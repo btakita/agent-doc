@@ -209,7 +209,7 @@ impl PartialCheckpointWriter {
 pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
     let file_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for response capture", file.display()))?;
-    let snapshot_content = crate::snapshot::load(file)?;
+    let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let response_sha256 = agent_doc_hash::content_hash(response);
     let existing_cycle_id = crate::cycle_state::load(file)?.map(|s| s.cycle_id);
     let capture_id = existing_cycle_id.unwrap_or_else(|| format!("synthetic-{}", now_millis()));
@@ -270,7 +270,7 @@ fn checkpoint_partial_response_for_cycle(
             file.display()
         )
     })?;
-    let snapshot_content = crate::snapshot::load(file)?;
+    let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let response_sha256 = agent_doc_hash::content_hash(response);
     let checkpoint_id = format!("{cycle_id}-partial");
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -325,7 +325,7 @@ pub fn load_active(file: &Path) -> Result<Option<CaptureRecord>> {
 }
 
 pub fn load_by_id(file: &Path, capture_id: &str) -> Result<Option<CaptureRecord>> {
-    let path = capture_path_for(file, capture_id)?;
+    let path = agent_doc_capture_io::capture_path_for(file, capture_id)?;
     let Some(content) = agent_doc_fs::read_optional_text(&path)
         .with_context(|| format!("failed to read capture {}", path.display()))?
     else {
@@ -337,7 +337,7 @@ pub fn load_by_id(file: &Path, capture_id: &str) -> Result<Option<CaptureRecord>
 }
 
 pub fn load_partial_by_cycle(file: &Path, cycle_id: &str) -> Result<Option<PartialCaptureRecord>> {
-    let path = partial_capture_path_for(file, cycle_id)?;
+    let path = agent_doc_capture_io::partial_capture_path_for(file, cycle_id)?;
     let Some(content) = agent_doc_fs::read_optional_text(&path)
         .with_context(|| format!("failed to read partial capture {}", path.display()))?
     else {
@@ -351,10 +351,7 @@ pub fn load_partial_by_cycle(file: &Path, cycle_id: &str) -> Result<Option<Parti
 #[allow(dead_code)]
 pub fn latest_partial_checkpoint(file: &Path) -> Result<Option<PartialCaptureRecord>> {
     let canonical = file.canonicalize()?;
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    let project_root = agent_doc_fs::find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let dir = project_root.join(".agent-doc/captures").join(hash);
+    let dir = agent_doc_capture_io::capture_dir_for(&canonical)?;
     if !dir.exists() {
         return Ok(None);
     }
@@ -390,10 +387,7 @@ pub fn latest_partial_checkpoint(file: &Path) -> Result<Option<PartialCaptureRec
 
 pub fn latest_committed(file: &Path) -> Result<Option<CaptureRecord>> {
     let canonical = file.canonicalize()?;
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    let project_root = agent_doc_fs::find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let dir = project_root.join(".agent-doc/captures").join(hash);
+    let dir = agent_doc_capture_io::capture_dir_for(&canonical)?;
     if !dir.exists() {
         return Ok(None);
     }
@@ -466,7 +460,7 @@ pub fn replay_baseline_drifted(file: &Path, capture: &CaptureRecord) -> Result<b
         )
     })?;
     let current_file_hash = replay_file_hash(&current_file);
-    let current_snapshot = crate::snapshot::load(file)?;
+    let current_snapshot = agent_doc_snapshot_io::load(file)?;
     let current_snapshot_hash = current_snapshot
         .as_deref()
         .map(agent_doc_hash::content_hash);
@@ -479,7 +473,7 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     let current_file = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for capture replay", file.display()))?;
     let current_file_hash = replay_file_hash(&current_file);
-    let current_snapshot = crate::snapshot::load(file)?;
+    let current_snapshot = agent_doc_snapshot_io::load(file)?;
     let current_snapshot_hash = current_snapshot
         .as_deref()
         .map(agent_doc_hash::content_hash);
@@ -687,10 +681,7 @@ pub fn discard_captures_for_archived_responses(file: &Path, archived_text: &str)
         return Ok(0);
     }
     let canonical = file.canonicalize()?;
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    let project_root = agent_doc_fs::find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let dir = project_root.join(".agent-doc/captures").join(hash);
+    let dir = agent_doc_capture_io::capture_dir_for(&canonical)?;
     if !dir.exists() {
         return Ok(0);
     }
@@ -795,7 +786,7 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
                 record.file_hash = Some(current_file_hash);
                 changed = true;
             }
-            let current_snapshot = crate::snapshot::load(file)?;
+            let current_snapshot = agent_doc_snapshot_io::load(file)?;
             let current_snapshot_hash = current_snapshot
                 .as_deref()
                 .map(agent_doc_hash::content_hash);
@@ -855,7 +846,7 @@ fn metadata_from_frontmatter(file_content: &str) -> CaptureMetadata {
 }
 
 fn write_record(file: &Path, record: &CaptureRecord) -> Result<()> {
-    let path = capture_path_for(file, &record.capture_id)?;
+    let path = agent_doc_capture_io::capture_path_for(file, &record.capture_id)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -864,34 +855,12 @@ fn write_record(file: &Path, record: &CaptureRecord) -> Result<()> {
 }
 
 fn write_partial_record(file: &Path, record: &PartialCaptureRecord) -> Result<()> {
-    let path = partial_capture_path_for(file, &record.cycle_id)?;
+    let path = agent_doc_capture_io::partial_capture_path_for(file, &record.cycle_id)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(record)?;
     atomic_write(&path, &json)
-}
-
-fn capture_path_for(file: &Path, capture_id: &str) -> Result<PathBuf> {
-    let canonical = file.canonicalize()?;
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    let project_root = agent_doc_fs::find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Ok(project_root
-        .join(".agent-doc/captures")
-        .join(hash)
-        .join(format!("{capture_id}.json")))
-}
-
-fn partial_capture_path_for(file: &Path, cycle_id: &str) -> Result<PathBuf> {
-    let canonical = file.canonicalize()?;
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    let project_root = agent_doc_fs::find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Ok(project_root
-        .join(".agent-doc/captures")
-        .join(hash)
-        .join(format!("{cycle_id}.partial.json")))
 }
 
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
@@ -940,7 +909,12 @@ mod tests {
             "---\nsession: sid\nagent: codex\nmodel: gpt-5\n---\n\n## User\n\nHello\n",
         )
         .unwrap();
-        crate::snapshot::save(&doc, &std::fs::read_to_string(&doc).unwrap()).unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            &std::fs::read_to_string(&doc).unwrap(),
+            crate::ops_log::log_op,
+        )
+        .unwrap();
 
         let record = capture_response(&doc, "response body").unwrap();
         let active = load_active(&doc).unwrap().unwrap();
@@ -965,10 +939,15 @@ mod tests {
             "---\nagent_doc_session: sid\nagent: codex\ncodex_model: gpt-5\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange -->\n❯ Do work\n<!-- /agent:exchange -->\n",
         )
         .unwrap();
-        crate::snapshot::save(&doc, &std::fs::read_to_string(&doc).unwrap()).unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            &std::fs::read_to_string(&doc).unwrap(),
+            crate::ops_log::log_op,
+        )
+        .unwrap();
         crate::cycle_state::start_preflight(
             &doc,
-            crate::snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(&std::fs::read_to_string(&doc).unwrap()),
         )
         .unwrap();
@@ -993,7 +972,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
@@ -1010,7 +989,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
@@ -1037,7 +1016,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         // Capture A — a committed response that compaction is about to archive.
@@ -1085,7 +1064,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
 
         let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
         assert!(writer.maybe_checkpoint("same").unwrap().is_some());
@@ -1102,7 +1081,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         let capture = capture_response(&doc, "response body").unwrap();
 
         assert!(
@@ -1122,7 +1101,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         let capture = capture_response(&doc, "response body").unwrap();
 
         std::fs::write(&doc, "body changed").unwrap();
@@ -1152,7 +1131,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         let capture = capture_response(
             &doc,
             "<!-- patch:exchange -->\n### Re: first head — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
@@ -1200,7 +1179,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         let original = "## Exchange\n\nold body\n";
         std::fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         let response = "### Re: topic — gpt-5\n\nIntact response body.\n";
         let capture = capture_response(&doc, response).unwrap();
 
@@ -1208,7 +1187,7 @@ mod tests {
         // left the response body untouched.
         let after_user_commit = "## Exchange\n\nold body\n### Re: topic — gpt-5\n\nIntact response body.\n\n## Backlog\n\n- new item added by user\n";
         std::fs::write(&doc, after_user_commit).unwrap();
-        crate::snapshot::save(&doc, after_user_commit).unwrap();
+        agent_doc_snapshot_io::save(&doc, after_user_commit, crate::ops_log::log_op).unwrap();
         assert_ne!(
             agent_doc_hash::content_hash(after_user_commit),
             capture.file_hash.clone().unwrap()
@@ -1250,7 +1229,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         let original = "## Exchange\n\nuser prompt\n";
         std::fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         // Captured body simulates the JB cache-conflict spill: a stray "❯ "
         // accidentally prepended to one of the agent's response prose lines.
         let captured_response =
@@ -1260,7 +1239,7 @@ mod tests {
         // User ran sed (or equivalent) to strip the spurious ❯ markers.
         let cleaned_doc = "## Exchange\n\nuser prompt\n### Re: topic — gpt-5\n\nImplemented and verified.\nSubmodule pointer updated.\n";
         std::fs::write(&doc, cleaned_doc).unwrap();
-        crate::snapshot::save(&doc, cleaned_doc).unwrap();
+        agent_doc_snapshot_io::save(&doc, cleaned_doc, crate::ops_log::log_op).unwrap();
 
         validate_replay(&doc, &capture)
             .expect("user-normalized prefix strip must auto-refresh the baseline");
@@ -1286,7 +1265,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         let original = "## Exchange\n\nold body\n### Re: topic — gpt-5\n\nOriginal response.\n";
         std::fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         let capture =
             capture_response(&doc, "### Re: topic — gpt-5\n\nOriginal response.\n").unwrap();
 
@@ -1307,7 +1286,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_committed(&doc).unwrap();
@@ -1321,7 +1300,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_committed(&doc).unwrap();
@@ -1336,7 +1315,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_committed(&doc).unwrap();
@@ -1353,7 +1332,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_replayed(&doc).unwrap();
@@ -1370,7 +1349,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        crate::snapshot::save(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_replayed(&doc).unwrap();

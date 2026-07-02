@@ -33,6 +33,10 @@ pub fn display_message(target: Option<&str>, format: &str) -> TmuxCommand {
     TmuxCommand::new(args)
 }
 
+pub fn display_notification(target: &str, delay_ms: &str, message: &str) -> TmuxCommand {
+    TmuxCommand::new(["display-message", "-t", target, "-d", delay_ms, message])
+}
+
 pub fn list_panes(target: Option<&str>, format: &str) -> TmuxCommand {
     let mut args = vec!["list-panes".to_string()];
     push_optional_target(&mut args, target);
@@ -40,8 +44,55 @@ pub fn list_panes(target: Option<&str>, format: &str) -> TmuxCommand {
     TmuxCommand::new(args)
 }
 
+pub fn list_panes_all(format: &str) -> TmuxCommand {
+    TmuxCommand::new(["list-panes", "-a", "-F", format])
+}
+
+pub fn list_windows(target: Option<&str>, format: &str) -> TmuxCommand {
+    let mut args = vec!["list-windows".to_string()];
+    push_optional_target(&mut args, target);
+    args.extend(["-F".to_string(), format.to_string()]);
+    TmuxCommand::new(args)
+}
+
+pub fn list_windows_all(format: &str) -> TmuxCommand {
+    TmuxCommand::new(["list-windows", "-a", "-F", format])
+}
+
+pub fn new_window_in_cwd(cwd: &str, name: &str, command: &str) -> TmuxCommand {
+    TmuxCommand::new(["new-window", "-c", cwd, "-n", name, command])
+}
+
+pub fn kill_pane(target: &str) -> TmuxCommand {
+    TmuxCommand::new(["kill-pane", "-t", target])
+}
+
+pub fn kill_window(target: &str) -> TmuxCommand {
+    TmuxCommand::new(["kill-window", "-t", target])
+}
+
+pub fn respawn_pane(target: &str, command: &str) -> TmuxCommand {
+    TmuxCommand::new(["respawn-pane", "-k", "-t", target, command])
+}
+
+pub fn rename_window(target: &str, name: &str) -> TmuxCommand {
+    TmuxCommand::new(["rename-window", "-t", target, name])
+}
+
+pub fn resize_window_height(target: &str, height: &str) -> TmuxCommand {
+    TmuxCommand::new(["resize-window", "-t", target, "-y", height])
+}
+
+pub fn swap_window(source: &str, target: &str) -> TmuxCommand {
+    TmuxCommand::new(["swap-window", "-s", source, "-t", target])
+}
+
 pub fn capture_pane(target: &str) -> TmuxCommand {
     TmuxCommand::new(["capture-pane", "-p", "-t", target])
+}
+
+pub fn capture_pane_with_ansi(target: &str) -> TmuxCommand {
+    TmuxCommand::new(["capture-pane", "-t", target, "-p", "-e"])
 }
 
 pub fn send_keys_literal(target: &str, text: &str) -> TmuxCommand {
@@ -760,6 +811,114 @@ mod tests {
         assert_eq!(
             command.args(),
             ["list-panes", "-t", ":agent", "-F", "#{pane_id}"]
+        );
+    }
+
+    #[test]
+    fn list_panes_all_uses_all_flag_before_format() {
+        let command = list_panes_all("#{pane_id}");
+
+        assert_eq!(command.args(), ["list-panes", "-a", "-F", "#{pane_id}"]);
+    }
+
+    #[test]
+    fn list_windows_places_target_before_format() {
+        let command = list_windows(Some("dev:"), "#{window_id}");
+
+        assert_eq!(
+            command.args(),
+            ["list-windows", "-t", "dev:", "-F", "#{window_id}"]
+        );
+    }
+
+    #[test]
+    fn list_windows_all_uses_all_flag_before_format() {
+        let command = list_windows_all("#{window_id}");
+
+        assert_eq!(command.args(), ["list-windows", "-a", "-F", "#{window_id}"]);
+    }
+
+    #[test]
+    fn new_window_in_cwd_sets_cwd_name_and_command() {
+        let command = new_window_in_cwd("/repo", "agent-doc", "agent-doc start plan.md");
+
+        assert_eq!(
+            command.args(),
+            [
+                "new-window",
+                "-c",
+                "/repo",
+                "-n",
+                "agent-doc",
+                "agent-doc start plan.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn kill_pane_targets_requested_pane() {
+        let command = kill_pane("%7");
+
+        assert_eq!(command.args(), ["kill-pane", "-t", "%7"]);
+    }
+
+    #[test]
+    fn kill_window_targets_requested_window() {
+        let command = kill_window("@9");
+
+        assert_eq!(command.args(), ["kill-window", "-t", "@9"]);
+    }
+
+    #[test]
+    fn respawn_pane_kills_existing_process_and_runs_command() {
+        let command = respawn_pane("%4", "exec agent-doc start file.md");
+
+        assert_eq!(
+            command.args(),
+            [
+                "respawn-pane",
+                "-k",
+                "-t",
+                "%4",
+                "exec agent-doc start file.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn rename_window_targets_requested_window() {
+        let command = rename_window("@2", "agent-doc");
+
+        assert_eq!(command.args(), ["rename-window", "-t", "@2", "agent-doc"]);
+    }
+
+    #[test]
+    fn resize_window_height_targets_requested_height() {
+        let command = resize_window_height("@2", "1000");
+
+        assert_eq!(command.args(), ["resize-window", "-t", "@2", "-y", "1000"]);
+    }
+
+    #[test]
+    fn swap_window_targets_requested_source_and_destination() {
+        let command = swap_window("@2", "@9");
+
+        assert_eq!(command.args(), ["swap-window", "-s", "@2", "-t", "@9"]);
+    }
+
+    #[test]
+    fn display_notification_builds_targeted_delay_message_command() {
+        assert_eq!(
+            display_notification("%1", "3000", "claimed").into_args(),
+            vec!["display-message", "-t", "%1", "-d", "3000", "claimed"]
+        );
+    }
+
+    #[test]
+    fn capture_pane_with_ansi_preserves_escape_attributes() {
+        assert_eq!(
+            capture_pane_with_ansi("%1").into_args(),
+            vec!["capture-pane", "-t", "%1", "-p", "-e"]
         );
     }
 

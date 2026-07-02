@@ -73,16 +73,15 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::agent::streaming::StreamingAgent;
 use agent_doc_config::Config;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_merge::crdt;
 use agent_doc_prompt_context::StreamingAgentPromptContext;
 use agent_doc_template as template;
 use agent_doc_turn::response_text::render_interleaved_thinking_response;
-use agent_doc_turn_executor::agent_stream::StreamChunk;
+use agent_doc_turn_executor::agent_stream::{StreamChunk, StreamingAgent};
 
-use crate::{agent, diff_io, git, repair, snapshot, template_io};
+use crate::{agent, git, repair};
 
 /// Run the stream command: stream agent output to document in real-time.
 ///
@@ -138,7 +137,10 @@ pub fn run(
     );
 
     // Compute diff
-    let the_diff = match diff_io::compute(file)? {
+    let the_diff = match agent_doc_diff_io::compute(
+        &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+        file,
+    )? {
         Some(d) => {
             eprintln!("[stream] diff computed ({} bytes)", d.len());
             d
@@ -189,11 +191,14 @@ pub fn run(
 
     // Build prompt
     let session_accretion = crate::session_accretion::inspect(file).ok();
-    let document_section = crate::prompt_context::build_document_section(
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let ssh_context = rc.ssh_context();
+    let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
         file,
         &the_diff,
         &content_original,
         session_accretion.as_ref(),
+        &ssh_context,
     );
     let prompt =
         agent_doc_prompt_context::render_streaming_agent_prompt(StreamingAgentPromptContext {
@@ -247,7 +252,7 @@ pub fn run(
         let current = std::fs::read_to_string(file)?;
         let updated = frontmatter::set_resume_id(&current, sid)?;
         crate::write::atomic_write_pub(file, &updated)?;
-        snapshot::save(file, &updated)?;
+        agent_doc_snapshot_io::save(file, &updated, crate::ops_log::log_op)?;
     }
 
     // Lint gate: runs on the merged document AFTER the final flush /
@@ -257,7 +262,7 @@ pub fn run(
     // `write::run_command` (Phase 3b.1). Mode resolution precedence:
     // CLI override > frontmatter `agent_doc_lint_dialect` > workspace
     // `.agent-doc/config.toml` `[lint] dialect` > default (`warn`).
-    crate::lint_gate::run(file, lint_override)?;
+    agent_doc_lint_io::run_with_logger(file, lint_override, crate::ops_log::log_op)?;
 
     // Final git commit
     if !no_git && let Err(e) = git::commit(file) {
@@ -270,8 +275,9 @@ pub fn run(
     // post_write. Missing this hook broke supervisors that trigger follow-up
     // actions (gutter refresh, downstream doc sync) when a stream completes.
     let session_id = result.session_id.clone().unwrap_or_default();
-    crate::hooks::fire_post_write(file, &session_id, 1);
-    crate::hooks::fire_doc_event(file, "post_write");
+    let hook_effects = crate::post_response_hook_effects();
+    agent_doc_hooks_io::fire_post_write_with_effects(&hook_effects, file, &session_id, 1);
+    agent_doc_hooks_io::fire_doc_event(file, "post_write");
 
     eprintln!("[stream] Stream complete for {}", file.display());
     Ok(())
@@ -464,19 +470,19 @@ fn stream_loop(
                 agent_doc_template::parse_patches(&patch).unwrap_or_default();
             let mut mode_overrides = std::collections::HashMap::new();
             mode_overrides.insert(target.to_string(), "replace".to_string());
-            crate::template_io::apply_patches_with_overrides_with_context(
+            agent_doc_template_io::apply_patches_with_overrides_with_project_config(
                 baseline,
                 &patches,
                 &unmatched,
                 file,
                 &mode_overrides,
-                Some(&rc),
+                Some(rc.project_config()),
             )
             .unwrap_or_else(|_| std::fs::read_to_string(file).unwrap_or_default())
         };
-        snapshot::save(file, &content_ours)?;
+        agent_doc_snapshot_io::save(file, &content_ours, crate::ops_log::log_op)?;
         let doc = crdt::CrdtDoc::from_text(&content_ours);
-        snapshot::save_document_crdt(file, &doc.encode_state(), &content_ours)?;
+        agent_doc_merge_io::save_document_crdt(file, &doc.encode_state(), &content_ours)?;
 
         repair::clear_pending(file)?;
     }
@@ -514,7 +520,7 @@ pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str)
         .canonicalize()
         .ok()
         .map(|canonical| {
-            crate::write::resolve_ipc_project_root_pub(&canonical)
+            agent_doc_project_root_io::resolve_ipc_project_root(&canonical)
                 .join(".agent-doc/patches")
                 .exists()
         })
@@ -554,13 +560,13 @@ pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     // Apply patches with replace override for stream target
-    let content_patched = template_io::apply_patches_with_overrides_with_context(
+    let content_patched = agent_doc_template_io::apply_patches_with_overrides_with_project_config(
         &content_current,
         &patches,
         &unmatched,
         file,
         &mode_overrides,
-        Some(&rc),
+        Some(rc.project_config()),
     )
     .context("failed to apply template patches")?;
 
@@ -800,7 +806,7 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nagent_doc_session: sid\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let chunks = mock_chunks(vec![
@@ -1041,7 +1047,7 @@ Done — all packages pushed.";
         let mut mode_overrides = std::collections::HashMap::new();
         mode_overrides.insert(target.to_string(), "replace".to_string());
         let file = std::path::Path::new("test.md");
-        let content_ours = crate::template_io::apply_patches_with_overrides(
+        let content_ours = agent_doc_template_io::apply_patches_with_overrides(
             baseline,
             &patches,
             &unmatched,
@@ -1096,7 +1102,7 @@ user prompt here
 
         // dedup_exchange_adjacent_lines now removes the echo duplication in append mode
         let content_no_override =
-            crate::template_io::apply_patches(baseline, &patches, &unmatched, file).unwrap();
+            agent_doc_template_io::apply_patches(baseline, &patches, &unmatched, file).unwrap();
 
         // "user prompt here" should appear exactly once — dedup prevents echo duplication
         assert_eq!(
@@ -1110,7 +1116,7 @@ user prompt here
 
     // ---- Lint gate integration tests (p6adfstream) --------------------
     //
-    // The stream subcommand calls `crate::lint_gate::run` after the final
+    // The stream subcommand calls `agent_doc_lint_io::run_with_logger` after the final
     // flush merges the response into the document and before the final
     // git commit. These tests exercise the same gate against the
     // post-flush document state to prove malformed streamed responses
@@ -1118,7 +1124,7 @@ user prompt here
 
     /// Write a session doc in the post-flush state (what the file looks
     /// like after `stream_loop()` completes) and assert that the lint
-    /// gate — the same call `stream::run` now performs before the final
+    /// gate - the same call `stream::run` now performs before the final
     /// git commit — fails closed on a malformed `<!-- agent:done archive
     /// PATH -->` directive missing the `=` between `archive` and the
     /// path. Error message format must match the shared gate output the
@@ -1140,7 +1146,7 @@ user prompt here
             <!-- /agent:done -->\n";
         std::fs::write(&doc, post_flush).unwrap();
 
-        let err = crate::lint_gate::run(&doc, None)
+        let err = agent_doc_lint_io::run_with_logger(&doc, None, crate::ops_log::log_op)
             .expect_err("stream's lint gate must reject malformed directive");
         let msg = format!("{}", err);
         assert!(
@@ -1153,7 +1159,7 @@ user prompt here
         );
     }
 
-    /// Clean post-stream document state → the lint gate must pass so the
+    /// Clean post-stream document state: the lint gate must pass so the
     /// stream cycle proceeds to the final commit.
     #[test]
     fn stream_response_clean_passes_lint_gate() {
@@ -1167,11 +1173,12 @@ user prompt here
             <!-- /agent:exchange -->\n";
         std::fs::write(&doc, post_flush).unwrap();
 
-        crate::lint_gate::run(&doc, None).expect("clean stream output must pass lint gate");
+        agent_doc_lint_io::run_with_logger(&doc, None, crate::ops_log::log_op)
+            .expect("clean stream output must pass lint gate");
     }
 
     /// `--lint=off` (via the CLI override) must bypass the gate even
-    /// when the streamed response contains a malformed directive — same
+    /// when the streamed response contains a malformed directive; same
     /// override semantics as `agent-doc write --commit --lint=off`.
     #[test]
     fn stream_lint_off_bypasses_malformed_directive() {
@@ -1187,8 +1194,12 @@ user prompt here
             <!-- /agent:done -->\n";
         std::fs::write(&doc, post_flush).unwrap();
 
-        crate::lint_gate::run(&doc, Some(agent_doc_frontmatter::lint::LintCliMode::Off))
-            .expect("--lint=off must bypass the stream lint gate even with malformed directive");
+        agent_doc_lint_io::run_with_logger(
+            &doc,
+            Some(agent_doc_frontmatter::lint::LintCliMode::Off),
+            crate::ops_log::log_op,
+        )
+        .expect("--lint=off must bypass the stream lint gate even with malformed directive");
     }
 
     /// Verify the stream subcommand's `run` signature accepts the

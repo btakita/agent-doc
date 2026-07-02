@@ -159,43 +159,34 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::flow::routed_reopen::{log_dispatch_proof_failed, log_prompt_ready_barrier_failed};
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixFacts,
     BusyPaneAutoFixOutcome, CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts,
     DegradedAuthoritativeActorDirectSubmit, DegradedAuthoritativeActorFacts,
-    DirectPaneAcceptancePollState, DirectPaneDispatchStartProofFacts,
-    DirectPaneEnterResubmitAttemptFacts, DirectPaneExistingDraftSubmitFacts,
-    DirectPaneResubmitProofFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
-    DispatchActorState, DispatchDrainRetryDecision, DispatchOnlyBlockerRecoveryHintFacts,
-    DispatchOnlyBusyRefusalFacts, DispatchOnlyProofOutcomeFacts,
-    DispatchOnlyRecycleInflightMessageFacts, DispatchOnlyReopenDelivery,
-    DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneNotReadyMessageFacts,
-    DispatchRuntimeHealth, DispatchStartProofDecision, DispatchStartProofFacts,
-    DuplicatePanePolicyErrorFacts, MissingCycleAckFacts, OpenCodePaneDispatchStartProofFacts,
-    PromptReadyBarrierDecision, ReopenMode, RetryBudget, RouteBusyDiagnosticFacts,
-    RouteBusyQueuedDiagnosticFacts, RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts,
-    RouteLatencyFacts, RouteLatencyStatus, RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
+    DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
+    DispatchDrainRetryDecision, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyBusyRefusalFacts,
+    DispatchOnlyProofOutcomeFacts, DispatchOnlyRecycleInflightMessageFacts,
+    DispatchOnlyReopenDelivery, DispatchOnlyStartingPaneActorReadyFacts,
+    DispatchOnlyStartingPaneNotReadyMessageFacts, DispatchRuntimeHealth,
+    DispatchStartProofDecision, DispatchStartProofFacts, DuplicatePanePolicyErrorFacts,
+    MissingCycleAckFacts, OpenCodePaneDispatchStartProofFacts, PromptReadyBarrierDecision,
+    ReopenMode, RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
+    RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteLatencyFacts,
+    RouteLatencyStatus, RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
     RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
     RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
-    RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON, StartingActorLogFacts,
-    StartingTimeoutActorFacts, StartupMissRouteFacts, accepted_only_dispatch_start_log_message,
+    STARTING_ACTOR_TIMEOUT_REASON, StartingActorLogFacts, StartingTimeoutActorFacts,
+    StartupMissRouteFacts, accepted_only_dispatch_start_log_message,
     accepted_only_dispatch_start_refusal_message, actor_blocked_by_starting_timeout,
     actor_dispatch_blocker_reason, actor_recovery_hint, authoritative_actor_ready_retry_budget,
-    busy_dispatch_start_outcome,
     busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
     busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
     classify_closeout_block_dispatch, classify_codex_routed_dispatch_start_proof,
     classify_dispatch_start_proof, decide_authoritative_reopen,
-    degraded_authoritative_actor_direct_submit_log_message, direct_pane_acceptance_poll_status,
-    direct_pane_can_continue_enter_resubmit, direct_pane_can_enter_existing_draft,
-    direct_pane_max_enter_resubmits, direct_pane_resubmit_proof_line,
-    direct_pane_should_await_dispatch_start_proof, direct_pane_submit_acceptance_budget,
-    direct_pane_submit_acceptance_timeout, direct_pane_submit_outcome,
-    dispatch_drain_retry_decision, dispatch_only_blocked_guard_reason,
-    dispatch_only_blocker_recovery_hint,
+    degraded_authoritative_actor_direct_submit_log_message, dispatch_drain_retry_decision,
+    dispatch_only_blocked_guard_reason, dispatch_only_blocker_recovery_hint,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
@@ -205,14 +196,14 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_actor_ready, dispatch_only_starting_pane_not_ready_message,
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
-    dispatch_only_starting_pane_recovery_timeout_for_binary, dispatch_start_busy_probe_timeout,
+    dispatch_only_starting_pane_recovery_timeout_for_binary, dispatch_proof_failed_event,
     duplicate_pane_policy_error_message, existing_pane_ready_timeout, failclosed_wait_context,
     fresh_route_start_ack_timeout, opencode_pane_state_changed_from_idle,
-    route_busy_diagnostic_message, route_busy_queued_diagnostic_message,
-    route_closeout_user_outcome_fields, route_dispatch_bug_report_item, route_latency_message,
-    route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
+    prompt_ready_barrier_failed_event, route_busy_diagnostic_message,
+    route_busy_queued_diagnostic_message, route_closeout_user_outcome_fields,
+    route_dispatch_bug_report_item, route_latency_message, route_latency_status,
+    route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_cycle_ack_timeout,
-    routed_dispatch_start_timeout_for_binary, routed_trigger_payload_rejection,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
     starting_actor_not_ready_log_line, starting_actor_ready_log_line,
     starting_actor_terminal_log_line, starting_actor_timeout_coalesced_log_line,
@@ -220,9 +211,19 @@ use agent_doc_controller::dispatch::{
     startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
     startup_miss_superseded_by_later_open_start,
 };
+use agent_doc_controller_io::route_snapshot::RoutePaneSnapshot;
+use agent_doc_controller_io::starting_actor_timeout::{
+    StartingActorTimeoutLogDecision, clear_starting_actor_timeout_record,
+    record_starting_actor_timeout, starting_actor_timeout_record_identity_matches,
+    starting_actor_timeout_record_matches,
+};
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
-use agent_doc_hash::short_content_hash;
+#[cfg(test)]
+use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
+use agent_doc_session_registry_io::dispatch_registry::{
+    lookup_dispatch_registration, pane_registration_matches_file, registry_base_dir_for_dispatch,
+};
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_supervisor::route_runtime::{
     DeferToBoundaryRestartRecoveryFacts, RouteActorState, SupervisorHealth, SupervisorRuntime,
@@ -234,19 +235,13 @@ use agent_doc_supervisor::startup_miss::{
     StartingPaneRecoveryTarget, starting_pane_recovery_target,
 };
 use agent_doc_tmux::is_first_column;
-use agent_doc_tmux_commands::input_diag::{
-    EDITOR_ROUTE_ATTEMPT_ID_ENV, RoutePaneSnapshotFacts, RoutePaneSnapshotFailedLogFacts,
-    RoutePaneSnapshotHintFacts, RoutePaneSnapshotLogFacts, format_route_pane_snapshot_failed_log,
-    format_route_pane_snapshot_filename, format_route_pane_snapshot_hint,
-    format_route_pane_snapshot_log, sanitize_route_snapshot_field,
-};
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, blocked_closeout_recovery_command,
 };
 use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 use tmux_router::Tmux;
 
-use crate::{frontmatter_io, resync, sessions, sync};
+use crate::{resync, sessions, sync};
 use std::cell::Cell;
 
 thread_local! {
@@ -440,15 +435,12 @@ const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_mil
 const AGENT_READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
 fn editor_route_attempt_id() -> Option<String> {
-    std::env::var(EDITOR_ROUTE_ATTEMPT_ID_ENV)
-        .ok()
-        .map(|value| sanitize_route_snapshot_field(&value))
-        .filter(|value| !value.is_empty())
+    agent_doc_controller_io::route_snapshot::editor_route_attempt_id()
 }
 
 fn route_current_actor_generation(file: &Path) -> Option<u64> {
     let canonical = file.canonicalize().ok()?;
-    let root = agent_doc_fs::find_project_root(&canonical)?;
+    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
     crate::session_actor::load_record_in(&root, canonical.to_string_lossy().as_ref())
         .ok()
         .flatten()
@@ -457,22 +449,8 @@ fn route_current_actor_generation(file: &Path) -> Option<u64> {
 
 fn route_ops_log_path(file: &Path) -> Option<PathBuf> {
     let canonical = file.canonicalize().ok()?;
-    let root = agent_doc_fs::find_project_root(&canonical)?;
+    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
     Some(root.join(".agent-doc/logs/ops.log"))
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RoutePaneSnapshot {
-    len: usize,
-    hash: String,
-    path: Option<PathBuf>,
-}
-
-fn route_snapshot_timestamp_millis() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0)
 }
 
 fn preserve_route_pane_snapshot(
@@ -482,84 +460,23 @@ fn preserve_route_pane_snapshot(
     phase: &str,
     content: &str,
 ) -> RoutePaneSnapshot {
-    let redacted = agent_doc_secret_redact::redact(content);
-    let snapshot = RoutePaneSnapshot {
-        len: redacted.len(),
-        hash: short_content_hash(&redacted),
-        path: None,
-    };
-
-    let path = (|| -> Result<PathBuf> {
-        let canonical = file
-            .canonicalize()
-            .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-        let root = agent_doc_fs::find_project_root(&canonical)
-            .with_context(|| format!("could not find .agent-doc root for {}", file.display()))?;
-        let dir = root.join(".agent-doc/logs/route-submit");
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create {}", dir.display()))?;
-        let name = format_route_pane_snapshot_filename(
-            route_snapshot_timestamp_millis(),
+    let outcome = agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(
+        file,
+        pane,
+        &harness.binary,
+        phase,
+        content,
+        crate::ops_log::log_op,
+    );
+    if let Some(err) = outcome.warning.as_deref() {
+        eprintln!(
+            "[route] warning: failed to preserve pane snapshot for {} phase {}: {}",
+            file.display(),
             phase,
-            &harness.binary,
-            pane,
-            snapshot.hash.as_str(),
+            err
         );
-        let path = dir.join(name);
-        std::fs::write(&path, redacted)
-            .with_context(|| format!("failed to write {}", path.display()))?;
-        Ok(path)
-    })();
-
-    match path {
-        Ok(path) => {
-            let file_display = file.display().to_string();
-            let snapshot_path = path.display().to_string();
-            let editor_attempt_id = editor_route_attempt_id();
-            let message = format_route_pane_snapshot_log(RoutePaneSnapshotLogFacts {
-                snapshot: RoutePaneSnapshotFacts {
-                    file_display: &file_display,
-                    pane,
-                    harness_binary: &harness.binary,
-                    phase,
-                    capture_len: snapshot.len,
-                    capture_hash: &snapshot.hash,
-                    editor_attempt_id: editor_attempt_id.as_deref(),
-                },
-                snapshot_path: &snapshot_path,
-            });
-            crate::ops_log::log_op(file, &message);
-            RoutePaneSnapshot {
-                path: Some(path),
-                ..snapshot
-            }
-        }
-        Err(err) => {
-            let file_display = file.display().to_string();
-            let error = err.to_string();
-            let editor_attempt_id = editor_route_attempt_id();
-            let message = format_route_pane_snapshot_failed_log(RoutePaneSnapshotFailedLogFacts {
-                snapshot: RoutePaneSnapshotFacts {
-                    file_display: &file_display,
-                    pane,
-                    harness_binary: &harness.binary,
-                    phase,
-                    capture_len: snapshot.len,
-                    capture_hash: &snapshot.hash,
-                    editor_attempt_id: editor_attempt_id.as_deref(),
-                },
-                error: &error,
-            });
-            crate::ops_log::log_op(file, &message);
-            eprintln!(
-                "[route] warning: failed to preserve pane snapshot for {} phase {}: {}",
-                file.display(),
-                phase,
-                err
-            );
-            snapshot
-        }
     }
+    outcome.snapshot
 }
 
 fn print_route_pane_snapshot_hint(
@@ -569,24 +486,13 @@ fn print_route_pane_snapshot_hint(
     phase: &str,
     snapshot: &RoutePaneSnapshot,
 ) {
-    let file_display = file.display().to_string();
-    let snapshot_path = snapshot
-        .path
-        .as_ref()
-        .map(|path| path.display().to_string());
-    let editor_attempt_id = editor_route_attempt_id();
-    let message = format_route_pane_snapshot_hint(RoutePaneSnapshotHintFacts {
-        snapshot: RoutePaneSnapshotFacts {
-            file_display: &file_display,
-            pane,
-            harness_binary: &harness.binary,
-            phase,
-            capture_len: snapshot.len,
-            capture_hash: &snapshot.hash,
-            editor_attempt_id: editor_attempt_id.as_deref(),
-        },
-        snapshot_path: snapshot_path.as_deref(),
-    });
+    let message = agent_doc_controller_io::route_snapshot::route_pane_snapshot_hint(
+        file,
+        pane,
+        &harness.binary,
+        phase,
+        snapshot,
+    );
     eprintln!("{message}");
 }
 
@@ -801,25 +707,14 @@ impl AgentReadyWaitOutcome {
     }
 }
 
-fn pane_display_value(tmux: &Tmux, pane_id: &str, format: &str) -> Option<String> {
-    tmux.cmd()
-        .args(["display-message", "-t", pane_id, "-p", format])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-}
-
 fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
-    let pane_pid = pane_display_value(tmux, pane_id, "#{pane_pid}")
-        .filter(|value| !value.is_empty())
+    let pane_pid = agent_doc_tmux_io::pane_pid(tmux, pane_id)
+        .map(|pid| pid.to_string())
         .unwrap_or_else(|| "?".to_string());
-    let pane_session = pane_display_value(tmux, pane_id, "#{session_name}")
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "?".to_string());
-    let current_command = pane_display_value(tmux, pane_id, "#{pane_current_command}")
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "?".to_string());
+    let pane_session =
+        agent_doc_tmux_io::target_session_name(tmux, pane_id).unwrap_or_else(|| "?".to_string());
+    let current_command =
+        agent_doc_tmux_io::target_current_command(tmux, pane_id).unwrap_or_else(|| "?".to_string());
     format!(
         "pane={} pane_pid={} pane_session={} current_command={}",
         pane_id, pane_pid, pane_session, current_command
@@ -894,12 +789,13 @@ fn build_routed_dispatch_start_tracker(
             let (Some(tmux), Some(pane)) = (tmux, pane) else {
                 return Ok(None);
             };
-            let pre_dispatch_content = sessions::capture_pane(tmux, pane).with_context(|| {
-                format!(
-                    "failed to capture OpenCode pane {} before routed dispatch",
-                    pane
-                )
-            })?;
+            let pre_dispatch_content =
+                agent_doc_tmux_io::capture_pane(tmux, pane).with_context(|| {
+                    format!(
+                        "failed to capture OpenCode pane {} before routed dispatch",
+                        pane
+                    )
+                })?;
             Ok(Some(RoutedDispatchStartTracker::OpenCodePane {
                 pane: pane.to_string(),
                 trigger: harness.trigger_command(file_path),
@@ -995,7 +891,7 @@ fn wait_for_routed_dispatch_start(
                 trigger,
                 pre_dispatch_content,
             } => {
-                let content = sessions::capture_pane(tmux, pane).with_context(|| {
+                let content = agent_doc_tmux_io::capture_pane(tmux, pane).with_context(|| {
                     format!(
                         "failed to capture OpenCode pane {} while awaiting routed dispatch proof",
                         pane
@@ -1059,8 +955,8 @@ fn authoritative_actor_ready_facts_from_target(
 
 fn supervisor_socket_path(file: &Path, session_id: &str) -> Option<std::path::PathBuf> {
     let canonical = file.canonicalize().ok()?;
-    let project_root = agent_doc_fs::find_project_root(&canonical)?;
-    Some(crate::supervisor::ipc::socket_path(
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
+    Some(agent_doc_supervisor_io::ipc::socket_path(
         &project_root,
         session_id,
     ))
@@ -1079,7 +975,7 @@ fn query_supervisor_runtime(file: &Path, session_id: &str) -> SupervisorRuntime 
             actor_state: None,
         };
     }
-    match crate::supervisor::ipc::send_command(&sock, &IpcMethod::State) {
+    match agent_doc_supervisor_io::ipc::send_command(&sock, &IpcMethod::State) {
         Ok(resp) if resp.ok => {
             if let Some(data) = &resp.data {
                 let running = data
@@ -1130,15 +1026,15 @@ fn restart_via_supervisor_with_mode(file: &Path, session_id: &str, mode: &str) -
         Ok(c) => c,
         Err(_) => return false,
     };
-    let project_root = match agent_doc_fs::find_project_root(&canonical) {
+    let project_root = match agent_doc_project_root_io::project_root_containing(&canonical) {
         Some(r) => r,
         None => return false,
     };
-    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    let sock = agent_doc_supervisor_io::ipc::socket_path(&project_root, session_id);
     let method = IpcMethod::Restart {
         mode: mode.to_string(),
     };
-    match crate::supervisor::ipc::send_command(&sock, &method) {
+    match agent_doc_supervisor_io::ipc::send_command(&sock, &method) {
         Ok(resp) => resp.ok,
         Err(_) => false,
     }
@@ -1243,7 +1139,12 @@ fn managed_capability_proof_status(
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let fm = frontmatter_io::parse_for_file_with_context(&content, file, &rc).map(|(fm, _)| fm)?;
+    let fm = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+        &content,
+        file,
+        &rc.ssh_context(),
+    )
+    .map(|(fm, _)| fm)?;
     #[cfg(test)]
     let global_config = agent_doc_config::Config::default();
     #[cfg(not(test))]
@@ -1264,14 +1165,14 @@ fn managed_capability_proof_status(
     };
     let proven_prefix = format!("{}proven", prefix);
     let proven = if let Some(contract) = expected_writable_contract.as_deref() {
-        crate::startup_miss::session_log_has_event_after_latest_start_containing(
+        agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start_containing(
             file,
             session_id,
             &proven_prefix,
             &format!("writable_root_contract={contract}"),
         )?
     } else {
-        crate::startup_miss::session_log_has_event_after_latest_start(
+        agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
             file,
             session_id,
             &proven_prefix,
@@ -1280,14 +1181,14 @@ fn managed_capability_proof_status(
     if proven {
         return Ok(ManagedCapabilityProofStatus::Proven);
     }
-    if crate::startup_miss::session_log_has_event_after_latest_start(
+    if agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
         file,
         session_id,
         &format!("{}failed", prefix),
     )? {
         return Ok(ManagedCapabilityProofStatus::Failed);
     }
-    if crate::startup_miss::session_log_has_event_after_latest_start(
+    if agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
         file,
         session_id,
         &format!("{}pending", prefix),
@@ -1501,7 +1402,9 @@ const STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
 const BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
 
 fn fail_if_recent_session_loss_window(file: &Path, session_id: &str) -> Result<()> {
-    let Some(window) = crate::startup_miss::recent_session_loss_window(file, session_id)? else {
+    let Some(window) =
+        agent_doc_supervisor_io::startup_miss::recent_session_loss_window(file, session_id)?
+    else {
         return Ok(());
     };
 
@@ -1537,17 +1440,8 @@ fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason:
         file_display: &file_display,
         reason,
     });
-    if let Err(e) = tmux
-        .cmd()
-        .args([
-            "display-message",
-            "-t",
-            pane_id,
-            "-d",
-            STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS,
-            &msg,
-        ])
-        .status()
+    if let Err(e) =
+        agent_doc_tmux_io::show_message(tmux, pane_id, STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS, &msg)
     {
         eprintln!(
             "[route] warning: failed to emit startup-miss diagnostic to pane {}: {}",
@@ -1562,17 +1456,8 @@ fn emit_busy_route_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, harness: 
         file_display: &file_display,
         harness_binary: &harness.binary,
     });
-    if let Err(e) = tmux
-        .cmd()
-        .args([
-            "display-message",
-            "-t",
-            pane_id,
-            "-d",
-            BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS,
-            &msg,
-        ])
-        .status()
+    if let Err(e) =
+        agent_doc_tmux_io::show_message(tmux, pane_id, BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS, &msg)
     {
         eprintln!(
             "[route] warning: failed to emit busy-route diagnostic to pane {}: {}",
@@ -1596,17 +1481,8 @@ fn emit_busy_route_queued_diagnostic(
         harness_binary: &harness.binary,
         user_outcome_fields: &user_outcome,
     });
-    if let Err(e) = tmux
-        .cmd()
-        .args([
-            "display-message",
-            "-t",
-            pane_id,
-            "-d",
-            BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS,
-            &msg,
-        ])
-        .status()
+    if let Err(e) =
+        agent_doc_tmux_io::show_message(tmux, pane_id, BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS, &msg)
     {
         eprintln!(
             "[route] warning: failed to emit busy-route queued diagnostic to pane {}: {}",
@@ -1618,23 +1494,9 @@ fn emit_busy_route_queued_diagnostic(
 /// Returns true if the pane is running an agent process for the given harness.
 /// Returns true on query failure (conservative — don't skip panes we can't inspect).
 fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
-    let output = tmux
-        .cmd()
-        .args([
-            "display-message",
-            "-t",
-            pane_id,
-            "-p",
-            "#{pane_current_command}",
-        ])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => {
-            let cmd = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            harness.is_agent_process_name(&cmd)
-        }
-        _ => true, // can't inspect → treat conservatively
-    }
+    agent_doc_tmux_io::target_current_command(tmux, pane_id)
+        .map(|cmd| harness.is_agent_process_name(&cmd))
+        .unwrap_or(true)
 }
 
 pub fn run(
@@ -1772,8 +1634,8 @@ pub fn run_with_tmux_with_options(
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
-    let snapshot_doc = crate::snapshot::load(file).ok().flatten();
-    let head_doc = crate::git::show_head(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+    let head_doc = agent_doc_git_io::revision::show_head(file).ok().flatten();
     let mut preserve_docs = Vec::new();
     preserve_docs.push(updated_content.as_str());
     if let Some(head_doc) = head_doc.as_deref() {
@@ -1821,8 +1683,12 @@ pub fn run_with_tmux_with_options(
     }
 
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let fm =
-        frontmatter_io::parse_for_file_with_context(&updated_content, file, &rc).map(|(f, _)| f)?;
+    let fm = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+        &updated_content,
+        file,
+        &rc.ssh_context(),
+    )
+    .map(|(f, _)| f)?;
     let global_config = rc.global_config();
     let mut harness = HarnessConfig::from_context(&fm, &global_config);
     if plain_trigger {
@@ -1879,7 +1745,11 @@ pub fn run_with_tmux_with_options(
             // races with the first sync's stash operations, causing panes to
             // bounce between stash and agent-doc window visibly.
             // The JB plugin's sync call is authoritative — no defensive re-sync needed.
-            crate::editor_route_errors::clear_for_success(file, "route_success");
+            agent_doc_controller_io::editor_route_errors::clear_for_success(
+                file,
+                "route_success",
+                crate::ops_log::log_op,
+            );
             Ok(())
         }
         Err(e) => {
@@ -2149,7 +2019,7 @@ fn enqueue_route_dispatch_prompt(
                 )
             },
         )?;
-        crate::snapshot::save(file, &content).with_context(|| {
+        agent_doc_snapshot_io::save(file, &content, crate::ops_log::log_op).with_context(|| {
             format!(
                 "failed to sync snapshot after queueing dispatch for {}",
                 file.display()
@@ -2216,8 +2086,12 @@ fn inactive_route_queue_head(file: &Path) -> Result<Option<String>> {
 
 fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Option<String>> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = frontmatter_io::parse_for_file_with_context(content, file, &rc)?;
-    let committed_snapshot = match crate::snapshot::load(file) {
+    let (fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+        content,
+        file,
+        &rc.ssh_context(),
+    )?;
+    let committed_snapshot = match agent_doc_snapshot_io::load(file) {
         Ok(snapshot) => snapshot,
         Err(err) => {
             crate::ops_log::log_op(
@@ -2270,7 +2144,7 @@ fn activate_existing_route_queue_head(
     if activated {
         route_write_document(file, &content, &original, "route_queue_activation")
             .with_context(|| format!("failed to activate queue in {}", file.display()))?;
-        crate::snapshot::save(file, &content).with_context(|| {
+        agent_doc_snapshot_io::save(file, &content, crate::ops_log::log_op).with_context(|| {
             format!(
                 "failed to sync snapshot after activating queue for {}",
                 file.display()
@@ -2300,7 +2174,7 @@ fn activate_existing_route_queue_head(
 fn route_queue_lock_path(file: &Path) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(file)
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let base = agent_doc_fs::find_project_root(&canonical)
+    let base = agent_doc_project_root_io::project_root_containing(&canonical)
         .or_else(|| canonical.parent().map(Path::to_path_buf))
         .ok_or_else(|| {
             anyhow::anyhow!("failed to resolve queue lock root for {}", file.display())
@@ -2344,7 +2218,7 @@ fn cleanup_failed_route_panes(
                 file.display()
             );
             tracing::warn!(pane = %p, "route: killing startup-miss pane from failed fresh route");
-            let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
+            let _ = agent_doc_tmux_io::kill_pane(tmux, p);
             continue;
         }
         if should_preserve_failed_route_pane(tmux, file, p, session_id) {
@@ -2360,12 +2234,12 @@ fn cleanup_failed_route_panes(
             p
         );
         tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
-        let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
+        let _ = agent_doc_tmux_io::kill_pane(tmux, p);
     }
 }
 
 fn failed_route_pane_has_startup_miss(file: &Path, pane_id: &str) -> bool {
-    crate::startup_miss::load(file)
+    agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
         .ok()
         .flatten()
         .is_some_and(|miss| {
@@ -2381,7 +2255,7 @@ fn failed_route_registry_root(file: &Path) -> Option<std::path::PathBuf> {
     let canonical = std::fs::canonicalize(file)
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
-    agent_doc_fs::find_project_root(&canonical)
+    agent_doc_project_root_io::project_root_containing(&canonical)
         .or_else(|| canonical.parent().map(|parent| parent.to_path_buf()))
 }
 
@@ -2394,7 +2268,7 @@ fn should_preserve_failed_route_pane(
     let Some(root) = failed_route_registry_root(file) else {
         return false;
     };
-    sessions::load_in(&root)
+    agent_doc_session_registry_io::load_in(&root)
         .ok()
         .and_then(|registry| {
             registry
@@ -2432,13 +2306,15 @@ fn wait_for_starting_pane_recovery_target(
     let deadline = std::time::Instant::now() + budget.timeout;
 
     while std::time::Instant::now() < deadline {
-        let current_status = crate::startup_miss::session_log_status(file, session_id)
-            .ok()
-            .flatten();
-        let registry = sessions::load_in(&registry_base_dir).ok();
-        let registered_pane = sessions::lookup_in(&registry_base_dir, session_id)
-            .ok()
-            .flatten();
+        let current_status =
+            agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
+                .ok()
+                .flatten();
+        let registry = agent_doc_session_registry_io::load_in(&registry_base_dir).ok();
+        let registered_pane =
+            agent_doc_session_registry_io::lookup_in(&registry_base_dir, session_id)
+                .ok()
+                .flatten();
 
         match starting_pane_recovery_target(
             initial_status,
@@ -2626,9 +2502,12 @@ fn wait_for_authoritative_actor_ready(
         match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
             Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
                 crate::ops_log::log_op(file, &log_line);
-                log_prompt_ready_barrier_failed(
+                agent_doc_flow_io::log_flow_event(
                     file,
-                    RoutedReopenGuardReason::StartingActorNotReady,
+                    prompt_ready_barrier_failed_event(
+                        RoutedReopenGuardReason::StartingActorNotReady,
+                    ),
+                    crate::ops_log::log_op,
                 );
                 mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
             }
@@ -2652,9 +2531,12 @@ fn wait_for_authoritative_actor_ready(
                     err
                 );
                 crate::ops_log::log_op(file, &log_line);
-                log_prompt_ready_barrier_failed(
+                agent_doc_flow_io::log_flow_event(
                     file,
-                    RoutedReopenGuardReason::StartingActorNotReadyUnpersisted,
+                    prompt_ready_barrier_failed_event(
+                        RoutedReopenGuardReason::StartingActorNotReadyUnpersisted,
+                    ),
+                    crate::ops_log::log_op,
                 );
             }
         }
@@ -3318,9 +3200,12 @@ fn route_via_authoritative_actor(
                         actor_state.as_str()
                     ),
                 );
-                log_prompt_ready_barrier_failed(
+                agent_doc_flow_io::log_flow_event(
                     file,
-                    RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
+                    prompt_ready_barrier_failed_event(
+                        RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
+                    ),
+                    crate::ops_log::log_op,
                 );
                 let file_display = file.display().to_string();
                 let recovery_hint = authoritative_actor_dispatch_recovery_hint(actor_state, file);
@@ -3386,9 +3271,12 @@ fn route_via_authoritative_actor(
                     reopen_outcome.reason
                 ),
             );
-            log_prompt_ready_barrier_failed(
+            agent_doc_flow_io::log_flow_event(
                 file,
-                RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
+                prompt_ready_barrier_failed_event(
+                    RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
+                ),
+                crate::ops_log::log_op,
             );
             if let Some(context) = prompt_context {
                 // #jb-run-preempt-autoloop-priority: busy-actor Run Agent Doc preempts.
@@ -3872,7 +3760,7 @@ pub(crate) fn wait_for_pane_contains(
     let poll = std::time::Duration::from_millis(100);
     let mut last = String::new();
     while start.elapsed() < timeout {
-        last = sessions::capture_pane(iso, pane).unwrap_or_default();
+        last = agent_doc_tmux_io::capture_pane(iso, pane).unwrap_or_default();
         if last.contains(needle) {
             return last;
         }
@@ -3908,22 +3796,7 @@ pub(crate) fn send_keys_with_retry(iso: &IsolatedTmux, pane: &str, text: &str) {
 }
 #[cfg(test)]
 pub(crate) fn pane_current_command(iso: &IsolatedTmux, pane: &str) -> Option<String> {
-    let output = iso
-        .cmd()
-        .args([
-            "display-message",
-            "-t",
-            pane,
-            "-p",
-            "#{pane_current_command}",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let cmd = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if cmd.is_empty() { None } else { Some(cmd) }
+    agent_doc_tmux_io::target_current_command(iso, pane)
 }
 #[cfg(test)]
 pub(crate) fn wait_for_shell(iso: &IsolatedTmux, pane: &str, timeout: std::time::Duration) -> bool {
@@ -4256,7 +4129,7 @@ pub(crate) fn wait_for_mock_agent_prompt(
     let mut last = String::new();
 
     while start.elapsed() < timeout {
-        last = sessions::capture_pane(iso, pane).unwrap_or_default();
+        last = agent_doc_tmux_io::capture_pane(iso, pane).unwrap_or_default();
         if last.lines().any(|line| line.trim() == ">") {
             return last;
         }
@@ -4347,9 +4220,9 @@ pub(crate) fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTa
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
+    use agent_doc_supervisor_io::ipc::SupervisorIpc;
     use agent_doc_turn::closeout_recovery::CloseoutRecoveryState;
 
     struct EnvGuard {
@@ -4756,7 +4629,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
@@ -4785,7 +4658,7 @@ mod tests {
             queue_pos < backlog_pos,
             "created queue component should be visible before tracked work components:\n{updated}"
         );
-        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             snapshot, updated,
             "route queueing must sync the snapshot so queue continuation is not treated as a modified head prompt"
@@ -4829,7 +4702,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let _listener =
             crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), expected.into());
@@ -4842,7 +4715,10 @@ mod tests {
         assert!(outcome.appended);
         assert!(outcome.activated);
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), expected);
-        assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), expected);
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            expected
+        );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("route_dispatch_queue_editor_convergence_attempt")
@@ -4878,7 +4754,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         // The polluted free-text line is preserved as a non-actionable Freeform
         // entry (tolerant parse) rather than failing the consume/dispatch guards.
@@ -4936,7 +4812,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
@@ -4984,7 +4860,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap().as_deref(),
@@ -5022,7 +4898,7 @@ mod tests {
             Some("shipstationaudit"),
             "activated go queue should become drainable by the idle-queue watch"
         );
-        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(snapshot, updated, "route activation must sync the snapshot");
     }
     #[test]
@@ -5042,7 +4918,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         assert_eq!(inactive_route_queue_head(&doc).unwrap(), None);
         assert_eq!(
@@ -5051,7 +4927,7 @@ mod tests {
             "plain inactive queues should stay inert without auto/start activation"
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
-        assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), content);
+        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap().unwrap(), content);
     }
     #[test]
     fn route_defers_uncommitted_queue_head_not_in_committed_snapshot() {
@@ -5090,7 +4966,7 @@ mod tests {
         );
         std::fs::write(&doc, on_disk).unwrap();
         // Committed snapshot only knows about `#committed`.
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
 
         assert!(
             !agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
@@ -5123,7 +4999,10 @@ mod tests {
             "route must not activate/consume an uncommitted queue head"
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), on_disk);
-        assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), committed);
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            committed
+        );
     }
     #[test]
     fn route_dispatches_committed_queue_head() {
@@ -5144,7 +5023,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap().as_deref(),
@@ -5173,7 +5052,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         assert!(
             !agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
                 Some(committed),
@@ -5217,7 +5096,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         // No INACTIVE head — the queue is already active, so the activate path no-ops.
         assert_eq!(
@@ -5261,7 +5140,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap().as_deref(),
@@ -5311,7 +5190,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap(),
@@ -5351,7 +5230,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
@@ -5392,7 +5271,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
@@ -5419,7 +5298,7 @@ mod tests {
             updated.contains("- Run Agent Doc queued the edited prompt."),
             "edited prompt should become the single queued rerun:\n{updated}"
         );
-        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             snapshot, updated,
             "queue prompt supersession must sync the route snapshot"
@@ -5445,7 +5324,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
@@ -5487,7 +5366,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
@@ -5506,7 +5385,7 @@ mod tests {
             ),
             "priority dispatch must head-insert ahead of pending auto items with operator pin:\n{updated}"
         );
-        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(snapshot, updated, "priority preempt must sync the snapshot");
     }
     #[test]
@@ -5531,7 +5410,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
@@ -5570,7 +5449,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
@@ -5676,7 +5555,7 @@ mod tests {
             ManagedCapabilityProofStatus::Missing
         );
 
-        crate::startup_miss::append_session_log_event(
+        agent_doc_supervisor_io::startup_miss::append_session_log_event(
             &doc,
             session_id,
             "codex_capability_proof status=proven network=proven ssh_targets=0 writable_roots=0",
@@ -5886,7 +5765,7 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         // Open cycle so the drain actually runs (is_open()).
         crate::cycle_state::start_preflight(&doc, None, Some(content)).unwrap();
 
@@ -6060,10 +5939,11 @@ mod tests {
         let message = route_latency_message(RouteLatencyFacts {
             phase: "direct_pane_submit",
             elapsed_ms: Duration::from_millis(1180).as_millis(),
-            budget_ms: direct_pane_submit_acceptance_budget().as_millis(),
+            budget_ms: agent_doc_controller::dispatch::direct_pane_submit_acceptance_budget()
+                .as_millis(),
             pane: "%1",
             harness_binary: &harness.binary,
-            outcome: direct_pane_submit_outcome(
+            outcome: agent_doc_controller::dispatch::direct_pane_submit_outcome(
                 CommandDispatchStatus::TimedOut,
                 Some(RoutedDispatchStartProof::HookPromptMatched),
             ),
@@ -6330,7 +6210,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             "resolver should keep dispatch in the fresh pane when the previous startup-miss owner is explicitly blocked"
         );
 
-        let registry = sessions::load_in(dir.path()).unwrap();
+        let registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
         let entry = registry
             .values()
             .find(|entry| entry.session_id == session_id)
@@ -6407,7 +6287,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             "@1",
         )
         .unwrap();
-        crate::startup_miss::record(
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
             &file,
             &pane,
             "session-1",
@@ -6504,7 +6384,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        crate::startup_miss::record(
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
             &doc,
             "%42",
             "session-test",
@@ -6514,7 +6394,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         )
         .unwrap();
 
-        let miss = crate::startup_miss::load(&doc)
+        let miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
             .unwrap()
             .expect("should have marker");
         assert_eq!(miss.pane_id, "%42");
@@ -6522,7 +6402,9 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             miss.origin,
             agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart
         );
-        assert!(crate::startup_miss::is_startup_miss_pane(&doc, "%42"));
+        assert!(agent_doc_supervisor_io::startup_miss::is_startup_miss_pane(
+            &doc, "%42"
+        ));
     }
     #[test]
     fn startup_miss_cleared_on_successful_ack() {
@@ -6531,7 +6413,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        crate::startup_miss::record(
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
             &doc,
             "%42",
             "session-test",
@@ -6540,11 +6422,19 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             None,
         )
         .unwrap();
-        assert!(crate::startup_miss::load(&doc).unwrap().is_some());
+        assert!(
+            agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
+                .unwrap()
+                .is_some()
+        );
 
-        crate::startup_miss::clear(&doc).unwrap();
-        assert!(crate::startup_miss::load(&doc).unwrap().is_none());
-        assert!(!crate::startup_miss::is_startup_miss_pane(&doc, "%42"));
+        agent_doc_supervisor_io::startup_miss::clear_startup_miss(&doc).unwrap();
+        assert!(
+            agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
+                .unwrap()
+                .is_none()
+        );
+        assert!(!agent_doc_supervisor_io::startup_miss::is_startup_miss_pane(&doc, "%42"));
     }
     #[test]
     fn startup_miss_pane_detected_on_rerun() {
@@ -6553,7 +6443,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        crate::startup_miss::record(
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
             &doc,
             "%99",
             "session-test",
@@ -6563,9 +6453,11 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         )
         .unwrap();
 
-        assert!(crate::startup_miss::is_startup_miss_pane(&doc, "%99"));
+        assert!(agent_doc_supervisor_io::startup_miss::is_startup_miss_pane(
+            &doc, "%99"
+        ));
         assert!(
-            !crate::startup_miss::is_startup_miss_pane(&doc, "%100"),
+            !agent_doc_supervisor_io::startup_miss::is_startup_miss_pane(&doc, "%100"),
             "different pane should not match"
         );
     }
@@ -6576,7 +6468,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        crate::startup_miss::record(
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
             &doc,
             "%50",
             "session-test",
@@ -6586,7 +6478,9 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         )
         .unwrap();
 
-        let miss = crate::startup_miss::load(&doc).unwrap().expect("marker");
+        let miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
+            .unwrap()
+            .expect("marker");
         assert_eq!(
             miss.origin,
             agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger
@@ -6825,7 +6719,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         emit_startup_miss_diagnostic(&iso, &pane, &doc, "startup timed out");
 
         std::thread::sleep(std::time::Duration::from_millis(250));
-        let after = sessions::capture_pane(&iso, &pane).unwrap();
+        let after = agent_doc_tmux_io::capture_pane(&iso, &pane).unwrap();
         assert!(
             !after.contains("echo '[agent-doc] startup-miss:"),
             "diagnostic should not be left as drafted shell input: {after}"

@@ -710,7 +710,7 @@ pub unsafe extern "C" fn agent_doc_cancel_preflight_cycle(file_path: *const c_ch
         Err(_) => return -1,
     };
     match agent_doc_orchestration::repair::cancel_preflight_cycle(std::path::Path::new(path)) {
-        Ok(agent_doc_orchestration::repair::CancelOutcome::Abandoned) => 1,
+        Ok(agent_doc_turn::repair::CancelOutcome::Abandoned) => 1,
         Ok(_) => 0,
         Err(e) => {
             eprintln!("[ffi] agent_doc_cancel_preflight_cycle failed for {path}: {e}");
@@ -1170,19 +1170,23 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
     let root_path = std::path::PathBuf::from(&root_str);
 
     std::thread::spawn(move || {
-        let result = agent_doc_orchestration::ipc_socket::start_listener(&root_path, move |msg| {
-            // Lend the message to the callback (no ownership transfer)
-            let c_msg = match CString::new(msg) {
-                Ok(c) => c,
-                Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
-            };
-            let success = callback(c_msg.as_ptr()) != 0;
-            if success {
-                Some(r#"{"type":"ack","status":"ok"}"#.to_string())
-            } else {
-                Some(r#"{"type":"ack","status":"error"}"#.to_string())
-            }
-        });
+        let result = agent_doc_ipc_io::start_listener_with_logger(
+            &root_path,
+            move |msg| {
+                // Lend the message to the callback (no ownership transfer)
+                let c_msg = match CString::new(msg) {
+                    Ok(c) => c,
+                    Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
+                };
+                let success = callback(c_msg.as_ptr()) != 0;
+                if success {
+                    Some(r#"{"type":"ack","status":"ok"}"#.to_string())
+                } else {
+                    Some(r#"{"type":"ack","status":"error"}"#.to_string())
+                }
+            },
+            agent_doc_orchestration::ops_log::log_op,
+        );
         if let Err(e) = result {
             eprintln!("[ffi] IPC listener error: {}", e);
         }
@@ -1204,7 +1208,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
 /// Plugins should prefer v2 when available. Existing plugins built against
 /// [`agent_doc_start_ipc_listener`] keep working unchanged.
 ///
-/// Early-ack (`#ipc-early-ack`): the underlying `ipc_socket::start_listener`
+/// Early-ack (`#ipc-early-ack`): the underlying `agent_doc_ipc_io::start_listener`
 /// transport emits a `pending` ack the instant it receives a patch that opted
 /// in (`"early_ack": true`), before this callback's blocking apply runs, then
 /// this callback's terminal ack as usual. No plugin/callback change is needed —
@@ -1229,19 +1233,23 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener_v2(
     let root_path = std::path::PathBuf::from(&root_str);
 
     std::thread::spawn(move || {
-        let result = agent_doc_orchestration::ipc_socket::start_listener(&root_path, move |msg| {
-            let c_msg = match CString::new(msg) {
-                Ok(c) => c,
-                Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
-            };
-            match callback(c_msg.as_ptr()) {
-                1 => Some(r#"{"type":"ack","status":"ok"}"#.to_string()),
-                2 => Some(
-                    r#"{"type":"ack","status":"error","reason":"already_applied"}"#.to_string(),
-                ),
-                _ => Some(r#"{"type":"ack","status":"error"}"#.to_string()),
-            }
-        });
+        let result = agent_doc_ipc_io::start_listener_with_logger(
+            &root_path,
+            move |msg| {
+                let c_msg = match CString::new(msg) {
+                    Ok(c) => c,
+                    Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
+                };
+                match callback(c_msg.as_ptr()) {
+                    1 => Some(r#"{"type":"ack","status":"ok"}"#.to_string()),
+                    2 => Some(
+                        r#"{"type":"ack","status":"error","reason":"already_applied"}"#.to_string(),
+                    ),
+                    _ => Some(r#"{"type":"ack","status":"error"}"#.to_string()),
+                }
+            },
+            agent_doc_orchestration::ops_log::log_op,
+        );
         if let Err(e) = result {
             eprintln!("[ffi] IPC listener v2 error: {}", e);
         }
@@ -1264,7 +1272,7 @@ pub unsafe extern "C" fn agent_doc_stop_ipc_listener(project_root: *const c_char
         Ok(s) => s,
         Err(_) => return,
     };
-    let sock = agent_doc_orchestration::ipc_socket::socket_path(std::path::Path::new(root_str));
+    let sock = agent_doc_ipc_io::socket_path(std::path::Path::new(root_str));
     if let Err(e) = std::fs::remove_file(&sock)
         && e.kind() != std::io::ErrorKind::NotFound
     {
@@ -1778,7 +1786,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
         }
     };
 
-    match agent_doc_orchestration::op_capture::record_editor_op(&file_path_buf, base, op) {
+    match agent_doc_op_capture_io::record_editor_op(&file_path_buf, base, op) {
         Ok(()) => {
             agent_doc_orchestration::ops_log::log_op(
                 &file_path_buf,
@@ -1801,7 +1809,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
 
 /// Compute the `base_hash` the editor op reporters must stamp on captured ops
 /// (`#qnodemerge4wire`) so the write-time merge accepts them — the SHA256 hex of
-/// the same CRDT merge base text [`merge::merge_contents_crdt_with_ops`]
+/// the same CRDT merge base text [`agent_doc_merge_io::merge_contents_crdt_with_ops`]
 /// resolves. The reporter calls this once per edit (cheap; the editor offsets it
 /// pairs with are relative to this base) and passes the result to
 /// [`agent_doc_record_editor_op`].
@@ -1820,7 +1828,18 @@ pub unsafe extern "C" fn agent_doc_document_base_hash(file_path: *const c_char) 
         eprintln!("[op-capture] agent_doc_document_base_hash: non-UTF-8 path; returning null");
         return std::ptr::null_mut();
     };
-    match agent_doc_orchestration::op_capture::current_base_hash(std::path::Path::new(path)) {
+    match agent_doc_op_capture_io::current_base_hash_with(
+        std::path::Path::new(path),
+        |doc, baseline| {
+            agent_doc_snapshot_io::crdt_merge_base_state_with(
+                doc,
+                baseline,
+                agent_doc_op_capture_io::has_pending_editor_ops,
+                agent_doc_orchestration::ops_log::log_op,
+            )
+            .map(|base| base.state)
+        },
+    ) {
         Ok(hash) => CString::new(hash)
             .map(|c| c.into_raw())
             .unwrap_or(std::ptr::null_mut()),
@@ -2825,7 +2844,7 @@ mod tests {
 
     #[test]
     fn record_editor_op_ffi_writes_base_keyed_sidecar() {
-        use agent_doc_orchestration::op_capture;
+        use agent_doc_op_capture_io as op_capture;
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("plan.md");
@@ -2916,7 +2935,7 @@ mod tests {
 
     #[test]
     fn record_editor_op_ffi_preserves_non_ascii_byte_offsets() {
-        use agent_doc_orchestration::op_capture;
+        use agent_doc_op_capture_io as op_capture;
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("plan.md");

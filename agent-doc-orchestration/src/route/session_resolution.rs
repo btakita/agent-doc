@@ -123,41 +123,6 @@ pub(crate) fn find_target_pane(
     target.filter(|p| tmux.pane_alive(p) && !claimed_panes.contains(p))
 }
 
-/// Check if a window with the given name exists in the target tmux session.
-pub(crate) fn has_named_window(tmux: &Tmux, session_name: &str, window_name: &str) -> bool {
-    let output = tmux
-        .cmd()
-        .args(["list-windows", "-t", session_name, "-F", "#{window_name}"])
-        .output();
-    match output {
-        Ok(out) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            text.lines().any(|l| l.trim() == window_name)
-        }
-        _ => false,
-    }
-}
-
-pub(crate) fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
-    tmux.cmd()
-        .args(["display-message", "-t", pane_id, "-p", "#{session_name}"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-}
-
-pub(crate) fn pane_window_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
-    tmux.pane_window(pane_id).ok().and_then(|window_id| {
-        tmux.cmd()
-            .args(["display-message", "-t", &window_id, "-p", "#{window_name}"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-    })
-}
-
 pub(crate) fn evict_previous_stash_pane(
     tmux: &Tmux,
     session_id: &str,
@@ -165,7 +130,7 @@ pub(crate) fn evict_previous_stash_pane(
     target_session: &str,
     harness: &HarnessConfig,
 ) {
-    let Ok(Some(previous)) = sessions::lookup_entry(session_id) else {
+    let Ok(Some(previous)) = agent_doc_session_registry_io::lookup_entry(session_id) else {
         return;
     };
     evict_previous_stash_pane_entry(
@@ -192,10 +157,12 @@ pub(crate) fn evict_previous_stash_pane_entry(
     {
         return;
     }
-    if pane_session_name(tmux, &previous.pane).as_deref() != Some(target_session) {
+    if agent_doc_tmux_io::target_session_name(tmux, &previous.pane).as_deref()
+        != Some(target_session)
+    {
         return;
     }
-    let Some(window_name) = pane_window_name(tmux, &previous.pane) else {
+    let Some(window_name) = agent_doc_tmux_io::target_window_name(tmux, &previous.pane) else {
         return;
     };
     if !is_stash_window_name(&window_name) {
@@ -218,7 +185,7 @@ pub(crate) fn find_registered_pane_in_session(
     session_name: &str,
     exclude_pane: &str,
 ) -> Option<String> {
-    let registry = sessions::load_in(registry_base_dir).ok()?;
+    let registry = agent_doc_session_registry_io::load_in(registry_base_dir).ok()?;
     for entry in registry.values() {
         if entry.pane == exclude_pane || entry.pane.is_empty() {
             continue;
@@ -227,43 +194,22 @@ pub(crate) fn find_registered_pane_in_session(
             continue;
         }
         // Check if this pane is in the target session
-        if let Ok(output) = tmux
-            .cmd()
-            .args([
-                "display-message",
-                "-t",
-                &entry.pane,
-                "-p",
-                "#{session_name}",
-            ])
-            .output()
+        if agent_doc_tmux_io::target_session_name(tmux, &entry.pane).as_deref()
+            == Some(session_name)
         {
-            let pane_session = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if pane_session == session_name {
-                return Some(entry.pane.clone());
-            }
+            return Some(entry.pane.clone());
         }
     }
     None
-}
-
-pub(crate) fn registry_base_dir_for_file(file: &Path, fallback: &Path) -> std::path::PathBuf {
-    std::fs::canonicalize(file)
-        .ok()
-        .and_then(|path| {
-            agent_doc_fs::find_project_root(&path)
-                .or_else(|| path.parent().map(|parent| parent.to_path_buf()))
-        })
-        .unwrap_or_else(|| fallback.to_path_buf())
 }
 
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
+    use agent_doc_supervisor_io::ipc::SupervisorIpc;
     #[test]
     fn unregistered_file_skips_lazy_claim() {
         // When registered is None, the lazy-claim step should be skipped.
@@ -328,7 +274,7 @@ mod tests {
         // Create session (first window gets default name, not "agent-doc")
         let _pane = iso.auto_start(session, &cwd).unwrap();
         assert!(
-            !has_named_window(&iso, session, "agent-doc"),
+            !agent_doc_tmux_io::has_window_named(&iso, session, "agent-doc"),
             "should not find 'agent-doc' window before renaming"
         );
 
@@ -338,7 +284,7 @@ mod tests {
             .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
             .status();
         assert!(
-            has_named_window(&iso, session, "agent-doc"),
+            agent_doc_tmux_io::has_window_named(&iso, session, "agent-doc"),
             "should find 'agent-doc' window after renaming"
         );
     }
@@ -347,7 +293,7 @@ mod tests {
     fn has_named_window_false_for_nonexistent_session() {
         let iso = IsolatedTmux::new("route-test-named-win-no-sess");
         assert!(
-            !has_named_window(&iso, "nonexistent", "agent-doc"),
+            !agent_doc_tmux_io::has_window_named(&iso, "nonexistent", "agent-doc"),
             "should return false for nonexistent session"
         );
     }

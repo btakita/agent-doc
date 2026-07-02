@@ -8,8 +8,6 @@
 //!
 //! ## Submodules
 //! - `pty` — pty allocation, child spawn, stdin/stdout forwarding threads.
-//! - `ipc` — per-session Unix-domain socket for lifecycle control.
 
 pub mod in_process;
-pub mod ipc;
 pub mod pty;

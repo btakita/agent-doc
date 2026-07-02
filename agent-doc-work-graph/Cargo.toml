@@ -12,5 +12,6 @@ name = "agent_doc_work_graph"
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.67" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

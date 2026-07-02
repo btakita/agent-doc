@@ -81,6 +81,12 @@ pub fn read_turn_active_marker(base: &Path) -> Option<TurnActiveMarker> {
     read_turn_active_marker_at(base, now_secs())
 }
 
+/// Read the non-expired turn-active marker for the project containing `file`.
+pub fn read_turn_active_marker_for_file(file: &Path) -> Option<TurnActiveMarker> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    read_turn_active_marker(&root)
+}
+
 /// True when a non-expired turn-active marker is present under `base`.
 pub fn turn_active(base: &Path) -> bool {
     read_turn_active_marker(base).is_some()
@@ -172,8 +178,7 @@ pub fn run(active: bool) -> anyhow::Result<()> {
 /// directory (the harness hook runs there). `None` when there is no
 /// `.agent-doc` ancestor.
 fn resolve_marker_base() -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    agent_doc_fs::find_project_root(&cwd)
+    agent_doc_project_root_io::project_root_from_cwd().ok()
 }
 
 #[cfg(test)]

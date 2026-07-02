@@ -115,7 +115,7 @@ pub(crate) fn supervisor_pane_dispatch_ready(
         .clone()
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
     let tmux = tmux_router::Tmux::default_server();
-    let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
+    let content = agent_doc_tmux_io::capture_pane(&tmux, &pane).ok()?;
     Some(supervisor_detection::pane_dispatch_ready(&content, harness))
 }
 
@@ -149,7 +149,7 @@ pub(crate) fn supervisor_pane_has_busy_cue(
         .clone()
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
     let tmux = tmux_router::Tmux::default_server();
-    let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
+    let content = agent_doc_tmux_io::capture_pane(&tmux, &pane).ok()?;
     Some(supervisor_detection::pane_has_busy_cue(&content, harness))
 }
 
@@ -170,7 +170,7 @@ pub(crate) fn supervisor_pane_payload_already_pending(
         .clone()
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
     let tmux = tmux_router::Tmux::default_server();
-    let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
+    let content = agent_doc_tmux_io::capture_pane(&tmux, &pane).ok()?;
     Some(dispatch_payload_pending_in_current_input(
         &content,
         payload,
@@ -206,9 +206,9 @@ pub(crate) fn is_help_screen_visible(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::hooks::fire_doc_hooks;
     use agent_doc_config::Config;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
+    use agent_doc_hooks_io::fire_doc_hooks;
     use agent_doc_project_config_io as project_config_io;
     use std::collections::HashMap;
     use tempfile::TempDir;

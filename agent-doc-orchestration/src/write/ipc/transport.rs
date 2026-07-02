@@ -107,7 +107,7 @@ pub fn queue_file_ipc_reposition_boundary(
     normalize_prefix_lines: &[String],
 ) -> Result<FileIpcRepositionResult> {
     let canonical = file.canonicalize()?;
-    let project_root = resolve_ipc_project_root(&canonical);
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let patches_dir = project_root.join(".agent-doc/patches");
     if !patches_dir.exists() {
         return Ok(FileIpcRepositionResult::Unavailable);
@@ -202,7 +202,7 @@ pub fn queue_file_ipc_reposition_boundary(
 
 /// Attempt to write via IPC (socket-first, file-based fallback).
 ///
-/// First tries socket IPC via `ipc_socket::send_message()` for lowest latency.
+/// First tries socket IPC via `agent_doc_ipc_io::send_message()` for lowest latency.
 /// Falls back to file-based IPC (JSON patch in `.agent-doc/patches/`) if socket
 /// is unavailable. Returns `IpcResult` with success flag and the patch_id used.
 ///
@@ -222,7 +222,7 @@ pub fn try_ipc(
 ) -> Result<IpcResult> {
     let canonical = file.canonicalize()?;
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let project_root = resolve_ipc_project_root(&canonical);
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let patch_id = reuse_patch_id
         .map(|s| s.to_string())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -272,7 +272,7 @@ pub fn try_ipc(
                     patch_id
                 ),
             );
-            let snapshot_content = crate::snapshot::load(file)?;
+            let snapshot_content = agent_doc_snapshot_io::load(file)?;
             let file_content_for_state = std::fs::read_to_string(file).ok();
             let _ = crate::cycle_state::start_preflight(
                 file,
@@ -331,7 +331,7 @@ pub fn try_ipc(
     // Try socket IPC first (lower latency, no inotify) unless the socket is
     // latched degraded — in that case the file-IPC patch queue below is the
     // reliable plugin path.
-    if !socket_degraded && crate::ipc_socket::is_listener_active(&project_root) {
+    if !socket_degraded && agent_doc_ipc_io::is_listener_active(&project_root) {
         // Seed the boundary from patch_id so the socket patch and any later file /
         // run_stream fallback rebuild share an IDENTICAL boundary — otherwise a
         // late socket apply + file apply land the response twice
@@ -462,7 +462,7 @@ pub fn try_ipc(
                 None
             }
         };
-        match crate::ipc_socket::send_message(&project_root, &socket_payload) {
+        match agent_doc_ipc_io::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC patch delivered");
                 clear_ipc_socket_ack_timeouts(&project_root, file, "socket_ack")?;
@@ -643,7 +643,11 @@ pub fn try_ipc(
                             unmatched,
                         );
                     }
-                    if let Err(e) = snapshot::save(file, &repair_decision.snapshot_content) {
+                    if let Err(e) = agent_doc_snapshot_io::save(
+                        file,
+                        &repair_decision.snapshot_content,
+                        crate::ops_log::log_op,
+                    ) {
                         eprintln!(
                             "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
                              Commit will auto-recover via divergence detection.",
@@ -669,7 +673,7 @@ pub fn try_ipc(
                         let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(
                             &repair_decision.snapshot_content,
                         );
-                        if let Err(e) = snapshot::save_document_crdt(
+                        if let Err(e) = agent_doc_merge_io::save_document_crdt(
                             file,
                             &crdt_doc.encode_state(),
                             &repair_decision.snapshot_content,
@@ -1011,7 +1015,7 @@ pub fn try_ipc(
             .iter()
             .any(|patch| patch.content.contains("### Re:"))
         && let Ok(current) = std::fs::read_to_string(file)
-        && let Ok(after_apply) = crate::template_io::apply_patches(&current, patches, "", file)
+        && let Ok(after_apply) = agent_doc_template_io::apply_patches(&current, patches, "", file)
         && strip_boundary_for_dedup(&after_apply) == strip_boundary_for_dedup(&current)
     {
         eprintln!(
@@ -1362,7 +1366,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         Ok(c) => c,
         Err(_) => return false,
     };
-    let project_root = resolve_ipc_project_root(&canonical);
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     cleanup_legacy_ipc_degraded(&project_root);
     match ipc_direct_disk_degraded(&project_root, file) {
         Ok(true) => {
@@ -1381,7 +1385,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             );
         }
     }
-    let snapshot_doc = crate::snapshot::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     let working_doc = std::fs::read_to_string(file).ok();
     let boundary_id = snapshot_doc
         .as_deref()
@@ -1398,7 +1402,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         _ => vec![],
     };
 
-    if !crate::ipc_socket::is_listener_active(&project_root) {
+    if !agent_doc_ipc_io::is_listener_active(&project_root) {
         return match queue_file_ipc_reposition_boundary(
             file,
             boundary_id.as_deref(),
@@ -1424,7 +1428,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             message["boundary_id"] = serde_json::Value::String(boundary_id.to_string());
         }
         target_payload_to_live_editor(file, &mut message, "socket_reposition");
-        crate::ipc_socket::send_message(&project_root, &message).map(|_| true)
+        agent_doc_ipc_io::send_message(&project_root, &message).map(|_| true)
     } else {
         let mut message = serde_json::json!({
             "type": "patch",
@@ -1439,7 +1443,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             message["reposition_boundary_id"] = serde_json::Value::String(boundary_id.to_string());
         }
         target_payload_to_live_editor(file, &mut message, "socket_reposition_patch");
-        crate::ipc_socket::send_message(&project_root, &message).map(|_| true)
+        agent_doc_ipc_io::send_message(&project_root, &message).map(|_| true)
     };
 
     match result {
@@ -1567,6 +1571,35 @@ pub(crate) fn write_ipc_and_poll(
             cleanup_fallback_patch_files(doc_file);
             return Ok(false);
         }
+        // #af88 file-IPC negative-ack: a plugin that attempted the apply and failed
+        // writes a `<patch>.nack` sidecar. Detect it immediately instead of waiting
+        // out the full no_ack timeout, and surface a distinct `nack` proof failure so
+        // callers / session-check can tell an explicit plugin rejection from silence.
+        let nack_file = patch_file.with_extension("nack");
+        if nack_file.exists() {
+            let detail = std::fs::read_to_string(&nack_file).unwrap_or_default();
+            let _ = std::fs::remove_file(&nack_file);
+            // Drop the unconsumed patch too: the plugin just told us this apply
+            // fails, so leaving it for an editor retry would only repeat the failure.
+            let _ = std::fs::remove_file(patch_file);
+            eprintln!(
+                "[write] IPC negative-ack: plugin rejected patch {} — refusing direct document write",
+                patch_file.display()
+            );
+            log_ipc_proof_failure(
+                doc_file,
+                "file_ipc",
+                patch_id_for_diagnostics,
+                "nack",
+                "retry_without_disk_write",
+                &format!(
+                    "nack_detail={} patch_file={}",
+                    detail.trim(),
+                    patch_file.display()
+                ),
+            );
+            return Ok(false);
+        }
         if !patch_file.exists() {
             // Plugin consumed the patch — poll for ack-content sidecar (authoritative
             // post-apply snapshot). Falls back to file read after timeout.
@@ -1684,7 +1717,8 @@ pub(crate) fn write_ipc_and_poll(
                     }
                 }
             }
-            let expected_response = response_materialization_probe_from_ipc_payload(payload);
+            let expected_response =
+                agent_doc_template_io::response_materialization_probe_from_ipc_payload(payload);
             if prefer_visible_content_over_stale_ack_content(
                 doc_file,
                 "file_ipc",
@@ -1867,7 +1901,11 @@ pub(crate) fn write_ipc_and_poll(
                     unmatched,
                 );
             }
-            if let Err(e) = snapshot::save(doc_file, &repair_decision.snapshot_content) {
+            if let Err(e) = agent_doc_snapshot_io::save(
+                doc_file,
+                &repair_decision.snapshot_content,
+                crate::ops_log::log_op,
+            ) {
                 eprintln!(
                     "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
                      Commit will auto-recover via divergence detection.",
@@ -1892,7 +1930,7 @@ pub(crate) fn write_ipc_and_poll(
                 );
                 let crdt_doc =
                     agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
-                if let Err(e) = snapshot::save_document_crdt(
+                if let Err(e) = agent_doc_merge_io::save_document_crdt(
                     doc_file,
                     &crdt_doc.encode_state(),
                     &repair_decision.snapshot_content,
@@ -2096,90 +2134,6 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
-    fn resolve_ipc_project_root_uses_nearest_agent_doc_for_submodule_file() {
-        // Build a parent+submodule layout. Verify that a document inside the
-        // submodule resolves to the SUBMODULE's .agent-doc/ root, not the
-        // superproject. This matches the IDE plugin's resolveRootFor logic so
-        // ack-content paths agree between Rust and Kotlin.
-        let parent_dir = TempDir::new().unwrap();
-        let sub_src_dir = TempDir::new().unwrap();
-        let parent = parent_dir.path().canonicalize().unwrap();
-        let sub_src = sub_src_dir.path().canonicalize().unwrap();
-
-        // Bootstrap a "remote" submodule repo with one committed file.
-        git(&sub_src, &["init"]);
-        std::fs::write(sub_src.join("README.md"), "sub").unwrap();
-        git(&sub_src, &["add", "README.md"]);
-        git(&sub_src, &["commit", "-m", "init"]);
-
-        // Bootstrap parent repo and add the submodule under src/submodule.
-        git(&parent, &["init"]);
-        std::fs::write(parent.join("README.md"), "parent").unwrap();
-        git(&parent, &["add", "README.md"]);
-        git(&parent, &["commit", "-m", "init"]);
-        git(
-            &parent,
-            &[
-                "submodule",
-                "add",
-                sub_src.to_string_lossy().as_ref(),
-                "src/submodule",
-            ],
-        );
-
-        // Submodule has its own .agent-doc — the IDE plugin registers it as a root.
-        let submodule_root = parent.join("src/submodule");
-        std::fs::create_dir_all(submodule_root.join(".agent-doc/patches")).unwrap();
-
-        // Place a document inside the submodule.
-        let doc = submodule_root.join("test.md");
-        std::fs::write(
-            &doc,
-            "---\n---\n\n<!-- agent:exchange -->c<!-- /agent:exchange -->\n",
-        )
-        .unwrap();
-
-        let canonical = doc.canonicalize().unwrap();
-        let project_root = resolve_ipc_project_root(&canonical);
-
-        assert_eq!(
-            project_root, submodule_root,
-            "submodule file must resolve to submodule root (nearest .agent-doc/) to match IDE plugin routing"
-        );
-
-        // The superproject must NOT be returned — ack-content would diverge.
-        assert_ne!(
-            project_root, parent,
-            "must not return the superproject — ack-content written at submodule root would not be found"
-        );
-    }
-
-    #[test]
-    fn resolve_ipc_project_root_ignores_agent_doc_outside_git_toplevel() {
-        let outer_dir = TempDir::new().unwrap();
-        let outer = outer_dir.path().canonicalize().unwrap();
-        std::fs::create_dir_all(outer.join(".agent-doc/patches")).unwrap();
-
-        let nested = outer.join("nested");
-        std::fs::create_dir_all(&nested).unwrap();
-        git(&nested, &["init"]);
-        let doc = nested.join("session.md");
-        std::fs::write(
-            &doc,
-            "---\n---\n\n<!-- agent:exchange -->c<!-- /agent:exchange -->\n",
-        )
-        .unwrap();
-
-        let canonical = doc.canonicalize().unwrap();
-        let project_root = resolve_ipc_project_root(&canonical);
-
-        assert_eq!(
-            project_root, nested,
-            "a parent .agent-doc outside the current git toplevel must not capture IPC routing"
-        );
-    }
-
-    #[test]
     fn required_closeout_fails_when_parent_submodule_pointer_commit_fails() {
         let parent_dir = TempDir::new().unwrap();
         let sub_src_dir = TempDir::new().unwrap();
@@ -2245,7 +2199,7 @@ mod submodule_patch_routing_tests {
             "### Re: reply — gpt-5\nbody\n<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, &updated).unwrap();
-        crate::snapshot::save(&doc, &updated).unwrap();
+        agent_doc_snapshot_io::save(&doc, &updated, crate::ops_log::log_op).unwrap();
 
         let err = super::complete_required_closeout(&doc).unwrap_err();
         let message = err.to_string();
@@ -2258,7 +2212,9 @@ mod submodule_patch_routing_tests {
             "strict closeout should prescribe the idempotent commit recovery, got: {message}"
         );
         assert!(
-            crate::git::submodule_pointer_drift(&doc).unwrap().is_some(),
+            agent_doc_git_io::submodule::submodule_pointer_drift(&doc)
+                .unwrap()
+                .is_some(),
             "parent gitlink should remain stale when parent commit fails"
         );
     }
@@ -2276,7 +2232,7 @@ mod submodule_patch_routing_tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
             let root_clone = root.clone();
-            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+            let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v
                     .get("patch_id")
@@ -2312,7 +2268,7 @@ mod submodule_patch_routing_tests {
                         .and_then(|value| value.as_str())
                         .unwrap_or("");
                     let after =
-                        crate::template_io::apply_patches(&before, &patches, unmatched, file)
+                        agent_doc_template_io::apply_patches(&before, &patches, unmatched, file)
                             .unwrap_or(before);
                     let _ = std::fs::write(file, &after);
                     after
@@ -2329,7 +2285,7 @@ mod submodule_patch_routing_tests {
         let root = project_root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
-            let _ = crate::ipc_socket::start_listener(&root, |_msg| {
+            let _ = agent_doc_ipc_io::start_listener(&root, |_msg| {
                 Some(
                     serde_json::json!({
                         "type": "ack",
@@ -2350,7 +2306,7 @@ mod submodule_patch_routing_tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
             let root_clone = root.clone();
-            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+            let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v
                     .get("patch_id")
@@ -2375,7 +2331,7 @@ mod submodule_patch_routing_tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
             let root_clone = root.clone();
-            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+            let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v
                     .get("patch_id")
@@ -2392,7 +2348,7 @@ mod submodule_patch_routing_tests {
     /// Helper: wait for the socket listener to become connectable (up to 1s).
     fn wait_for_listener(project_root: &Path) {
         for _ in 0..100 {
-            if crate::ipc_socket::is_listener_active(project_root) {
+            if agent_doc_ipc_io::is_listener_active(project_root) {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -2470,7 +2426,7 @@ mod submodule_patch_routing_tests {
     fn try_ipc_routes_to_git_toplevel_for_non_submodule() {
         // Verify that try_ipc routes patches to the git toplevel (not a
         // superproject) when the document lives in a plain git repo. This
-        // exercises the git_toplevel_at path (step 2 in resolve_ipc_project_root).
+        // exercises the git_toplevel_at path in agent_doc_project_root_io.
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
 
@@ -2555,7 +2511,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        crate::snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         fs::write(&doc, live_already_applied_with_user_edit).unwrap();
 
@@ -2583,7 +2539,7 @@ mod submodule_patch_routing_tests {
             "already_applied socket ack is a consumed editor write"
         );
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(live_already_applied_with_user_edit),
             "already_applied must adopt disk content when it contains the response plus live user edits"
         );
@@ -2671,7 +2627,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        crate::snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         let editor_id = "jetbrains-test-editor";
@@ -2723,7 +2679,7 @@ mod submodule_patch_routing_tests {
             "already_applied socket ack with ack-content is a proven editor write"
         );
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(editor_ack_content),
             "already_applied must adopt fresh editor ack-content when disk still lags"
         );
@@ -2800,7 +2756,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        crate::snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-stale-ack-content";
@@ -2825,7 +2781,7 @@ mod submodule_patch_routing_tests {
 
         assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::Persisted);
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(newer_visible),
             "newer visible operator text must be the saved snapshot authority"
         );
@@ -2891,7 +2847,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        crate::snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-unsaved-live-editor";
@@ -2925,7 +2881,7 @@ mod submodule_patch_routing_tests {
 
         assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
             "stale ack-content must not replace the snapshot when the live editor buffer has moved on"
         );
@@ -2992,7 +2948,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        crate::snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         let editor_id = "jetbrains-test-editor";
@@ -3028,7 +2984,7 @@ mod submodule_patch_routing_tests {
 
         assert!(result.success, "socket ACK-content should prove delivery");
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(editor_ack_content),
             "socket ACK-content should remain the snapshot authority"
         );
@@ -3104,7 +3060,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        crate::snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         fs::write(&doc, duplicated_live_buffer).unwrap();
 
@@ -3132,7 +3088,7 @@ mod submodule_patch_routing_tests {
             "already_applied duplicate repair must fail closed: {err}"
         );
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
             "already_applied duplicate repair must not snapshot unproven dedupe"
         );
@@ -3186,7 +3142,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        crate::snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
         fs::write(&doc, stale_disk_with_live_prompt).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
@@ -3202,7 +3158,7 @@ mod submodule_patch_routing_tests {
 
         assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::Persisted);
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(repaired_visible),
             "missing disk response must snapshot the repaired visible document, preserving the live follow-up prompt"
         );
@@ -3235,7 +3191,7 @@ mod submodule_patch_routing_tests {
         );
         let content_ours = baseline;
         fs::write(&doc, baseline).unwrap();
-        crate::snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &doc,
@@ -3250,7 +3206,7 @@ mod submodule_patch_routing_tests {
 
         assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
             "response-less already_applied content_ours must not replace the snapshot"
         );
@@ -3277,7 +3233,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, content_ours).unwrap();
-        crate::snapshot::save(&doc, content_ours).unwrap();
+        agent_doc_snapshot_io::save(&doc, content_ours, crate::ops_log::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &doc,
@@ -3347,7 +3303,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        crate::snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let _listener = start_fixed_ack_content_listener(&root, duplicated_ack_content.to_string());
@@ -3374,7 +3330,7 @@ mod submodule_patch_routing_tests {
             "duplicated ack-content repair must fail closed instead of repairing disk: {err}"
         );
         assert_eq!(
-            snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
             "duplicated ack-content must not replace the existing snapshot without editor proof"
         );
@@ -4190,7 +4146,6 @@ mod late_fallback_patch_guard_tests {
         repair_ipc_decision_visible_state, try_ipc, try_ipc_full_content,
         try_ipc_full_content_operator_mutation_from_source,
     };
-    use crate::snapshot;
     use crate::write::ipc::EditorBadStateFingerprint;
     use std::fs;
     use std::path::Path;
@@ -4592,7 +4547,7 @@ mod late_fallback_patch_guard_tests {
             "stale full-content replacement must not overwrite live prompt drift"
         );
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "failed full-content IPC must not save a snapshot"
         );
         let patch_count = fs::read_dir(agent_doc_dir.join("patches"))
@@ -4651,7 +4606,7 @@ mod late_fallback_patch_guard_tests {
             "stale full-content replacement must preserve the live scratch comment"
         );
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "failed full-content IPC must not save a snapshot"
         );
         let patch_count = fs::read_dir(agent_doc_dir.join("patches"))
@@ -4695,7 +4650,7 @@ mod late_fallback_patch_guard_tests {
         let listener_doc = doc.clone();
         let listener_root = tmp.path().to_path_buf();
         let server = std::thread::spawn(move || {
-            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 listener_calls.fetch_add(1, Ordering::SeqCst);
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
@@ -4706,13 +4661,13 @@ mod late_fallback_patch_guard_tests {
             .ok();
         });
         for _ in 0..100 {
-            if crate::ipc_socket::is_listener_active(tmp.path()) {
+            if agent_doc_ipc_io::is_listener_active(tmp.path()) {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(
-            crate::ipc_socket::is_listener_active(tmp.path()),
+            agent_doc_ipc_io::is_listener_active(tmp.path()),
             "fake socket listener did not start"
         );
 
@@ -4732,7 +4687,7 @@ mod late_fallback_patch_guard_tests {
             live,
             "stale response fallback must not overwrite live prompt drift"
         );
-        assert!(snapshot::load(&doc).unwrap().is_none());
+        assert!(agent_doc_snapshot_io::load(&doc).unwrap().is_none());
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("full_content_ipc_authority_rejected")
@@ -4741,7 +4696,7 @@ mod late_fallback_patch_guard_tests {
             "stale-source full-content rejection should be logged:\n{ops_log}"
         );
 
-        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(tmp.path()));
         drop(server);
     }
 
@@ -4767,7 +4722,7 @@ mod late_fallback_patch_guard_tests {
         let listener_doc = doc.clone();
         let listener_root = tmp.path().to_path_buf();
         let server = std::thread::spawn(move || {
-            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 *listener_seen.lock().unwrap() = Some(payload.clone());
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
@@ -4778,13 +4733,13 @@ mod late_fallback_patch_guard_tests {
             .ok();
         });
         for _ in 0..100 {
-            if crate::ipc_socket::is_listener_active(tmp.path()) {
+            if agent_doc_ipc_io::is_listener_active(tmp.path()) {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(
-            crate::ipc_socket::is_listener_active(tmp.path()),
+            agent_doc_ipc_io::is_listener_active(tmp.path()),
             "fake socket listener did not start"
         );
 
@@ -4807,7 +4762,7 @@ mod late_fallback_patch_guard_tests {
             "disabled redelivery should be logged:\n{ops_log}"
         );
 
-        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(tmp.path()));
         drop(server);
     }
 
@@ -4869,7 +4824,7 @@ mod late_fallback_patch_guard_tests {
         let listener_doc = doc.clone();
         let listener_root = tmp.path().to_path_buf();
         let server = std::thread::spawn(move || {
-            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 listener_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
@@ -4880,13 +4835,13 @@ mod late_fallback_patch_guard_tests {
             .ok();
         });
         for _ in 0..100 {
-            if crate::ipc_socket::is_listener_active(tmp.path()) {
+            if agent_doc_ipc_io::is_listener_active(tmp.path()) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(
-            crate::ipc_socket::is_listener_active(tmp.path()),
+            agent_doc_ipc_io::is_listener_active(tmp.path()),
             "fake socket listener did not start"
         );
 
@@ -4917,7 +4872,7 @@ mod late_fallback_patch_guard_tests {
             "template fullContent rejection and retry should be logged:\n{ops_log}"
         );
 
-        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(tmp.path()));
         drop(server);
     }
 
@@ -4946,7 +4901,7 @@ mod late_fallback_patch_guard_tests {
         let listener_doc = doc.clone();
         let listener_root = tmp.path().to_path_buf();
         let server = std::thread::spawn(move || {
-            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 listener_calls.fetch_add(1, Ordering::SeqCst);
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
@@ -4957,13 +4912,13 @@ mod late_fallback_patch_guard_tests {
             .ok();
         });
         for _ in 0..100 {
-            if crate::ipc_socket::is_listener_active(tmp.path()) {
+            if agent_doc_ipc_io::is_listener_active(tmp.path()) {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(
-            crate::ipc_socket::is_listener_active(tmp.path()),
+            agent_doc_ipc_io::is_listener_active(tmp.path()),
             "fake socket listener did not start"
         );
 
@@ -4996,7 +4951,7 @@ mod late_fallback_patch_guard_tests {
             "stale tsift.md fixture should log proof and skip diagnostics:\n{ops_log}"
         );
 
-        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(tmp.path()));
         drop(server);
     }
 
@@ -5026,7 +4981,7 @@ mod late_fallback_patch_guard_tests {
         let listener_doc = doc.clone();
         let listener_root = tmp.path().to_path_buf();
         let server = std::thread::spawn(move || {
-            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 listener_calls.fetch_add(1, Ordering::SeqCst);
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
@@ -5037,13 +4992,13 @@ mod late_fallback_patch_guard_tests {
             .ok();
         });
         for _ in 0..100 {
-            if crate::ipc_socket::is_listener_active(tmp.path()) {
+            if agent_doc_ipc_io::is_listener_active(tmp.path()) {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(
-            crate::ipc_socket::is_listener_active(tmp.path()),
+            agent_doc_ipc_io::is_listener_active(tmp.path()),
             "fake socket listener did not start"
         );
 
@@ -5060,7 +5015,7 @@ mod late_fallback_patch_guard_tests {
             "socket listener must not receive stale full-content payloads"
         );
         assert_eq!(fs::read_to_string(&doc).unwrap(), live);
-        assert!(snapshot::load(&doc).unwrap().is_none());
+        assert!(agent_doc_snapshot_io::load(&doc).unwrap().is_none());
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("full_content_ipc_authority_rejected")
@@ -5068,7 +5023,7 @@ mod late_fallback_patch_guard_tests {
             "stale-source full-content rejection should be logged:\n{ops_log}"
         );
 
-        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(tmp.path()));
         drop(server);
     }
 
@@ -5092,7 +5047,7 @@ mod late_fallback_patch_guard_tests {
         let listener_root = root.clone();
         let ack_root = root.clone();
         let server = std::thread::spawn(move || {
-            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = payload.get("patch_id")?.as_str()?;
                 let ack_dir = ack_root.join(".agent-doc/ack-content");
@@ -5112,7 +5067,7 @@ mod late_fallback_patch_guard_tests {
             "socket full-content IPC must be disabled before payload delivery"
         );
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "mismatched socket ack-content must not become the saved snapshot"
         );
         assert_eq!(
@@ -5126,7 +5081,7 @@ mod late_fallback_patch_guard_tests {
             "disabled full-content path should be logged:\n{ops_log}"
         );
 
-        let _ = fs::remove_file(crate::ipc_socket::socket_path(&root));
+        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(&root));
         drop(server);
     }
 
@@ -5217,7 +5172,7 @@ Implemented.
             "test setup: duplicated content must actually dedupe"
         );
         fs::write(&doc, &deduped).unwrap();
-        crate::snapshot::save(&doc, &deduped).unwrap();
+        agent_doc_snapshot_io::save(&doc, &deduped, crate::ops_log::log_op).unwrap();
 
         let head_before = head_count(root);
         let recovered =
@@ -5234,13 +5189,15 @@ Implemented.
             head_before + 1,
             "dedupe-only recovery must produce exactly one new commit"
         );
-        let head_content = crate::git::show_head(&doc).unwrap().unwrap();
+        let head_content = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             head_content.matches("### Re: topic — opus-4-7").count(),
             1,
             "committed HEAD must hold the deduped response"
         );
-        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             snapshot_after.matches("### Re: topic — opus-4-7").count(),
             1,
@@ -5269,7 +5226,7 @@ Implemented.
 ";
         git_commit_file(root, "session.md", clean, "add clean");
         let doc = root.join("session.md");
-        crate::snapshot::save(&doc, clean).unwrap();
+        agent_doc_snapshot_io::save(&doc, clean, crate::ops_log::log_op).unwrap();
 
         let recovered = recover_dedupe_only_drift(&doc).unwrap();
         assert!(
@@ -5304,7 +5261,7 @@ Implemented.
         // dedupe. Recovery must refuse so we don't auto-commit unrelated drift.
         let user_edit = original.replace("Implemented.", "Implemented and tested.");
         fs::write(&doc, &user_edit).unwrap();
-        crate::snapshot::save(&doc, &user_edit).unwrap();
+        agent_doc_snapshot_io::save(&doc, &user_edit, crate::ops_log::log_op).unwrap();
 
         let recovered = recover_dedupe_only_drift(&doc).unwrap();
         assert!(
@@ -5346,7 +5303,7 @@ Implemented.
 
         let deduped = agent_doc_turn::response_replay::dedupe_responses(duplicated);
         fs::write(&doc, &deduped).unwrap();
-        crate::snapshot::save(&doc, &deduped).unwrap();
+        agent_doc_snapshot_io::save(&doc, &deduped, crate::ops_log::log_op).unwrap();
 
         let strict = WriteFlags {
             strict_closeout: true,
@@ -5365,7 +5322,9 @@ Implemented.
             "exactly one new commit should land via the dedupe recovery wrapper"
         );
 
-        let head_after = crate::git::show_head(&doc).unwrap().unwrap();
+        let head_after = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             head_after.matches("### Re: topic — opus-4-7").count(),
             1,
@@ -5399,7 +5358,7 @@ Implemented.
         let doc = root.join("session.md");
         let deduped = agent_doc_turn::response_replay::dedupe_responses(duplicated);
         fs::write(&doc, &deduped).unwrap();
-        crate::snapshot::save(&doc, &deduped).unwrap();
+        agent_doc_snapshot_io::save(&doc, &deduped, crate::ops_log::log_op).unwrap();
 
         let lenient = WriteFlags::default();
         let head_before = head_count(root);
@@ -5455,7 +5414,7 @@ Implemented.
         let listener_root = tmp.path().to_path_buf();
         let server = std::thread::spawn(move || {
             let root = listener_root.clone();
-            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = payload
                     .get("patch_id")
@@ -5480,13 +5439,13 @@ Implemented.
             });
         });
         for _ in 0..100 {
-            if crate::ipc_socket::is_listener_active(tmp.path()) {
+            if agent_doc_ipc_io::is_listener_active(tmp.path()) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(
-            crate::ipc_socket::is_listener_active(tmp.path()),
+            agent_doc_ipc_io::is_listener_active(tmp.path()),
             "fake socket listener did not start"
         );
 
@@ -5518,7 +5477,7 @@ Implemented.
             "successful in-cycle convergence must not emit the retry_without_disk_write bail:\n{ops_log}"
         );
 
-        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(tmp.path()));
         drop(server);
     }
 

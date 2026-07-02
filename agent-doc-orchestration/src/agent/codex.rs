@@ -59,11 +59,10 @@ use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use super::streaming::StreamingAgent;
 use super::{Agent, AgentResponse};
 use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, Frontmatter};
-use agent_doc_git_io::dirs::workspace_access_dirs_for_doc;
-use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_codex_line};
+use agent_doc_git_io::dirs::{append_workspace_access_args, workspace_access_dirs_for_doc};
+use agent_doc_turn_executor::agent_stream::{StreamChunk, StreamingAgent, parse_codex_line};
 #[cfg(test)]
 use agent_doc_turn_executor::codex_launch::CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER;
 use agent_doc_turn_executor::codex_launch::{
@@ -166,7 +165,7 @@ pub fn managed_writable_roots_for_doc(
     if let Some(raw_args) = resolved_codex_agent_args_for_contract(fm, global_config) {
         args.extend(raw_args.split_whitespace().map(String::from));
     }
-    crate::agent::append_workspace_access_args("codex", &mut args, file);
+    append_workspace_access_args("codex", &mut args, file);
     add_dirs_from_args(&args)
 }
 

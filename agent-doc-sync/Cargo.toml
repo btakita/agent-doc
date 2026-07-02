@@ -11,6 +11,8 @@ name = "agent_doc_sync"
 
 [dependencies]
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

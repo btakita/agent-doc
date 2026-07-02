@@ -13,6 +13,7 @@ use agent_doc_element::element;
 use agent_doc_element_exchange::{
     normalization_target_counts, normalize_exchange_prefixes_for_targets,
 };
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_prompt_lines::{
     line_looks_like_plain_response_after_prompt, text_line_looks_like_prompt_target,
 };
@@ -61,6 +62,31 @@ pub fn decide_visible_write_after_typing(facts: VisibleWriteTypingFacts) -> Visi
     } else {
         VisibleWriteDecision::DeferActiveTyping
     }
+}
+
+pub fn visible_write_guard_event(decision: VisibleWriteDecision, source: &str) -> FlowEvent {
+    let outcome = match decision {
+        VisibleWriteDecision::Apply => FlowOutcome::Completed,
+        VisibleWriteDecision::DeferActiveTyping => FlowOutcome::Blocked,
+    };
+    FlowEvent::new(
+        FlowName::DocumentMutation,
+        FlowStage::PreWriteGuard,
+        outcome,
+    )
+    .with_reason(format!(
+        "visible_write_typing_{}:{source}",
+        decision.as_str()
+    ))
+}
+
+pub fn visible_write_current_changed_event(source: &str) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::DocumentMutation,
+        FlowStage::PreWriteGuard,
+        FlowOutcome::Blocked,
+    )
+    .with_reason(format!("visible_write_current_changed:{source}"))
 }
 
 /// Outcome of reconciling the visible-write guard with the on-disk state.
@@ -487,6 +513,12 @@ pub fn snapshot_persist_mode_with_current(
     final_content: &str,
 ) -> SnapshotPersistMode {
     if baseline.is_some()
+        && post_exchange_ordinary_comment_carry_forward_drift(content_ours, content_current)
+    {
+        return SnapshotPersistMode::ContentOurs;
+    }
+
+    if baseline.is_some()
         && strip_boundary_markers(base) != strip_boundary_markers(content_current)
         && (has_prompt_bearing_user_drift(base, content_current)
             || non_exchange_drift_carries_directive(base, content_current))
@@ -788,6 +820,115 @@ pub fn content_ours_drops_operator_text(
         .any(|change| !prompt_bearing_change_owned_by_content_ours(&change, &owned_changes))
 }
 
+/// Build the committed-snapshot content when the merge would otherwise choose
+/// `content_ours` (deeper root cause A). `final_content` is the full union already
+/// written to disk (agent response + operator edits + any concurrently-typed
+/// prompt). Returns that union with only the **carry-forward** prompt lines
+/// stripped — the concurrently-typed operator prompts that must stay UNCOMMITTED
+/// for the next cycle (`#fintol/#pcwc`). The result keeps every operator *edit*
+/// (so nothing is lost, `#qftlossdelta`) while still excluding the new prompt (so
+/// it carries forward). When no carry-forward prompt exists this is `final_content`
+/// verbatim.
+///
+/// Precise line stripping (normalized prompt identity) rather than a re-merge:
+/// `final_content` is already the correct union, so we only subtract the exact
+/// carry-forward prompt lines instead of risking conflict markers from a fresh
+/// 3-way merge of the committed authority.
+pub fn committed_snapshot_union_excluding_carry_forward(
+    base: &str,
+    content_ours: &str,
+    content_current: &str,
+    final_content: &str,
+) -> String {
+    let carry_forward =
+        dropped_prompt_lines_after_content_ours(base, content_current, content_ours);
+    let snapshot = strip_prompt_lines(final_content, &carry_forward);
+    if post_exchange_ordinary_comment_carry_forward_drift(content_ours, content_current) {
+        restore_post_exchange_gap_from_content_ours(content_ours, &snapshot).unwrap_or(snapshot)
+    } else {
+        snapshot
+    }
+}
+
+fn post_exchange_ordinary_comment_carry_forward_drift(
+    content_ours: &str,
+    content_current: &str,
+) -> bool {
+    let ours = agent_doc_diff::post_exchange_ordinary_html_comments(content_ours);
+    let current = agent_doc_diff::post_exchange_ordinary_html_comments(content_current);
+    if current.len() > ours.len() {
+        return true;
+    }
+    current
+        .iter()
+        .zip(ours.iter())
+        .any(|(current, ours)| current != ours && ordinary_comment_carries_prompt_work(current))
+}
+
+fn ordinary_comment_carries_prompt_work(comment: &str) -> bool {
+    !agent_doc_diff::post_exchange_comment_directive_signals(comment).is_empty()
+        || comment.lines().any(|line| {
+            let trimmed = line.trim().trim_start_matches('❯').trim();
+            !trimmed.is_empty()
+                && (text_line_looks_like_prompt_target(trimmed)
+                    || starts_with_prompt_preset_reference(trimmed))
+        })
+}
+
+fn post_exchange_gap_range(doc: &str) -> Option<std::ops::Range<usize>> {
+    let components = element::parse(doc).ok()?;
+    let exchange = components
+        .iter()
+        .filter(|component| component.name == "exchange")
+        .max_by_key(|component| component.close_end)?;
+    let start = exchange.close_end;
+    let end = components
+        .iter()
+        .filter(|component| component.open_start >= start)
+        .map(|component| component.open_start)
+        .min()
+        .unwrap_or(doc.len());
+    Some(start..end)
+}
+
+fn restore_post_exchange_gap_from_content_ours(
+    content_ours: &str,
+    snapshot: &str,
+) -> Option<String> {
+    let ours_gap = post_exchange_gap_range(content_ours)?;
+    let snapshot_gap = post_exchange_gap_range(snapshot)?;
+    let mut restored = String::with_capacity(snapshot.len() - snapshot_gap.len() + ours_gap.len());
+    restored.push_str(&snapshot[..snapshot_gap.start]);
+    restored.push_str(&content_ours[ours_gap]);
+    restored.push_str(&snapshot[snapshot_gap.end..]);
+    Some(restored)
+}
+
+/// Remove lines from `content` whose normalized prompt identity matches one of
+/// `prompt_lines`. Preserves the trailing-newline shape of `content`.
+fn strip_prompt_lines(content: &str, prompt_lines: &[String]) -> String {
+    if prompt_lines.is_empty() {
+        return content.to_string();
+    }
+    let strip: std::collections::HashSet<String> = prompt_lines
+        .iter()
+        .map(|line| normalized_prompt_line(line))
+        .filter(|line| !line.is_empty())
+        .collect();
+    if strip.is_empty() {
+        return content.to_string();
+    }
+    let mut out = content
+        .lines()
+        .filter(|line| !strip.contains(&normalized_prompt_line(line)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if content.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
 fn normalized_prompt_line(line: &str) -> String {
     line.trim()
         .strip_prefix('❯')
@@ -820,6 +961,72 @@ pub fn decide_full_content_visible_replacement(
             FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
         }
         _ => FullContentVisibleReplacementDecision::Apply,
+    }
+}
+
+pub fn full_content_visible_replacement_event(
+    decision: FullContentVisibleReplacementDecision,
+    source: &str,
+) -> FlowEvent {
+    let outcome = match decision {
+        FullContentVisibleReplacementDecision::Apply => FlowOutcome::Completed,
+        FullContentVisibleReplacementDecision::RejectStaleSourceBuffer => FlowOutcome::Blocked,
+    };
+    FlowEvent::new(
+        FlowName::DocumentMutation,
+        FlowStage::PreWriteGuard,
+        outcome,
+    )
+    .with_reason(format!(
+        "full_content_source_buffer_{}:{source}",
+        decision.as_str()
+    ))
+}
+
+#[cfg(test)]
+mod write_flow_event_tests {
+    use super::*;
+
+    #[test]
+    fn visible_write_guard_defers_when_typing_never_settles() {
+        let decision = VisibleWriteDecision::DeferActiveTyping;
+        let event = visible_write_guard_event(decision, "socket_ipc");
+
+        assert_eq!(decision, VisibleWriteDecision::DeferActiveTyping);
+        assert_eq!(event.flow, FlowName::DocumentMutation);
+        assert_eq!(event.stage, FlowStage::PreWriteGuard);
+        assert_eq!(event.outcome, FlowOutcome::Blocked);
+        assert_eq!(
+            event.reason.as_deref(),
+            Some("visible_write_typing_defer_active_typing:socket_ipc")
+        );
+    }
+
+    #[test]
+    fn visible_write_guard_allows_idle_writes() {
+        let decision = VisibleWriteDecision::Apply;
+        let event = visible_write_guard_event(decision, "socket_ipc");
+
+        assert_eq!(decision, VisibleWriteDecision::Apply);
+        assert_eq!(event.outcome, FlowOutcome::Completed);
+    }
+
+    #[test]
+    fn full_content_visible_replacement_blocks_stale_source_buffer() {
+        let decision = FullContentVisibleReplacementDecision::RejectStaleSourceBuffer;
+        let event = full_content_visible_replacement_event(decision, "compact_exchange");
+
+        assert_eq!(
+            decision,
+            FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
+        );
+        assert_eq!(event.flow, FlowName::DocumentMutation);
+        assert_eq!(event.stage, FlowStage::PreWriteGuard);
+        assert_eq!(event.outcome, FlowOutcome::Blocked);
+        assert_eq!(
+            event.reason.as_deref(),
+            Some("full_content_source_buffer_reject_stale_source_buffer:compact_exchange")
+        );
     }
 }
 
@@ -3231,6 +3438,71 @@ Working.
     }
 
     #[test]
+    fn committed_snapshot_excludes_carry_forward_prompt_keeps_operator_edit() {
+        let base = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        // Agent applied a new response; NO new operator prompt in the agent candidate.
+        let content_ours = base.replace(
+            "\nAnswered.\n",
+            "\nAnswered EDITED BY OPERATOR.\n### Re: now — gpt-5\n\nFresh answer.\n",
+        );
+        // Operator concurrently edited existing text AND typed a new prompt.
+        let content_current = base.replace(
+            "\nAnswered.\n<!-- agent:boundary:b0 -->",
+            "\nAnswered EDITED BY OPERATOR.\n❯ carry me forward\n<!-- agent:boundary:b0 -->",
+        );
+        // The union already written to disk = agent response + operator edit + prompt.
+        let final_content = base.replace(
+            "\nAnswered.\n<!-- agent:boundary:b0 -->",
+            "\nAnswered EDITED BY OPERATOR.\n### Re: now — gpt-5\n\nFresh answer.\n❯ carry me forward\n<!-- agent:boundary:b0 -->",
+        );
+
+        let snapshot = committed_snapshot_union_excluding_carry_forward(
+            base,
+            &content_ours,
+            &content_current,
+            &final_content,
+        );
+        // Operator edit to existing text is retained (no #qftlossdelta loss).
+        assert!(
+            snapshot.contains("Answered EDITED BY OPERATOR."),
+            "operator edit must be committed, not dropped: {snapshot}"
+        );
+        // Agent response retained.
+        assert!(
+            snapshot.contains("Fresh answer."),
+            "agent response retained"
+        );
+        // Carry-forward prompt excluded from the committed snapshot (stays uncommitted).
+        assert!(
+            !snapshot.contains("carry me forward"),
+            "carry-forward prompt must NOT be committed (it carries forward): {snapshot}"
+        );
+    }
+
+    #[test]
+    fn committed_snapshot_union_is_verbatim_final_without_carry_forward() {
+        let base = "<!-- agent:exchange -->\n### Re: a\nDone.\n<!-- /agent:exchange -->\n";
+        let content_ours = base;
+        let content_current = base;
+        let final_content = "<!-- agent:exchange -->\n### Re: a\nDone.\n### Re: b\nMore.\n<!-- /agent:exchange -->\n";
+        // No concurrently-typed prompt → snapshot is the union verbatim.
+        assert_eq!(
+            committed_snapshot_union_excluding_carry_forward(
+                base,
+                content_ours,
+                content_current,
+                final_content
+            ),
+            final_content
+        );
+    }
+
+    #[test]
     fn content_ours_drops_operator_text_false_when_owned_or_unchanged() {
         let baseline = concat!(
             "<!-- agent:exchange patch=append -->\n",
@@ -3306,6 +3578,98 @@ Working.
                 final_content
             ),
             final_content
+        );
+    }
+
+    #[test]
+    fn committed_snapshot_union_restores_new_post_exchange_gap_from_content_ours() {
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ prompt\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let content_current = base.replace(
+            "<!-- agent:backlog -->",
+            "###\n\n<!--\nnew scratch note\n-->\n\n<!-- agent:backlog -->",
+        );
+        let content_ours = base.replace("❯ prompt\n", "❯ prompt\n### Re: answer\nDone.\n");
+        let final_content = content_ours.replace(
+            "<!-- agent:backlog -->",
+            "###\n\n<!--\nnew scratch note\n-->\n\n<!-- agent:backlog -->",
+        );
+
+        assert_eq!(
+            snapshot_persist_mode_with_current(
+                Some(base),
+                base,
+                &content_current,
+                &content_ours,
+                &final_content,
+            ),
+            SnapshotPersistMode::ContentOurs
+        );
+
+        let snapshot = committed_snapshot_union_excluding_carry_forward(
+            base,
+            &content_ours,
+            &content_current,
+            &final_content,
+        );
+
+        assert!(
+            snapshot.contains("### Re: answer"),
+            "agent response should still be committed: {snapshot}"
+        );
+        assert!(
+            !snapshot.contains("new scratch note"),
+            "new post-exchange scratch comments should carry forward: {snapshot}"
+        );
+    }
+
+    #[test]
+    fn committed_snapshot_union_restores_prompt_edit_in_existing_post_exchange_comment() {
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ prompt\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let live_prompt = "Does the operator need a follow-up email?";
+        let content_current = base.replace("<!--\n-->", &format!("<!--\n{live_prompt}\n-->"));
+        let content_ours = base.replace("❯ prompt\n", "❯ prompt\n### Re: answer\nDone.\n");
+        let final_content = content_ours.replace("<!--\n-->", &format!("<!--\n{live_prompt}\n-->"));
+
+        assert_eq!(
+            snapshot_persist_mode_with_current(
+                Some(base),
+                base,
+                &content_current,
+                &content_ours,
+                &final_content,
+            ),
+            SnapshotPersistMode::ContentOurs
+        );
+
+        let snapshot = committed_snapshot_union_excluding_carry_forward(
+            base,
+            &content_ours,
+            &content_current,
+            &final_content,
+        );
+
+        assert!(
+            snapshot.contains("### Re: answer"),
+            "agent response should still be committed: {snapshot}"
+        );
+        assert!(
+            !snapshot.contains(live_prompt),
+            "prompt text typed into an existing post-exchange comment should carry forward: {snapshot}"
         );
     }
 

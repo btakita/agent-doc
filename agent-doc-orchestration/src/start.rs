@@ -129,7 +129,6 @@ use std::time::{Duration, Instant};
 
 use crate::supervisor::{
     in_process::{InProcessSupervisor, PtySupervisedChild, TickOutcome},
-    ipc::SupervisorIpc,
     pty::PtySpawnConfig,
 };
 use agent_doc_frontmatter::frontmatter;
@@ -172,13 +171,13 @@ use agent_doc_supervisor::session_owner::{
     format_existing_pane_conflict_error as format_existing_pane_conflict_error_from_facts,
 };
 use agent_doc_supervisor_io::cwd;
+use agent_doc_supervisor_io::ipc::SupervisorIpc;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
 use agent_doc_supervisor_process::screen::OwnedPtyScreen;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;
 
-use crate::sessions;
 use agent_doc_project_config_io as project_config_io;
 
 struct RouteOwnedCompletionConfig {
@@ -295,7 +294,7 @@ fn record_session_startup_miss(
     let pane = shared.inject_pane.as_deref().unwrap_or("child_pty");
     let session_id = agent_doc_frontmatter_io::session::read_session_id(path).unwrap_or_default();
     let deadline_secs = AUTO_TRIGGER_TIMEOUT.as_secs();
-    match crate::startup_miss::record(
+    match agent_doc_supervisor_io::startup_miss::record_startup_miss(
         path,
         pane,
         &session_id,
@@ -330,10 +329,7 @@ fn record_session_startup_miss(
 mod idle_watch;
 
 fn turn_active_for_owned_pane(file: &Path, shared: &SupervisorShared) -> bool {
-    let Some(root) = agent_doc_fs::find_project_root(file) else {
-        return false;
-    };
-    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker(&root) else {
+    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker_for_file(file) else {
         return false;
     };
     let owned_pane = shared.inject_pane.as_deref().or_else(|| {
@@ -1077,8 +1073,15 @@ fn dispatch_submit_text_to_tmux(
     text: &str,
     harness: &str,
 ) -> Result<()> {
-    crate::sessions::send_submitted_text_for_harness(tmux, pane, text, harness)
-        .with_context(|| format!("failed to inject submitted input into pane {}", pane))
+    agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+        tmux,
+        pane,
+        text,
+        harness,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        "sessions.send_submitted_text_for_harness",
+    )
+    .with_context(|| format!("failed to inject submitted input into pane {}", pane))
 }
 
 fn dispatch_submit_text_to_pane(pane: &str, text: &str, harness: &str) -> Result<()> {
@@ -1609,7 +1612,7 @@ fn display_managed_capability_proof_status(
     event: &str,
 ) -> Result<()> {
     let message = managed_capability_proof_status_message(harness_binary, event);
-    tmux.raw_cmd(&["display-message", "-t", pane_id, "-d", "5000", &message])?;
+    agent_doc_tmux_io::show_message(tmux, pane_id, "5000", &message)?;
     Ok(())
 }
 
@@ -1639,7 +1642,7 @@ fn existing_session_pane_action(
     file: &Path,
     current_pane: &str,
 ) -> Result<Option<ExistingSessionPaneAction>> {
-    let entry = sessions::lookup_entry(session_id)?;
+    let entry = agent_doc_session_registry_io::lookup_entry(session_id)?;
     let live_owner = crate::sync::find_normal_path_owner_pane_excluding_quiet(
         tmux,
         file,
@@ -1679,9 +1682,11 @@ fn format_existing_pane_conflict_error(
     conflicting_pane: &str,
 ) -> String {
     let conflict_session = tmux.pane_session(conflicting_pane).unwrap_or_default();
-    let conflict_window = tmux.pane_window(conflicting_pane).unwrap_or_default();
+    let conflict_window =
+        agent_doc_tmux_io::target_window_id(tmux, conflicting_pane).unwrap_or_default();
     let current_session = tmux.pane_session(current_pane).unwrap_or_default();
-    let current_window = tmux.pane_window(current_pane).unwrap_or_default();
+    let current_window =
+        agent_doc_tmux_io::target_window_id(tmux, current_pane).unwrap_or_default();
     let document = file.display().to_string();
     format_existing_pane_conflict_error_from_facts(&ExistingPaneConflictFacts {
         document: &document,
@@ -2239,17 +2244,8 @@ mod th {
         }
     }
     pub(crate) fn tmux_env_for_server(iso: &IsolatedTmux) -> String {
-        let output = iso
-            .cmd()
-            .args(["display-message", "-p", "#{socket_path}"])
-            .output()
-            .expect("tmux should report its socket path");
-        assert!(
-            output.status.success(),
-            "failed to query tmux socket path: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let socket_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let socket_path =
+            agent_doc_tmux_io::socket_path(iso).expect("tmux should report its socket path");
         format!("{socket_path},0,0")
     }
     // --- model injection from frontmatter tests ---
@@ -2368,9 +2364,9 @@ pub(crate) use th::{
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::hooks::fire_doc_hooks;
     use agent_doc_config::Config;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
+    use agent_doc_hooks_io::fire_doc_hooks;
     use agent_doc_project_config_io as project_config_io;
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -2724,7 +2720,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         for args in [
             vec!["init"],
             vec!["config", "user.email", "test@example.com"],

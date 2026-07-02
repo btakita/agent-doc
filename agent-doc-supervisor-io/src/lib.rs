@@ -3,6 +3,7 @@
 pub mod config;
 pub mod cwd;
 pub mod env;
+pub mod ipc;
 pub mod recycle_inflight;
 pub mod recycle_request;
 pub mod recycle_yield;

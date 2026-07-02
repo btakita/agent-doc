@@ -7,6 +7,7 @@
 use agent_doc_supervisor::SupervisorBinding;
 use serde::{Deserialize, Serialize};
 
+pub mod detached_child;
 pub mod resize;
 pub mod screen;
 pub mod start_command;

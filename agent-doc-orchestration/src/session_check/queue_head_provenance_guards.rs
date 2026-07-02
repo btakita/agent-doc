@@ -297,14 +297,14 @@ mod tests {
         fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("doc.md");
         fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         doc
     }
 
     fn mark_cycle_committed(doc: &Path, preflight: &str, committed: &str) {
         crate::cycle_state::start_preflight(doc, Some(preflight), Some(preflight)).unwrap();
         fs::write(doc, committed).unwrap();
-        crate::snapshot::save(doc, committed).unwrap();
+        agent_doc_snapshot_io::save(doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(doc, "commit_success", Some(committed), Some(committed))
             .unwrap();
     }

@@ -85,6 +85,62 @@ impl SessionLogStatus {
     }
 }
 
+/// Build the session-log events that close an open supervisor session after sync
+/// proves the registered pane is missing.
+///
+/// Returns `None` when there is no current log status or the latest session is
+/// already closed. Callers own appending the returned events to the durable log.
+pub fn missing_pane_session_loss_events(
+    status: Option<&SessionLogStatus>,
+    pane_id: &str,
+    reason: &str,
+    last_known_window: Option<&str>,
+) -> Option<(String, String)> {
+    let status = status?;
+    if status.latest_session_closed() {
+        return None;
+    }
+
+    let mut exit_event =
+        format!("supervisor_exit code=missing_pane pane={pane_id} reason={reason}");
+    if let Some(window_id) = last_known_window.filter(|window_id| !window_id.is_empty()) {
+        exit_event.push_str(&format!(" last_known_window={window_id}"));
+    }
+    Some((
+        exit_event,
+        "session_end origin=sync_missing_pane".to_string(),
+    ))
+}
+
+/// Decide whether a persisted startup-miss marker is superseded by the current
+/// registered owner and that owner's latest session-log start.
+///
+/// Callers supply already-loaded registry/session-log facts so this remains
+/// pure. A marker is superseded only when the registered pane differs from the
+/// miss pane and the registered session log proves a newer start on that same
+/// registered pane.
+pub fn registered_start_supersedes_miss(
+    miss: &StartupMiss,
+    registered_pane: &str,
+    status: Option<&SessionLogStatus>,
+) -> Option<StartupMissSupersession> {
+    if registered_pane == miss.pane_id {
+        return None;
+    }
+    let status = status?;
+    let latest_start_timestamp = status.latest_start_timestamp?;
+    let latest_start_pane = status.latest_start_pane.as_ref()?;
+    if latest_start_pane != registered_pane || latest_start_timestamp <= miss.timestamp {
+        return None;
+    }
+
+    Some(StartupMissSupersession {
+        registered_pane: registered_pane.to_string(),
+        latest_start_pane: latest_start_pane.clone(),
+        latest_start_timestamp,
+    })
+}
+
 pub fn is_harness_run_start_event(event: &str) -> bool {
     matches!(
         event.split_whitespace().next(),
@@ -499,6 +555,86 @@ mod tests {
             Some("registered_pane_dead".to_string())
         );
         assert_eq!(event_reason("session_end origin=manual"), None);
+    }
+
+    #[test]
+    fn missing_pane_session_loss_events_close_open_status() {
+        let status = open_status("%61", 1, 2, "codex_start mode=fresh restart_count=0");
+        let events = missing_pane_session_loss_events(
+            Some(&status),
+            "%61",
+            "registered_pane_missing",
+            Some("@9"),
+        )
+        .expect("open status should produce closeout events");
+
+        assert_eq!(
+            events.0,
+            "supervisor_exit code=missing_pane pane=%61 reason=registered_pane_missing last_known_window=@9"
+        );
+        assert_eq!(events.1, "session_end origin=sync_missing_pane");
+    }
+
+    #[test]
+    fn missing_pane_session_loss_events_skip_closed_or_missing_status() {
+        let mut closed = open_status("%61", 1, 2, "codex_start mode=fresh restart_count=0");
+        closed.saw_process_exit_after_latest_run = true;
+
+        assert!(
+            missing_pane_session_loss_events(Some(&closed), "%61", "registered_pane_missing", None)
+                .is_none()
+        );
+        assert!(
+            missing_pane_session_loss_events(None, "%61", "registered_pane_missing", None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn registered_start_supersedes_stale_startup_miss() {
+        let miss = StartupMiss {
+            file: "tasks/owned.md".to_string(),
+            pane_id: "%401".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 5,
+            origin: StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+        let status = open_status("%408", 10, 11, "codex_start mode=fresh restart_count=0");
+
+        let supersession = registered_start_supersedes_miss(&miss, "%408", Some(&status))
+            .expect("newer registered pane start should supersede stale miss");
+
+        assert_eq!(supersession.registered_pane, "%408");
+        assert_eq!(supersession.latest_start_pane, "%408");
+        assert_eq!(supersession.latest_start_timestamp, 10);
+    }
+
+    #[test]
+    fn registered_start_supersession_requires_different_pane_and_newer_matching_start() {
+        let miss = StartupMiss {
+            file: "tasks/owned.md".to_string(),
+            pane_id: "%401".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 5,
+            origin: StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+
+        let same_pane_status = open_status("%401", 10, 11, "codex_start mode=fresh");
+        assert!(registered_start_supersedes_miss(&miss, "%401", Some(&same_pane_status)).is_none());
+
+        let stale_status = open_status("%408", 5, 6, "codex_start mode=fresh");
+        assert!(registered_start_supersedes_miss(&miss, "%408", Some(&stale_status)).is_none());
+
+        let wrong_pane_status = open_status("%999", 10, 11, "codex_start mode=fresh");
+        assert!(
+            registered_start_supersedes_miss(&miss, "%408", Some(&wrong_pane_status)).is_none()
+        );
+
+        assert!(registered_start_supersedes_miss(&miss, "%408", None).is_none());
     }
 
     #[test]

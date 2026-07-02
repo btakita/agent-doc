@@ -44,7 +44,6 @@ use agent_doc_element::element;
 use crate::PatchMode;
 use agent_doc_frontmatter::project_config::ComponentConfig;
 use agent_doc_orchestration::graph::RunContext;
-use agent_doc_orchestration::snapshot;
 use agent_doc_project_config_io as project_config_io;
 
 fn load_configs_with_context(
@@ -188,7 +187,7 @@ pub fn run(
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     } else {
         // Fallback to CWD-relative (original behavior)
-        snapshot::save(file, &new_doc)
+        agent_doc_snapshot_io::save(file, &new_doc, agent_doc_orchestration::ops_log::log_op)
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     }
 
@@ -280,7 +279,7 @@ mod tests {
     use tempfile::TempDir;
 
     /// Create a temp dir with `.agent-doc/snapshots/` so `find_project_root` and
-    /// `snapshot::save` work without `set_current_dir`.
+    /// focused snapshot IO work without `set_current_dir`.
     fn setup_project() -> TempDir {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();

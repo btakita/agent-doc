@@ -807,6 +807,16 @@ impl Frontmatter {
             || !self.pipeline.is_empty()
     }
 
+    /// Whether initialization should assign `agent_doc_session` to this
+    /// frontmatter.
+    ///
+    /// This intentionally mirrors the historical snapshot initialization rule:
+    /// only documents with an explicit `agent_doc_format` are auto-assigned here,
+    /// and documents that already carry a session remain unchanged.
+    pub fn needs_session_for_formatted_document(&self) -> bool {
+        self.format.is_some() && self.session.is_none()
+    }
+
     /// Resolve the canonical (format, write) pair from all three fields.
     ///
     /// Priority:
@@ -2575,6 +2585,20 @@ mod tests {
         assert_eq!(sid, "existing-id");
         // Content should be unchanged
         assert_eq!(updated, content);
+    }
+
+    #[test]
+    fn formatted_document_session_predicate_matches_init_rule() {
+        let (needs, _) = parse("---\nagent_doc_format: template\n---\nBody\n").unwrap();
+        assert!(needs.needs_session_for_formatted_document());
+
+        let (existing, _) =
+            parse("---\nagent_doc_session: existing\nagent_doc_format: template\n---\nBody\n")
+                .unwrap();
+        assert!(!existing.needs_session_for_formatted_document());
+
+        let (plain, _) = parse("---\ntitle: notes\n---\nBody\n").unwrap();
+        assert!(!plain.needs_session_for_formatted_document());
     }
 
     #[test]

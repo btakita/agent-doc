@@ -276,7 +276,7 @@ fn codex_hook_cli_does_not_replay_over_editor_convergence_block() {
     fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
     init_git_repo(tmp.path(), &doc);
     let content = fs::read_to_string(&doc).unwrap();
-    agent_doc_orchestration::snapshot::save(&doc, &content).unwrap();
+    agent_doc_snapshot_io::save(&doc, &content, agent_doc_orchestration::ops_log::log_op).unwrap();
     agent_doc_debounce::record_live_buffer_digest_content_for_editor(
         &doc.to_string_lossy(),
         &content,

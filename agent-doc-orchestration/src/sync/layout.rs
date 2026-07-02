@@ -32,7 +32,7 @@ pub(crate) fn visible_registered_layout(tmux: &Tmux, window: Option<&str>) -> Ve
     if ordered_panes.len() < 2 {
         return Vec::new();
     }
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     ordered_panes
         .iter()
         .map(|pane| {
@@ -68,87 +68,61 @@ pub(crate) struct SyntheticRegistryCandidate {
 pub(crate) fn filter_duplicate_synthetic_registry_candidates(
     candidates: Vec<SyntheticRegistryCandidate>,
 ) -> Vec<SyntheticRegistryCandidate> {
-    let mut pane_claims: std::collections::HashMap<String, Vec<usize>> =
-        std::collections::HashMap::new();
-    for (idx, candidate) in candidates.iter().enumerate() {
-        pane_claims
-            .entry(candidate.entry.pane.clone())
-            .or_default()
-            .push(idx);
-    }
-
-    let mut keep = vec![true; candidates.len()];
-    for (pane_id, claimants) in pane_claims {
-        if claimants.len() < 2 {
-            continue;
-        }
-
-        let live_owner_matches: Vec<usize> = claimants
-            .iter()
-            .copied()
-            .filter(|idx| candidates[*idx].live_owner_match)
-            .collect();
-        let pane_root_matches: Vec<usize> = claimants
-            .iter()
-            .copied()
-            .filter(|idx| candidates[*idx].pane_root_match)
-            .collect();
-
-        let winners = if live_owner_matches.len() == 1 {
-            live_owner_matches
-        } else if live_owner_matches.is_empty() && pane_root_matches.len() == 1 {
-            pane_root_matches
-        } else {
-            Vec::new()
-        };
-
-        if let Some(&winner_idx) = winners.first() {
-            let winner = &candidates[winner_idx];
-            eprintln!(
-                "[sync] synthetic tmux-router registry keeps pane {} for {} and drops {} duplicate claimant(s)",
+    let facts = candidates
+        .iter()
+        .map(
+            |candidate| agent_doc_sync::SyntheticRegistryCandidateFacts {
+                pane_id: candidate.entry.pane.clone(),
+                file_path: candidate.file_path.display().to_string(),
+                live_owner_match: candidate.live_owner_match,
+                pane_root_match: candidate.pane_root_match,
+            },
+        )
+        .collect::<Vec<_>>();
+    let filter = agent_doc_sync::filter_synthetic_registry_candidate_facts(&facts);
+    for resolution in &filter.resolutions {
+        match resolution {
+            agent_doc_sync::SyntheticRegistryDuplicateResolution::KeepWinner {
                 pane_id,
-                winner.file_path.display(),
-                claimants.len() - 1
-            );
-            sync_log(&format!(
-                "router_registry_duplicate_kept pane={} winner={} duplicates={} basis={}",
-                pane_id,
-                winner.file_path.display(),
-                claimants.len() - 1,
-                if winner.live_owner_match {
-                    "live_owner"
-                } else {
-                    "pane_root"
-                }
-            ));
-            for idx in claimants {
-                keep[idx] = idx == winner_idx;
+                winner_index,
+                duplicate_count,
+                basis,
+            } => {
+                let winner = &candidates[*winner_index];
+                eprintln!(
+                    "[sync] synthetic tmux-router registry keeps pane {} for {} and drops {} duplicate claimant(s)",
+                    pane_id,
+                    winner.file_path.display(),
+                    duplicate_count
+                );
+                sync_log(&format!(
+                    "router_registry_duplicate_kept pane={} winner={} duplicates={} basis={}",
+                    pane_id,
+                    winner.file_path.display(),
+                    duplicate_count,
+                    basis.as_str()
+                ));
             }
-            continue;
-        }
-
-        let duplicate_files = claimants
-            .iter()
-            .map(|idx| candidates[*idx].file_path.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        eprintln!(
-            "[sync] synthetic tmux-router registry dropping ambiguous duplicate pane {} for {}",
-            pane_id, duplicate_files
-        );
-        sync_log(&format!(
-            "router_registry_duplicate_dropped pane={} files={}",
-            pane_id, duplicate_files
-        ));
-        for idx in claimants {
-            keep[idx] = false;
+            agent_doc_sync::SyntheticRegistryDuplicateResolution::DropAmbiguous {
+                pane_id,
+                files,
+            } => {
+                let duplicate_files = files.join(", ");
+                eprintln!(
+                    "[sync] synthetic tmux-router registry dropping ambiguous duplicate pane {} for {}",
+                    pane_id, duplicate_files
+                );
+                sync_log(&format!(
+                    "router_registry_duplicate_dropped pane={} files={}",
+                    pane_id, duplicate_files
+                ));
+            }
         }
     }
-
     candidates
         .into_iter()
         .enumerate()
-        .filter_map(|(idx, candidate)| keep[idx].then_some(candidate))
+        .filter_map(|(idx, candidate)| filter.keep[idx].then_some(candidate))
         .collect()
 }
 
@@ -223,16 +197,13 @@ mod tests {
 
         let iso = IsolatedTmux::new("sync-associated-supervisor");
         let pane = iso.new_session("test", tmp.path()).unwrap();
-        let pane_pid = iso
-            .raw_cmd(&["display-message", "-t", &pane, "-p", "#{pane_pid}"])
-            .unwrap()
-            .trim()
-            .parse::<u32>()
-            .unwrap();
+        let pane_pid = agent_doc_tmux_io::pane_pid(&iso, &pane).unwrap();
         let supervisor_instance_id = "instance-1".to_string();
 
-        let _ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), "associated-supervisor", {
+        let _ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            tmp.path(),
+            "associated-supervisor",
+            {
                 let supervisor_instance_id = supervisor_instance_id.clone();
                 move |method| match method {
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({
@@ -244,8 +215,9 @@ mod tests {
                     })),
                     _ => IpcResponse::ok_empty(),
                 }
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
 
         let recovery = recover_existing_associated_pane(
             &iso,
@@ -260,7 +232,7 @@ mod tests {
             ExistingAssociatedPaneRecovery::Recovered(_)
         ));
         assert_eq!(
-            sessions::lookup("associated-supervisor").unwrap(),
+            agent_doc_session_registry_io::lookup("associated-supervisor").unwrap(),
             Some(pane.clone())
         );
         let entry = lookup_registry_entry_for_file_session(&doc, "associated-supervisor")
@@ -295,14 +267,14 @@ mod tests {
             &tmp.path().to_string_lossy(),
         )
         .unwrap();
-        let mut registry = sessions::load_in(tmp.path()).unwrap();
+        let mut registry = agent_doc_session_registry_io::load_in(tmp.path()).unwrap();
         let key = tmux_router::registry::canonical_registry_key_in(
             tmp.path(),
             doc.to_string_lossy().as_ref(),
         );
         let entry = registry.get_mut(&key).expect("seeded entry should exist");
         entry.supervisor_instance_id = "instance-preserved".to_string();
-        sessions::save_in(tmp.path(), &registry).unwrap();
+        agent_doc_session_registry_io::save_in(tmp.path(), &registry).unwrap();
 
         reregister_recovered_owner(&iso, &doc, "preserved-supervisor", &pane).unwrap();
 
@@ -616,7 +588,7 @@ mod tests {
                 supervisor_instance_id: "instance-1".to_string(),
             },
         );
-        sessions::save_in(&subroot, &registry).unwrap();
+        agent_doc_session_registry_io::save_in(&subroot, &registry).unwrap();
 
         let _cwd = ScopedCurrentDir::set(root);
         let entry = lookup_registry_entry_for_file_session(

@@ -27,6 +27,26 @@ pub const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
 pub const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub const STALE_SYNC_LOCK_OWNER_AGE: Duration = Duration::from_secs(300);
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncLockProcess {
+    pub pid: u32,
+    pub ppid: u32,
+    pub age: Duration,
+    pub cmdline: Vec<String>,
+    pub has_lock_fd: bool,
+}
+
+pub fn is_stale_orphaned_sync_lock_owner(process: &SyncLockProcess) -> bool {
+    process.ppid == 1
+        && process.age >= STALE_SYNC_LOCK_OWNER_AGE
+        && process.has_lock_fd
+        && process
+            .cmdline
+            .first()
+            .is_some_and(|bin| bin.ends_with("agent-doc"))
+        && process.cmdline.iter().any(|arg| arg == "sync")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoStartMode {
     Full,
@@ -281,6 +301,56 @@ pub fn last_visible_excerpt(capture: &str) -> Option<String> {
         .and_then(sanitize_excerpt)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtectedRegisteredPaneState {
+    pub reason: String,
+    pub last_visible_excerpt: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenCycleProtectedPaneState {
+    pub file: PathBuf,
+    pub phase: &'static str,
+}
+
+pub fn protected_registered_pane_state_from_capture(
+    harness: &agent_doc_harness::HarnessConfig,
+    capture: &str,
+) -> Option<ProtectedRegisteredPaneState> {
+    let reason = harness.protected_prompt_input_reason(capture)?;
+    Some(ProtectedRegisteredPaneState {
+        reason,
+        last_visible_excerpt: last_visible_excerpt(capture),
+    })
+}
+
+pub fn open_cycle_protected_file_state_from_phase(
+    file: &Path,
+    phase: agent_doc_turn::CyclePhase,
+) -> Option<OpenCycleProtectedPaneState> {
+    if !phase.is_open() {
+        return None;
+    }
+    Some(OpenCycleProtectedPaneState {
+        file: file.to_path_buf(),
+        phase: phase.as_str(),
+    })
+}
+
+pub fn preserved_layout_focus_marker(pane: &str, reason: &str) -> String {
+    format!("[sync] safe_passive_layout_preserved_reselected_focus pane={pane} reason={reason}")
+}
+
+pub fn reselect_visible_focus_pane_failed_warning(
+    pane: &str,
+    focus_display: &str,
+    error: &str,
+) -> String {
+    format!(
+        "[sync] warning: failed to reselect visible focus pane {pane} for {focus_display} while preserving layout: {error}"
+    )
+}
+
 pub fn registry_relative_file_path(project_root: &Path, canonical_file: &Path) -> String {
     canonical_file
         .strip_prefix(project_root)
@@ -349,6 +419,119 @@ pub fn superseded_candidates(canonical: &str, drift_sessions: &[String]) -> Vec<
         out.push(session.clone());
     }
     out
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntheticRegistryCandidateFacts {
+    pub pane_id: String,
+    pub file_path: String,
+    pub live_owner_match: bool,
+    pub pane_root_match: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntheticRegistryDuplicateBasis {
+    LiveOwner,
+    PaneRoot,
+}
+
+impl SyntheticRegistryDuplicateBasis {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LiveOwner => "live_owner",
+            Self::PaneRoot => "pane_root",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntheticRegistryDuplicateResolution {
+    KeepWinner {
+        pane_id: String,
+        winner_index: usize,
+        duplicate_count: usize,
+        basis: SyntheticRegistryDuplicateBasis,
+    },
+    DropAmbiguous {
+        pane_id: String,
+        files: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntheticRegistryCandidateFilter {
+    pub keep: Vec<bool>,
+    pub resolutions: Vec<SyntheticRegistryDuplicateResolution>,
+}
+
+pub fn filter_synthetic_registry_candidate_facts(
+    candidates: &[SyntheticRegistryCandidateFacts],
+) -> SyntheticRegistryCandidateFilter {
+    let mut pane_claims: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (idx, candidate) in candidates.iter().enumerate() {
+        pane_claims
+            .entry(candidate.pane_id.clone())
+            .or_default()
+            .push(idx);
+    }
+
+    let mut keep = vec![true; candidates.len()];
+    let mut resolutions = Vec::new();
+    for (pane_id, claimants) in pane_claims {
+        if claimants.len() < 2 {
+            continue;
+        }
+
+        let live_owner_matches: Vec<usize> = claimants
+            .iter()
+            .copied()
+            .filter(|idx| candidates[*idx].live_owner_match)
+            .collect();
+        let pane_root_matches: Vec<usize> = claimants
+            .iter()
+            .copied()
+            .filter(|idx| candidates[*idx].pane_root_match)
+            .collect();
+
+        let winner = if live_owner_matches.len() == 1 {
+            Some((
+                live_owner_matches[0],
+                SyntheticRegistryDuplicateBasis::LiveOwner,
+            ))
+        } else if live_owner_matches.is_empty() && pane_root_matches.len() == 1 {
+            Some((
+                pane_root_matches[0],
+                SyntheticRegistryDuplicateBasis::PaneRoot,
+            ))
+        } else {
+            None
+        };
+
+        if let Some((winner_index, basis)) = winner {
+            for idx in claimants.iter().copied() {
+                keep[idx] = idx == winner_index;
+            }
+            resolutions.push(SyntheticRegistryDuplicateResolution::KeepWinner {
+                pane_id,
+                winner_index,
+                duplicate_count: claimants.len() - 1,
+                basis,
+            });
+        } else {
+            let files = claimants
+                .iter()
+                .map(|idx| candidates[*idx].file_path.clone())
+                .collect::<Vec<_>>();
+            for idx in claimants {
+                keep[idx] = false;
+            }
+            resolutions
+                .push(SyntheticRegistryDuplicateResolution::DropAmbiguous { pane_id, files });
+        }
+    }
+
+    SyntheticRegistryCandidateFilter { keep, resolutions }
 }
 
 pub fn planned_stash_window_indices(
@@ -517,6 +700,42 @@ mod tests {
     fn auto_start_mode_reports_stable_log_labels() {
         assert_eq!(AutoStartMode::Full.log_label(), "full");
         assert_eq!(AutoStartMode::SafePassive.log_label(), "safe-passive");
+    }
+
+    #[test]
+    fn stale_orphaned_sync_lock_owner_requires_all_guards() {
+        let stale_owner = SyncLockProcess {
+            pid: 42,
+            ppid: 1,
+            age: STALE_SYNC_LOCK_OWNER_AGE + Duration::from_secs(1),
+            cmdline: vec!["/home/brian/.cargo/bin/agent-doc".into(), "sync".into()],
+            has_lock_fd: true,
+        };
+        assert!(is_stale_orphaned_sync_lock_owner(&stale_owner));
+
+        let live_parent = SyncLockProcess {
+            ppid: 100,
+            ..stale_owner.clone()
+        };
+        assert!(!is_stale_orphaned_sync_lock_owner(&live_parent));
+
+        let too_young = SyncLockProcess {
+            age: STALE_SYNC_LOCK_OWNER_AGE - Duration::from_secs(1),
+            ..stale_owner.clone()
+        };
+        assert!(!is_stale_orphaned_sync_lock_owner(&too_young));
+
+        let different_command = SyncLockProcess {
+            cmdline: vec!["/home/brian/.cargo/bin/agent-doc".into(), "route".into()],
+            ..stale_owner.clone()
+        };
+        assert!(!is_stale_orphaned_sync_lock_owner(&different_command));
+
+        let no_lock_fd = SyncLockProcess {
+            has_lock_fd: false,
+            ..stale_owner.clone()
+        };
+        assert!(!is_stale_orphaned_sync_lock_owner(&no_lock_fd));
     }
 
     #[test]
@@ -782,6 +1001,77 @@ mod tests {
     }
 
     #[test]
+    fn protected_registered_pane_state_detects_codex_queue_state() {
+        let capture = "\
+Starting codex...
+›
+tab to queue message
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        let state = protected_registered_pane_state_from_capture(
+            &agent_doc_harness::HarnessConfig::codex(),
+            capture,
+        )
+        .expect("queue-state draft should protect the pane");
+
+        assert_eq!(state.reason, "queued draft in composer");
+        assert!(
+            state
+                .last_visible_excerpt
+                .as_deref()
+                .is_some_and(|excerpt| excerpt.contains("Context 31% used"))
+        );
+    }
+
+    #[test]
+    fn open_cycle_protected_file_state_keeps_open_phases_only() {
+        let file = Path::new("tasks/doc.md");
+
+        let preflight = open_cycle_protected_file_state_from_phase(
+            file,
+            agent_doc_turn::CyclePhase::PreflightStarted,
+        )
+        .expect("preflight should protect pane");
+        assert_eq!(preflight.file, PathBuf::from("tasks/doc.md"));
+        assert_eq!(preflight.phase, "preflight_started");
+
+        let response = open_cycle_protected_file_state_from_phase(
+            file,
+            agent_doc_turn::CyclePhase::ResponseCaptured,
+        )
+        .expect("response captured should protect pane");
+        assert_eq!(response.phase, "response_captured");
+
+        let write = open_cycle_protected_file_state_from_phase(
+            file,
+            agent_doc_turn::CyclePhase::WriteApplied,
+        )
+        .expect("write applied should protect pane");
+        assert_eq!(write.phase, "write_applied");
+
+        assert!(
+            open_cycle_protected_file_state_from_phase(file, agent_doc_turn::CyclePhase::Committed)
+                .is_none()
+        );
+        assert!(
+            open_cycle_protected_file_state_from_phase(file, agent_doc_turn::CyclePhase::Abandoned)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn preserved_layout_focus_messages_are_stable() {
+        assert_eq!(
+            preserved_layout_focus_marker("%7", "blocked_files"),
+            "[sync] safe_passive_layout_preserved_reselected_focus pane=%7 reason=blocked_files"
+        );
+        assert_eq!(
+            reselect_visible_focus_pane_failed_warning("%7", "/repo/tasks/doc.md", "no pane"),
+            "[sync] warning: failed to reselect visible focus pane %7 for /repo/tasks/doc.md while preserving layout: no pane"
+        );
+    }
+
+    #[test]
     fn registry_relative_file_path_prefers_project_relative_path() {
         assert_eq!(
             registry_relative_file_path(Path::new("/repo"), Path::new("/repo/tasks/doc.md")),
@@ -847,6 +1137,59 @@ mod tests {
             vec!["0".to_string(), "5".to_string()]
         );
         assert!(superseded_candidates("0", &["0".to_string()]).is_empty());
+    }
+
+    fn synthetic_registry_candidate(
+        file_path: &str,
+        pane_id: &str,
+        live_owner_match: bool,
+        pane_root_match: bool,
+    ) -> SyntheticRegistryCandidateFacts {
+        SyntheticRegistryCandidateFacts {
+            pane_id: pane_id.to_string(),
+            file_path: file_path.to_string(),
+            live_owner_match,
+            pane_root_match,
+        }
+    }
+
+    #[test]
+    fn synthetic_registry_candidate_filter_drops_ambiguous_same_root_duplicate_pane() {
+        let filter = filter_synthetic_registry_candidate_facts(&[
+            synthetic_registry_candidate("tasks/claudescore.md", "%250", false, true),
+            synthetic_registry_candidate("tasks/claudescore-3.md", "%250", false, true),
+        ]);
+
+        assert_eq!(filter.keep, vec![false, false]);
+        assert_eq!(
+            filter.resolutions,
+            vec![SyntheticRegistryDuplicateResolution::DropAmbiguous {
+                pane_id: "%250".to_string(),
+                files: vec![
+                    "tasks/claudescore.md".to_string(),
+                    "tasks/claudescore-3.md".to_string()
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn synthetic_registry_candidate_filter_keeps_unique_live_owner() {
+        let filter = filter_synthetic_registry_candidate_facts(&[
+            synthetic_registry_candidate("tasks/claudescore.md", "%250", false, true),
+            synthetic_registry_candidate("tasks/claudescore-3.md", "%250", true, true),
+        ]);
+
+        assert_eq!(filter.keep, vec![false, true]);
+        assert_eq!(
+            filter.resolutions,
+            vec![SyntheticRegistryDuplicateResolution::KeepWinner {
+                pane_id: "%250".to_string(),
+                winner_index: 1,
+                duplicate_count: 1,
+                basis: SyntheticRegistryDuplicateBasis::LiveOwner,
+            }]
+        );
     }
 
     #[test]

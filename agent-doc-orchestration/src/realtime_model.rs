@@ -168,7 +168,7 @@ struct BroadcastDelta {
 /// cannot assess (mirrors the `#fccreap` dead-consumer liveness stance).
 fn editor_id_is_live(editor_id: &str) -> bool {
     match jetbrains_editor_id_pid(editor_id) {
-        Some(pid) => crate::hooks::pid_is_live(pid),
+        Some(pid) => agent_doc_plugin_owner::plugin_owner_pid_is_live(pid),
         None => true,
     }
 }
@@ -212,7 +212,7 @@ pub fn broadcast_editor_change(
     }
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let canonical_str = canonical.to_string_lossy().to_string();
-    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         return Ok(Vec::new());
     };
     let patches_dir = project_root.join(".agent-doc/patches");

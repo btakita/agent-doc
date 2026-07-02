@@ -15,6 +15,7 @@ agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.67" }
 agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.34.67" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.67" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.67" }

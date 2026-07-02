@@ -2,6 +2,10 @@
 
 use super::*;
 use agent_doc_controller::dispatch::is_stash_window_name;
+use agent_doc_session_registry_io::dispatch_registry::{
+    deregister_dispatch_registration, load_dispatch_registry, lookup_dispatch_registration,
+    registry_base_dir_for_dispatch,
+};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn recover_dispatch_only_authoritative_waiting_input(
@@ -31,9 +35,10 @@ pub(crate) fn recover_dispatch_only_authoritative_waiting_input(
         file.display(),
         pane
     );
-    let initial_status = crate::startup_miss::session_log_status(file, session_id)
-        .ok()
-        .flatten();
+    let initial_status =
+        agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
+            .ok()
+            .flatten();
 
     if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
         anyhow::bail!(
@@ -500,9 +505,13 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         preferred_active_window.as_deref(),
     );
 
-    if let Ok(Some(miss)) = crate::startup_miss::load(file)
+    if let Ok(Some(miss)) = agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
         && let Some(supersession) =
-            crate::startup_miss::superseded_by_newer_registered_start(file, &miss)?
+            agent_doc_supervisor_io::startup_miss::superseded_by_newer_registered_start(
+                agent_doc_supervisor_io::startup_miss::session_registry_lookup(),
+                file,
+                &miss,
+            )?
     {
         let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
         eprintln!(
@@ -520,20 +529,21 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 supersession.latest_start_timestamp
             ),
         );
-        let _ = crate::startup_miss::clear(file);
+        let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
     }
 
     // Strategy 0: If a previous startup-miss was recorded for the registered pane,
     // deregister it immediately so we fall through to auto-start instead of
     // reusing a pane that never successfully started a document cycle.
     if let Some(ref registered_pane) = registered
-        && let Ok(Some(miss)) = crate::startup_miss::load(file)
+        && let Ok(Some(miss)) = agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
         && miss.pane_id == *registered_pane
         && tmux.pane_alive(registered_pane)
     {
-        let log_status = crate::startup_miss::session_log_status(file, &miss.session_id)
-            .ok()
-            .flatten();
+        let log_status =
+            agent_doc_supervisor_io::startup_miss::session_log_status(file, &miss.session_id)
+                .ok()
+                .flatten();
         let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
         let provenance = startup_miss_route_provenance(
             tmux,
@@ -591,7 +601,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 ),
             );
             let _ = deregister_dispatch_registration(file_path, session_id)?;
-            let _ = crate::startup_miss::clear(file);
+            let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
             // Fall through to Strategy 3 (auto-start)
             eprintln!("[route] No active pane found, auto-starting...");
             if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
@@ -627,7 +637,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                     file_path, registered_pane, miss_ts
                 ),
             );
-            let _ = crate::startup_miss::clear(file);
+            let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
         } else {
             eprintln!(
                 "[route] registered pane {} still owns {} but startup-miss {} is not superseded by a newer open harness run — keeping marker until dispatch proves recovery",
@@ -1357,7 +1367,7 @@ pub(crate) fn wait_for_busy_restart_handoff(
     let start = std::time::Instant::now();
     let mut handed_off_pane: Option<String> = None;
     while start.elapsed() < timeout {
-        if let Ok(registry) = sessions::load_in(&registry_base_dir)
+        if let Ok(registry) = agent_doc_session_registry_io::load_in(&registry_base_dir)
             && let Some(entry) = registry
                 .values()
                 .find(|entry| entry.session_id == session_id)
@@ -1429,7 +1439,7 @@ pub(crate) fn rescue_from_stash(
     split_before: bool,
 ) -> bool {
     // Session guard: only rescue within the target session
-    let pane_session = pane_session_name(tmux, pane_id).unwrap_or_default();
+    let pane_session = agent_doc_tmux_io::target_session_name(tmux, pane_id).unwrap_or_default();
     if pane_session != target_session {
         eprintln!(
             "[route] Pane {} is in session '{}', not target '{}' — skipping stash rescue",
@@ -1438,7 +1448,7 @@ pub(crate) fn rescue_from_stash(
         return false;
     }
 
-    let pane_win_name = pane_window_name(tmux, pane_id).unwrap_or_default();
+    let pane_win_name = agent_doc_tmux_io::target_window_name(tmux, pane_id).unwrap_or_default();
 
     if is_stash_window_name(&pane_win_name) {
         tracing::debug!(pane_id, window = %pane_win_name, target_session, "route: rescuing pane from stash");
@@ -1458,7 +1468,13 @@ pub(crate) fn rescue_from_stash(
         let mut moved = false;
         if let Some(target) = target {
             let join_flag = if split_before { "-dbh" } else { "-dh" };
-            match sessions::join_pane_guarded(tmux, pane_id, target, target_session, join_flag) {
+            match agent_doc_tmux_io::join_pane_guarded(
+                tmux,
+                pane_id,
+                target,
+                target_session,
+                join_flag,
+            ) {
                 Ok(()) => {
                     eprintln!("[route] Rescued pane {} via join-pane", pane_id);
                     moved = true;
@@ -1478,9 +1494,9 @@ pub(crate) fn rescue_from_stash(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
+    use agent_doc_supervisor_io::ipc::SupervisorIpc;
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
@@ -1500,7 +1516,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -1583,7 +1599,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -1640,7 +1656,7 @@ mod tests {
                 }),
             "route should still dispatch the trigger through supervisor IPC before accepting the optimistic startup-miss path: {injects:?}"
         );
-        let miss = crate::startup_miss::load(&doc)
+        let miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
             .unwrap()
             .expect("optimistic route should still record a startup miss");
         assert_eq!(miss.pane_id, pane);
@@ -1668,7 +1684,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -1684,41 +1700,42 @@ mod tests {
         let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
         let injected_pane_for_ipc = injected_pane.clone();
         *injected_pane.lock().unwrap() = Some(pane.clone());
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": true,
-                        "state": "healthy",
-                        "restart_count": 0,
-                        "actor_state": "ready",
-                        "supervisor_pid": 12345,
-                        "supervisor_instance_id": supervisor_instance_id_for_ipc
-                    })),
-                    IpcMethod::Restart { mode } => {
-                        if mode == "fresh" {
-                            restart_called_for_ipc.store(true, Ordering::Relaxed);
-                        }
-                        IpcResponse::ok_empty()
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            session_id,
+            move |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "restart_count": 0,
+                    "actor_state": "ready",
+                    "supervisor_pid": 12345,
+                    "supervisor_instance_id": supervisor_instance_id_for_ipc
+                })),
+                IpcMethod::Restart { mode } => {
+                    if mode == "fresh" {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
                     }
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
-                            let _ = ipc_tmux.send_keys(&target, bytes.trim_end_matches('\n'));
-                        }
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcResponse::ok_empty()
                 }
-            })
-            .unwrap();
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                        let _ = ipc_tmux.send_keys(&target, bytes.trim_end_matches('\n'));
+                    }
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
 
         let iso_for_thread = iso.clone();
         let ready_agent = write_mock_registered_agent_doc(dir.path());
@@ -1802,7 +1819,7 @@ mod tests {
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -1837,39 +1854,40 @@ mod tests {
         let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
         let injects = Arc::new(Mutex::new(Vec::<String>::new()));
         let injects_for_ipc = injects.clone();
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": true,
-                        "state": "healthy",
-                        "restart_count": 0,
-                        "actor_state": "ready",
-                        "supervisor_pid": 12345,
-                        "supervisor_instance_id": supervisor_instance_id_for_ipc
-                    })),
-                    IpcMethod::Restart { mode } => {
-                        if mode == "fresh" {
-                            restart_called_for_ipc.store(true, Ordering::Relaxed);
-                        }
-                        IpcResponse::ok_empty()
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            session_id,
+            move |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "restart_count": 0,
+                    "actor_state": "ready",
+                    "supervisor_pid": 12345,
+                    "supervisor_instance_id": supervisor_instance_id_for_ipc
+                })),
+                IpcMethod::Restart { mode } => {
+                    if mode == "fresh" {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
                     }
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        injects_for_ipc.lock().unwrap().push(bytes.clone());
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcResponse::ok_empty()
                 }
-            })
-            .unwrap();
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    injects_for_ipc.lock().unwrap().push(bytes.clone());
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
 
         let iso_for_thread = iso.clone();
         let fresh_agent =
@@ -1962,7 +1980,7 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -1982,7 +2000,7 @@ mod tests {
         )
         .expect_err("route should fail closed instead of injecting into a busy live pane");
 
-        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        let after = agent_doc_tmux_io::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
             !after.contains("EARLY:agent-doc "),
             "route should not inject a trigger before the pane becomes idle: {after}"
@@ -2021,7 +2039,7 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2071,7 +2089,7 @@ mod tests {
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2079,7 +2097,7 @@ mod tests {
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-dispatch-only-starting-pane";
         sessions::register(session_id, &pane, &file_path).unwrap();
-        crate::startup_miss::append_session_log_event(
+        agent_doc_supervisor_io::startup_miss::append_session_log_event(
             &doc,
             session_id,
             &format!(
@@ -2090,7 +2108,7 @@ mod tests {
             ),
         )
         .unwrap();
-        crate::startup_miss::append_session_log_event(
+        agent_doc_supervisor_io::startup_miss::append_session_log_event(
             &doc,
             session_id,
             "codex_start mode=fresh restart_count=0",
@@ -2143,7 +2161,7 @@ mod tests {
                 .contains("tasks/professional/sampleportal.md"),
             "startup-window refusal should preserve the sample portal document path: {err:#}"
         );
-        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        let after = agent_doc_tmux_io::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
             !after.contains("EARLY:agent-doc "),
             "dispatch-only route must not submit through the live pane before the startup prompt is visible: {after}"
@@ -2166,11 +2184,12 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n",
         )
         .unwrap();
-        crate::snapshot::save(
-        &doc,
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
-    )
-    .unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
+            crate::ops_log::log_op,
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register(
             "route-test-dispatch-only-reverse-i-search",
@@ -2259,7 +2278,7 @@ mod tests {
         )
         .unwrap();
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2356,7 +2375,7 @@ mod tests {
             "busy mock session should be in reverse-i-search: {content}"
         );
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2455,7 +2474,7 @@ mod tests {
             "busy OpenCode mock should be active in pane: {content}"
         );
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2554,7 +2573,7 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2569,41 +2588,42 @@ mod tests {
         let ipc_tmux = iso.clone();
         let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
         let injected_pane_for_ipc = injected_pane.clone();
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": true,
-                        "state": "healthy",
-                        "restart_count": 0,
-                        "actor_state": "ready",
-                        "supervisor_pid": 12345,
-                        "supervisor_instance_id": supervisor_instance_id_for_ipc
-                    })),
-                    IpcMethod::Restart { mode } => {
-                        if mode == "fresh" {
-                            restart_called_for_ipc.store(true, Ordering::Relaxed);
-                        }
-                        IpcResponse::ok_empty()
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            session_id,
+            move |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "restart_count": 0,
+                    "actor_state": "ready",
+                    "supervisor_pid": 12345,
+                    "supervisor_instance_id": supervisor_instance_id_for_ipc
+                })),
+                IpcMethod::Restart { mode } => {
+                    if mode == "fresh" {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
                     }
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
-                            let _ = ipc_tmux.send_keys(&target, &bytes);
-                        }
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcResponse::ok_empty()
                 }
-            })
-            .unwrap();
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                        let _ = ipc_tmux.send_keys(&target, &bytes);
+                    }
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
 
         let reused = resolve_or_create_pane(
         &iso,
@@ -2621,7 +2641,7 @@ mod tests {
     );
         assert_eq!(reused, pane);
         assert!(restart_called.load(Ordering::Relaxed));
-        let miss = crate::startup_miss::load(&doc)
+        let miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
             .unwrap()
             .expect("optimistic busy reroute should still record a startup miss");
         assert_eq!(miss.pane_id, pane);
@@ -2664,7 +2684,7 @@ mod tests {
         )
         .unwrap();
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2753,7 +2773,7 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2774,7 +2794,7 @@ mod tests {
         .expect("route should focus the already-running pane when there is no new drift");
         assert_eq!(reused, pane);
 
-        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        let after = agent_doc_tmux_io::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
             !after.contains("EARLY:agent-doc "),
             "route should not inject a duplicate reopen into a busy live pane: {after}"
@@ -2797,7 +2817,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2864,7 +2884,7 @@ mod tests {
             content.contains("GOT:agent-doc "),
             "route should still dispatch the trigger to the registered pane: {content}"
         );
-        let miss = crate::startup_miss::load(&doc)
+        let miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
             .unwrap()
             .expect("optimistic same-cycle reroute should still record a startup miss");
         assert_eq!(miss.pane_id, pane);
@@ -2888,7 +2908,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2984,7 +3004,7 @@ mod tests {
         std::fs::write(&doc, current).unwrap();
         let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3096,7 +3116,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        sessions::save_in(dir.path(), &registry).unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
         let mock_start = write_mock_start_agent_doc(dir.path());
 
         let doc_for_thread = doc.clone();
@@ -3142,13 +3162,13 @@ mod tests {
         .expect("route should continue recovery after clearing the stale registration");
         assert_ne!(resolved, stale_pane);
 
-        let reassigned = sessions::lookup("route-live-owner-missing").unwrap();
+        let reassigned = agent_doc_session_registry_io::lookup("route-live-owner-missing").unwrap();
         assert!(
             reassigned.as_deref() == Some(resolved.as_str()),
             "route should re-register to the recovered pane, got: {reassigned:?}"
         );
 
-        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        let stale_content = agent_doc_tmux_io::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
             !stale_content.contains("STALE:agent-doc "),
             "route should not dispatch into the stale registered pane: {stale_content}"
@@ -3176,7 +3196,7 @@ mod tests {
         let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3259,7 +3279,7 @@ mod tests {
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3401,7 +3421,7 @@ mod tests {
         let doc = dir.path().join("stale-starting-ready-prompt.md");
         let current = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, current).unwrap();
+        agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
             .unwrap();
@@ -3510,7 +3530,7 @@ mod tests {
         let cwd = test_cwd();
 
         let anchor_pane = iso.auto_start(requested_session, &cwd).unwrap();
-        let session = pane_session_name(&iso, &anchor_pane)
+        let session = agent_doc_tmux_io::target_session_name(&iso, &anchor_pane)
             .expect("anchor pane should report its tmux session");
         let anchor_window = iso.pane_window(&anchor_pane).unwrap();
         send_keys_with_retry(
@@ -3605,13 +3625,14 @@ mod tests {
             "fresh pane should receive the routed command: {target_content}"
         );
 
-        let anchor_content = sessions::capture_pane(&iso, &anchor_pane).unwrap_or_default();
+        let anchor_content =
+            agent_doc_tmux_io::capture_pane(&iso, &anchor_pane).unwrap_or_default();
         assert!(
             !anchor_content.contains("ANCHOR:agent-doc "),
             "existing pane for another document must stay a split anchor only: {anchor_content}"
         );
 
-        let lookup = sessions::load_in(dir.path())
+        let lookup = agent_doc_session_registry_io::load_in(dir.path())
             .unwrap()
             .values()
             .find(|entry| entry.session_id == "route-cross-file-target")
@@ -3712,9 +3733,9 @@ mod tests {
         let registry_root = dir.path().to_path_buf();
         let clear_handle = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
-            let registry_path = sessions::registry_path_in(&registry_root);
+            let registry_path = agent_doc_session_registry_io::registry_path_in(&registry_root);
             let _lock = tmux_router::RegistryLock::acquire(&registry_path).unwrap();
-            let mut registry = sessions::load_in(&registry_root).unwrap();
+            let mut registry = agent_doc_session_registry_io::load_in(&registry_root).unwrap();
             let key = registry
                 .iter()
                 .find(|(_, entry)| {
@@ -3723,7 +3744,7 @@ mod tests {
                 .map(|(key, _)| key.clone());
             if let Some(key) = key {
                 registry.remove(&key);
-                sessions::save_in(&registry_root, &registry).unwrap();
+                agent_doc_session_registry_io::save_in(&registry_root, &registry).unwrap();
             }
         });
 
@@ -3778,7 +3799,9 @@ mod tests {
             "fresh auto-start should still dispatch after the initial binding is cleared during ready-wait: {content}"
         );
 
-        let lookup = sessions::lookup("route-fresh-start-reregister-before-dispatch").unwrap();
+        let lookup =
+            agent_doc_session_registry_io::lookup("route-fresh-start-reregister-before-dispatch")
+                .unwrap();
         assert_eq!(
             lookup.as_deref(),
             Some(new_pane.as_str()),
@@ -3879,19 +3902,19 @@ mod tests {
             "fresh auto-start should still create one pane"
         );
 
-        let owner_after = sessions::capture_pane(&iso, &existing_pane).unwrap_or_default();
+        let owner_after = agent_doc_tmux_io::capture_pane(&iso, &existing_pane).unwrap_or_default();
         assert!(
             !owner_after.contains("GOT:agent-doc "),
             "route must not hand dispatch back to the older pane after a fresh start: {owner_after}"
         );
 
-        let new_pane_after = sessions::capture_pane(&iso, &new_pane).unwrap_or_default();
+        let new_pane_after = agent_doc_tmux_io::capture_pane(&iso, &new_pane).unwrap_or_default();
         assert!(
             new_pane_after.contains("GOT:agent-doc "),
             "route should keep dispatching into the fresh pane after a competing registry rebind: {new_pane_after}"
         );
 
-        let lookup = sessions::lookup("route-fresh-start-handoff").unwrap();
+        let lookup = agent_doc_session_registry_io::lookup("route-fresh-start-handoff").unwrap();
         assert_eq!(
             lookup.as_deref(),
             Some(new_pane.as_str()),
@@ -3928,7 +3951,7 @@ mod tests {
             "existing owner pane should be idle before the handoff: {owner_ready}"
         );
 
-        crate::startup_miss::record(
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
             &doc,
             &existing_pane,
             "route-fresh-start-ignore-startup-miss-handoff",
@@ -4008,13 +4031,16 @@ mod tests {
             "route should keep the reopen in the fresh pane when the alternate handoff target still owns startup-miss provenance: {new_pane_after}"
         );
 
-        let old_pane_after = sessions::capture_pane(&iso, &existing_pane).unwrap_or_default();
+        let old_pane_after =
+            agent_doc_tmux_io::capture_pane(&iso, &existing_pane).unwrap_or_default();
         assert!(
             !old_pane_after.contains("GOT:agent-doc "),
             "route must not hand dispatch back to the startup-miss pane: {old_pane_after}"
         );
 
-        let lookup = sessions::lookup("route-fresh-start-ignore-startup-miss-handoff").unwrap();
+        let lookup =
+            agent_doc_session_registry_io::lookup("route-fresh-start-ignore-startup-miss-handoff")
+                .unwrap();
         assert_eq!(
             lookup.as_deref(),
             Some(new_pane.as_str()),
@@ -4055,37 +4081,38 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        sessions::save_in(dir.path(), &registry).unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": false,
-                        "state": "halted",
-                        "restart_count": 5
-                    })),
-                    IpcMethod::Restart { .. } => {
-                        restart_called_for_ipc.store(true, Ordering::Relaxed);
-                        IpcResponse::ok_empty()
-                    }
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": null })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            session_id,
+            move |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": false,
+                    "state": "halted",
+                    "restart_count": 5
+                })),
+                IpcMethod::Restart { .. } => {
+                    restart_called_for_ipc.store(true, Ordering::Relaxed);
+                    IpcResponse::ok_empty()
                 }
-            })
-            .unwrap();
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": null })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
 
         let panes_before = iso
             .list_panes_ordered(&format!("{session}:0"))

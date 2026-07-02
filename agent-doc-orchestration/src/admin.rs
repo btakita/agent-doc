@@ -18,11 +18,10 @@
 //! Shared-Foundation rule: editor plugins shell the CLI/FFI rather than
 //! re-deriving fleet state.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::sessions;
 use agent_doc_controller::fleet::{
     ActorListRecord, ActorListRegistryBinding, AdminReceiptLine, build_admin_actor_list,
     detect_admin_findings, format_admin_receipt_line,
@@ -36,32 +35,6 @@ pub struct ReapAllStaleSummary {
     pub reaped: usize,
     pub kept: usize,
     pub reason: String,
-}
-
-/// Resolve the project root for fleet enumeration: explicit `--project-root`,
-/// else the nearest `.agent-doc` ancestor of the current directory.
-fn resolve_root(project_root: Option<&Path>) -> Result<PathBuf> {
-    if let Some(root) = project_root {
-        return Ok(root.to_path_buf());
-    }
-    let cwd = std::env::current_dir().context("failed to read current directory")?;
-    agent_doc_fs::find_project_root(&cwd)
-        .with_context(|| format!("no .agent-doc project root found from {}", cwd.display()))
-}
-
-fn resolve_root_for_target(
-    project_root: Option<&Path>,
-    document: Option<&Path>,
-) -> Result<PathBuf> {
-    if let Some(root) = project_root {
-        return Ok(root.to_path_buf());
-    }
-    if let Some(document) = document
-        && let Some(root) = agent_doc_fs::find_project_root(document)
-    {
-        return Ok(root);
-    }
-    resolve_root(None)
 }
 
 fn print_receipt(
@@ -87,9 +60,9 @@ fn print_receipt(
 
 /// `agent-doc admin list` — enumerate the project fleet.
 pub fn list(project_root: Option<&Path>, json: bool) -> Result<()> {
-    let root = resolve_root(project_root)?;
+    let root = agent_doc_project_root_io::project_root_or_cwd(project_root)?;
     let actors = crate::project_controller::load_actor_store(&root)?;
-    let registry = sessions::load_in(&root)?;
+    let registry = agent_doc_session_registry_io::load_in(&root)?;
     let tmux = Tmux::default_server();
     let rows = build_admin_actor_list(
         actors.values().map(|record| ActorListRecord {
@@ -138,9 +111,9 @@ pub fn list(project_root: Option<&Path>, json: bool) -> Result<()> {
 
 /// `agent-doc admin detect` — derived fleet diagnostics.
 pub fn detect(project_root: Option<&Path>, json: bool) -> Result<()> {
-    let root = resolve_root(project_root)?;
+    let root = agent_doc_project_root_io::project_root_or_cwd(project_root)?;
     let actors = crate::project_controller::load_actor_store(&root)?;
-    let registry = sessions::load_in(&root)?;
+    let registry = agent_doc_session_registry_io::load_in(&root)?;
     let tmux = Tmux::default_server();
     let rows = build_admin_actor_list(
         actors.values().map(|record| ActorListRecord {
@@ -184,7 +157,7 @@ pub fn inspect(
     pane: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let root = resolve_root_for_target(project_root, document)?;
+    let root = agent_doc_project_root_io::project_root_for_target_or_cwd(project_root, document)?;
     let inspection = crate::project_controller::inspect_actor(&root, document, session, pane)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&inspection)?);
@@ -222,7 +195,7 @@ pub fn queue_control(
     item_id: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let root = resolve_root_for_target(project_root, document)?;
+    let root = agent_doc_project_root_io::project_root_for_target_or_cwd(project_root, document)?;
     let receipt = crate::project_controller::control_queue(
         &root,
         document,
@@ -243,7 +216,7 @@ pub fn reap(
     reason: &str,
     json: bool,
 ) -> Result<()> {
-    let root = resolve_root_for_target(project_root, document)?;
+    let root = agent_doc_project_root_io::project_root_for_target_or_cwd(project_root, document)?;
     let receipt = crate::project_controller::admin_reap(
         &root,
         document,
@@ -277,7 +250,7 @@ pub fn reap_all_stale_with_liveness(
 }
 
 pub fn reap_all_stale(project_root: Option<&Path>, reason: &str, json: bool) -> Result<()> {
-    let root = resolve_root(project_root)?;
+    let root = agent_doc_project_root_io::project_root_or_cwd(project_root)?;
     let stored_reason = format!("manual_reap_all_stale {reason}");
     let (reaped, kept) =
         crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
@@ -311,7 +284,8 @@ pub fn handoff(
     reason: &str,
     json: bool,
 ) -> Result<()> {
-    let root = resolve_root_for_target(project_root, Some(document))?;
+    let root =
+        agent_doc_project_root_io::project_root_for_target_or_cwd(project_root, Some(document))?;
     let receipt = crate::project_controller::admin_handoff(
         &root,
         document,
@@ -330,7 +304,7 @@ pub fn repair_projection(
     reason: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let root = resolve_root_for_target(project_root, document)?;
+    let root = agent_doc_project_root_io::project_root_for_target_or_cwd(project_root, document)?;
     let receipt = crate::project_controller::repair_projection(
         &root,
         document,

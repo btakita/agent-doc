@@ -4,8 +4,8 @@
 //! - Resets a session document to a clean state by clearing the agent conversation resume pointer and deleting or rebuilding associated state files.
 //! - `run(file, from_current, preserve_session, force_disk)` performs three operations in sequence:
 //!   1. Reads YAML frontmatter, sets `resume` to `None` (clears the conversation ID), rewrites the frontmatter while preserving all other fields and the document body.
-//!   2. Deletes the snapshot file via `snapshot::delete`, or with `--from-current` saves the current markdown as the snapshot.
-//!   3. Deletes the CRDT state file via `snapshot::delete_crdt`, or with `--from-current` rebuilds it from the current markdown.
+//!   2. Deletes the snapshot file via `agent_doc_snapshot_io::delete`, or with `--from-current` saves the current markdown as the snapshot.
+//!   3. Deletes the CRDT state file via `agent_doc_snapshot_io::delete_crdt`, or with `--from-current` rebuilds it from the current markdown.
 //! - `--from-current --preserve-session` is non-destructive: it leaves the
 //!   markdown, resume pointer, cycle state, and capture chain untouched while
 //!   refreshing snapshot/CRDT/baseline sidecars from the visible file.
@@ -36,7 +36,6 @@ use std::io::Write;
 use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_orchestration::snapshot;
 
 pub fn run(
     file: &Path,
@@ -101,10 +100,10 @@ pub fn run(
         );
     } else {
         // Delete snapshot
-        snapshot::delete(file)?;
+        agent_doc_snapshot_io::delete(file)?;
 
         // Delete CRDT state (stream mode)
-        snapshot::delete_crdt(file)?;
+        agent_doc_snapshot_io::delete_crdt(file)?;
 
         eprintln!("Reset session for {}", file.display());
     }
@@ -112,9 +111,9 @@ pub fn run(
 }
 
 fn rebuild_sidecars_from_current(file: &Path, content: &str, save_baseline: bool) -> Result<()> {
-    snapshot::save(file, content)?;
+    agent_doc_snapshot_io::save(file, content, agent_doc_orchestration::ops_log::log_op)?;
     let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(content).encode_state();
-    snapshot::save_document_crdt(file, &crdt, content)?;
+    agent_doc_merge_io::save_document_crdt(file, &crdt, content)?;
     if save_baseline {
         save_baseline_from_current(file, content)?;
     }
@@ -125,7 +124,7 @@ fn rebuild_sidecars_from_current(file: &Path, content: &str, save_baseline: bool
     // compaction or reset that removed answered/compacted heads would leave those
     // heads in the journal, and the next `start` would call
     // `queue_journal::replay_missing` and resurrect them over the current queue.
-    agent_doc_orchestration::queue_journal::clear(file);
+    agent_doc_queue_io::queue_journal::clear(file);
     Ok(())
 }
 
@@ -147,7 +146,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn assert_overlay_projects_to(doc: &Path, expected: &str) {
-        let overlay = snapshot::load_overlay_crdt(doc)
+        let overlay = agent_doc_snapshot_io::load_overlay_crdt(doc)
             .unwrap()
             .expect("overlay sidecar present");
         let projected = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay)
@@ -168,15 +167,20 @@ mod tests {
         let doc = dir.path().join("session.md");
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: old\n---\n\nBody\n";
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, "stale snapshot").unwrap();
-        snapshot::save_crdt(&doc, b"stale crdt").unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            "stale snapshot",
+            agent_doc_orchestration::ops_log::log_op,
+        )
+        .unwrap();
+        agent_doc_snapshot_io::save_crdt(&doc, b"stale crdt").unwrap();
 
         run(&doc, true, false, true).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(!updated.contains("resume: old"));
-        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), updated);
-        let crdt_state = snapshot::load_crdt(&doc).unwrap().unwrap();
+        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap().unwrap(), updated);
+        let crdt_state = agent_doc_snapshot_io::load_crdt(&doc).unwrap().unwrap();
         let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt_state)
             .unwrap()
             .to_text();
@@ -205,7 +209,7 @@ mod tests {
             "resume must be cleared on disk after reset"
         );
         assert_eq!(
-            snapshot::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
             updated,
             "snapshot must match the resume-cleared document"
         );
@@ -228,8 +232,13 @@ mod tests {
         let doc = dir.path().join("session.md");
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: keep-me\n---\n\nBody\n";
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, "stale snapshot").unwrap();
-        snapshot::save_crdt(&doc, b"stale crdt").unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            "stale snapshot",
+            agent_doc_orchestration::ops_log::log_op,
+        )
+        .unwrap();
+        agent_doc_snapshot_io::save_crdt(&doc, b"stale crdt").unwrap();
         std::fs::write(
             agent_doc_fs::baseline_path_for(&doc).unwrap(),
             "stale baseline",
@@ -254,12 +263,12 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(updated, current);
         assert!(updated.contains("resume: keep-me"));
-        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), current);
+        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap().unwrap(), current);
         assert_eq!(
             std::fs::read_to_string(agent_doc_fs::baseline_path_for(&doc).unwrap()).unwrap(),
             current
         );
-        let crdt_state = snapshot::load_crdt(&doc).unwrap().unwrap();
+        let crdt_state = agent_doc_snapshot_io::load_crdt(&doc).unwrap().unwrap();
         let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt_state)
             .unwrap()
             .to_text();
@@ -279,7 +288,7 @@ mod tests {
         // `reset --from-current --preserve-session` rebuilds the sidecars. Without
         // clearing the journal, the next `start` would call
         // `queue_journal::replay_missing` and resurrect B,C over the current file.
-        use agent_doc_orchestration::queue_journal;
+        use agent_doc_queue_io::queue_journal;
 
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
@@ -294,7 +303,7 @@ mod tests {
         queue_journal::record(&doc, earlier).unwrap();
         // Sanity: B,C are journaled and would replay if absent.
         let only_a = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: keep-me\n---\n\n## Queue\n\n<!-- agent:queue auto -->\n- do [#a]\n<!-- /agent:queue -->\n";
-        let pre_fix_missing = queue_journal::replay_missing(&doc, only_a);
+        let pre_fix_missing = queue_journal::replay_missing(&doc, only_a, None);
         assert_eq!(
             pre_fix_missing.len(),
             2,
@@ -303,8 +312,13 @@ mod tests {
 
         // Current file (post-answer/compaction): queue has ONLY head A.
         std::fs::write(&doc, only_a).unwrap();
-        snapshot::save(&doc, "stale snapshot").unwrap();
-        snapshot::save_crdt(&doc, b"stale crdt").unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            "stale snapshot",
+            agent_doc_orchestration::ops_log::log_op,
+        )
+        .unwrap();
+        agent_doc_snapshot_io::save_crdt(&doc, b"stale crdt").unwrap();
         std::fs::write(
             agent_doc_fs::baseline_path_for(&doc).unwrap(),
             "stale baseline",
@@ -328,7 +342,7 @@ mod tests {
         run(&doc, true, true, false).unwrap();
 
         // The journal is cleared: B,C no longer replay over the current file.
-        let missing = queue_journal::replay_missing(&doc, only_a);
+        let missing = queue_journal::replay_missing(&doc, only_a, None);
         assert!(
             missing.is_empty(),
             "reset --from-current must clear the journal so compacted heads do not resurface: {missing:?}"
@@ -341,7 +355,7 @@ mod tests {
                 .unwrap()
                 .contains("resume: keep-me")
         );
-        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), only_a);
+        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap().unwrap(), only_a);
         assert_eq!(
             std::fs::read_to_string(agent_doc_fs::baseline_path_for(&doc).unwrap()).unwrap(),
             only_a
@@ -350,6 +364,37 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&capture_path).unwrap(),
             capture_state
+        );
+    }
+
+    #[test]
+    fn default_reset_deletes_snapshot_and_crdt_sidecars() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/crdt")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: old\n---\n\nBody\n";
+        std::fs::write(&doc, current).unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            "stale snapshot",
+            agent_doc_orchestration::ops_log::log_op,
+        )
+        .unwrap();
+        agent_doc_snapshot_io::save_crdt(&doc, b"stale crdt").unwrap();
+        agent_doc_snapshot_io::save_overlay_crdt(&doc, b"stale overlay").unwrap();
+
+        run(&doc, false, false, true).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(!updated.contains("resume: old"));
+        assert!(agent_doc_snapshot_io::load(&doc).unwrap().is_none());
+        assert!(agent_doc_snapshot_io::load_crdt(&doc).unwrap().is_none());
+        assert!(
+            agent_doc_snapshot_io::load_overlay_crdt(&doc)
+                .unwrap()
+                .is_none()
         );
     }
 

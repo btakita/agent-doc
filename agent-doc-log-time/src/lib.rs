@@ -31,7 +31,10 @@
 //! - `parse_log_timestamp` fails closed (`None`) on garbage rather than mapping
 //!   it to `0`, so a malformed line is skipped, not mis-windowed.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 /// Return the current Unix epoch seconds, defaulting to `0` when the system
 /// clock is earlier than `UNIX_EPOCH`.
@@ -45,6 +48,31 @@ pub fn current_epoch_secs() -> u64 {
 /// Return the current timestamp in the log format `YYYY-MM-DDTHH:MM:SSZ`.
 pub fn current_log_timestamp() -> String {
     format_log_timestamp(current_epoch_secs())
+}
+
+/// Return the current timestamp in a compact human display format
+/// `YYYY-MM-DD HH:MM:SS` (UTC).
+pub fn current_human_timestamp() -> String {
+    format_human_timestamp(current_epoch_secs())
+}
+
+/// Return the current local date as `YYYY-MM-DD` using the platform `date`
+/// command, falling back to `unknown-date` when it is unavailable.
+///
+/// Archive headings historically used local operator dates, not UTC log dates.
+/// Keep that behavior here without adding a chrono dependency.
+pub fn current_local_date_ymd() -> String {
+    Command::new("date")
+        .args(["+%Y-%m-%d"])
+        .output()
+        .ok()
+        .and_then(|o| trimmed_date_stdout(&o.stdout))
+        .unwrap_or_else(|| "unknown-date".to_string())
+}
+
+fn trimmed_date_stdout(stdout: &[u8]) -> Option<String> {
+    let trimmed = String::from_utf8_lossy(stdout).trim().to_string();
+    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 /// Format a Unix epoch (seconds) as a human-readable ISO-8601 UTC timestamp
@@ -67,6 +95,12 @@ pub fn format_log_timestamp(secs: u64) -> String {
     let year = if m <= 2 { y + 1 } else { y };
 
     format!("{year:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+}
+
+/// Format a Unix epoch (seconds) as `YYYY-MM-DD HH:MM:SS` (UTC).
+pub fn format_human_timestamp(secs: u64) -> String {
+    let iso = format_log_timestamp(secs);
+    format!("{} {}", &iso[..10], &iso[11..19])
 }
 
 /// Render the `#opslogtrack` suffix appended to each ops-log line.
@@ -152,6 +186,31 @@ mod tests {
         assert_eq!(format_log_timestamp(1_781_771_180), "2026-06-18T08:26:20Z");
         assert_eq!(format_log_timestamp(0), "1970-01-01T00:00:00Z");
         assert_eq!(format_log_timestamp(1_709_164_800), "2024-02-29T00:00:00Z");
+    }
+
+    #[test]
+    fn human_timestamp_preserves_space_separated_shape() {
+        assert_eq!(format_human_timestamp(1_781_771_180), "2026-06-18 08:26:20");
+        assert_eq!(format_human_timestamp(0), "1970-01-01 00:00:00");
+    }
+
+    #[test]
+    fn local_date_stdout_trims_and_rejects_empty_output() {
+        assert_eq!(
+            trimmed_date_stdout(b"2026-07-02\n"),
+            Some("2026-07-02".to_string())
+        );
+        assert_eq!(trimmed_date_stdout(b"\n"), None);
+    }
+
+    #[test]
+    fn current_local_date_ymd_has_archive_shape() {
+        let date = current_local_date_ymd();
+        assert!(
+            date == "unknown-date"
+                || (date.len() == 10 && date.as_bytes()[4] == b'-' && date.as_bytes()[7] == b'-'),
+            "unexpected archive date shape: {date:?}"
+        );
     }
 
     #[test]

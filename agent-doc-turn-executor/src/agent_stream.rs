@@ -19,6 +19,18 @@ pub struct StreamChunk {
     pub session_id: Option<String>,
 }
 
+/// Backend contract for agent adapters that can stream response chunks.
+pub trait StreamingAgent {
+    /// Send a prompt and return an iterator over response chunks.
+    fn send_streaming(
+        &self,
+        prompt: &str,
+        session_id: Option<&str>,
+        fork: bool,
+        model: Option<&str>,
+    ) -> Result<Box<dyn Iterator<Item = Result<StreamChunk>>>>;
+}
+
 /// Parse a single stream-json line from Claude Code output.
 ///
 /// Claude Code stream-json format emits lines like:

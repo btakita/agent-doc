@@ -27,10 +27,8 @@ pub(crate) fn check_backlog_replay_guard(
     // Phase 6 (#lr-content-6): cached document content.
     let current_content = rc.doc_content();
 
-    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let hash = agent_doc_fs::document_state_hash(&canonical).unwrap_or_default();
-    let baseline_content = agent_doc_fs::find_project_root(&canonical)
-        .map(|root| root.join(format!(".agent-doc/baselines/{}.md", hash)))
+    let baseline_content = agent_doc_fs::baseline_path_for(file)
+        .ok()
         .and_then(|p| std::fs::read_to_string(p).ok());
 
     let baseline = match baseline_content {

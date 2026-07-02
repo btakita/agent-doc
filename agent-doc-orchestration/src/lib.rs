@@ -35,12 +35,7 @@
 //! split into narrower crates.
 
 // Foundation utilities (increments 1–5).
-pub mod ipc_socket;
 pub mod ops_log;
-
-// I/O wrappers around focused pure crates.
-pub mod frontmatter_io;
-pub mod template_io;
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod admin;
@@ -53,31 +48,20 @@ pub mod capture;
 pub mod claim;
 pub mod codex_hook;
 pub mod compact;
-pub mod convergence_playback;
 pub mod crdt_relay_host;
 pub mod cycle_state;
-pub mod dashboard;
-pub mod dedupe;
-pub(crate) mod detached_child;
-pub mod diff_io;
 pub mod doctor;
 pub mod document_watcher;
-pub mod editor_route_errors;
 pub mod flow;
 pub mod focus;
 pub mod gc;
 pub mod git;
 pub mod graph;
-pub mod hooks;
-pub mod lint_gate;
-pub mod memory_cmd;
 pub mod preflight;
 pub mod project_controller;
 pub mod prompt;
-pub mod prompt_context;
 pub mod queue_cmd;
 pub mod queue_continuation;
-pub mod queue_journal;
 pub mod realtime_model;
 pub mod repair;
 pub mod resync;
@@ -87,10 +71,7 @@ pub mod session_accretion;
 pub mod session_actor;
 pub mod session_check;
 pub mod sessions;
-pub mod snapshot;
 pub mod start;
-pub mod startup_miss;
-pub mod status_cmd;
 pub mod stream;
 pub mod supervisor;
 pub mod sync;
@@ -98,12 +79,46 @@ pub mod watch;
 pub mod write;
 pub mod write_queue;
 
-// Op-capture merge adapter over the focused merge crate.
-pub mod merge;
+fn load_active_capture_for_hooks(
+    file: &std::path::Path,
+) -> Result<Option<agent_doc_hooks_io::PostResponseCapture>, String> {
+    crate::capture::load_active(file)
+        .map(|capture| {
+            capture.map(|capture| agent_doc_hooks_io::PostResponseCapture {
+                capture_id: capture.capture_id,
+                response_sha256: capture.response_sha256,
+                response_body: capture.response_body,
+            })
+        })
+        .map_err(|err| err.to_string())
+}
 
-// Supply side of op-capture / evented-reflection merge (#qnodemerge4wire):
-// per-document editor-op sidecar persistence consumed by merge::merge_contents_crdt_with_ops.
-pub mod op_capture;
+fn capture_tsift_memory_closeout_for_hooks(file: &std::path::Path, response_body: &str) {
+    let _ = agent_doc_memory_io::closeout::capture_tsift_memory_closeout(file, response_body);
+}
+
+fn reap_local_model_leases_for_hooks(file: &std::path::Path) {
+    let _ = agent_doc_lease_io::local_model::reap_local_model_leases(file);
+}
+
+fn reap_stale_editor_consumers_for_hooks(
+    file: &std::path::Path,
+) -> agent_doc_hooks_io::StaleConsumerReapCounts {
+    let counts = agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file(file);
+    agent_doc_hooks_io::StaleConsumerReapCounts {
+        consumer_patches: counts.consumer_patches,
+        live_buffers: counts.live_buffers,
+    }
+}
+
+pub(crate) fn post_response_hook_effects() -> impl agent_doc_hooks_io::PostResponseHookEffects {
+    agent_doc_hooks_io::post_response_hook_effects(
+        load_active_capture_for_hooks,
+        capture_tsift_memory_closeout_for_hooks,
+        reap_local_model_leases_for_hooks,
+        reap_stale_editor_consumers_for_hooks,
+    )
+}
 
 #[cfg(test)]
 mod test_support;

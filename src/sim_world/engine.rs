@@ -1744,16 +1744,11 @@ impl SimWorld {
             baseline,
             content_ours,
             snapshot_candidate,
-            |base, ours, theirs| {
-                agent_doc_orchestration::merge::merge_contents(base, ours, theirs).ok()
-            },
+            |base, ours, theirs| agent_doc_merge_io::merge_contents(base, ours, theirs).ok(),
         ) {
-            let union = agent_doc_orchestration::merge::merge_contents(
-                baseline,
-                content_ours,
-                snapshot_candidate,
-            )
-            .expect("disjoint forward-merge must succeed");
+            let union =
+                agent_doc_merge_io::merge_contents(baseline, content_ours, snapshot_candidate)
+                    .expect("disjoint forward-merge must succeed");
             assert!(
                 !union.contains("<<<<<<<"),
                 "a disjoint forward-merge must be conflict-free:\n{union}"
@@ -2403,7 +2398,7 @@ impl SimWorld {
             return Ok(());
         }
         let (patches, unmatched) = agent_doc_template::parse_patches(&response)?;
-        let next_doc = agent_doc_orchestration::template_io::apply_patches(
+        let next_doc = agent_doc_template_io::apply_patches(
             &self.doc,
             &patches,
             &unmatched,

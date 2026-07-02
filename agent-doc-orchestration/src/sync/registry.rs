@@ -2,31 +2,7 @@ use super::*;
 
 pub(crate) fn cycle_phase_label(file: &Path) -> Option<String> {
     let state = crate::cycle_state::load(file).ok().flatten()?;
-    let label = match state.phase {
-        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
-        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
-        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
-        agent_doc_turn::CyclePhase::Committed => "committed",
-        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
-    };
-    Some(label.to_string())
-}
-
-pub(crate) fn repair_outcome_label(outcome: crate::repair::RepairOutcome) -> &'static str {
-    match outcome {
-        crate::repair::RepairOutcome::Noop => "noop",
-        crate::repair::RepairOutcome::ReplayedResponse => "replayed_response",
-        crate::repair::RepairOutcome::AlreadyApplied => "already_applied",
-        crate::repair::RepairOutcome::ManualTailRemovalRespected => "manual_tail_removal_respected",
-        crate::repair::RepairOutcome::StaleCaptureRetired => "stale_capture_retired",
-        crate::repair::RepairOutcome::StalePreflightLockRepaired => "stale_preflight_lock_repaired",
-        crate::repair::RepairOutcome::StalePreflightCycleAbandoned => {
-            "stale_preflight_cycle_abandoned"
-        }
-        crate::repair::RepairOutcome::CommitBoundaryRecovered => "commit_boundary_recovered",
-        crate::repair::RepairOutcome::TemplateNormalized => "template_normalized",
-        crate::repair::RepairOutcome::CompletedBacklogReaped => "completed_backlog_reaped",
-    }
+    Some(state.phase.as_str().to_string())
 }
 
 pub(crate) fn canonicalize_sync_file(file: &Path) -> Option<PathBuf> {
@@ -40,7 +16,7 @@ pub(crate) fn canonicalize_sync_file(file: &Path) -> Option<PathBuf> {
 
 pub(crate) fn registry_location_for_file(file: &Path) -> Option<(PathBuf, PathBuf, String)> {
     let canonical = canonicalize_sync_file(file)?;
-    let project_root = agent_doc_fs::find_project_root(&canonical)?;
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
     let registry_key = tmux_router::registry::canonical_registry_key_in(
         &project_root,
         canonical.to_string_lossy().as_ref(),

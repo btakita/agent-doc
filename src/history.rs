@@ -36,7 +36,6 @@ use std::path::Path;
 use std::process::Command;
 
 use agent_doc_element::element;
-use agent_doc_orchestration::snapshot;
 
 const EXCHANGE_COMPONENT: &str = "exchange";
 
@@ -253,7 +252,9 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
         .with_context(|| format!("failed to persist to {}", file.display()))?;
 
     // Update snapshot (best-effort — may fail in environments without .agent-doc/)
-    if let Err(e) = snapshot::save(file, &new_doc) {
+    if let Err(e) =
+        agent_doc_snapshot_io::save(file, &new_doc, agent_doc_orchestration::ops_log::log_op)
+    {
         eprintln!("[history] Warning: failed to update snapshot: {}", e);
     }
 

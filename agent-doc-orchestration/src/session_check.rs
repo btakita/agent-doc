@@ -593,11 +593,15 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 }
             }
         }
-        if let Ok(Some(miss)) = crate::startup_miss::load(file) {
+        if let Ok(Some(miss)) = agent_doc_supervisor_io::startup_miss::load_startup_miss(file) {
             if let Some(supersession) =
-                crate::startup_miss::superseded_by_newer_registered_start(file, &miss)?
+                agent_doc_supervisor_io::startup_miss::superseded_by_newer_registered_start(
+                    agent_doc_supervisor_io::startup_miss::session_registry_lookup(),
+                    file,
+                    &miss,
+                )?
             {
-                crate::startup_miss::clear(file)?;
+                agent_doc_supervisor_io::startup_miss::clear_startup_miss(file)?;
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -609,11 +613,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                     ),
                 );
             } else {
-                let detail = crate::startup_miss::session_log_diagnostic(file, &miss.session_id)
-                    .ok()
-                    .flatten()
-                    .map(|detail| format!("; {detail}"))
-                    .unwrap_or_default();
+                let detail = agent_doc_supervisor_io::startup_miss::session_log_diagnostic(
+                    file,
+                    &miss.session_id,
+                )
+                .ok()
+                .flatten()
+                .map(|detail| format!("; {detail}"))
+                .unwrap_or_default();
                 report.warnings.push(format!(
                     "[session-check] WARNING: startup-miss marker exists for pane {} ({:?}) — the last {} start never acknowledged a document cycle{}",
                     miss.pane_id, miss.origin, miss.harness, detail
@@ -664,7 +671,11 @@ fn self_heal_late_ipc_overapplication(file: &Path) -> Result<bool> {
         file.display()
     );
     crate::write::atomic_write_pub(file, &overapplication.remediated_content)?;
-    crate::snapshot::save(file, &overapplication.remediated_content)?;
+    agent_doc_snapshot_io::save(
+        file,
+        &overapplication.remediated_content,
+        crate::ops_log::log_op,
+    )?;
     Ok(true)
 }
 
@@ -834,11 +845,12 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             // run for it — it is not a bypassed patchback. Do not interrupt; fall
             // through to the remaining guards (post-commit drift etc.) which catch a
             // genuine working-tree problem without the false closeout-violation.
-            let marker_committed_in_head = crate::git::show_head(file)?.is_some_and(|head| {
-                agent_doc_document::write_normalization::response_marker_present_in_content(
-                    &head, &marker,
-                )
-            });
+            let marker_committed_in_head = agent_doc_git_io::revision::show_head(file)?
+                .is_some_and(|head| {
+                    agent_doc_document::write_normalization::response_marker_present_in_content(
+                        &head, &marker,
+                    )
+                });
             if marker_committed_in_head {
                 crate::ops_log::log_op(
                     file,
@@ -852,13 +864,13 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 return Ok(SessionCheckStatus::Interrupted(
                     agent_doc_workflow::session_check::likely_direct_response_patchback_message(
                         &marker,
-                        &tracked_side_effect_note(file)?,
+                        &agent_doc_git_io::status::tracked_side_effect_note(file)?,
                         &closeout_recovery_hint(file),
                     ),
                 ));
             }
         }
-        let latest_head_response_missing = match crate::git::show_head(file)? {
+        let latest_head_response_missing = match agent_doc_git_io::revision::show_head(file)? {
             Some(head) => match std::fs::read_to_string(file) {
                 Ok(working) => {
                     let heading =
@@ -919,7 +931,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
         )));
     }
 
-    match last_ops_event(file)? {
+    match agent_doc_ops_log_io::last_ops_event(file)? {
         None => {
             if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
@@ -950,7 +962,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}{} {}",
                     marker,
-                    tracked_side_effect_note(file)?,
+                    agent_doc_git_io::status::tracked_side_effect_note(file)?,
                     closeout_recovery_hint(file)
                 )));
             }
@@ -1044,7 +1056,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}{} {}",
                     marker,
-                    tracked_side_effect_note(file)?,
+                    agent_doc_git_io::status::tracked_side_effect_note(file)?,
                     closeout_recovery_hint(file)
                 )));
             }
@@ -1304,7 +1316,7 @@ mod tests {
             current.push_str("<!-- /agent:icebox -->\n");
         }
         fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if had_pending_mutations {
@@ -1340,7 +1352,7 @@ mod tests {
         let current =
             "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
         fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         if capture {
             crate::capture::capture_response(&doc, "### Re: do #nsga4verify — gpt-5\n\nDone.")
@@ -1372,7 +1384,7 @@ mod tests {
             "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{exchange_body}\n<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         // A response WAS captured/parsed this turn (capture_id set)...
         crate::capture::capture_response(&doc, "### Re: do #x — gpt-5\n\nDone.").unwrap();
@@ -1424,7 +1436,7 @@ mod tests {
             current.push_str("<!-- /agent:backlog -->\n");
         }
         fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if !expect_ids.is_empty() {
@@ -1494,7 +1506,7 @@ mod tests {
             current.push_str("<!-- /agent:review -->\n");
         }
         fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if !expect_ids.is_empty() {
@@ -1601,7 +1613,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, visible_lost_latest).unwrap();
-        crate::snapshot::save(&doc, visible_lost_latest).unwrap();
+        agent_doc_snapshot_io::save(&doc, visible_lost_latest, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(
             &doc,
             Some(visible_lost_latest),
@@ -1678,7 +1690,8 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, visible_disk_lost_latest).unwrap();
-        crate::snapshot::save(&doc, visible_disk_lost_latest).unwrap();
+        agent_doc_snapshot_io::save(&doc, visible_disk_lost_latest, crate::ops_log::log_op)
+            .unwrap();
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc.to_string_lossy(),
             committed,
@@ -1731,7 +1744,7 @@ mod tests {
         let doc = root.join("doc.md");
         let doc_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nHello\n";
         fs::write(&doc, doc_content).unwrap();
-        crate::snapshot::save(&doc, doc_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, doc_content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(doc_content), Some(doc_content)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -1784,7 +1797,7 @@ mod tests {
         }
         let doc = root.join("doc.md");
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         for args in [
             vec!["add", "doc.md"],
             vec!["commit", "-m", "ours", "--no-verify"],
@@ -1931,7 +1944,7 @@ Body\n\
 <!-- /agent:exchange -->\n";
         let current = snapshot.replacen("agent: claude", "agent: codex", 1);
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
         assert!(
@@ -1992,7 +2005,7 @@ Body\n\
         );
         fs::write(&doc, &current).unwrap();
         assert!(
-            crate::snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "precondition: fresh session has no snapshot"
         );
 
@@ -2056,7 +2069,7 @@ Body\n\
         );
         fs::write(&doc, &current).unwrap();
         assert!(
-            crate::snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "precondition: fresh session has no snapshot"
         );
 
@@ -2092,7 +2105,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         assert!(agent_doc_prompt_lines::text_line_looks_like_prompt_target(
             "Can we run specific rubrics for fine tuning?"
@@ -2136,7 +2149,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         assert!(agent_doc_diff::prompt_change_is_already_answered(
             "I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references\nI updated the repo-local references to the renamed GitHub repo.\n"
@@ -2168,7 +2181,7 @@ Body\n\
             "The service returned 503 from this endpoint",
         );
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let changes = agent_doc_diff::classify_prompt_bearing_changes(
             &agent_doc_diff::unified_diff_from_contents(
@@ -2218,7 +2231,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
         assert!(
@@ -2250,7 +2263,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let change = first_unstarted_prompt_bearing_change(&doc)
             .unwrap()
@@ -2291,7 +2304,7 @@ Body\n\
             "-->\n",
         );
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
         assert!(
@@ -2314,7 +2327,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, current).unwrap();
+        agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
             .unwrap();
@@ -2362,7 +2375,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -2420,7 +2433,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, current).unwrap();
+        agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
             .unwrap();
@@ -2611,7 +2624,7 @@ Body\n\
         )
         .to_string();
         fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         crate::cycle_state::mark_pending_mutations(&doc).unwrap();
         crate::cycle_state::record_active_queue_heads(&doc, &["do [#eqrecovery]".to_string()])
@@ -2646,7 +2659,7 @@ Body\n\
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
         let current = fs::read_to_string(&doc).unwrap();
-        crate::snapshot::save(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
 
         match inspect(&doc).unwrap() {
@@ -2768,20 +2781,20 @@ Body\n\
         let root = tmp.path().to_path_buf();
         let root_clone = root.clone();
         let server = std::thread::spawn(move || {
-            crate::ipc_socket::start_listener(&root_clone, |_msg| {
+            agent_doc_ipc_io::start_listener(&root_clone, |_msg| {
                 Some(serde_json::json!({"type": "ack"}).to_string())
             })
             .ok();
         });
         // Wait until the listener is provably active before asserting.
         for _ in 0..50 {
-            if crate::ipc_socket::is_listener_active(&root) {
+            if agent_doc_ipc_io::is_listener_active(&root) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         assert!(
-            crate::ipc_socket::is_listener_active(&root),
+            agent_doc_ipc_io::is_listener_active(&root),
             "listener should be active for the project root"
         );
         match inspect(&doc).unwrap() {
@@ -2793,7 +2806,7 @@ Body\n\
             ),
         }
 
-        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(&root));
+        let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(&root));
         drop(server);
     }
     #[test]
@@ -3029,14 +3042,22 @@ Body\n\
     fn last_ops_event_missing_log_returns_none() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
-        assert!(last_ops_event(&doc).unwrap().is_none());
+        assert!(
+            agent_doc_ops_log_io::last_ops_event(&doc)
+                .unwrap()
+                .is_none()
+        );
     }
     #[test]
     fn last_ops_event_empty_log_returns_none() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
         fs::write(tmp.path().join(".agent-doc/logs/ops.log"), "\n\n").unwrap();
-        assert!(last_ops_event(&doc).unwrap().is_none());
+        assert!(
+            agent_doc_ops_log_io::last_ops_event(&doc)
+                .unwrap()
+                .is_none()
+        );
     }
     #[test]
     fn last_ops_event_returns_final_event_stripped() {
@@ -3048,7 +3069,7 @@ Body\n\
         )
         .unwrap();
         assert_eq!(
-            last_ops_event(&doc).unwrap().unwrap(),
+            agent_doc_ops_log_io::last_ops_event(&doc).unwrap().unwrap(),
             "ipc_write_consumed file=x patches=1"
         );
     }
@@ -3061,7 +3082,7 @@ Body\n\
             "[100] ipc_write_consumed file=x\n[101] preflight_diff_start file=x\n",
         )
         .unwrap();
-        let last = last_ops_event(&doc).unwrap().unwrap();
+        let last = agent_doc_ops_log_io::last_ops_event(&doc).unwrap().unwrap();
         assert!(last.starts_with(PREFLIGHT_START_EVENT));
     }
     #[test]
@@ -3080,7 +3101,7 @@ Body\n\
         )
         .unwrap();
         assert_eq!(
-            last_ops_event(&doc).unwrap().unwrap(),
+            agent_doc_ops_log_io::last_ops_event(&doc).unwrap().unwrap(),
             format!("ipc_write_consumed file={} patches=1", doc.display())
         );
     }
@@ -3100,7 +3121,9 @@ Body\n\
         )
         .unwrap();
 
-        let diagnostic = latest_ipc_proof_diagnostic(&doc).unwrap().unwrap();
+        let diagnostic = agent_doc_ops_log_io::latest_ipc_proof_diagnostic(&doc)
+            .unwrap()
+            .unwrap();
         assert!(diagnostic.contains("invariant=missing_response_probe"));
         assert!(diagnostic.contains("recovery=retry_without_disk_write"));
     }
@@ -3114,7 +3137,7 @@ Body\n\
         )
         .unwrap();
         assert_eq!(
-            detect_write_completed_commit_missing(&doc)
+            agent_doc_ops_log_io::detect_write_completed_commit_missing(&doc)
                 .unwrap()
                 .unwrap(),
             "snapshot_saved_file_ipc file=x snap_len=10"
@@ -3170,7 +3193,7 @@ Body\n\
         let doc = make_project(tmp.path());
         let snapshot = "---\nagent_doc_format: template\n---\n\n## Exchange\n\nHello\n";
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         fs::write(&doc, format!("{snapshot}### Re: test — gpt-5\n\nBody\n")).unwrap();
 
         let marker = detect_bypassed_response_write(&doc).unwrap();
@@ -3182,7 +3205,7 @@ Body\n\
         let doc = make_project(tmp.path());
         let snapshot = "## User\n\nHello\n";
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         fs::write(&doc, format!("{snapshot}\n## Assistant\n\nResponse\n")).unwrap();
 
         let marker = detect_bypassed_response_write(&doc).unwrap();
@@ -3194,7 +3217,7 @@ Body\n\
         let doc = make_project(tmp.path());
         let snapshot = "## User\n\nHello\n";
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         fs::write(&doc, format!("{snapshot}\nWhy is this still dirty?\n")).unwrap();
 
         assert!(detect_bypassed_response_write(&doc).unwrap().is_none());
@@ -3211,7 +3234,7 @@ Body\n\
         let doc = make_project(tmp.path());
         let snapshot = "## Exchange\n\nHello\n";
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         fs::write(
             &doc,
             format!(
@@ -3229,7 +3252,7 @@ Body\n\
         let snapshot =
             "<!-- agent:exchange patch=append -->\n❯ Prior question?\n<!-- /agent:exchange -->\n";
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         fs::write(
             &doc,
             "<!-- agent:exchange patch=append -->\n❯ Prior question?\nWhy was this missed?\n### Re: test — gpt-5\n\nBody\n<!-- /agent:exchange -->\n",
@@ -3247,7 +3270,7 @@ Body\n\
         let snapshot =
             "<!-- agent:exchange patch=append -->\n❯ Prior question?\n<!-- /agent:exchange -->\n";
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         fs::write(
             &doc,
             "<!-- agent:exchange patch=append -->\n❯ Prior question?\n### Re: test — gpt-5\n\nCompleted `#adoc-prefix-strip-session-check-whitelist`.\n<!-- /agent:exchange -->\n",
@@ -3312,7 +3335,7 @@ Body\n\
         fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -3346,7 +3369,7 @@ Body\n\
         fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -3387,7 +3410,7 @@ Body\n\
         fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -3438,7 +3461,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -3504,7 +3527,7 @@ Body\n\
             "-->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -3557,7 +3580,7 @@ Body\n\
             "The service returned 503 from this endpoint",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -3611,7 +3634,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -3683,7 +3706,7 @@ Body\n\
             "<!-- /agent:backlog -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -3825,7 +3848,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -3860,7 +3883,7 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
         crate::cycle_state::mark_write_applied(
             &doc,
@@ -3883,7 +3906,7 @@ Body\n\
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "session_check_commit_boundary_recovered");
-        let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(repaired_snapshot.contains("### Re: #patchbypass — gpt-5"));
     }
     #[test]
@@ -3918,7 +3941,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -3996,7 +4019,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -4031,7 +4054,7 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         fs::write(
             root.join(".agent-doc/logs/ops.log"),
             format!(
@@ -4087,7 +4110,7 @@ Body\n\
             new body\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, tracked).unwrap();
-        crate::snapshot::save(&doc, tracked).unwrap();
+        agent_doc_snapshot_io::save(&doc, tracked, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -4116,7 +4139,7 @@ Body\n\
             new body\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, historical).unwrap();
-        crate::snapshot::save(&doc, stale_snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, stale_snapshot, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -4144,7 +4167,7 @@ Body\n\
             other => panic!("expected ok status, got {other:?}"),
         }
 
-        let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
             repaired_snapshot.contains("### Re: historical"),
             "snapshot should advance to the committed historical response:\n{repaired_snapshot}"
@@ -4196,7 +4219,7 @@ Body\n\
             "<!-- /agent:backlog -->\n",
         );
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -4244,7 +4267,7 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(head)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(head), Some(head)).unwrap();
 
@@ -4289,7 +4312,7 @@ Body\n\
             other => panic!("expected interrupted status, got {other:?}"),
         }
 
-        let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(!repaired_snapshot.contains("### Re: do `#sgzy` — codex"));
         assert!(!repaired_snapshot.contains("What are the next steps?"));
     }
@@ -4327,7 +4350,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -4360,7 +4383,7 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -4378,7 +4401,7 @@ Body\n\
             other => panic!("expected ok status, got {other:?}"),
         }
 
-        let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             repaired_snapshot, committed,
             "snapshot should follow the committed prompt-prefix normalization"
@@ -4421,7 +4444,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, snapshot).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -4461,7 +4484,7 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(head)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(head), Some(head)).unwrap();
 
@@ -4493,7 +4516,7 @@ Body\n\
             other => panic!("expected interrupted status, got {other:?}"),
         }
 
-        let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(!repaired_snapshot.contains("### Re: do `#done` — codex"));
         assert!(!repaired_snapshot.contains("Tuned manually."));
     }
@@ -4548,7 +4571,7 @@ Body\n\
                 supervisor_instance_id: String::new(),
             },
         );
-        crate::sessions::save_in(tmp.path(), &registry).unwrap();
+        agent_doc_session_registry_io::save_in(tmp.path(), &registry).unwrap();
         fs::write(
             tmp.path().join(".agent-doc/logs/session-456.log"),
             concat!(
@@ -5106,7 +5129,7 @@ Body\n\
         let doc = tmp.path().join("doc.md");
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nPrompt\n";
         fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &doc.to_string_lossy(),
             content,
@@ -5851,7 +5874,7 @@ Body\n\
         let doc = root.join("doc.md");
         let old_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n";
         fs::write(&doc, old_content).unwrap();
-        crate::snapshot::save(&doc, old_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, old_content, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -5871,7 +5894,7 @@ Body\n\
         let snapshot_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: test\nresponse\n";
         let working_tree = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: test\nresponse\n\n❯ extra user prompt that diverges from snapshot\n";
         fs::write(&doc, working_tree).unwrap();
-        crate::snapshot::save(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
 
         // Mark cycle as committed (simulating a bug where cycle_state lied)
         crate::cycle_state::start_preflight(&doc, Some(old_content), Some(old_content)).unwrap();
@@ -5930,7 +5953,7 @@ Body\n\
         let doc = root.join("doc.md");
         let old_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n";
         fs::write(&doc, old_content).unwrap();
-        crate::snapshot::save(&doc, old_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, old_content, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -5946,7 +5969,7 @@ Body\n\
         // HEAD does not, cycle marked Committed.
         let new_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: test\nresponse\n";
         fs::write(&doc, new_content).unwrap();
-        crate::snapshot::save(&doc, new_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, new_content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(old_content), Some(old_content)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -6000,7 +6023,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -6079,7 +6102,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -6149,7 +6172,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -6226,7 +6249,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -6289,7 +6312,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -6374,7 +6397,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         for args in [
             vec!["add", "doc.md"],
             vec!["commit", "-m", "ours", "--no-verify"],
@@ -6442,7 +6465,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         for args in [
             vec!["add", "doc.md"],
             vec!["commit", "-m", "recovered", "--no-verify"],
@@ -6793,7 +6816,7 @@ Body\n\
             "<!-- agent:queue auto -->\n<!-- /agent:queue -->\n",
         );
         fs::write(&doc, without_head).unwrap();
-        crate::snapshot::save(&doc, without_head).unwrap();
+        agent_doc_snapshot_io::save(&doc, without_head, crate::ops_log::log_op).unwrap();
 
         let result = inspect(&doc).unwrap();
         match result {
@@ -6827,7 +6850,7 @@ Body\n\
             "<!-- agent:queue auto -->\n<!-- /agent:queue -->\n",
         );
         fs::write(&doc, without_head).unwrap();
-        crate::snapshot::save(&doc, without_head).unwrap();
+        agent_doc_snapshot_io::save(&doc, without_head, crate::ops_log::log_op).unwrap();
         crate::cycle_state::record_dropped_queue_prompts(&doc, &[head.to_string()]).unwrap();
 
         let rc = crate::graph::RunContext::new(doc.clone());
@@ -6876,7 +6899,7 @@ Body\n\
             head = head,
         );
         fs::write(&doc, &with_echo).unwrap();
-        crate::snapshot::save(&doc, &with_echo).unwrap();
+        agent_doc_snapshot_io::save(&doc, &with_echo, crate::ops_log::log_op).unwrap();
 
         let rc = crate::graph::RunContext::new(doc.clone());
         rc.set_doc_content(with_echo);
@@ -6927,7 +6950,7 @@ Body\n\
             "<!-- no-free-text-queue-head-guard -->\n",
         );
         fs::write(&doc, without_head).unwrap();
-        crate::snapshot::save(&doc, without_head).unwrap();
+        agent_doc_snapshot_io::save(&doc, without_head, crate::ops_log::log_op).unwrap();
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
@@ -6959,7 +6982,7 @@ Body\n\
             "###\n",
         );
         fs::write(&doc, interrupted).unwrap();
-        crate::snapshot::save(&doc, interrupted).unwrap();
+        agent_doc_snapshot_io::save(&doc, interrupted, crate::ops_log::log_op).unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -7325,9 +7348,10 @@ Body\n\
         .unwrap();
         fs::write(&news_index, "old news index\n").unwrap();
         fs::write(&news_day, "old daily news\n").unwrap();
-        crate::snapshot::save(
+        agent_doc_snapshot_io::save(
             &doc,
             "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n",
+            crate::ops_log::log_op,
         )
         .unwrap();
         Command::new("git")
@@ -7354,7 +7378,7 @@ Body\n\
         // closeout.
         let new_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: create today's news — codex\nresponse\n";
         fs::write(&doc, new_content).unwrap();
-        crate::snapshot::save(&doc, new_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, new_content, crate::ops_log::log_op).unwrap();
         fs::write(&news_index, "new news index\n").unwrap();
         fs::write(&news_day, "new daily news\n").unwrap();
 
@@ -7398,7 +7422,7 @@ Body\n\
         let content =
             "---\nagent_doc_session: test\n---\n\n## Exchange\n\nbody\n### Re: test\nresponse\n";
         fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -7462,7 +7486,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -7551,7 +7575,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -7609,7 +7633,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -7678,7 +7702,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -7728,7 +7752,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])

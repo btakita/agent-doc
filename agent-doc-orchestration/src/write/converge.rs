@@ -50,9 +50,9 @@ pub fn guard_no_stale_snapshot_reset_drift(
         return Ok(false);
     }
     if let Some(reason) = classify_stale_snapshot_visible_rebase(file, snapshot_doc, current_doc) {
-        crate::snapshot::save(file, current_doc)?;
+        agent_doc_snapshot_io::save(file, current_doc, crate::ops_log::log_op)?;
         let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(current_doc).encode_state();
-        crate::snapshot::save_document_crdt(file, &crdt, current_doc)?;
+        agent_doc_merge_io::save_document_crdt(file, &crdt, current_doc)?;
         crate::ops_log::log_op(
             file,
             &format!(
@@ -105,7 +105,7 @@ fn classify_stale_snapshot_visible_rebase(
     // origin fact. (After a `/clear` the on-disk marker survives, so a resumed
     // session can still recognize its own prior compaction.)
     let recent_binary_compaction =
-        crate::session_accretion::recent_exchange_compaction_timestamp(file)
+        agent_doc_session_accretion_io::recent_exchange_compaction_timestamp(file)
             .ok()
             .flatten()
             .is_some();
@@ -307,10 +307,10 @@ pub fn try_auto_recover_live_prompt_drift(
     let ipc_project_root = file
         .canonicalize()
         .ok()
-        .map(|c| resolve_ipc_project_root_pub(&c));
+        .map(|c| agent_doc_project_root_io::resolve_ipc_project_root(&c));
     let ipc_listener_active = ipc_project_root
         .as_deref()
-        .map(crate::ipc_socket::is_listener_active)
+        .map(agent_doc_ipc_io::is_listener_active)
         .unwrap_or(false);
 
     if let Some(project_root) = ipc_project_root.as_deref()
@@ -330,7 +330,7 @@ pub fn try_auto_recover_live_prompt_drift(
                     true,
                     "editor_ipc",
                 );
-                crate::flow::proof::log_flow_event(
+                agent_doc_flow_io::log_flow_event(
                     file,
                     agent_doc_flow::types::FlowEvent::new(
                         agent_doc_flow::types::FlowName::DocumentMutation,
@@ -338,6 +338,7 @@ pub fn try_auto_recover_live_prompt_drift(
                         agent_doc_flow::types::FlowOutcome::Completed,
                     )
                     .with_reason("live_prompt_drift_auto_recovered"),
+                    crate::ops_log::log_op,
                 );
                 eprintln!(
                     "[commit] auto-recovered live_prompt_drift wedge for {} via editor IPC convergence ({} bytes)",
@@ -378,9 +379,9 @@ pub fn try_auto_recover_live_prompt_drift(
             file.display()
         )
     })?;
-    crate::snapshot::save(file, &recovery_target)?;
+    agent_doc_snapshot_io::save(file, &recovery_target, crate::ops_log::log_op)?;
     let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&recovery_target);
-    crate::snapshot::save_document_crdt(file, &crdt_doc.encode_state(), &recovery_target)?;
+    agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), &recovery_target)?;
     log_live_prompt_drift_auto_recovered(
         file,
         &recovery_target,
@@ -388,7 +389,7 @@ pub fn try_auto_recover_live_prompt_drift(
         ipc_listener_active,
         "disk_fallback",
     );
-    crate::flow::proof::log_flow_event(
+    agent_doc_flow_io::log_flow_event(
         file,
         agent_doc_flow::types::FlowEvent::new(
             agent_doc_flow::types::FlowName::DocumentMutation,
@@ -396,6 +397,7 @@ pub fn try_auto_recover_live_prompt_drift(
             agent_doc_flow::types::FlowOutcome::Completed,
         )
         .with_reason("live_prompt_drift_auto_recovered"),
+        crate::ops_log::log_op,
     );
     eprintln!(
         "[commit] auto-recovered live_prompt_drift wedge for {} — merged the missing response into the realtime document ({} bytes) so operator-visible edits stay authoritative",
@@ -489,7 +491,7 @@ pub(crate) fn stale_ipc_drift_forces_pcp_recycle(stale: bool, auto_recycle: bool
 /// leaves the existing retry/advisory behavior in place. Returns `true` only when a
 /// forced recycle was scheduled.
 pub(crate) fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> bool {
-    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
         return false;
     };
     if crate::project_controller::stale_supervisor_warning_for_doc(file).is_none() {
@@ -557,7 +559,7 @@ pub(crate) fn stale_supervisor_write_short_circuit(
     let base = file
         .canonicalize()
         .ok()
-        .map(|canonical| resolve_ipc_project_root_pub(&canonical))?;
+        .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))?;
     if !agent_doc_turn_status_io::supervisor_stale(&base) {
         return None;
     }
@@ -565,7 +567,7 @@ pub(crate) fn stale_supervisor_write_short_circuit(
     // the Goal 2 forced PCP recycle (re-gated on the authoritative staleness probe
     // inside the helper) plus the Goal 1 route-owned supervisor recycle-request.
     schedule_stale_supervisor_pcp_recycle(file, source);
-    if let Err(err) = crate::project_controller::schedule_supervisor_recycle_for_doc(
+    if let Err(err) = agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
         file,
         agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT,
     ) {
@@ -650,7 +652,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
         ),
     );
 
-    match crate::ipc_socket::send_message(project_root, &payload) {
+    match agent_doc_ipc_io::send_message(project_root, &payload) {
         Ok(Some(_ack)) => {
             let patch_id = payload
                 .get("patch_id")
@@ -862,8 +864,8 @@ fn live_editor_sidecar_present(file: &Path) -> bool {
 fn editor_ipc_listener_active(file: &Path) -> bool {
     file.canonicalize()
         .ok()
-        .map(|c| resolve_ipc_project_root_pub(&c))
-        .map(|root| crate::ipc_socket::is_listener_active(&root))
+        .map(|c| agent_doc_project_root_io::resolve_ipc_project_root(&c))
+        .map(|root| agent_doc_ipc_io::is_listener_active(&root))
         .unwrap_or(false)
 }
 
@@ -969,7 +971,7 @@ fn refresh_editor_after_ack_mismatch(
             "safe_missing_agent_response_refresh_failed"
         }
     };
-    match crate::ipc_socket::send_refresh_content(
+    match agent_doc_ipc_io::send_refresh_content(
         project_root,
         &canonical.to_string_lossy(),
         refresh_content,
@@ -1034,9 +1036,9 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
         &indicator_path,
         content,
     )?;
-    let project_root = resolve_ipc_project_root_pub(&canonical_file);
-    if !crate::ipc_socket::is_listener_active(&project_root) {
-        return match crate::ipc_socket::send_publish_live_buffer_file_signal(
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical_file);
+    if !agent_doc_ipc_io::is_listener_active(&project_root) {
+        return match agent_doc_ipc_io::send_publish_live_buffer_file_signal(
             &project_root,
             &indicator_path,
         ) {
@@ -1074,7 +1076,7 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
         };
     }
 
-    match crate::ipc_socket::send_publish_live_buffer(&project_root, &indicator_path) {
+    match agent_doc_ipc_io::send_publish_live_buffer(&project_root, &indicator_path) {
         Ok(true) => {
             crate::ops_log::log_op(
                 file,
@@ -1138,7 +1140,7 @@ pub fn try_editor_converge(
     let canonical_file = file
         .canonicalize()
         .with_context(|| format!("{source}: failed to resolve {}", file.display()))?;
-    let project_root = resolve_ipc_project_root_pub(&canonical_file);
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical_file);
     // `#fcc0e`: integrate the converger with the `#ipcdrift` degraded-latch
     // circuit breaker. A session whose socket listener latched degraded
     // (repeated ack timeouts) may skip the socket, but must still prefer the
@@ -1250,7 +1252,7 @@ pub fn try_editor_converge(
             );
         }
     }
-    if !crate::ipc_socket::is_listener_active(&project_root) {
+    if !agent_doc_ipc_io::is_listener_active(&project_root) {
         if try_detached_disk_write(file, current_content, target, source, "no_listener")? {
             return Ok(true);
         }
@@ -1299,7 +1301,7 @@ pub fn try_editor_converge(
         ),
     );
 
-    match crate::ipc_socket::send_message(&project_root, &payload) {
+    match agent_doc_ipc_io::send_message(&project_root, &payload) {
         Ok(Some(_ack)) => {
             let sidecar = poll_ack_content_sidecar(
                 &project_root,
@@ -1704,7 +1706,7 @@ mod core_tests {
         let file = dir.path().join("plan.md");
         std::fs::write(&file, "body").unwrap();
         let canonical = file.canonicalize().unwrap();
-        let base = resolve_ipc_project_root_pub(&canonical);
+        let base = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
         agent_doc_turn_status_io::set_supervisor_stale_marker(&base, true).unwrap();
 
         let outcome = stale_supervisor_write_short_circuit(&file, "unit_test")
@@ -1757,7 +1759,7 @@ mod core_tests {
         let listener_root = project_root.to_path_buf();
         std::thread::spawn(move || {
             let root_clone = listener_root.clone();
-            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let msg_type = v.get("type").and_then(|value| value.as_str()).unwrap_or("");
                 let patch_id = v
@@ -2004,7 +2006,7 @@ mod core_tests {
 
         let listener_root = dir.path().to_path_buf();
         let _listener = std::thread::spawn(move || {
-            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v
                     .get("patch_id")
@@ -2531,7 +2533,7 @@ mod core_tests {
         let doc_for_listener = doc_str.clone();
         let source_for_listener = source.clone();
         let server = std::thread::spawn(move || {
-            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 *captured_clone.lock().unwrap() = Some(v.clone());
                 if v.get("type").and_then(|value| value.as_str()) == Some("publish_live_buffer") {
@@ -2576,7 +2578,7 @@ mod core_tests {
             "authority refresh should be logged as read-only editor IPC:\n{log}"
         );
 
-        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(dir.path()));
+        let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(dir.path()));
         drop(server);
     }
 
@@ -3084,7 +3086,7 @@ mod core_tests {
         );
         let current = preflight.replace(historical, "");
         fs::write(&doc, &current).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         // Preflight observed the historical response. The operator deleted it
         // before auto-recovery ran, so recovery must not resurrect it while
         // trying to restore the new response.
@@ -3119,7 +3121,7 @@ mod core_tests {
             crate::test_support::drift_baseline()
         );
         fs::write(&doc, &fragmented).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
         crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
@@ -3132,7 +3134,7 @@ mod core_tests {
         assert!(!recovered.contains("- original backlog wording"));
         assert_eq!(fs::read_to_string(&doc).unwrap(), recovered);
         assert_eq!(
-            snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(recovered.as_str()),
             "snapshot must advance to the operator-preserving merged document"
         );
@@ -3148,7 +3150,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         // The drift guard fired this cycle and adopted content_ours.
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
         crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -3181,7 +3183,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
         crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
@@ -3239,7 +3241,7 @@ mod core_tests {
         )
         .expect("partial exchange text should be preserved in the target");
         fs::write(&doc, &fragmented).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
         crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
@@ -3281,7 +3283,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
         crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
@@ -3324,7 +3326,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         // A cycle exists but the drift guard never fired (flag stays false) →
         // not the wedge we own.
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
@@ -3349,7 +3351,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
         crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
         // A genuine dropped user prompt was recorded this cycle → session-check
@@ -3397,7 +3399,7 @@ mod core_tests {
         let fragmented =
             crate::test_support::drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
         fs::write(&doc, &fragmented).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
         crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
         // The drift heuristic recorded the consumed item as a dropped queue prompt.
@@ -3480,7 +3482,7 @@ mod core_tests {
 ## Queue\n\n<!-- agent:queue auto -->\n- do [#active]\n- do [#sibling]\n<!-- /agent:queue -->\n"
         );
         fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         let active_node_key = queue_node_key_for_id(&snapshot, "active");
         let scope = agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
             Some(agent_doc_turn::turn_scope::Address::node(
@@ -3497,7 +3499,7 @@ mod core_tests {
                 .expect("historical trim plus sibling queue add should rebase");
 
         assert!(rebased, "guard should report a snapshot refresh");
-        assert_eq!(crate::snapshot::load(&doc).unwrap(), Some(current));
+        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), Some(current));
         let ops_log =
             fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
@@ -3530,7 +3532,7 @@ mod core_tests {
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n- Prior summary/context: compacted prior responses\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
 ## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         let scope =
             agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
         agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
@@ -3541,7 +3543,7 @@ mod core_tests {
 
         assert!(rebased, "guard should report a snapshot refresh");
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap(),
+            agent_doc_snapshot_io::load(&doc).unwrap(),
             Some(current.to_string())
         );
         let ops_log =
@@ -3582,10 +3584,10 @@ mod core_tests {
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n- Prior summary/context: compacted prior responses\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
 ## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         // No turn_scope saved (post-`/clear`). The binary-origin signal is the
         // recorded compaction marker.
-        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         let rebased =
             guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
@@ -3593,7 +3595,7 @@ mod core_tests {
 
         assert!(rebased, "guard should report a snapshot refresh");
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap(),
+            agent_doc_snapshot_io::load(&doc).unwrap(),
             Some(current.to_string())
         );
         let ops_log =
@@ -3626,10 +3628,10 @@ mod core_tests {
             &format!("{response_body}<!-- agent:boundary:new -->"),
         );
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, current).unwrap();
+        agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
         crate::capture::capture_response(&doc, &response_patch).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
 
         let rebased = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "commit")
             .expect("active captured response must not trip stale-snapshot reset repair");
@@ -3639,7 +3641,7 @@ mod core_tests {
             "active capture should leave the response-bearing snapshot in place"
         );
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap(),
+            agent_doc_snapshot_io::load(&doc).unwrap(),
             Some(snapshot),
             "prompt-only visible text must not overwrite the response snapshot"
         );
@@ -3678,7 +3680,7 @@ mod core_tests {
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
 ## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
         fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         // No turn_scope and no compaction marker → no provenance signal.
 
         let err = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
@@ -3687,7 +3689,7 @@ mod core_tests {
             err.to_string().contains("agent-doc reset --from-current"),
             "unproven shrink should keep deterministic reset guidance: {err}"
         );
-        assert_eq!(crate::snapshot::load(&doc).unwrap(), Some(snapshot));
+        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), Some(snapshot));
     }
 
     #[test]
@@ -3710,7 +3712,7 @@ mod core_tests {
         );
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\nOperator-authored replacement without compact archive proof.\n<!-- /agent:exchange -->\n";
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         let scope =
             agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
         agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
@@ -3723,7 +3725,7 @@ mod core_tests {
             err.to_string().contains("agent-doc reset --from-current"),
             "unsafe exchange rewrite should keep deterministic reset guidance: {err}"
         );
-        assert_eq!(crate::snapshot::load(&doc).unwrap(), Some(snapshot));
+        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), Some(snapshot));
     }
 
     #[test]
@@ -3752,7 +3754,7 @@ mod core_tests {
 ## Queue\n\n<!-- agent:queue auto -->\n- do [#sibling]\n<!-- /agent:queue -->\n"
         );
         fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         let active_node_key = queue_node_key_for_id(&snapshot, "active");
         let scope = agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
             Some(agent_doc_turn::turn_scope::Address::node(
@@ -3782,7 +3784,7 @@ mod core_tests {
             err.to_string().contains("agent-doc reset --from-current"),
             "unsafe drift should keep deterministic reset guidance: {err}"
         );
-        assert_eq!(crate::snapshot::load(&doc).unwrap(), Some(snapshot));
+        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), Some(snapshot));
     }
 
     #[test]

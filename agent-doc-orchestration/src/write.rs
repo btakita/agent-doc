@@ -36,7 +36,7 @@
 //! - `run_template`: template-component mode. Parses `patch:NAME` fence blocks
 //!   from stdin, sanitizes any `<!-- agent:NAME -->` markers in patch content
 //!   (prevents parser corruption), applies patches to the baseline via
-//!   `template_io::apply_patches`, then performs the same lock/merge/atomic-write
+//!   `agent_doc_template_io::apply_patches`, then performs the same lock/merge/atomic-write
 //!   cycle as `run`.
 //!
 //! - `run_stream`: CRDT stream-flush mode. Like `run_template` but uses
@@ -239,7 +239,6 @@ use agent_doc_element_exchange::{
     repair_response_precedes_prompt_in_exchange as repair_response_prompt_order_in_exchange,
     response_precedes_prompt_in_exchange, strip_prompt_prefix_from_response_body_first_lines,
 };
-use agent_doc_fs::find_project_root;
 use agent_doc_queue::queue_consume::{
     queue_consumption_allowed_for_response, queue_targeted_completion_id_for_current_head,
 };
@@ -252,14 +251,14 @@ use agent_doc_workflow::session_cycle::{
     pending_kept_open_ids_from_mutations,
 };
 
-use crate::flow::document_mutation::{
-    TemplateStructureGuardReason, log_template_structure_guard_event,
-};
+use agent_doc_element_exchange_io::{DuplicatePromptRepairOptions, DuplicatePromptRepairReport};
 use agent_doc_flow::types::FlowOutcome;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_template as template;
+use agent_doc_template::structure_guard::TemplateStructureGuardReason;
+use agent_doc_template_io::log_template_structure_guard_event;
 
-use crate::{merge, repair, sessions, snapshot};
+use crate::repair;
 use agent_doc_template::stale_baseline::{
     exchange_append_patch_can_rebase_to_head, is_append_mode_component, is_stale_baseline,
     patch_touches_exchange,
@@ -421,15 +420,19 @@ fn log_splice_pending_component_warning(warning: &SplicePendingComponentWarning)
 ///
 /// `#mps` Rung 3 (flip): when the model-projected-baseline cutover is enabled
 /// (`AGENT_DOC_MPS=1`), source the base by projecting the model overlay pinned at
-/// preflight (`snapshot::load_baseline_model`), cross-checking against — and
+/// preflight (`agent_doc_snapshot_io::load_baseline_model`), cross-checking against — and
 /// falling back to — the legacy `.md` baseline. The `.md` read stays the fail-safe
 /// (and, with the flag on, the derived cross-check cache; Rung 4). With the flag
 /// off this is byte-for-byte the legacy `.md` path.
 fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<Option<String>> {
     let md_content = read_explicit_baseline_md(file, baseline_file)?;
 
-    if crate::snapshot::mps_enabled() {
-        match crate::snapshot::load_baseline_model(file, md_content.as_deref()) {
+    if agent_doc_snapshot_io::mps_enabled() {
+        match agent_doc_snapshot_io::load_baseline_model(
+            file,
+            md_content.as_deref(),
+            crate::ops_log::log_op,
+        ) {
             Ok(Some(projection)) => return Ok(Some(projection)),
             Ok(None) => {
                 crate::ops_log::log_op(
@@ -473,7 +476,7 @@ fn read_explicit_baseline_md(file: &Path, baseline_file: Option<&Path>) -> Resul
         }
     }
 
-    if let Err(e) = crate::snapshot::try_migrate_renamed(file) {
+    if let Err(e) = agent_doc_snapshot_io::try_migrate_renamed(file) {
         eprintln!("[write] warning: rename migration before baseline fallback failed: {e}");
     }
 
@@ -555,7 +558,7 @@ fn guard_no_explicit_baseline_replay_after_committed_cycle(
         slot.borrow_mut().replace(response.clone());
     });
 
-    let head = crate::git::show_head(file).ok().flatten();
+    let head = agent_doc_git_io::revision::show_head(file).ok().flatten();
 
     let reject = |reason: &str| -> anyhow::Error {
         crate::ops_log::log_op(
@@ -722,7 +725,7 @@ fn guard_no_exchange_compaction_request_between(
 ) -> Result<()> {
     let baseline_owned = baseline
         .map(ToOwned::to_owned)
-        .or_else(|| snapshot::load(file).ok().flatten());
+        .or_else(|| agent_doc_snapshot_io::load(file).ok().flatten());
     let Some(base) = baseline_owned.as_deref() else {
         return Ok(());
     };
@@ -760,7 +763,7 @@ fn bare_write_placed_response_body(file: &Path) -> Result<bool> {
     }
     let current = std::fs::read_to_string(file)
         .context("failed to read document for bare-write response-body detection")?;
-    let Some(head) = crate::git::show_head(file)? else {
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
     Ok(
@@ -779,6 +782,34 @@ fn consume_queue_prompts_for_done_ids_closeout(
     } else {
         consume_queue_prompts_for_done_ids_with_outcome(file, done_ids)
     }
+}
+
+struct WriteStatusEffects;
+
+impl agent_doc_status_io::StatusWriteEffects for WriteStatusEffects {
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        previous: &str,
+        updated: &str,
+        phase: &str,
+    ) -> Result<()> {
+        converge_or_disk_write(file, previous, updated, phase)
+    }
+
+    fn record_document_write_provenance(&self, file: &Path, updated: &str) {
+        record_document_write_provenance(file, updated);
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        crate::ops_log::log_op(file, message);
+    }
+}
+
+const STATUS_EFFECTS: WriteStatusEffects = WriteStatusEffects;
+
+fn set_status_with_options(file: &Path, text: &str, force_disk: bool) -> Result<()> {
+    agent_doc_status_io::set_with_options(&STATUS_EFFECTS, file, text, force_disk)
 }
 
 pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
@@ -891,7 +922,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         options.pending_reorder.as_deref(),
     );
     let mut commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
-    if commit_mode == CommitMode::Required && !crate::git::is_in_git_repo(file) {
+    if commit_mode == CommitMode::Required && !agent_doc_git_io::status::is_in_git_repo(file) {
         if is_session_document(file)? {
             anyhow::bail!(
                 "write --commit requires a git repository for session documents so the cycle can reach a committed state"
@@ -905,7 +936,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     if has_pending_ops || options.status.is_some() {
         let current_content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        let snapshot_doc = snapshot::load(file).ok().flatten();
+        let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
         guard_no_stale_snapshot_reset_drift(
             file,
             snapshot_doc.as_deref(),
@@ -1091,13 +1122,17 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if let Some(ref status_text) = options.status {
-        crate::status_cmd::set_with_options(file, status_text, options.force_disk)?;
+        set_status_with_options(file, status_text, options.force_disk)?;
     }
 
     if options.pending_only {
         run_closeout_pending_maintenance(file, commit_mode, options.force_disk)?;
         if commit_mode != CommitMode::None {
-            crate::lint_gate::run(file, options.lint_override)?;
+            agent_doc_lint_io::run_with_logger(
+                file,
+                options.lint_override,
+                crate::ops_log::log_op,
+            )?;
         }
         return finalize_commit(file, commit_mode);
     }
@@ -1239,7 +1274,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         && is_session_document(file)?
         && bare_write_placed_response_body(file)?
     {
-        if crate::git::is_in_git_repo(file) {
+        if agent_doc_git_io::status::is_in_git_repo(file) {
             eprintln!(
                 "[write] bare write placed a response body on session document {}; escalating to the commit boundary (#bare-write-captured-uncommitted)",
                 file.display()
@@ -1284,7 +1319,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // > frontmatter `agent_doc_lint_dialect` > workspace `.agent-doc/
     // config.toml` `[lint] dialect` > default (`warn`).
     if write_result.is_ok() && commit_mode != CommitMode::None {
-        crate::lint_gate::run(file, options.lint_override)?;
+        agent_doc_lint_io::run_with_logger(file, options.lint_override, crate::ops_log::log_op)?;
     }
 
     // Phase 3c: consume queue prompt after all other strict closeout gates
@@ -1475,7 +1510,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
     match commit_mode {
         CommitMode::None => Ok(()),
         CommitMode::BestEffort => {
-            if crate::git::is_in_git_repo(file) {
+            if agent_doc_git_io::status::is_in_git_repo(file) {
                 let session_document = is_session_document(file)?;
                 // `#crdtauth4` — authority-gated commit barrier (plan phase 4).
                 // No-op under `GitAuthoritative` (Detached); under `MultiReplica`
@@ -1564,7 +1599,7 @@ fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -
 }
 
 fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
-    let Some(head_content) = crate::git::show_head(file)? else {
+    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
     let current = std::fs::read_to_string(file)
@@ -1586,7 +1621,7 @@ fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
     );
     guard_visible_write_idle_and_current(file, "recover_committed_head_response", &current)?;
     atomic_write(file, &recovered)?;
-    crate::snapshot::save(file, &recovered)?;
+    agent_doc_snapshot_io::save(file, &recovered, crate::ops_log::log_op)?;
     crate::git::commit(file)?;
     Ok(true)
 }
@@ -1605,7 +1640,7 @@ fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
 /// defeating the binary-owned closeout contract. This branch keeps the
 /// closeout binary-owned by recognizing the dedupe-only drift signature.
 fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
-    let Some(head_content) = crate::git::show_head(file)? else {
+    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
     let current = std::fs::read_to_string(file)
@@ -1625,7 +1660,7 @@ fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
         "[write] empty response stdin; current file matches dedupe(HEAD) for {} — committing dedupe-only working-tree drift through the binary closeout path",
         file.display()
     );
-    crate::snapshot::save(file, &current)?;
+    agent_doc_snapshot_io::save(file, &current, crate::ops_log::log_op)?;
     crate::git::commit(file)?;
     Ok(true)
 }
@@ -1682,37 +1717,6 @@ pub fn enforce_no_replace_pending(patches: &[template::PatchBlock], allow: bool)
 mod materialize;
 pub use materialize::*;
 
-/// Resolve the IPC project root for `canonical` (an already-canonicalized file
-/// path). Uses the nearest `.agent-doc/` directory to match the IDE plugin's
-/// `resolveRootFor` logic — submodule documents use the submodule's own
-/// `.agent-doc/`, not the superproject's. Falls back to git toplevel for
-/// plain git repos without `.agent-doc/`, then the file's parent directory.
-fn resolve_ipc_project_root(canonical: &Path) -> std::path::PathBuf {
-    let parent = canonical.parent().unwrap_or(Path::new("/"));
-    let git_toplevel = agent_doc_git_io::dirs::git_toplevel_at(parent);
-    // 1. Nearest .agent-doc/ root — mirrors IDE plugin's resolveRootFor.
-    //    Submodule files resolve to the submodule root, not the superproject,
-    //    so ack-content and patch paths agree between Rust and Kotlin.
-    if let Some(p) = find_project_root(canonical)
-        && git_toplevel
-            .as_ref()
-            .is_none_or(|toplevel| p.starts_with(toplevel))
-    {
-        return p;
-    }
-    // 2. Plain git repo without .agent-doc: use the toplevel.
-    if let Some(toplevel) = git_toplevel {
-        return toplevel;
-    }
-    // 3. Last resort: file's parent directory.
-    parent.to_path_buf()
-}
-
-/// Public accessor for `resolve_ipc_project_root` (used by git.rs).
-pub fn resolve_ipc_project_root_pub(canonical: &Path) -> std::path::PathBuf {
-    resolve_ipc_project_root(canonical)
-}
-
 pub(crate) fn ipc_direct_disk_degraded_for_file(project_root: &Path, file: &Path) -> Result<bool> {
     ipc::ipc_direct_disk_degraded(project_root, file)
 }
@@ -1738,81 +1742,11 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
 }
 
 fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
-    let deduped = dedupe_responses(content);
-    if deduped != content {
-        eprintln!(
-            "[write] dedup: removed consecutive duplicate response block(s) from {} before closeout",
-            file.display()
-        );
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "dedupe_consecutive_response_blocks file={} before_closeout=true",
-                file.display()
-            ),
-        );
-    }
-    deduped
-}
-
-#[derive(Clone, Copy, Debug)]
-struct DuplicatePromptRepairOptions<'a> {
-    source: &'a str,
-    before: Option<&'a str>,
-    preserve_doc: Option<&'a str>,
-    preserve_current_doc: Option<&'a str>,
-    enforce_residue_guard: bool,
-}
-
-impl<'a> DuplicatePromptRepairOptions<'a> {
-    fn new(source: &'a str) -> Self {
-        Self {
-            source,
-            before: None,
-            preserve_doc: None,
-            preserve_current_doc: None,
-            enforce_residue_guard: true,
-        }
-    }
-
-    fn with_before(mut self, before: Option<&'a str>) -> Self {
-        self.before = before;
-        self
-    }
-
-    fn preserving(mut self, preserve_doc: Option<&'a str>) -> Self {
-        self.preserve_doc = preserve_doc;
-        self
-    }
-
-    fn preserving_current(mut self, preserve_current_doc: Option<&'a str>) -> Self {
-        self.preserve_current_doc = preserve_current_doc;
-        self
-    }
-
-    fn without_residue_guard(mut self) -> Self {
-        self.enforce_residue_guard = false;
-        self
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct DuplicatePromptRepairReport {
-    response_blocks: bool,
-    answered_tail: bool,
-    post_exchange_comments: bool,
-    prompt_lines_against_before: bool,
-    live_prefix_variants: bool,
-}
-
-impl DuplicatePromptRepairReport {
-    fn changed(self) -> bool {
-        self.response_blocks
-            || self.answered_tail
-            || self.post_exchange_comments
-            || self.prompt_lines_against_before
-            || self.live_prefix_variants
-    }
+    agent_doc_element_exchange_io::dedupe_consecutive_response_blocks_with_log(
+        content,
+        file,
+        crate::ops_log::log_op,
+    )
 }
 
 fn repair_duplicate_prompt_artifacts(
@@ -1820,87 +1754,13 @@ fn repair_duplicate_prompt_artifacts(
     file: &Path,
     options: DuplicatePromptRepairOptions<'_>,
 ) -> Result<(String, DuplicatePromptRepairReport)> {
-    let mut repaired = content.to_string();
-    let mut report = DuplicatePromptRepairReport::default();
-
-    let response_deduped = dedupe_consecutive_response_blocks(&repaired, file);
-    if response_deduped != repaired {
-        repaired = response_deduped;
-        report.response_blocks = true;
-    }
-
-    if let Some(answered_tail_deduped) =
-        agent_doc_template::remove_duplicate_answered_exchange_prompt_tail(&repaired)
-    {
-        repaired = answered_tail_deduped;
-        report.answered_tail = true;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "duplicate_answered_exchange_prompt_tail_removed file={} source={} before_commit=true",
-                file.display(),
-                options.source
-            ),
-        );
-    }
-
-    let (comment_deduped, comment_changed) =
-        remove_post_exchange_duplicate_prompt_comments_with_log(
-            &repaired,
-            file,
-            options.source,
-            options.preserve_doc,
-            options.preserve_current_doc,
-        );
-    if comment_changed {
-        repaired = comment_deduped;
-        report.post_exchange_comments = true;
-    }
-
-    if let Some(before) = options.before {
-        let (prompt_deduped, prompt_changed) =
-            dedupe_prompt_lines_against_before(before, &repaired, file);
-        if prompt_changed {
-            repaired = prompt_deduped;
-            report.prompt_lines_against_before = true;
-        }
-    }
-
-    let (adjacent_prefix_deduped, adjacent_prefix_changed) =
-        dedupe_adjacent_prompt_prefix_duplicates(&repaired, file);
-    if adjacent_prefix_changed {
-        repaired = adjacent_prefix_deduped;
-        report.live_prefix_variants = true;
-    }
-
-    let (prefix_deduped, prefix_changed) =
-        dedupe_live_prompt_prefix_variants_in_tail(&repaired, file);
-    if prefix_changed {
-        repaired = prefix_deduped;
-        report.live_prefix_variants = true;
-    }
-
-    if options.enforce_residue_guard {
-        enforce_no_duplicate_prompt_residue(file, &repaired, options.source)?;
-    }
-
-    if report.changed() {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "duplicate_prompt_artifact_repair file={} source={} response_blocks={} answered_tail={} post_exchange_comments={} prompt_lines_against_before={} live_prefix_variants={} before_commit=true",
-                file.display(),
-                options.source,
-                report.response_blocks,
-                report.answered_tail,
-                report.post_exchange_comments,
-                report.prompt_lines_against_before,
-                report.live_prefix_variants
-            ),
-        );
-    }
-
-    Ok((repaired, report))
+    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+        content,
+        file,
+        options,
+        crate::ops_log::log_op,
+        log_duplicate_prompt_residue_guard,
+    )
 }
 
 pub fn repair_commit_prompt_artifacts_against_snapshot(
@@ -1908,63 +1768,21 @@ pub fn repair_commit_prompt_artifacts_against_snapshot(
     snapshot: &str,
     current: &str,
 ) -> Option<String> {
-    let mut repaired = current.to_string();
-    let mut report = DuplicatePromptRepairReport::default();
-
-    let (prompt_deduped, prompt_changed) =
-        dedupe_prompt_lines_against_before(snapshot, &repaired, file);
-    if prompt_changed {
-        repaired = prompt_deduped;
-        report.prompt_lines_against_before = true;
-    }
-
-    let (adjacent_prefix_deduped, adjacent_prefix_changed) =
-        dedupe_adjacent_prompt_prefix_duplicates(&repaired, file);
-    if adjacent_prefix_changed {
-        repaired = adjacent_prefix_deduped;
-        report.live_prefix_variants = true;
-    }
-
-    let (prefix_deduped, prefix_changed) =
-        dedupe_live_prompt_prefix_variants_in_tail(&repaired, file);
-    if prefix_changed {
-        repaired = prefix_deduped;
-        report.live_prefix_variants = true;
-    }
-
-    if report.changed() {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "duplicate_prompt_artifact_repair file={} source=commit-pre-stage response_blocks=false answered_tail=false post_exchange_comments=false prompt_lines_against_before={} live_prefix_variants={} before_commit=true",
-                file.display(),
-                report.prompt_lines_against_before,
-                report.live_prefix_variants
-            ),
-        );
-        Some(repaired)
-    } else {
-        None
-    }
+    agent_doc_element_exchange_io::repair_commit_prompt_artifacts_against_snapshot_with_log(
+        file,
+        snapshot,
+        current,
+        crate::ops_log::log_op,
+    )
 }
 
-fn enforce_no_duplicate_prompt_residue(file: &Path, content: &str, context: &str) -> Result<()> {
-    match agent_doc_template::guard_no_duplicate_prompt_residue_outside_exchange(content) {
-        Ok(()) => Ok(()),
-        Err(err) => {
-            log_template_structure_guard_event(
-                file,
-                TemplateStructureGuardReason::DuplicatePromptResidue,
-                FlowOutcome::FailedClosed,
-            );
-            Err(err).with_context(|| {
-                format!(
-                    "duplicate prompt residue check failed for {} ({context})",
-                    file.display()
-                )
-            })
-        }
-    }
+fn log_duplicate_prompt_residue_guard(file: &Path) {
+    log_template_structure_guard_event(
+        file,
+        TemplateStructureGuardReason::DuplicatePromptResidue,
+        FlowOutcome::FailedClosed,
+        crate::ops_log::log_op,
+    );
 }
 
 pub fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
@@ -2008,6 +1826,7 @@ pub fn normalize_template_structure_or_fail_preserving(
                     file,
                     TemplateStructureGuardReason::DuplicateScaffoldDropped,
                     FlowOutcome::Completed,
+                    crate::ops_log::log_op,
                 );
                 let (repaired, _) = repair_duplicate_prompt_artifacts(
                     &repaired,
@@ -2029,6 +1848,7 @@ pub fn normalize_template_structure_or_fail_preserving(
                     file,
                     TemplateStructureGuardReason::MixedDuplicateScaffoldTail,
                     FlowOutcome::FailedClosed,
+                    crate::ops_log::log_op,
                 );
                 anyhow::bail!(
                     "mixed duplicate scaffold tail for {}: live conversation text is interleaved with duplicated template scaffold; refusing automatic closeout repair",
@@ -2042,6 +1862,7 @@ pub fn normalize_template_structure_or_fail_preserving(
                     file,
                     TemplateStructureGuardReason::DuplicateCloseTailMoved,
                     FlowOutcome::Completed,
+                    crate::ops_log::log_op,
                 );
                 let (repaired, _) = repair_duplicate_prompt_artifacts(
                     &repaired,
@@ -2109,9 +1930,10 @@ fn guard_visible_write_idle_with_budget(
     };
     let decision =
         agent_doc_document_realtime::write_policy::decide_visible_write_after_typing(facts);
-    crate::flow::proof::log_flow_event(
+    agent_doc_flow_io::log_flow_event(
         file,
-        crate::flow::document_mutation::visible_write_guard_event(decision, source),
+        agent_doc_document_realtime::write_policy::visible_write_guard_event(decision, source),
+        crate::ops_log::log_op,
     );
     if decision == agent_doc_document_realtime::write_policy::VisibleWriteDecision::Apply {
         return Ok(());
@@ -2152,9 +1974,12 @@ pub(crate) fn guard_visible_write_idle_current_or_target(
     {
         VisibleWriteReconcile::Clean => Ok(()),
         VisibleWriteReconcile::DiskDrifted { fresh_current } => {
-            crate::flow::proof::log_flow_event(
+            agent_doc_flow_io::log_flow_event(
                 file,
-                crate::flow::document_mutation::visible_write_current_changed_event(source),
+                agent_doc_document_realtime::write_policy::visible_write_current_changed_event(
+                    source,
+                ),
+                crate::ops_log::log_op,
             );
             crate::ops_log::log_op(
                 file,
@@ -2274,9 +2099,12 @@ fn guard_visible_write_reconcile_with_target(
                 ),
             );
         } else {
-            crate::flow::proof::log_flow_event(
+            agent_doc_flow_io::log_flow_event(
                 file,
-                crate::flow::document_mutation::visible_write_current_changed_event(source),
+                agent_doc_document_realtime::write_policy::visible_write_current_changed_event(
+                    source,
+                ),
+                crate::ops_log::log_op,
             );
             crate::ops_log::log_op(
                 file,
@@ -2363,7 +2191,7 @@ fn template_patch_application_base<'a>(
         return Ok(std::borrow::Cow::Borrowed(base));
     }
 
-    let Some(head) = crate::git::show_head(input.file)? else {
+    let Some(head) = agent_doc_git_io::revision::show_head(input.file)? else {
         return Ok(std::borrow::Cow::Borrowed(base));
     };
     if !is_stale_baseline(base, &head) {
@@ -2485,7 +2313,7 @@ fn log_dedup(file: &Path, context: &str) {
 /// no session ID, session not registered, pane indeterminate). Returns `Err`
 /// only when a *different* pane definitively owns the session.
 fn verify_pane_ownership(file: &Path) -> Result<()> {
-    if !sessions::in_tmux() {
+    if !agent_doc_tmux_io::in_tmux() {
         return Ok(());
     }
     let content = match std::fs::read_to_string(file) {
@@ -2499,13 +2327,13 @@ fn verify_pane_ownership(file: &Path) -> Result<()> {
         },
         Err(_) => return Ok(()),
     };
-    let entry = match sessions::lookup_entry(&session_id) {
+    let entry = match agent_doc_session_registry_io::lookup_entry(&session_id) {
         Ok(Some(e)) => e,
         _ => return Ok(()),
     };
-    let current = match sessions::current_pane() {
-        Ok(p) => p,
-        Err(_) => return Ok(()),
+    let tmux = tmux_router::Tmux::default_server();
+    let Some(current) = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux) else {
+        return Ok(());
     };
     if entry.pane != current {
         anyhow::bail!(
@@ -2548,7 +2376,7 @@ fn capture_locked_pre_response(path: &Path) -> Result<(std::fs::File, String)> {
     let doc_lock = acquire_doc_lock(path)?;
     let content_at_start = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    snapshot::save_pre_response(path, &content_at_start)?;
+    agent_doc_snapshot_io::save_pre_response(path, &content_at_start)?;
     Ok((doc_lock, content_at_start))
 }
 
@@ -2734,7 +2562,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         && !agent_doc_document_realtime::write_authority::within_owner_scope()
     {
         log_fence_count_drop_if_any(path, content);
-        let base_dir = agent_doc_fs::find_project_root(path)
+        let base_dir = agent_doc_project_root_io::project_root_containing(path)
             .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
         let file = path.to_string_lossy().to_string();
         let result = crate::write_queue::serialized_atomic_write(&base_dir, &file, path, content);
@@ -2856,6 +2684,120 @@ mod tests {
     }
 
     #[test]
+    fn status_set_writes_detached_disk_without_listener() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "## Status\n\n",
+                "<!-- agent:status patch=replace -->\n",
+                "old status\n",
+                "<!-- /agent:status -->\n",
+            ),
+        )
+        .unwrap();
+
+        set_status_with_options(&doc, "new status", false).unwrap();
+
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            on_disk.contains("new status"),
+            "status should be written through detached disk when no editor owns the doc: {on_disk}"
+        );
+        assert!(
+            !on_disk.contains("old status"),
+            "old status should be replaced: {on_disk}"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("status_set_writeback")
+                && log.contains("transport=disk_detached")
+                && log.contains("reason=no_listener"),
+            "detached status write should be attributable:\n{log}"
+        );
+    }
+
+    #[test]
+    fn status_set_blocks_write_with_live_editor_sidecar() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = concat!(
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "old status\n",
+            "<!-- /agent:status -->\n",
+        );
+        std::fs::write(&doc, source).unwrap();
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc.to_string_lossy(),
+            &format!("{source}\noperator typed text\n"),
+            "jetbrains-new",
+            "jetbrains",
+            "0.2.197",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let err = set_status_with_options(&doc, "new status", false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("no_listener"),
+            "status write with a live editor sidecar must fail closed without delivery proof: {err}"
+        );
+
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !on_disk.contains("new status"),
+            "status should not be written behind a live editor sidecar: {on_disk}"
+        );
+        assert!(
+            on_disk.contains("old status"),
+            "old status should remain unchanged: {on_disk}"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("transport=disk_detached"),
+            "live editor sidecar must block detached disk write:\n{log}"
+        );
+    }
+
+    #[test]
+    fn force_disk_status_set_writes_without_listener() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(
+            &doc,
+            concat!(
+                "## Status\n\n",
+                "<!-- agent:status patch=replace -->\n",
+                "old status\n",
+                "<!-- /agent:status -->\n",
+            ),
+        )
+        .unwrap();
+
+        set_status_with_options(&doc, "new status", true)
+            .expect("force-disk status update should write without listener");
+
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(on_disk.contains("new status"));
+        assert!(!on_disk.contains("old status"));
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("status_set_writeback")
+                && log.contains("transport=disk_force")
+                && log.contains("reason=force_disk"),
+            "force-disk status write should be attributable:\n{log}"
+        );
+    }
+
+    #[test]
     fn best_effort_session_commit_fails_closed_when_live_buffer_is_ahead_of_disk() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
@@ -2887,7 +2829,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         std::process::Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3166,7 +3108,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        snapshot::save(&doc, &source).unwrap();
+        agent_doc_snapshot_io::save(&doc, &source, crate::ops_log::log_op).unwrap();
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
@@ -3221,7 +3163,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        snapshot::save(&doc, &source).unwrap();
+        agent_doc_snapshot_io::save(&doc, &source, crate::ops_log::log_op).unwrap();
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
@@ -3286,7 +3228,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        snapshot::save(&doc, &source).unwrap();
+        agent_doc_snapshot_io::save(&doc, &source, crate::ops_log::log_op).unwrap();
 
         let live_operator_buffer = source.replace(
             "<!-- /agent:backlog -->",
@@ -3346,7 +3288,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        snapshot::save(&doc, &source).unwrap();
+        agent_doc_snapshot_io::save(&doc, &source, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&source), Some(&source)).unwrap();
         crate::capture::capture_response(&doc, "Done.").unwrap();
 
@@ -3812,7 +3754,9 @@ scratch
 
         assert_eq!(captured_content, "updated while waiting\n");
         assert_eq!(
-            snapshot::load_pre_response(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_pre_response(&doc)
+                .unwrap()
+                .unwrap(),
             "updated while waiting\n"
         );
     }
@@ -3853,7 +3797,7 @@ scratch
         let new_doc = dir.path().join("new.md");
         fs::rename(&old_doc, &new_doc).unwrap();
 
-        assert!(snapshot::try_migrate_renamed(&new_doc).unwrap());
+        assert!(agent_doc_snapshot_io::try_migrate_renamed(&new_doc).unwrap());
         assert!(!old_baseline.exists());
         let migrated_baseline = agent_doc_fs::baseline_path_for(&new_doc).unwrap();
         assert!(migrated_baseline.exists());
@@ -3884,7 +3828,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
 
         let err = guard_no_exchange_compaction_request_between(&doc, Some(baseline), current)
             .expect_err("ordinary response write should be rejected");
@@ -3906,7 +3850,7 @@ scratch
         // "theirs" = user added a follow-up to the User block
         let theirs = "---\nsession: test\n---\n\n## User\n\nOriginal question\nAnd a follow-up!\n";
 
-        let merged = merge::merge_contents(base, &ours, theirs).unwrap();
+        let merged = agent_doc_merge_io::merge_contents(base, &ours, theirs).unwrap();
 
         // Both the response and the user's follow-up should be in the merge
         assert!(
@@ -3939,7 +3883,7 @@ scratch
         let final_content = if content_current == base {
             ours.clone()
         } else {
-            merge::merge_contents(base, &ours, &content_current).unwrap()
+            agent_doc_merge_io::merge_contents(base, &ours, &content_current).unwrap()
         };
 
         drop(doc_lock);
@@ -4013,7 +3957,7 @@ scratch
         fs::write(&doc, &user_edited).unwrap();
 
         // Merge: content_ours + user edits
-        let merged = merge::merge_contents(base, &content_ours, &user_edited).unwrap();
+        let merged = agent_doc_merge_io::merge_contents(base, &content_ours, &user_edited).unwrap();
 
         // Write merged content (includes both response and user edit)
         atomic_write(&doc, &merged).unwrap();
@@ -4024,10 +3968,10 @@ scratch
         );
 
         // KEY: Save snapshot as final_content (the actual disk state after merge)
-        snapshot::save(&doc, &merged).unwrap();
+        agent_doc_snapshot_io::save(&doc, &merged, crate::ops_log::log_op).unwrap();
 
         // Verify: snapshot matches what's on disk exactly
-        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         let current = fs::read_to_string(&doc).unwrap();
         assert_eq!(
             snap, current,
@@ -4272,7 +4216,7 @@ scratch
             "IPC consume without the full response body must fall back instead of saving a successful snapshot"
         );
 
-        let snap = snapshot::load(&doc).unwrap();
+        let snap = agent_doc_snapshot_io::load(&doc).unwrap();
         assert!(
             snap.as_deref()
                 .is_none_or(|content| !content.contains("Recovered answer.")),
@@ -4348,7 +4292,7 @@ scratch
             "file IPC consumption with live exchange edits and unchanged disk content must fall back"
         );
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "unacknowledged live-edit IPC must not become the saved snapshot"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -4464,7 +4408,7 @@ scratch
             "ack-content proof should let file IPC accept an applied response even when disk still shows the pre-ack live exchange edit"
         );
         assert_eq!(
-            snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(ack_content),
             "snapshot must use the authoritative ack-content sidecar"
         );
@@ -4571,7 +4515,7 @@ scratch
             "live prompt drift without response materialization must not close out successfully"
         );
         assert_ne!(
-            snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(content_ours),
             "snapshot must not silently advance to content_ours when the visible editor/worktree still holds the drift candidate"
         );
@@ -4675,7 +4619,7 @@ scratch
             "partial operator text without response materialization must not close out successfully"
         );
         assert_ne!(
-            snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(content_ours),
             "snapshot must not silently advance to content_ours when the visible editor/worktree still holds a partial operator word"
         );
@@ -4797,7 +4741,7 @@ scratch
             "IPC delivery itself should remain successful"
         );
         assert_eq!(
-            snapshot::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(content_ours),
             "snapshot must not absorb post-exchange comment text typed after preflight"
         );
@@ -4883,7 +4827,7 @@ scratch
             "file IPC must fall back when final deduped exchange is unchanged without ack-content proof"
         );
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "unacknowledged post-dedupe no-op IPC must not become the saved snapshot"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -4928,7 +4872,7 @@ scratch
         agent_doc_template::sanitize::sanitize_unmatched(&mut sanitized_unmatched);
 
         let result =
-            crate::template_io::apply_patches(doc, &[], &sanitized_unmatched, &file).unwrap();
+            agent_doc_template_io::apply_patches(doc, &[], &sanitized_unmatched, &file).unwrap();
 
         let exchange_opens = result.matches("<!-- agent:exchange").count();
         assert_eq!(
@@ -5006,7 +4950,7 @@ scratch
         );
 
         // KEY ASSERTION: snapshot must match actual disk state (includes user edits)
-        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
             snap.contains("agent response content"),
             "snapshot must contain agent response, got: {}",
@@ -5999,7 +5943,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         git(&["add", "doc.md"]);
         git(&["commit", "-m", "commit response"]);
 
@@ -6018,7 +5962,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, visible).unwrap();
-        crate::snapshot::save(&doc, visible).unwrap();
+        agent_doc_snapshot_io::save(&doc, visible, crate::ops_log::log_op).unwrap();
 
         assert!(
             recover_missing_committed_head_response(&doc).unwrap(),
@@ -6035,7 +5979,7 @@ scratch
                 && recovered.contains("Latest body."),
             "latest committed response must be merged back into the visible file:\n{recovered}"
         );
-        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(snapshot, recovered);
 
         let head_after = std::process::Command::new("git")
@@ -6092,7 +6036,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         git(&["add", "doc.md"]);
         git(&["commit", "-m", "commit response"]);
 
@@ -6111,7 +6055,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, visible).unwrap();
-        crate::snapshot::save(&doc, visible).unwrap();
+        agent_doc_snapshot_io::save(&doc, visible, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
 
         let strict = WriteFlags {
@@ -6131,7 +6075,9 @@ scratch
         );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
-        let head_after = crate::git::show_head(&doc).unwrap().unwrap();
+        let head_after = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(head_after, recovered);
     }
 

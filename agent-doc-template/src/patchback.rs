@@ -3,6 +3,7 @@
 use std::fmt;
 
 use agent_doc_element::element;
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 
 use crate::template::{PatchBlock, parse_patches};
 
@@ -371,6 +372,26 @@ pub fn normalize_child_template_response(response: String) -> ChildPatchbackNorm
     ChildPatchbackNormalization { response, decision }
 }
 
+pub fn child_patchback_normalization_event(
+    normalization: &ChildPatchbackNormalization,
+) -> FlowEvent {
+    let outcome = match normalization.decision {
+        ChildPatchbackNormalizationDecision::WrappedPlainResponse
+        | ChildPatchbackNormalizationDecision::KeptExplicitPatch => FlowOutcome::Completed,
+        ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse
+        | ChildPatchbackNormalizationDecision::KeptUnparseable => FlowOutcome::FailedClosed,
+    };
+    FlowEvent::new(
+        FlowName::OrchestrationBatch,
+        FlowStage::ChildCloseout,
+        outcome,
+    )
+    .with_reason(format!(
+        "child_patchback:{}",
+        normalization.decision.as_str()
+    ))
+}
+
 pub fn child_template_finalize_text(response: String) -> String {
     normalize_child_template_response(response).response
 }
@@ -573,6 +594,21 @@ mod tests {
         );
         assert!(normalized.response.starts_with("<!-- patch:exchange -->"));
         assert!(normalized.response.contains("### Re: child"));
+    }
+
+    #[test]
+    fn child_patchback_normalization_event_marks_wrapped_plain_response_completed() {
+        let normalized =
+            normalize_child_template_response("### Re: child — gpt-5\n\nImplemented.".to_string());
+        let event = child_patchback_normalization_event(&normalized);
+
+        assert_eq!(event.flow, FlowName::OrchestrationBatch);
+        assert_eq!(event.stage, FlowStage::ChildCloseout);
+        assert_eq!(event.outcome, FlowOutcome::Completed);
+        assert_eq!(
+            event.reason.as_deref(),
+            Some("child_patchback:wrapped_plain_response")
+        );
     }
 
     #[test]

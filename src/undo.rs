@@ -25,24 +25,24 @@
 use anyhow::Result;
 use std::path::Path;
 
-use agent_doc_orchestration::{snapshot, write};
+use agent_doc_orchestration::write;
 
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let pre_response = snapshot::load_pre_response(file)?;
+    let pre_response = agent_doc_snapshot_io::load_pre_response(file)?;
     match pre_response {
         Some(content) => {
             // Restore the pre-response content
             write::atomic_write_pub(file, &content)?;
 
             // Update the main snapshot to match the restored state
-            snapshot::save(file, &content)?;
+            agent_doc_snapshot_io::save(file, &content, agent_doc_orchestration::ops_log::log_op)?;
 
             // Delete the pre-response snapshot (consumed)
-            snapshot::delete_pre_response(file)?;
+            agent_doc_snapshot_io::delete_pre_response(file)?;
 
             eprintln!("[undo] Restored {} to pre-response state", file.display());
             Ok(())

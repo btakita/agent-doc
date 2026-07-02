@@ -100,6 +100,16 @@ pub fn build_exchange_compact_summary(content: &str, archive_path: &str) -> Stri
     summary
 }
 
+/// Extract compact archive pointers from visible compact summary text.
+pub fn compact_archive_pointers(content: &str) -> Vec<&str> {
+    content
+        .split("archived to `")
+        .skip(1)
+        .filter_map(|tail| tail.split_once('`').map(|(path, _)| path.trim()))
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
 /// Format a UTC archive timestamp as `YYYYMMDD-HHMMSS`.
 pub fn format_compact_timestamp_from_unix_secs(secs: u64) -> String {
     let days = secs / 86400;
@@ -230,6 +240,20 @@ mod tests {
             "---\nagent_doc_session: test-session\nagent_doc_format: template\n---\n\nbody",
         );
         assert_eq!(session.as_deref(), Some("test-session"));
+    }
+
+    #[test]
+    fn compact_archive_pointers_extracts_non_empty_archive_paths() {
+        let content = concat!(
+            "*Compacted. Content archived to `.agent-doc/archives/a.md`*\n",
+            "*2 earlier exchange(s) archived to ` .agent-doc/archives/b.md `*\n",
+            "*Compacted. Content archived to ``*\n"
+        );
+
+        assert_eq!(
+            compact_archive_pointers(content),
+            vec![".agent-doc/archives/a.md", ".agent-doc/archives/b.md"]
+        );
     }
 
     #[test]

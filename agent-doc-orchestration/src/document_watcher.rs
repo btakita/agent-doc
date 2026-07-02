@@ -8,13 +8,13 @@
 //! which is the R1 "two watchers / duplicate-watcher reconcile race". A single
 //! owned event stream removes it.
 //!
-//! This module owns the controller-side gate logic:
-//! - a [`WatcherRegistry`] that is **idempotent per document** — a second watch
+//! `agent-doc-watch-io` owns the controller-side gate logic:
+//! - a watcher registry that is **idempotent per document** — a second watch
 //!   request for the same document reuses the one registration, so there is
 //!   never a duplicate watcher;
-//! - a [`DocumentWatchGate`] that coalesces event bursts into one logical change
-//!   and suppresses agent-doc's own write echoes (via the existing
-//!   `debounce` write-provenance), so the actor sees one settled change stream.
+//! - a document watch gate that coalesces event bursts into one logical change
+//!   and suppresses agent-doc's own write echoes, so the actor sees one settled
+//!   change stream.
 //!
 //! The raw event source is abstracted ([`RawWatchEvent`]) so the gate logic is
 //! deterministically testable without a live `notify` backend or the editor.
@@ -33,78 +33,14 @@
 //! - `gate_ignores_non_content_events`
 //! - `watch_change_routes_serialized_through_session_actor`
 
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
-use agent_doc_document::watch_projection::file_watch_event_id;
 use agent_doc_document_realtime::session_ops::SessionOpKind;
-use agent_doc_document_realtime::watch_authority::{
-    DocumentWatchGate, RawWatchEvent, WatchDelivery, WatchWriteProvenance,
-};
+use agent_doc_document_realtime::watch_authority::{RawWatchEvent, WatchDelivery};
 
 use crate::session_actor::document_actor_in;
-
-/// Controller-owned registry of one watch gate per document. Registration is
-/// idempotent: the second `register` for a document returns the existing gate,
-/// so a document is never watched twice (no duplicate-watcher reconcile race).
-#[derive(Default)]
-pub struct WatcherRegistry {
-    gates: Mutex<HashMap<String, Arc<Mutex<DocumentWatchGate>>>>,
-}
-
-impl WatcherRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Get-or-create the gate for `doc_id`. Returns the gate and whether it was
-    /// newly created (`true` only on the first registration). `file` is the
-    /// document path this gate accepts raw events for.
-    pub fn register(&self, doc_id: &str, file: &str) -> (Arc<Mutex<DocumentWatchGate>>, bool) {
-        let mut gates = self.gates.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(gate) = gates.get(doc_id) {
-            return (Arc::clone(gate), false);
-        }
-        let gate = Arc::new(Mutex::new(DocumentWatchGate::new(file)));
-        gates.insert(doc_id.to_string(), Arc::clone(&gate));
-        (gate, true)
-    }
-
-    /// Whether `doc_id` is currently watched.
-    pub fn is_watched(&self, doc_id: &str) -> bool {
-        self.gates
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .contains_key(doc_id)
-    }
-
-    /// Drop the watch for `doc_id`, returning whether one existed.
-    pub fn unregister(&self, doc_id: &str) -> bool {
-        self.gates
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(doc_id)
-            .is_some()
-    }
-
-    /// Number of watched documents.
-    pub fn len(&self) -> usize {
-        self.gates.lock().unwrap_or_else(|p| p.into_inner()).len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-/// The process-wide controller-owned watcher registry singleton.
-pub fn registry() -> &'static WatcherRegistry {
-    static REGISTRY: std::sync::OnceLock<WatcherRegistry> = std::sync::OnceLock::new();
-    REGISTRY.get_or_init(WatcherRegistry::new)
-}
 
 /// Route a settled watch change into the document's session actor (`#pcpc1`), so
 /// a watcher-triggered reconcile is serialized against in-flight writes
@@ -118,45 +54,26 @@ pub fn route_event(
     current_content: &str,
     on_change: impl FnOnce() -> Result<()> + Send + 'static,
 ) -> Result<WatchDelivery> {
-    let (gate, _new) = registry().register(doc_id, file);
-    let content_hash = agent_doc_hash::content_hash(current_content);
-    let provenance = agent_doc_debounce::write_provenance(file);
-    let write_provenance = provenance
-        .as_ref()
-        .map(|prov| WatchWriteProvenance::new(prov.actor.as_str(), prov.hash.as_str()));
-    let delivery = {
-        let mut g = gate.lock().unwrap_or_else(|p| p.into_inner());
-        g.observe(raw, &content_hash, write_provenance)
-    };
-    if let WatchDelivery::Change { generation } = delivery {
+    let observation =
+        agent_doc_watch_io::observe_document_event(doc_id, file, raw, current_content);
+    if let Some(event) = observation.state_event {
         let actor = document_actor_in(base_dir, file);
-        let event = agent_doc_state_backbone::StateEvent::new(
-            file_watch_event_id(doc_id, generation, &content_hash),
-            agent_doc_state_backbone::StateFact::FileWatchChangeObserved {
-                document_hash: doc_id.to_string(),
-                path: file.to_string(),
-                watch_generation: generation,
-                content_hash,
-            },
-        );
         let base_dir = base_dir.to_path_buf();
         actor.submit(SessionOpKind::FileWatch, move |_ctx| -> Result<()> {
             crate::project_controller::append_state_event(&base_dir, &event)?;
             on_change()
         })??;
     }
-    Ok(delivery)
+    Ok(observation.delivery)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{WatcherRegistry, registry, route_event};
+    use super::route_event;
     use agent_doc_document_realtime::watch_authority::{RawWatchEvent, WatchDelivery};
     use std::path::PathBuf;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    };
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn seed(dir: &tempfile::TempDir, rel: &str, content: &str) -> PathBuf {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -166,29 +83,6 @@ mod tests {
         }
         std::fs::write(&file, content).unwrap();
         file
-    }
-
-    #[test]
-    fn registry_is_idempotent_one_watcher_per_document() {
-        let reg = WatcherRegistry::new();
-        let (g1, new1) = reg.register("doc-A", "/tmp/doc-A.md");
-        let (g2, new2) = reg.register("doc-A", "/tmp/doc-A.md");
-        assert!(new1, "first registration is new");
-        assert!(!new2, "second registration must reuse the one watcher");
-        assert!(Arc::ptr_eq(&g1, &g2), "same gate for the same document");
-        assert_eq!(reg.len(), 1, "exactly one watcher for the document");
-        assert!(reg.is_watched("doc-A"));
-        assert!(reg.unregister("doc-A"));
-        assert!(!reg.is_watched("doc-A"));
-    }
-
-    #[test]
-    fn registry_distinct_documents_get_distinct_gates() {
-        let reg = WatcherRegistry::new();
-        let (a, _) = reg.register("doc-A", "/tmp/a.md");
-        let (b, _) = reg.register("doc-B", "/tmp/b.md");
-        assert!(!Arc::ptr_eq(&a, &b));
-        assert_eq!(reg.len(), 2);
     }
 
     #[test]
@@ -265,6 +159,6 @@ mod tests {
                 .map(|change| change.watch_generation),
             Some(2)
         );
-        registry().unregister(&doc_id);
+        agent_doc_watch_io::unregister_document(&doc_id);
     }
 }

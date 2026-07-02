@@ -143,7 +143,7 @@ pub(crate) fn start_live_prompt_drift_ack_listener(
     std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
     std::thread::spawn(move || {
         let root_clone = root.clone();
-        let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+        let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
             let v: serde_json::Value = serde_json::from_str(msg).ok()?;
             let patch_id = v
                 .get("patch_id")
@@ -167,7 +167,7 @@ pub(crate) fn start_ack_without_content_listener(
     let root = project_root.to_path_buf();
     std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
     std::thread::spawn(move || {
-        let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+        let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
             let v: serde_json::Value = serde_json::from_str(msg).ok()?;
             let patch_id = v
                 .get("patch_id")
@@ -181,7 +181,7 @@ pub(crate) fn start_ack_without_content_listener(
 #[cfg(test)]
 pub(crate) fn wait_for_live_prompt_drift_listener(project_root: &Path) {
     for _ in 0..100 {
-        if crate::ipc_socket::is_listener_active(project_root) {
+        if agent_doc_ipc_io::is_listener_active(project_root) {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));

@@ -691,9 +691,9 @@ pub(crate) fn spawn_writer_thread(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::hooks::fire_doc_hooks;
     use agent_doc_config::Config;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
+    use agent_doc_hooks_io::fire_doc_hooks;
     use agent_doc_project_config_io as project_config_io;
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -714,7 +714,7 @@ mod tests {
     /// return the parsed response — the production handler routes it through the
     /// per-document `crdt_relay_host` hub.
     fn crdt_send(sock: &std::path::Path, method: &IpcMethod) -> IpcResponse {
-        crate::supervisor::ipc::send_command(sock, method).expect("send crdt ipc")
+        agent_doc_supervisor_io::ipc::send_command(sock, method).expect("send crdt ipc")
     }
 
     #[test]
@@ -741,14 +741,14 @@ mod tests {
         ));
         let shared_for_ipc = shared.clone();
         let session_id = "crdtauth5-session";
-        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             &project_root,
             session_id,
             move |method| handle_ipc(method, &shared_for_ipc),
         )
         .expect("start supervisor ipc");
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+        let sock = agent_doc_supervisor_io::ipc::socket_path(&project_root, session_id);
 
         // Editor A and Editor B each register over the socket. The supervisor
         // hub mints their client-ids and returns the canonical bootstrap state.
@@ -900,14 +900,14 @@ mod tests {
         ));
         let shared_for_ipc = shared.clone();
         let session_id = "crdtauth5-detached";
-        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             &project_root,
             session_id,
             move |method| handle_ipc(method, &shared_for_ipc),
         )
         .expect("start supervisor ipc");
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+        let sock = agent_doc_supervisor_io::ipc::socket_path(&project_root, session_id);
 
         let reg = crdt_send(
             &sock,

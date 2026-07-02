@@ -21,7 +21,7 @@ pub(crate) fn safe_passive_local_actor_record_state(
         .canonicalize()
         .ok()
         .unwrap_or_else(|| focus_path.to_path_buf());
-    let base_dir = agent_doc_fs::find_project_root(&canonical)?;
+    let base_dir = agent_doc_project_root_io::project_root_containing(&canonical)?;
     crate::session_actor::load_record_in(&base_dir, &canonical.to_string_lossy()).ok()
 }
 
@@ -33,8 +33,8 @@ pub(crate) fn safe_passive_registry_pane_state(
         .canonicalize()
         .ok()
         .unwrap_or_else(|| focus_path.to_path_buf());
-    let base_dir = agent_doc_fs::find_project_root(&canonical)?;
-    crate::sessions::lookup_in(&base_dir, session_id).ok()
+    let base_dir = agent_doc_project_root_io::project_root_containing(&canonical)?;
+    agent_doc_session_registry_io::lookup_in(&base_dir, session_id).ok()
 }
 
 /// Move-before-select for the passive fast-handoff focus path

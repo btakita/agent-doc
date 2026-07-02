@@ -251,9 +251,7 @@ fn apply_payload_to_file(payload: &Value, file: &Path) -> Option<String> {
         .get("unmatched")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let after =
-        agent_doc_orchestration::template_io::apply_patches(&before, &patches, unmatched, file)
-            .ok()?;
+    let after = agent_doc_template_io::apply_patches(&before, &patches, unmatched, file).ok()?;
     fs::write(file, &after).ok()?;
     Some(after)
 }
@@ -417,7 +415,7 @@ fn socket_ipc_replays_live_typing_during_finalize() {
     let ack_dir = project.ack_dir();
     let seen_for_listener = seen_payload.clone();
     let server = std::thread::spawn(move || {
-        agent_doc_orchestration::ipc_socket::start_listener(&listener_root, move |msg| {
+        agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
             let payload: Value = serde_json::from_str(msg).ok()?;
             let Some(id) = patch_id(&payload) else {
                 return Some(serde_json::json!({"type": "ack"}).to_string());
@@ -431,21 +429,19 @@ fn socket_ipc_replays_live_typing_during_finalize() {
         .ok();
     });
     for _ in 0..100 {
-        if agent_doc_orchestration::ipc_socket::is_listener_active(project.root()) {
+        if agent_doc_ipc_io::is_listener_active(project.root()) {
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(
-        agent_doc_orchestration::ipc_socket::is_listener_active(project.root()),
+        agent_doc_ipc_io::is_listener_active(project.root()),
         "fake socket listener did not start"
     );
 
     run_finalize(&project, "socket live typing replay", 0, &[]);
 
-    let _ = fs::remove_file(agent_doc_orchestration::ipc_socket::socket_path(
-        project.root(),
-    ));
+    let _ = fs::remove_file(agent_doc_ipc_io::socket_path(project.root()));
     drop(server);
 
     let payload = seen_payload

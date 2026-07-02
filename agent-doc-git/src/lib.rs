@@ -494,6 +494,34 @@ pub fn parent_submodule_pointer_message(
     )
 }
 
+pub fn parent_submodule_pointer_guard_message(
+    drift: &SubmodulePointerDrift,
+    file_display: &str,
+) -> String {
+    format!(
+        "[session-check] INTERRUPTED: {}",
+        parent_submodule_pointer_message(
+            &drift.relative_path,
+            drift.parent_head.as_deref(),
+            &drift.submodule_head,
+            file_display,
+        )
+    )
+}
+
+pub fn parent_submodule_pointer_guard_log_line(
+    drift: &SubmodulePointerDrift,
+    file_display: &str,
+) -> String {
+    format!(
+        "parent_submodule_pointer_guard_failed file={} submodule={} parent_head={} submodule_head={}",
+        file_display,
+        drift.relative_path,
+        short_oid(drift.parent_head.as_deref()),
+        short_oid(Some(&drift.submodule_head))
+    )
+}
+
 /// Parse checkpoint tag lines into `RecoveryTag`s, newest-first.
 ///
 /// `tag_lines` is raw `git tag -l agent-doc/<stem>/*` output; `meta` resolves
@@ -547,13 +575,14 @@ fn render_git_streams(stderr: &[u8], stdout: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        PostCommitLocalDriftKind, agent_doc_branch_name_for_file,
+        PostCommitLocalDriftKind, SubmodulePointerDrift, agent_doc_branch_name_for_file,
         agent_doc_commit_message_for_file, classify_post_commit_local_drift,
         classify_post_commit_local_drift_from_checks, classify_prompt_bearing_post_commit_drift,
         commit_retry_backoff, doc_stem, doc_stem_or, has_blocking_non_exchange_component_drift,
         is_index_lock_contention_text, is_safe_user_only_follow_up_after_committed_head,
         line_looks_like_explicit_post_commit_prompt_directive, output_has_index_lock_contention,
         parent_pointer_recovery_hint, parent_submodule_pointer_commit_message,
+        parent_submodule_pointer_guard_log_line, parent_submodule_pointer_guard_message,
         parent_submodule_pointer_message, parse_porcelain_path, parse_recovery_tags,
         parse_submodule_paths, relative_to_root, render_git_streams, short_oid,
         tracked_modified_paths_from_porcelain,
@@ -1003,6 +1032,11 @@ mod tests {
 
     #[test]
     fn parent_submodule_pointer_message_renders_recovery_hint() {
+        let drift = SubmodulePointerDrift {
+            relative_path: "src/agent-doc".to_string(),
+            parent_head: Some("aaaaaaaaaaaabbbb".to_string()),
+            submodule_head: "bbbbbbbbbbbbcccc".to_string(),
+        };
         let message = parent_submodule_pointer_message(
             "src/agent-doc",
             Some("aaaaaaaaaaaabbbb"),
@@ -1015,6 +1049,12 @@ mod tests {
         assert_eq!(
             parent_pointer_recovery_hint("tasks/doc.md"),
             "Use `agent-doc commit tasks/doc.md` to finish the missing parent pointer commit, then re-run `agent-doc session-check tasks/doc.md`."
+        );
+        let guard = parent_submodule_pointer_guard_message(&drift, "tasks/doc.md");
+        assert!(guard.starts_with("[session-check] INTERRUPTED: parent submodule pointer"));
+        assert_eq!(
+            parent_submodule_pointer_guard_log_line(&drift, "tasks/doc.md"),
+            "parent_submodule_pointer_guard_failed file=tasks/doc.md submodule=src/agent-doc parent_head=aaaaaaaaaaaa submodule_head=bbbbbbbbbbbb"
         );
     }
 

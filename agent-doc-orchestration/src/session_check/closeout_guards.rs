@@ -3,9 +3,6 @@ use agent_doc_turn::document_drift::{
     active_session_drift_is_only_exchange_or_backlog_metadata, exchange_has_new_appended_content,
     exchange_only_promptless_content_drift, promptless_comment_only_drift,
 };
-use agent_doc_turn::op_log::{
-    IPC_PROOF_INSUFFICIENT_EVENT, is_write_completed_commit_missing_event, strip_timestamp_prefix,
-};
 
 pub(crate) fn check_blocked_closeout_followup_guard(
     file: &Path,
@@ -210,7 +207,7 @@ pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Opt
     let Some(session) = crate::codex_hook::load_active_session_for_current_file(file)? else {
         return Ok(None);
     };
-    let Some(snapshot) = crate::snapshot::load(file)? else {
+    let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
         return Ok(None);
     };
     let current = match std::fs::read_to_string(file) {
@@ -261,7 +258,7 @@ pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Opt
 }
 
 pub(crate) fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> {
-    let Some(snapshot) = crate::snapshot::load(file)? else {
+    let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
         return Ok(None);
     };
     let current = match std::fs::read_to_string(file) {
@@ -296,7 +293,7 @@ pub(crate) fn open_cycle_message(
     file: &Path,
     state: &crate::cycle_state::CycleState,
 ) -> Result<String> {
-    let ipc_hint = latest_ipc_proof_diagnostic_hint(file)?
+    let ipc_hint = agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(file)?
         .map(|hint| format!(" {hint}"))
         .unwrap_or_default();
     Ok(agent_doc_workflow::session_check::open_cycle_message(
@@ -334,74 +331,8 @@ pub(crate) fn open_cycle_manual_patchback_message(
     ))
 }
 
-/// Return the message portion of the last non-empty line in `ops.log`,
-/// stripped of the `[epoch_secs] ` timestamp prefix.
-///
-/// Returns `Ok(None)` when the log file is missing or empty.
-pub fn last_ops_event(file: &Path) -> Result<Option<String>> {
-    let canonical = match file.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return Ok(None),
-    };
-    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    let log_path = project_root.join(".agent-doc/logs/ops.log");
-    let Some(content) = agent_doc_fs::read_optional_text(&log_path)? else {
-        return Ok(None);
-    };
-    let canonical_display = canonical.display().to_string();
-    let requested_display = file.display().to_string();
-    let last = content
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .rfind(|line| {
-            line.contains(&format!("file={canonical_display}"))
-                || line.contains(&format!("file={requested_display}"))
-        })
-        .or_else(|| content.lines().rfind(|l| !l.trim().is_empty()))
-        .map(|l| strip_timestamp_prefix(l).to_string());
-    Ok(last)
-}
-
-pub fn latest_ipc_proof_diagnostic(file: &Path) -> Result<Option<String>> {
-    let canonical = match file.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return Ok(None),
-    };
-    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    let log_path = project_root.join(".agent-doc/logs/ops.log");
-    let Some(content) = agent_doc_fs::read_optional_text(&log_path)? else {
-        return Ok(None);
-    };
-    let canonical_display = canonical.display().to_string();
-    let requested_display = file.display().to_string();
-    Ok(content
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .rev()
-        .map(strip_timestamp_prefix)
-        .find(|event| {
-            event.starts_with(IPC_PROOF_INSUFFICIENT_EVENT)
-                && (event.contains(&format!("file={canonical_display}"))
-                    || event.contains(&format!("file={requested_display}")))
-        })
-        .map(str::to_string))
-}
-
-pub fn latest_ipc_proof_diagnostic_hint(file: &Path) -> Result<Option<String>> {
-    Ok(latest_ipc_proof_diagnostic(file)?
-        .map(|event| format!("latest IPC proof diagnostic: {event}")))
-}
-
-pub fn detect_write_completed_commit_missing(file: &Path) -> Result<Option<String>> {
-    Ok(last_ops_event(file)?.filter(|event| is_write_completed_commit_missing_event(event)))
-}
-
 pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
-    let Some(snapshot) = crate::snapshot::load(file)? else {
+    let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
         return Ok(None);
     };
     let current = match std::fs::read_to_string(file) {
@@ -461,9 +392,9 @@ pub fn first_unstarted_prompt_bearing_change(
     // an empty baseline for untracked docs) — otherwise the exchange prompt is
     // invisible and `Run Agent Doc` does nothing while the same write into the
     // queue starts a turn (#codex-exchange-prompt-no-dispatch).
-    let baseline = match crate::snapshot::load(file)? {
+    let baseline = match agent_doc_snapshot_io::load(file)? {
         Some(snapshot) => snapshot,
-        None => crate::git::show_head(file)?.unwrap_or_default(),
+        None => agent_doc_git_io::revision::show_head(file)?.unwrap_or_default(),
     };
     let current = match std::fs::read_to_string(file) {
         Ok(content) => content,

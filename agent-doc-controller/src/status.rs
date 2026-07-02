@@ -621,6 +621,34 @@ pub fn handoff_replacement_is_stranded(
     is_handoff_replacement && handoff_replacement_socket_exists && launched_elapsed > stale_after
 }
 
+/// `#stuckhandoffselfheal` — a promoted-but-stranded replacement should COMPLETE its
+/// own promotion (rename its temp handoff socket onto the canonical public path)
+/// rather than suicide. It already received `promote_handoff` (in-memory `Stable`),
+/// so it holds the authoritative generation; its handoff client merely died before
+/// performing the final rename. Self-promoting preserves the live controller (and any
+/// in-flight turn) instead of forcing a relaunch, and — crucially — restores
+/// `controller.sock` so clients that resolve via the recorded `socket_path` (e.g.
+/// finalize/commit) stop timing out and never fall back to an out-of-band disk write
+/// the IPC snapshot cannot adopt (the drift root cause).
+///
+/// A short `grace` — not the full stale threshold — bounds the canonical-socket
+/// outage while still never racing a *healthy* client, which renames within
+/// milliseconds of `promote_handoff`. Only `Stable` replacements self-promote; a
+/// replacement still `Preparing` (never promoted) has no authority and is left to the
+/// stranded/suicide watchdog so a clean generation binds the public socket instead.
+pub fn handoff_replacement_should_self_promote(
+    is_handoff_replacement: bool,
+    handoff_replacement_socket_exists: bool,
+    handoff_state: ControllerHandoffState,
+    launched_elapsed: Duration,
+    grace: Duration,
+) -> bool {
+    is_handoff_replacement
+        && handoff_replacement_socket_exists
+        && handoff_state == ControllerHandoffState::Stable
+        && launched_elapsed > grace
+}
+
 pub fn supervisor_lease_is_fresh_and_alive(
     last_heartbeat: Option<u64>,
     supervisor_process_alive: bool,
@@ -1299,6 +1327,53 @@ mod tests {
             true,
             Duration::from_secs(45),
             stale_after,
+        ));
+    }
+
+    #[test]
+    fn handoff_replacement_self_promote_policy_requires_stable_socket_and_grace() {
+        let grace = Duration::from_secs(3);
+
+        // Promoted (Stable) + still on temp socket + past grace → self-promote.
+        assert!(handoff_replacement_should_self_promote(
+            true,
+            true,
+            ControllerHandoffState::Stable,
+            Duration::from_secs(4),
+            grace,
+        ));
+        // Not yet promoted (still Preparing) → leave to the stranded/suicide watchdog,
+        // never self-promote a replacement that has no authority.
+        assert!(!handoff_replacement_should_self_promote(
+            true,
+            true,
+            ControllerHandoffState::Preparing,
+            Duration::from_secs(4),
+            grace,
+        ));
+        // Temp socket already renamed away (healthy client finished) → nothing to do.
+        assert!(!handoff_replacement_should_self_promote(
+            true,
+            false,
+            ControllerHandoffState::Stable,
+            Duration::from_secs(4),
+            grace,
+        ));
+        // Initial controller on the public socket (not a replacement) → never.
+        assert!(!handoff_replacement_should_self_promote(
+            false,
+            true,
+            ControllerHandoffState::Stable,
+            Duration::from_secs(4),
+            grace,
+        ));
+        // Within grace → don't race a healthy client mid-rename.
+        assert!(!handoff_replacement_should_self_promote(
+            true,
+            true,
+            ControllerHandoffState::Stable,
+            Duration::from_secs(3),
+            grace,
         ));
     }
 

@@ -107,6 +107,34 @@ pub fn workspace_access_dirs_for_doc(file: &Path) -> Vec<PathBuf> {
     dirs
 }
 
+pub fn append_workspace_access_args(agent_name: &str, args: &mut Vec<String>, file: &Path) {
+    if !matches!(agent_name, "claude" | "codex") {
+        return;
+    }
+
+    let mut existing = std::collections::HashSet::new();
+    let mut iter = args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "--add-dir" {
+            if let Some(dir) = iter.next() {
+                existing.insert(dir.clone());
+            }
+            continue;
+        }
+        if let Some(dir) = arg.strip_prefix("--add-dir=") {
+            existing.insert(dir.to_string());
+        }
+    }
+
+    for dir in workspace_access_dirs_for_doc(file) {
+        let dir = dir.to_string_lossy().into_owned();
+        if existing.insert(dir.clone()) {
+            args.push("--add-dir".into());
+            args.push(dir);
+        }
+    }
+}
+
 /// Return external git metadata directories a workspace-scoped harness must be
 /// allowed to write when operating on `file`.
 ///
@@ -214,6 +242,22 @@ pub fn resolve_to_git_root(file: &Path) -> Result<(PathBuf, PathBuf)> {
 
     let cwd = std::env::current_dir().unwrap_or_default();
     resolve_relative_to_git_root_from(&cwd, file)
+}
+
+/// Resolve the cwd to use when spawning a pane for `file`.
+///
+/// For documents inside a submodule, returns the submodule's own git toplevel
+/// so the spawned session starts inside that submodule. For top-level docs (or
+/// when git resolution fails), falls back to the process cwd.
+pub fn resolve_pane_cwd(file: &Path) -> PathBuf {
+    if let Ok((super_root, resolved)) = resolve_to_git_root(file) {
+        let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+        if in_submodule {
+            return git_root;
+        }
+        return super_root;
+    }
+    std::env::current_dir().unwrap_or_default()
 }
 
 /// Get git toplevel from a specific directory.
@@ -337,6 +381,12 @@ mod tests {
         git(repo, &["commit", "-m", msg, "--no-verify"]);
     }
 
+    fn has_add_dir(args: &[String], dir: &Path) -> bool {
+        let dir = dir.to_string_lossy();
+        args.windows(2)
+            .any(|w| w[0] == "--add-dir" && w[1] == dir.as_ref())
+    }
+
     #[test]
     fn external_git_dirs_for_submodule_include_submodule_and_parent_gitdirs() {
         let outer_dir = tempfile::TempDir::new().unwrap();
@@ -441,6 +491,84 @@ mod tests {
             dirs.contains(&outer.join(".git")),
             "superproject gitdir should still be exposed: {dirs:?}"
         );
+    }
+
+    #[test]
+    fn append_workspace_access_args_adds_superproject_root_for_submodule_docs() {
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+
+        let sub_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_dir.path();
+        init_repo(sub_origin);
+        commit_file(sub_origin, "README.md", "# sub\n", "init sub");
+
+        init_repo(outer);
+        commit_file(outer, "README.md", "# outer\n", "init outer");
+        add_submodule(outer, sub_origin, "src/sub", "add submodule");
+
+        let doc = outer.join("src/sub/session.md");
+        fs::write(&doc, "test\n").unwrap();
+
+        let mut args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+        ];
+        append_workspace_access_args("codex", &mut args, &doc);
+
+        assert!(has_add_dir(&args, outer));
+        assert!(has_add_dir(&args, &outer.join(".git/modules/src/sub")));
+        assert!(has_add_dir(&args, &outer.join(".git")));
+    }
+
+    #[test]
+    fn append_workspace_access_args_adds_nested_submodule_gitdirs() {
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+        init_repo(outer);
+        commit_file(outer, "README.md", "# outer\n", "init outer");
+
+        let sub_origin_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_origin_dir.path();
+        init_repo(sub_origin);
+        commit_file(sub_origin, "README.md", "# sub\n", "init sub");
+
+        let nested_origin_dir = tempfile::TempDir::new().unwrap();
+        let nested_origin = nested_origin_dir.path();
+        init_repo(nested_origin);
+        commit_file(nested_origin, "README.md", "# nested\n", "init nested");
+
+        add_submodule(outer, sub_origin, "src/sub", "add submodule");
+
+        let submodule_root = outer.join("src/sub");
+        add_submodule(
+            &submodule_root,
+            nested_origin,
+            "src/nested",
+            "add nested submodule",
+        );
+
+        let doc = submodule_root.join("tasks/session.md");
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, "test\n").unwrap();
+
+        let mut args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "-s".to_string(),
+            "workspace-write".to_string(),
+        ];
+        append_workspace_access_args("codex", &mut args, &doc);
+
+        assert!(has_add_dir(&args, outer));
+        assert!(has_add_dir(&args, &outer.join(".git/modules/src/sub")));
+        assert!(has_add_dir(
+            &args,
+            &outer.join(".git/modules/src/sub/modules/src/nested")
+        ));
+        assert!(has_add_dir(&args, &outer.join(".git")));
     }
 
     #[test]
@@ -574,6 +702,36 @@ mod tests {
 
         let resolved = resolve_canonical_or_absolute_file_path(Path::new("tasks/../tasks/plan.md"));
         assert_eq!(resolved, doc);
+    }
+
+    #[test]
+    fn resolve_pane_cwd_returns_git_root_for_file_in_repo() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        let doc = root.join("plan.md");
+        fs::write(&doc, "# Plan\n").unwrap();
+
+        let cwd = resolve_pane_cwd(&doc);
+
+        assert_eq!(
+            cwd, root,
+            "cwd should be the git root for a file inside a plain repo"
+        );
+    }
+
+    #[test]
+    fn resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let non_git_file = dir.path().join("notes.md");
+        fs::write(&non_git_file, "notes\n").unwrap();
+
+        let cwd = resolve_pane_cwd(&non_git_file);
+
+        assert!(
+            cwd.exists() || cwd == std::env::current_dir().unwrap_or_default(),
+            "fallback cwd should be the process cwd or an existing path"
+        );
     }
 
     #[test]

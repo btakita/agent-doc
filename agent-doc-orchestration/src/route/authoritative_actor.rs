@@ -1,6 +1,8 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_controller_io::starting_actor_timeout::clear_starting_actor_timeout_record;
+use agent_doc_session_registry_io::dispatch_registry::registry_base_dir_for_dispatch;
 
 pub(crate) fn load_authoritative_actor_binding(
     tmux: &Tmux,
@@ -635,109 +637,6 @@ pub(crate) fn route_starting_actor_not_ready_log_line(
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct StartingActorTimeoutRecord {
-    pane_id: String,
-    generation: u64,
-    log_line: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StartingActorTimeoutLogDecision {
-    NewTimeout,
-    DuplicateTimeout,
-}
-
-pub(crate) fn starting_actor_timeout_paths(file_path: &str) -> Option<(PathBuf, PathBuf)> {
-    let requested = PathBuf::from(file_path);
-    let root = agent_doc_fs::find_project_root(&requested)?;
-    let hash = agent_doc_fs::document_state_hash_from_str(file_path);
-    let state_dir = root.join(".agent-doc/state/route-starting-timeouts");
-    let lock_dir = root.join(".agent-doc/locks");
-    Some((
-        state_dir.join(format!("{hash}.json")),
-        lock_dir.join(format!("route-starting-timeout-{hash}.lock")),
-    ))
-}
-
-pub(crate) fn record_starting_actor_timeout(
-    file_path: &str,
-    facts: &AuthoritativeActorReadyFacts,
-    log_line: &str,
-) -> Result<StartingActorTimeoutLogDecision> {
-    let Some((state_path, lock_path)) = starting_actor_timeout_paths(file_path) else {
-        return Ok(StartingActorTimeoutLogDecision::NewTimeout);
-    };
-
-    if let Some(parent) = state_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let lock = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .truncate(false)
-        .write(true)
-        .open(&lock_path)?;
-    lock.lock_exclusive()?;
-
-    let existing = std::fs::read_to_string(&state_path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<StartingActorTimeoutRecord>(&content).ok());
-    if existing.as_ref().is_some_and(|record| {
-        record.pane_id == facts.pane_id && record.generation == facts.generation
-    }) {
-        let _ = lock.unlock();
-        return Ok(StartingActorTimeoutLogDecision::DuplicateTimeout);
-    }
-
-    let record = StartingActorTimeoutRecord {
-        pane_id: facts.pane_id.clone(),
-        generation: facts.generation,
-        log_line: log_line.to_string(),
-    };
-    std::fs::write(&state_path, serde_json::to_string_pretty(&record)?)?;
-    let _ = lock.unlock();
-    Ok(StartingActorTimeoutLogDecision::NewTimeout)
-}
-
-pub(crate) fn load_starting_actor_timeout_record(
-    file_path: &str,
-) -> Option<StartingActorTimeoutRecord> {
-    let (state_path, _) = starting_actor_timeout_paths(file_path)?;
-    std::fs::read_to_string(&state_path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<StartingActorTimeoutRecord>(&content).ok())
-}
-
-pub(crate) fn starting_actor_timeout_record_matches(
-    file_path: &str,
-    facts: &AuthoritativeActorReadyFacts,
-) -> bool {
-    if facts.actor_state != ActorDispatchState::Starting {
-        return false;
-    }
-    starting_actor_timeout_record_identity_matches(file_path, facts)
-}
-
-pub(crate) fn starting_actor_timeout_record_identity_matches(
-    file_path: &str,
-    facts: &AuthoritativeActorReadyFacts,
-) -> bool {
-    load_starting_actor_timeout_record(file_path).is_some_and(|record| {
-        record.pane_id == facts.pane_id && record.generation == facts.generation
-    })
-}
-
-pub(crate) fn clear_starting_actor_timeout_record(file_path: &str) {
-    let Some((state_path, _)) = starting_actor_timeout_paths(file_path) else {
-        return;
-    };
-    let _ = std::fs::remove_file(state_path);
-}
-
 pub(crate) fn mark_starting_actor_timeout_blocked(
     file: &Path,
     file_path: &str,
@@ -785,9 +684,9 @@ pub(crate) fn mark_starting_actor_timeout_blocked(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
+    use agent_doc_supervisor_io::ipc::SupervisorIpc;
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity() {

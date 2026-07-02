@@ -57,15 +57,11 @@ pub fn detect(file: &Path) -> Result<Option<queue_policy::QueueContinuation>> {
     // [`agent_doc_queue::queue_continuation::RECYCLE_YIELD_GUIDANCE`].
     // The supervisor's OWN idle-watch drain uses `live_drainable_continuation_head`
     // (not this), so it is unaffected and resumes the drain after recycling.
-    if agent_doc_supervisor_io::recycle_yield::recycle_yield_pending(file) {
-        return Ok(None);
-    }
-    let content = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(_) => return Ok(None),
-    };
-    let snapshot_content = crate::snapshot::load(file)?;
-    queue_policy::required_continuation(&content, snapshot_content.as_deref())
+    agent_doc_queue_io::continuation_detect::detect_required_continuation_with(
+        file,
+        agent_doc_snapshot_io::load,
+        agent_doc_supervisor_io::recycle_yield::recycle_yield_pending,
+    )
 }
 
 /// Reconcile the durable continuation marker for `file` after a successful
@@ -250,7 +246,7 @@ mod tests {
 ## Queue\n\n<!-- agent:queue{queue_attrs} -->\n{queue_body}<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         doc
     }
 
@@ -473,7 +469,7 @@ mod tests {
             ],
         );
         std::fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         // No socket → not live IPC. operator-verify (#b) is deferred regardless,
         // so continuation must land on the drainable #c head.
         let continuation = detect(&doc).unwrap().expect("drainable head remains");
@@ -495,7 +491,7 @@ mod tests {
             ],
         );
         std::fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         assert!(
             detect(&doc).unwrap().is_none(),
             "all-deferred heads must not require continuation"
@@ -689,7 +685,7 @@ mod tests {
 ## Backlog\n\n<!-- agent:backlog priority queue -->\n- [ ] [#ov] [operator-verify] live drive\n<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
 
         assert_eq!(
             detect(&doc)
@@ -852,7 +848,7 @@ mod tests {
             .unwrap()
             .replace("- -- stop placeholder\n", "--- stop\n- do [#x]\n");
         std::fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         // A stop fence at the head must not force continuation.
         assert!(detect(&doc).unwrap().is_none());
     }

@@ -1,0 +1,16 @@
+[package]
+name = "agent-doc-session-registry"
+version = "0.34.67"
+edition = "2024"
+description = "Pure session registry mutation policy for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_session_registry"
+
+[dependencies]
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+
+[dev-dependencies]
+tempfile = "3"

@@ -8,7 +8,7 @@
 //! - On startup, calls `upgrade::warn_if_outdated()` for all subcommands except `Upgrade`.
 //! - Loads global config via `agent_doc_config::load()` before dispatching; config is threaded into
 //!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
-//! - Each subcommand delegates immediately to its own module (`agent_doc_orchestration::run::run`, `agent_doc_orchestration::diff_io::run`, etc.);
+//! - Each subcommand delegates immediately to its owning module or focused crate (`agent_doc_orchestration::run::run`, `agent_doc_diff_io::run`, etc.);
 //!   `main` contains no business logic beyond argument destructuring and dispatch.
 //! - `Route` no longer runs a follow-up sync; editor/plugin sync remains the
 //!   authoritative layout path.
@@ -47,6 +47,8 @@ mod clean;
 mod cleanup_cmd;
 mod commands;
 mod convert;
+mod dashboard_cmd;
+mod dedupe_cmd;
 mod describe_image;
 mod extract;
 mod history;
@@ -90,7 +92,7 @@ mod upgrade;
 mod worktree;
 
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_orchestration::template_io;
+use agent_doc_template_io as template_io;
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
@@ -1506,7 +1508,7 @@ enum AdminAction {
         #[arg(long)]
         once: bool,
         /// Poll interval in milliseconds (default ~1s)
-        #[arg(long, default_value_t = agent_doc_orchestration::dashboard::DEFAULT_INTERVAL_MS)]
+        #[arg(long, default_value_t = dashboard_cmd::DEFAULT_INTERVAL_MS)]
         interval: u64,
     },
     /// Pause, resume, or drain queue work through the controller
@@ -2420,7 +2422,13 @@ fn main() -> anyhow::Result<()> {
                 let to_ref = to.as_deref().unwrap_or("HEAD");
                 history::git_diff(&file, &from_ref, to_ref)
             } else {
-                agent_doc_orchestration::diff_io::run(&file, wait)
+                agent_doc_diff_io::run(
+                    &agent_doc_snapshot_io::DiffSnapshotStore::new(
+                        agent_doc_orchestration::ops_log::log_op,
+                    ),
+                    &file,
+                    wait,
+                )
             }
         }
         Commands::Reset {
@@ -2507,18 +2515,18 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Commit { file } => agent_doc_orchestration::git::commit(&file).map(|_| ()),
-        Commands::Dedupe { file } => agent_doc_orchestration::dedupe::run(&file),
+        Commands::Dedupe { file } => dedupe_cmd::run(&file),
         Commands::Cancel { file } => {
             match agent_doc_orchestration::repair::cancel_preflight_cycle(&file)? {
-                agent_doc_orchestration::repair::CancelOutcome::Abandoned => {
+                agent_doc_turn::repair::CancelOutcome::Abandoned => {
                     println!(
                         "[cancel] abandoned orphaned preflight_started cycle; next dispatch starts fresh"
                     );
                 }
-                agent_doc_orchestration::repair::CancelOutcome::NoOpenCycle => {
+                agent_doc_turn::repair::CancelOutcome::NoOpenCycle => {
                     println!("[cancel] no open cycle to reclaim");
                 }
-                agent_doc_orchestration::repair::CancelOutcome::Protected => {
+                agent_doc_turn::repair::CancelOutcome::Protected => {
                     println!(
                         "[cancel] open cycle owns real work (advanced past preflight or has a response capture); left intact"
                     );
@@ -3024,7 +3032,7 @@ fn main() -> anyhow::Result<()> {
         ),
         Commands::Memory { action } => match action {
             MemoryAction::Index { file, db, json } => {
-                agent_doc_orchestration::memory_cmd::run_index(&file, db.as_deref(), json)
+                agent_doc_memory_io::session::run_index(&file, db.as_deref(), json)
             }
             MemoryAction::Search {
                 file,
@@ -3033,7 +3041,7 @@ fn main() -> anyhow::Result<()> {
                 limit,
                 json,
                 rebuild,
-            } => agent_doc_orchestration::memory_cmd::run_search(
+            } => agent_doc_memory_io::session::run_search(
                 &file,
                 &query,
                 db.as_deref(),
@@ -3334,12 +3342,7 @@ fn main() -> anyhow::Result<()> {
                 json,
                 once,
                 interval,
-            } => agent_doc_orchestration::dashboard::dashboard(
-                project_root.as_deref(),
-                json,
-                once,
-                interval,
-            ),
+            } => dashboard_cmd::dashboard(project_root.as_deref(), json, once, interval),
             AdminAction::ReapStaleControllers {
                 project_root,
                 dry_run,
@@ -3427,9 +3430,7 @@ fn main() -> anyhow::Result<()> {
                         );
                     }
                     let root_arg = project_root.as_deref().or(target.as_deref());
-                    let root = agent_doc_orchestration::project_controller::project_root_from_arg(
-                        root_arg,
-                    )?;
+                    let root = agent_doc_project_root_io::project_root_from_arg(root_arg)?;
                     let recycled =
                         agent_doc_orchestration::project_controller::recycle_controller_force(
                             &root, force,

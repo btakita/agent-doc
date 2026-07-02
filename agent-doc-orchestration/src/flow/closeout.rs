@@ -1,6 +1,6 @@
 use agent_doc_flow::{
     closeout::closeout_latency_message,
-    types::{FlowEvent, FlowName, FlowOutcome, FlowStage},
+    types::{FlowOutcome, FlowStage},
 };
 use agent_doc_turn::closeout_guard::CloseoutGuardReason;
 use agent_doc_turn::closeout_recovery::{
@@ -14,21 +14,17 @@ use agent_doc_turn::closeout_recovery::{
 use anyhow::{Context, Result};
 use std::path::Path;
 
-pub fn closeout_guard_event(
-    stage: FlowStage,
-    outcome: FlowOutcome,
-    reason: CloseoutGuardReason,
-) -> FlowEvent {
-    FlowEvent::new(FlowName::Closeout, stage, outcome).with_reason(reason.as_str())
-}
-
 pub fn log_closeout_guard_event(
     file: &Path,
     stage: FlowStage,
     outcome: FlowOutcome,
     reason: CloseoutGuardReason,
 ) {
-    super::proof::log_flow_event(file, closeout_guard_event(stage, outcome, reason));
+    agent_doc_flow_io::log_flow_event(
+        file,
+        agent_doc_turn::closeout_guard::closeout_guard_event(stage, outcome, reason),
+        crate::ops_log::log_op,
+    );
 }
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
@@ -100,7 +96,7 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
         Err(e) => eprintln!("[commit] closeout pending-reap maintenance failed (non-fatal): {e}"),
     }
 
-    if let crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
+    if let agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
         rc.snapshot_commit_status()
     {
         eprintln!("[commit] snapshot differs from HEAD after commit - retrying");
@@ -117,7 +113,7 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
         timer.mark("cycle_state_retry_snapshot");
     }
 
-    if crate::git::submodule_pointer_drift(file)?.is_some() {
+    if agent_doc_git_io::submodule::submodule_pointer_drift(file)?.is_some() {
         eprintln!("[commit] parent submodule pointer still stale after commit - retrying");
         did_commit |= crate::git::commit(file)?;
         rc.invalidate_head_content();
@@ -125,7 +121,7 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
         ensure_cycle_committed(file)?;
         timer.mark("cycle_state_retry_parent_pointer");
     }
-    if let Some(drift) = crate::git::submodule_pointer_drift(file)? {
+    if let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)? {
         timer.mark("parent_pointer_verify_failed");
         let parent_head = drift.parent_head.as_deref().unwrap_or("<missing>");
         timer.finish();
@@ -239,7 +235,7 @@ pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
     {
         return None;
     }
-    let head = match crate::git::show_head(file) {
+    let head = match agent_doc_git_io::revision::show_head(file) {
         Ok(Some(head)) => head,
         Ok(None) => return None,
         Err(err) => {
@@ -311,7 +307,7 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
     {
         return Ok(false);
     }
-    let Some(head) = crate::git::show_head(file)? else {
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
     // Present in HEAD → a normal committed response; nothing to reconcile.
@@ -349,45 +345,14 @@ fn response_materialized_in_head_compact_archive(
     response_body: &str,
     head: &str,
 ) -> bool {
-    compact_archive_pointers(head).into_iter().any(|pointer| {
-        read_head_compact_archive(file, pointer)
-            .map(|archive| {
-                agent_doc_turn::response_replay::response_materialized_in_content(
-                    response_body,
-                    &archive,
-                )
-            })
-            .unwrap_or(false)
-    })
-}
-
-pub(crate) fn compact_archive_pointers(content: &str) -> Vec<&str> {
-    content
-        .split("archived to `")
-        .skip(1)
-        .filter_map(|tail| tail.split_once('`').map(|(path, _)| path.trim()))
-        .filter(|path| !path.is_empty())
-        .collect()
-}
-
-pub(crate) fn read_head_compact_archive(file: &Path, pointer: &str) -> Option<String> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_fs::find_project_root(&canonical)?;
-    let archive_root = project_root
-        .join(".agent-doc/archives")
-        .canonicalize()
-        .ok()?;
-    let pointer_path = Path::new(pointer);
-    let archive_path = if pointer_path.is_absolute() {
-        pointer_path.to_path_buf()
-    } else {
-        project_root.join(pointer_path)
-    };
-    let archive_path = archive_path.canonicalize().ok()?;
-    if !archive_path.starts_with(&archive_root) {
-        return None;
-    }
-    std::fs::read_to_string(archive_path).ok()
+    agent_doc_archive_io::read_head_compact_archives(file, head)
+        .into_iter()
+        .any(|archive| {
+            agent_doc_turn::response_replay::response_materialized_in_content(
+                response_body,
+                &archive,
+            )
+        })
 }
 
 fn capture_state_label(state: agent_doc_workflow::capture::CaptureState) -> &'static str {
@@ -404,7 +369,7 @@ pub fn cleanup_fallback_patch_files(file: &Path) {
     let Ok(canonical) = file.canonicalize() else {
         return;
     };
-    let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let patches_dir = project_root.join(".agent-doc/patches");
     if !patches_dir.exists() {
         return;
@@ -483,7 +448,7 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
     let canonical = file
         .canonicalize()
         .with_context(|| format!("terminal proof: failed to canonicalize {}", file.display()))?;
-    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         eprintln!(
             "[commit] warning: terminal proof ledger unavailable for {}: project root not found",
             file.display()
@@ -506,13 +471,13 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
     }
     let file_content = std::fs::read_to_string(&canonical)
         .with_context(|| format!("terminal proof: read {}", canonical.display()))?;
-    let snapshot_content = crate::snapshot::load(&canonical)?.with_context(|| {
+    let snapshot_content = agent_doc_snapshot_io::load(&canonical)?.with_context(|| {
         format!(
             "terminal proof: missing snapshot for {}",
             canonical.display()
         )
     })?;
-    let head_content = crate::git::show_head(&canonical)?
+    let head_content = agent_doc_git_io::revision::show_head(&canonical)?
         .with_context(|| format!("terminal proof: missing HEAD for {}", canonical.display()))?;
     let file_hash = agent_doc_hash::content_hash(&file_content);
     let snapshot_hash = agent_doc_hash::content_hash(&snapshot_content);
@@ -716,7 +681,7 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
         )
     })?;
     let visible_markdown_hash = crate::capture::replay_file_hash(&visible);
-    let snapshot = crate::snapshot::load(file)?;
+    let snapshot = agent_doc_snapshot_io::load(file)?;
     let snapshot_hash = snapshot.as_deref().map(agent_doc_hash::content_hash);
     let cycle = crate::cycle_state::load(file)?;
     let active_cycle = cycle.as_ref().map(|state| CloseoutCycleEvidence {
@@ -818,7 +783,7 @@ fn closeout_editor_ipc_evidence(file: &Path, visible: &str) -> CloseoutEditorIpc
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let file_key = canonical.to_string_lossy().to_string();
     let live_buffers = agent_doc_debounce::live_buffer_snapshots(&file_key);
-    let socket_degraded = agent_doc_fs::find_project_root(&canonical)
+    let socket_degraded = agent_doc_project_root_io::project_root_containing(&canonical)
         .and_then(|root| crate::write::ipc_direct_disk_degraded_for_file(&root, &canonical).ok())
         .unwrap_or(false);
     if let Some(diverged) =
@@ -1018,7 +983,8 @@ pub fn apply_closeout_recovery_mutation(
                     })?;
                 }
             }
-            if delete_pre_response && let Err(e) = crate::snapshot::delete_pre_response(file) {
+            if delete_pre_response && let Err(e) = agent_doc_snapshot_io::delete_pre_response(file)
+            {
                 eprintln!("[repair] warning: failed to delete pre-response: {}", e);
             }
             crate::capture::mark_discarded(file)?;
@@ -1055,8 +1021,8 @@ fn apply_metadata_drift_recovery(
     file: &Path,
     state: CloseoutRecoveryState,
 ) -> Result<RecoveryApplication> {
-    let head = crate::git::show_head(file)?;
-    let snapshot = crate::snapshot::load(file).ok().flatten();
+    let head = agent_doc_git_io::revision::show_head(file)?;
+    let snapshot = agent_doc_snapshot_io::load(file).ok().flatten();
     let working = std::fs::read_to_string(file).ok();
     // For QueueMetadataDrift the local (commit-candidate) side is the snapshot;
     // for SidecarVisibleDrift the snapshot already matches HEAD and the local side
@@ -1135,9 +1101,9 @@ fn apply_metadata_drift_recovery(
 /// preflight-owned baseline is intentionally left untouched (it is re-taken at the
 /// next stable post-commit point).
 fn rebuild_sidecars_from_content(file: &Path, content: &str) -> Result<()> {
-    crate::snapshot::save(file, content)?;
+    agent_doc_snapshot_io::save(file, content, crate::ops_log::log_op)?;
     let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(content).encode_state();
-    crate::snapshot::save_document_crdt(file, &crdt, content)?;
+    agent_doc_merge_io::save_document_crdt(file, &crdt, content)?;
     Ok(())
 }
 
@@ -1193,8 +1159,8 @@ pub fn classify_closeout_recovery_state_for_file(file: &Path) -> CloseoutRecover
     // classify committed-cycle drift by *what* differs so the recovery names one
     // safe command. Order matters — narrowest/safest first, content drift last
     // (fail closed).
-    let snapshot = crate::snapshot::load(file).ok().flatten();
-    let head = crate::git::show_head(file).ok().flatten();
+    let snapshot = agent_doc_snapshot_io::load(file).ok().flatten();
+    let head = agent_doc_git_io::revision::show_head(file).ok().flatten();
     if let (Some(snapshot), Some(head)) = (snapshot.as_deref(), head.as_deref())
         && snapshot != head
     {
@@ -1213,7 +1179,7 @@ pub fn classify_closeout_recovery_state_for_file(file: &Path) -> CloseoutRecover
     // `#closeout-recovery-state-machine`: the document itself is clean (snapshot
     // == HEAD == working) but a reaped/closed item left a nested parent submodule
     // pointer uncommitted — single safe recovery is `agent-doc commit`.
-    input.nested_parent_pointer_stale = crate::git::submodule_pointer_drift(file)
+    input.nested_parent_pointer_stale = agent_doc_git_io::submodule::submodule_pointer_drift(file)
         .ok()
         .flatten()
         .is_some();
@@ -1221,7 +1187,7 @@ pub fn classify_closeout_recovery_state_for_file(file: &Path) -> CloseoutRecover
 }
 
 fn head_exchange_has_escaped_markers(file: &Path) -> bool {
-    let Ok(Some(head)) = crate::git::show_head(file) else {
+    let Ok(Some(head)) = agent_doc_git_io::revision::show_head(file) else {
         return false;
     };
     let Ok(components) = agent_doc_element::element::parse(&head) else {
@@ -1280,46 +1246,12 @@ mod tests {
     use super::*;
     use std::process::Command;
 
-    #[test]
-    fn closeout_guard_event_is_typed() {
-        let event = closeout_guard_event(
-            FlowStage::PreWriteGuard,
-            FlowOutcome::Blocked,
-            CloseoutGuardReason::PendingCaptureRecommendations,
-        );
-
-        assert_eq!(event.flow, FlowName::Closeout);
-        assert_eq!(event.stage, FlowStage::PreWriteGuard);
-        assert_eq!(event.outcome, FlowOutcome::Blocked);
-        assert_eq!(
-            event.reason.as_deref(),
-            Some("pending_capture_recommendations")
-        );
-    }
-
-    #[test]
-    fn closeout_guard_event_carries_review_done_reason() {
-        let event = closeout_guard_event(
-            FlowStage::PreWriteGuard,
-            FlowOutcome::Blocked,
-            CloseoutGuardReason::ReviewDoneSourceNotReviewed,
-        );
-
-        assert_eq!(event.flow, FlowName::Closeout);
-        assert_eq!(event.stage, FlowStage::PreWriteGuard);
-        assert_eq!(event.outcome, FlowOutcome::Blocked);
-        assert_eq!(
-            event.reason.as_deref(),
-            Some("review_done_source_not_reviewed")
-        );
-    }
-
     fn setup_git_project_with_doc(base: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, base).unwrap();
-        crate::snapshot::save(&doc, base).unwrap();
+        agent_doc_snapshot_io::save(&doc, base, crate::ops_log::log_op).unwrap();
         run_git(dir.path(), &["init"]);
         run_git(dir.path(), &["config", "user.email", "test@example.com"]);
         run_git(dir.path(), &["config", "user.name", "Test User"]);
@@ -1382,7 +1314,9 @@ mod tests {
         );
 
         // HEAD reflects the reap, and session-check accepts the closeout.
-        let head = crate::git::show_head(&doc).unwrap().unwrap();
+        let head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !head.contains("- [x] [#donelinger]"),
             "HEAD must not strand the completed item:\n{head}"
@@ -1451,7 +1385,7 @@ mod tests {
             "### Re: repair closeout - gpt-5\n\nRecovered.\n<!-- agent:boundary:repair -->",
         );
         std::fs::write(&doc, &closed).unwrap();
-        crate::snapshot::save(&doc, &closed).unwrap();
+        agent_doc_snapshot_io::save(&doc, &closed, crate::ops_log::log_op).unwrap();
 
         complete_required_closeout(&doc)
             .expect("abandoned stale cycle must not block terminal closeout proof");
@@ -1521,7 +1455,9 @@ mod tests {
             "closeout must wait for target ACK before commit: {err}"
         );
 
-        let head = crate::git::show_head(&doc).unwrap().unwrap();
+        let head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !head.contains("typed before closeout"),
             "pending replica delivery must not be materialized in HEAD before ACK:\n{head}"
@@ -1578,7 +1514,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::cycle_state::mark_committed(
@@ -1605,7 +1541,7 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
-        crate::snapshot::save(&doc, &full_doc).unwrap();
+        agent_doc_snapshot_io::save(&doc, &full_doc, crate::ops_log::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::cycle_state::mark_committed(
@@ -1638,7 +1574,7 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, captured).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
-        crate::snapshot::save(&doc, &full_doc).unwrap();
+        agent_doc_snapshot_io::save(&doc, &full_doc, crate::ops_log::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::cycle_state::mark_committed(
@@ -1884,7 +1820,7 @@ mod tests {
         let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (_dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
             "commit_success",
@@ -1909,7 +1845,7 @@ mod tests {
         let snapshot = head.replace("Done.\n", "Done.\n\nReal unreviewed user content.\n");
         let (_dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
             "commit_success",
@@ -1937,7 +1873,7 @@ mod tests {
         );
         let (_dir, doc) = setup_git_project_with_doc(base);
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::snapshot::save(&doc, base).unwrap();
+        agent_doc_snapshot_io::save(&doc, base, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
         // Patch a visible response directly into the working file (bypassing write).
         let with_response = base.replace(
@@ -2015,7 +1951,7 @@ mod tests {
         // Document itself is clean: snapshot == HEAD == working.
         let doc = subwt.join("doc.md");
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(content), Some(content))
             .unwrap();
         assert_eq!(
@@ -2074,7 +2010,7 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
         // The snapshot AND the visible file carry the drift; only HEAD is behind.
         std::fs::write(&doc, &snapshot).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
             "commit_success",
@@ -2090,7 +2026,7 @@ mod tests {
         }
         // HEAD now carries the committed queue item, and re-classification is Clean.
         assert!(
-            crate::git::show_head(&doc)
+            agent_doc_git_io::revision::show_head(&doc)
                 .unwrap()
                 .unwrap()
                 .contains("- do [#b]")
@@ -2121,7 +2057,7 @@ mod tests {
         let snapshot = head.replace("queue_active: true", "queue_active: false");
         let (dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
             "commit_success",
@@ -2140,7 +2076,10 @@ mod tests {
         // continuation survives and re-classification is Clean.
         let restored = std::fs::read_to_string(&doc).unwrap();
         assert!(restored.contains("queue_active: true"), "{restored}");
-        assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), restored);
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            restored
+        );
         assert_eq!(
             classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::Clean
@@ -2166,7 +2105,7 @@ mod tests {
         let visible = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        crate::snapshot::save(&doc, head).unwrap();
+        agent_doc_snapshot_io::save(&doc, head, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(head), Some(head)).unwrap();
         std::fs::write(&doc, &visible).unwrap();
         assert_eq!(
@@ -2183,10 +2122,10 @@ mod tests {
 
         let working = std::fs::read_to_string(&doc).unwrap();
         assert!(working.contains("- do [#b]"), "{working}");
-        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(snapshot.contains("- do [#b]"), "{snapshot}");
         assert!(
-            crate::git::show_head(&doc)
+            agent_doc_git_io::revision::show_head(&doc)
                 .unwrap()
                 .unwrap()
                 .contains("- do [#b]")
@@ -2211,7 +2150,7 @@ mod tests {
         let snapshot = head.replace("- do [#a]", "- do [#z]");
         let (_dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
             "commit_success",
@@ -2253,7 +2192,7 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
-        crate::snapshot::save(&doc, &full_doc).unwrap();
+        agent_doc_snapshot_io::save(&doc, &full_doc, crate::ops_log::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::cycle_state::mark_committed(
@@ -2291,7 +2230,7 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
         // Snapshot carries the un-canonicalized prompt prefix; HEAD has the bare
         // form. Artifact normalization makes them equal; transient does not.
-        crate::snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
             "commit_success",
@@ -2350,7 +2289,7 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, full_doc).unwrap();
-        crate::snapshot::save(&doc, full_doc).unwrap();
+        agent_doc_snapshot_io::save(&doc, full_doc, crate::ops_log::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(full_doc), Some(full_doc))
@@ -2395,7 +2334,7 @@ mod tests {
         let state = crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &compacted).unwrap();
-        crate::snapshot::save(&doc, &compacted).unwrap();
+        agent_doc_snapshot_io::save(&doc, &compacted, crate::ops_log::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
         crate::cycle_state::mark_committed(
@@ -2450,7 +2389,7 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &compacted).unwrap();
-        crate::snapshot::save(&doc, &compacted).unwrap();
+        agent_doc_snapshot_io::save(&doc, &compacted, crate::ops_log::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
         crate::cycle_state::mark_committed(

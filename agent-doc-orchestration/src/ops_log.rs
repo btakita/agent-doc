@@ -30,9 +30,7 @@
 //! - `log_cycle_writes_jsonl`: cycle entry → valid JSON line in cycles.jsonl
 //! - `log_cycle_appends_multiple`: multiple entries → multiple lines
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
@@ -75,7 +73,7 @@ fn cached_session_id(file: &Path, rc: Option<&RunContext>) -> Option<String> {
 
 /// Append a timestamped log line to `.agent-doc/logs/ops.log`.
 ///
-/// Finds the project root by walking up from `file` (`agent_doc_fs::find_project_root`).
+/// Finds the project root by walking up from `file`.
 /// Best-effort: silently returns on any I/O error.
 pub fn log_op(file: &Path, message: &str) {
     log_op_with_context(file, message, None);
@@ -89,89 +87,6 @@ pub fn log_op_with_context(file: &Path, message: &str, rc: Option<&RunContext>) 
     let _ = try_log_op(file, message, rc);
 }
 
-/// Structured cycle log entry for reproducible operation tracking.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CycleEntry {
-    /// Operation type (e.g., "write_inline", "write_template", "write_stream", "commit").
-    pub op: String,
-    /// Document path (relative to project root).
-    pub file: String,
-    /// ISO 8601 timestamp.
-    pub timestamp: String,
-    /// Git commit hash after the operation (if available).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub commit_hash: Option<String>,
-    /// SHA256 of the snapshot content after the operation.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub snapshot_hash: Option<String>,
-    /// SHA256 of the document file content after the operation.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub file_hash: Option<String>,
-}
-
-/// Maximum size (bytes) an individual best-effort log (`ops.log`,
-/// `cycles.jsonl`) may reach before it is rotated aside. A runaway logger must
-/// never be able to balloon a single log file unbounded and starve a live
-/// session again: the qualia IPC wedge (`cycle-1782934039471`) grew `ops.log`
-/// to ~832MB via the pre-fix `#crdtpullspam` empty-pull flood (~4×/second) that
-/// starved the run. The empty-pull flood itself is fixed at the source
-/// (`crdt_relay_host::pull_replica_updates_for_file`), but this cap is the
-/// defense-in-depth backstop so *any* future runaway logger is bounded. When the
-/// active file reaches this cap it is rotated to a single `<name>.1` backup
-/// (replacing any prior backup) and a fresh file is started, bounding on-disk
-/// usage to ~2× this cap per log (`#opslogcap`).
-const LOG_ROTATE_MAX_BYTES: u64 = 64 * 1024 * 1024;
-
-/// Best-effort size-based rotation for an append-only log. If `log_path` is at or
-/// over `max_bytes`, move it aside to a single `<name>.1` backup (overwriting any
-/// existing backup) so the next append starts a fresh file. Never panics; on any
-/// unexpected error it logs a warning to stderr and leaves the file in place so
-/// the caller still appends (a too-large log is better than a lost line).
-fn rotate_log_if_oversized(log_path: &Path, max_bytes: u64) {
-    let len = match std::fs::metadata(log_path) {
-        Ok(meta) => meta.len(),
-        // A not-yet-created log is the common first-call case, not an error.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-        Err(e) => {
-            eprintln!("[ops-log] stat of {} failed: {e}", log_path.display());
-            return;
-        }
-    };
-    if len < max_bytes {
-        return;
-    }
-    let Some(name) = log_path.file_name().and_then(|n| n.to_str()) else {
-        eprintln!(
-            "[ops-log] cannot rotate {}: non-UTF-8 file name",
-            log_path.display()
-        );
-        return;
-    };
-    let rotated = log_path.with_file_name(format!("{name}.1"));
-    if let Err(e) = std::fs::rename(log_path, &rotated) {
-        eprintln!(
-            "[ops-log] rotation of {} -> {} failed: {e}",
-            log_path.display(),
-            rotated.display()
-        );
-    }
-}
-
-/// Get the current git HEAD commit hash for a file.
-fn git_head_hash(file: &Path) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["log", "-1", "--format=%H", "--"])
-        .arg(file)
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if hash.is_empty() { None } else { Some(hash) }
-    } else {
-        None
-    }
-}
-
 /// Append a structured cycle entry to `.agent-doc/logs/cycles.jsonl`.
 ///
 /// Best-effort: silently returns on any I/O error.
@@ -181,44 +96,8 @@ pub fn log_cycle(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) {
-    let _ = try_log_cycle(file, op, snapshot_content, file_content);
-}
-
-fn try_log_cycle(
-    file: &Path,
-    op: &str,
-    snapshot_content: Option<&str>,
-    file_content: Option<&str>,
-) -> Option<()> {
-    let canonical = file.canonicalize().ok()?;
-    let project_root = agent_doc_fs::find_project_root(&canonical)?;
-    let logs_dir = project_root.join(".agent-doc/logs");
-    std::fs::create_dir_all(&logs_dir).ok()?;
-    let log_path = logs_dir.join("cycles.jsonl");
-    rotate_log_if_oversized(&log_path, LOG_ROTATE_MAX_BYTES);
-
-    let relative = canonical
-        .strip_prefix(&project_root)
-        .unwrap_or(&canonical)
-        .to_string_lossy()
-        .to_string();
-
-    let entry = CycleEntry {
-        op: op.to_string(),
-        file: relative,
-        timestamp: agent_doc_log_time::current_log_timestamp(),
-        commit_hash: git_head_hash(file),
-        snapshot_hash: snapshot_content.map(agent_doc_hash::content_hash),
-        file_hash: file_content.map(agent_doc_hash::content_hash),
-    };
-
-    let json = serde_json::to_string(&entry).ok()?;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .ok()?;
-    writeln!(f, "{}", json).ok()
+    let _ =
+        agent_doc_ops_log_io::append_cycle_log_for_file(file, op, snapshot_content, file_content);
 }
 
 fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()> {
@@ -226,18 +105,9 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
         Some(rc) => rc.project_root()?,
         None => {
             let canonical = file.canonicalize().ok()?;
-            agent_doc_fs::find_project_root(&canonical)?
+            agent_doc_project_root_io::project_root_containing(&canonical)?
         }
     };
-    let logs_dir = project_root.join(".agent-doc/logs");
-    std::fs::create_dir_all(&logs_dir).ok()?;
-    let log_path = logs_dir.join("ops.log");
-    rotate_log_if_oversized(&log_path, LOG_ROTATE_MAX_BYTES);
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .ok()?;
     // `#opslogtrack`: append doc/session/turn attribution so interleaved entries
     // from multiple documents in one project ops.log are traceable.
     let doc_stem = file.file_stem().and_then(|n| n.to_str());
@@ -249,90 +119,21 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
             .flatten()
             .map(|cs| cs.cycle_id),
     };
-    let suffix = agent_doc_log_time::format_ops_log_tracking_suffix(
-        doc_stem,
-        session.as_deref(),
-        turn.as_deref(),
-    );
-    let line = agent_doc_log_time::format_ops_log_line(
-        agent_doc_log_time::current_epoch_secs(),
+    agent_doc_ops_log_io::append_ops_log_at_project(
+        &project_root,
         message,
-        &suffix,
-    );
-    writeln!(f, "{line}").ok()
+        agent_doc_ops_log_io::OpsLogTracking {
+            doc_stem,
+            session_id: session.as_deref(),
+            turn_id: turn.as_deref(),
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
-
-    #[test]
-    fn rotate_log_moves_oversized_file_to_backup() {
-        // `#opslogcap`: a log at/over the cap is moved aside so the next append
-        // starts a fresh file, bounding disk usage instead of starving the
-        // session the way the ~832MB qualia ops.log did.
-        let tmp = tempfile::TempDir::new().unwrap();
-        let log_path = tmp.path().join("ops.log");
-        fs::write(&log_path, "0123456789").unwrap(); // 10 bytes
-
-        rotate_log_if_oversized(&log_path, 10);
-
-        assert!(
-            !log_path.exists(),
-            "oversized active log should be rotated away"
-        );
-        let backup = tmp.path().join("ops.log.1");
-        assert!(backup.exists(), "backup <name>.1 should exist");
-        assert_eq!(fs::read_to_string(&backup).unwrap(), "0123456789");
-    }
-
-    #[test]
-    fn rotate_log_leaves_small_file_in_place() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let log_path = tmp.path().join("ops.log");
-        fs::write(&log_path, "small").unwrap(); // 5 bytes, under cap
-
-        rotate_log_if_oversized(&log_path, 64);
-
-        assert!(log_path.exists(), "under-cap log must not be rotated");
-        assert!(
-            !tmp.path().join("ops.log.1").exists(),
-            "no backup should be created under cap"
-        );
-        assert_eq!(fs::read_to_string(&log_path).unwrap(), "small");
-    }
-
-    #[test]
-    fn rotate_log_replaces_existing_backup() {
-        // A second rotation overwrites the prior `.1` backup so on-disk usage
-        // stays bounded to ~2× the cap (one active + one backup) rather than
-        // accumulating `.1`, `.2`, ... generations forever.
-        let tmp = tempfile::TempDir::new().unwrap();
-        let log_path = tmp.path().join("ops.log");
-        let backup = tmp.path().join("ops.log.1");
-        fs::write(&backup, "stale-backup").unwrap();
-        fs::write(&log_path, "fresh-oversized").unwrap();
-
-        rotate_log_if_oversized(&log_path, 1);
-
-        assert!(!log_path.exists(), "active log rotated away");
-        assert_eq!(
-            fs::read_to_string(&backup).unwrap(),
-            "fresh-oversized",
-            "backup should be replaced by the newest rotation"
-        );
-    }
-
-    #[test]
-    fn rotate_log_absent_file_is_noop() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let log_path = tmp.path().join("ops.log");
-        // Must not panic or create anything when the log does not exist yet.
-        rotate_log_if_oversized(&log_path, 10);
-        assert!(!log_path.exists());
-        assert!(!tmp.path().join("ops.log.1").exists());
-    }
 
     #[test]
     fn log_op_creates_file_and_appends() {

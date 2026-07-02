@@ -116,17 +116,10 @@ pub(crate) fn check_reaped_queue_head_without_response(
     }
 
     let content = rc.doc_content();
-    let head = crate::git::show_head(file).ok().flatten();
+    let head = agent_doc_git_io::revision::show_head(file).ok().flatten();
     let archives: Vec<String> = head
         .as_deref()
-        .map(|head| {
-            crate::flow::closeout::compact_archive_pointers(head)
-                .into_iter()
-                .filter_map(|pointer| {
-                    crate::flow::closeout::read_head_compact_archive(file, pointer)
-                })
-                .collect()
-        })
+        .map(|head| agent_doc_archive_io::read_head_compact_archives(file, head))
         .unwrap_or_default();
 
     // #bkx9wire: per-id response-loss diagnostic. Emitted even when a response was

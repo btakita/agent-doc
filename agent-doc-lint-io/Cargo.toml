@@ -1,0 +1,19 @@
+[package]
+name = "agent-doc-lint-io"
+version = "0.34.67"
+edition = "2024"
+description = "Tagpath lint gate adapter for agent-doc finalize flows"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_lint_io"
+
+[dependencies]
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
+anyhow = "1"
+tagpath = { version = "0.12.1", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"

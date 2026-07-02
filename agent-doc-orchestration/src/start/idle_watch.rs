@@ -42,6 +42,15 @@ const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferred_clear";
 const CONTEXT_CLEAR_SOURCE_QUEUE_SLASH: &str = "queue_slash_command";
 const CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET: &str = "supervisor_background_context_reset";
 
+fn show_pane_message(
+    pane: &str,
+    delay: &str,
+    message: &str,
+) -> Result<(), agent_doc_tmux_io::TmuxIoError> {
+    let runner = agent_doc_tmux_io::ProcessTmuxRunner::default_binary();
+    agent_doc_tmux_io::show_message(&runner, pane, delay, message)
+}
+
 /// `#fbwire` / `#fullboundary` Phase 2 — bounded timeout for the inter-queue-item
 /// convergence gate. While the prior turn has not proven a quiescent close
 /// (committed + editor buffer converged to HEAD + IPC inflight drained + actor
@@ -73,7 +82,7 @@ fn context_clear_marker_source_allows_supervisor_action(
 /// dispatch; the fail-closed blocked boundary is reserved for genuine editor
 /// wedges, not missing git state.
 fn editor_buffer_converged_to_head(file: &std::path::Path) -> bool {
-    let head_doc = match crate::git::show_head(file) {
+    let head_doc = match agent_doc_git_io::revision::show_head(file) {
         Ok(Some(doc)) => doc,
         _ => return true,
     };
@@ -107,7 +116,7 @@ fn gather_convergence_facts(
     agent_doc_document_realtime::convergence_gate::ConvergenceFacts {
         committed,
         editor_converged: editor_buffer_converged_to_head(file),
-        inflight: crate::ipc_socket::inflight_connection_handlers(),
+        inflight: agent_doc_ipc_io::inflight_connection_handlers(),
         actor_idle: !actor_state_is_busy_or_starting(shared),
         elapsed_ms,
         timeout_ms,
@@ -127,9 +136,9 @@ fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
     agent_doc_debounce::is_typing_via_file(&absolute.to_string_lossy(), debounce_ms)
 }
 
-/// `#fbwire` / `#fullboundary` Phase 2 — the convergence gate could not be
+/// `#fbwire` / `#fullboundary` Phase 2 - the convergence gate could not be
 /// satisfied within `CONVERGENCE_GATE_TIMEOUT_MS` (editor IPC wedged). Persist a
-/// replayable [`crate::convergence_playback::ConvergencePlayback`] artifact and
+/// replayable [`agent_doc_workflow_io::convergence_playback::ConvergencePlayback`] artifact and
 /// emit the ERROR-level `convergence_gate_blocked` ops-log line so a later agent
 /// can root-cause the wedge from the logs alone. Best-effort: a failure to persist
 /// the artifact is logged (never silently swallowed), but the boundary still fails
@@ -145,7 +154,7 @@ fn record_convergence_gate_blocked(
         .map(|s| s.cycle_id.clone())
         .unwrap_or_else(|| "unknown".to_string());
     let run_id = state.as_ref().and_then(|s| s.turn_id.clone());
-    let playback = crate::convergence_playback::ConvergencePlayback::new(
+    let playback = agent_doc_workflow_io::convergence_playback::ConvergencePlayback::new(
         file.display().to_string(),
         cycle_id,
         facts.inflight,
@@ -161,9 +170,13 @@ fn record_convergence_gate_blocked(
         format!("elapsed_ms={}", facts.elapsed_ms),
         format!("timeout_ms={}", facts.timeout_ms),
     ]);
-    match crate::convergence_playback::record_blocked_boundary(file, &playback) {
-        // `record_blocked_boundary` already emits the canonical ERROR-level
-        // `convergence_gate_blocked severity=error … playback=<path>`
+    match agent_doc_workflow_io::convergence_playback::record_blocked_boundary_with_logger(
+        file,
+        &playback,
+        crate::ops_log::log_op,
+    ) {
+        // `record_blocked_boundary_with_logger` already emits the canonical ERROR-level
+        // `convergence_gate_blocked severity=error ... playback=<path>`
         // ops-log line referencing the persisted artifact, so a successful persist
         // needs no additional ops record here (avoid double-logging the wedge).
         Ok(_) => {}
@@ -207,10 +220,7 @@ fn surface_supervisor_auto_install_status(
     } else {
         "5000"
     };
-    if let Err(err) = std::process::Command::new("tmux")
-        .args(["display-message", "-t", pane, "-d", delay, message])
-        .status()
-    {
+    if let Err(err) = show_pane_message(pane, delay, message) {
         eprintln!(
             "[agent-doc] warning: failed to surface auto-install status on pane {pane}: {err}"
         );
@@ -392,7 +402,14 @@ fn idle_queue_resubmit_pending_payload(
         submit_key,
     );
     let tmux = tmux_router::Tmux::default_server();
-    match crate::sessions::send_submitted_text_for_harness(&tmux, &pane, "", &harness.binary) {
+    match agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+        &tmux,
+        &pane,
+        "",
+        &harness.binary,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        "sessions.send_submitted_text_for_harness",
+    ) {
         Ok(()) => {
             crate::ops_log::log_op(
                 file,
@@ -1368,7 +1385,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if let Some(base) = path
                     .canonicalize()
                     .ok()
-                    .map(|canonical| crate::write::resolve_ipc_project_root_pub(&canonical))
+                    .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
                     && let Err(e) =
                         agent_doc_turn_status_io::set_supervisor_stale_marker(&base, supervisor_stale)
                 {
@@ -1404,7 +1421,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // older turn that a newer cycle has superseded. Resolve it only at a
                 // true turn boundary; mid-turn, preserve the open checkpoint so a
                 // finalize/recycle race can still be resumed by the fresh supervisor.
-                let inflight = crate::ipc_socket::inflight_connection_handlers();
+                let inflight = agent_doc_ipc_io::inflight_connection_handlers();
                 let cycle_open = match crate::cycle_state::load(&path).ok().flatten() {
                     Some(state) if state.is_open() => {
                         if turn_boundary
@@ -1437,7 +1454,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     path.display(),
                                     state.cycle_id,
                                     state.turn_id.as_deref().unwrap_or("<none>"),
-                                    crate::cycle_state::cycle_phase_label(state.phase),
+                                    state.phase.as_str(),
                                     stalled_secs,
                                     inflight,
                                 ),
@@ -1616,7 +1633,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     .ok()
                     .map(|canonical| {
                         let project_root =
-                            crate::write::resolve_ipc_project_root_pub(&canonical);
+                            agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
                         crate::write::editor_ipc_write_wedged(&project_root, &canonical)
                     })
                     .unwrap_or(false);
@@ -1642,7 +1659,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             path.display(),
                             shared.inject_pane.as_deref().unwrap_or("<pty>"),
                             supervisor_stale,
-                            crate::ipc_socket::inflight_connection_handlers(),
+                            agent_doc_ipc_io::inflight_connection_handlers(),
                         ),
                     );
                 }
@@ -1822,14 +1839,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             reexec_escalation_attempts,
                         );
                         if let Some(pane) = shared.inject_pane.as_deref() {
-                            let _ = std::process::Command::new("tmux")
-                                .args([
-                                    "display-message",
-                                    "-t",
-                                    pane,
-                                    "agent-doc: binary hot-reload + relaunch failed; restart this session to pick up the new build",
-                                ])
-                                .status();
+                            let _ = show_pane_message(
+                                pane,
+                                "3000",
+                                "agent-doc: binary hot-reload + relaunch failed; restart this session to pick up the new build",
+                            );
                         }
                     }
                     // The escalation owns this tick's recycle decision; the requested
@@ -1965,14 +1979,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     "[agent-doc] supervisor execve hot-reload failed ({err}); escalating to a bounded kill+relaunch on the next idle boundary"
                                 );
                                 if let Some(pane) = shared.inject_pane.as_deref() {
-                                    let _ = std::process::Command::new("tmux")
-                                        .args([
-                                            "display-message",
-                                            "-t",
-                                            pane,
-                                            "agent-doc: binary hot-reload failed; escalating to kill+relaunch",
-                                        ])
-                                        .status();
+                                    let _ = show_pane_message(
+                                        pane,
+                                        "3000",
+                                        "agent-doc: binary hot-reload failed; escalating to kill+relaunch",
+                                    );
                                 }
                                 reexec_recycle_disabled = true;
                                 // `#supselfheal` Phase 3: the in-place execve cannot
@@ -3100,7 +3111,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(&doc, "doc\n").unwrap();
-        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         let head = "ordinary queue head";
         let reason = crate::codex_hook::codex_queue_context_reset_reason(&doc, None)
@@ -3396,7 +3407,7 @@ mod tests {
             .filter(|s| s != "unwritten")
             .expect("ERROR line must name a written playback path");
         let raw = std::fs::read_to_string(&playback_path).unwrap();
-        let loaded: crate::convergence_playback::ConvergencePlayback =
+        let loaded: agent_doc_workflow_io::convergence_playback::ConvergencePlayback =
             serde_json::from_str(&raw).expect("playback artifact must be loadable");
         assert_eq!(loaded.inflight, 5);
         assert!(loaded.unmet_proofs.iter().any(|p| p == "editor_converged"));

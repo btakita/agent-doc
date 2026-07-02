@@ -62,7 +62,6 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_orchestration::sessions;
 use tmux_router::{PaneMoveOp, Tmux};
 
 /// Split direction for the mirror window.
@@ -113,7 +112,7 @@ pub fn run_with_tmux(
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let (_updated, session_id) = frontmatter::ensure_session(&content)?;
-        let pane = sessions::lookup(&session_id)?;
+        let pane = agent_doc_session_registry_io::lookup(&session_id)?;
         match pane {
             Some(pane_id) if tmux.pane_alive(&pane_id) => {
                 pane_files.push((pane_id, file.display().to_string()));
@@ -208,7 +207,7 @@ pub fn run_with_tmux(
     // Break out unwanted panes, but only if they are registered sessions.
     // Non-session panes (shells, tools, etc.) are left in place — the user
     // didn't ask us to manage them.
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     let session_panes: std::collections::HashSet<String> =
         registry.values().map(|e| e.pane.clone()).collect();
 

@@ -50,7 +50,6 @@
 
 use anyhow::Result;
 
-use agent_doc_orchestration::sessions;
 use agent_doc_orchestration::sync;
 use tmux_router::Tmux;
 
@@ -63,9 +62,9 @@ pub fn run_with_tmux(tmux: &Tmux) -> Result<()> {
 }
 
 pub fn run_with_tmux_in(tmux: &Tmux, base_dir: &std::path::Path) -> Result<()> {
-    let pane_id = match sessions::current_pane() {
-        Ok(p) => p,
-        Err(_) => {
+    let pane_id = match agent_doc_tmux_io::current_pane_id_from_env_or_tmux(tmux) {
+        Some(p) => p,
+        None => {
             // Not in tmux — nothing to autoclaim
             return Ok(());
         }
@@ -74,7 +73,7 @@ pub fn run_with_tmux_in(tmux: &Tmux, base_dir: &std::path::Path) -> Result<()> {
 }
 
 fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &str) -> Result<()> {
-    let mut registry = sessions::load_in(base_dir)?;
+    let mut registry = agent_doc_session_registry_io::load_in(base_dir)?;
 
     // Find all entries mapped to the current pane
     let all_claimed: Vec<(String, tmux_router::RegistryEntry)> = registry
@@ -114,7 +113,7 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
         for key in &stale_keys {
             registry.remove(key);
         }
-        if let Err(e) = sessions::save_in(base_dir, &registry) {
+        if let Err(e) = agent_doc_session_registry_io::save_in(base_dir, &registry) {
             eprintln!("[autoclaim] Failed to save pruned registry: {}", e);
         }
     }
@@ -179,7 +178,7 @@ fn sync_after_autoclaim_in(
         Err(_) => return,
     };
 
-    let registry = match sessions::load_in(base_dir) {
+    let registry = match agent_doc_session_registry_io::load_in(base_dir) {
         Ok(r) => r,
         Err(_) => return,
     };

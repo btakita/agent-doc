@@ -23,50 +23,79 @@ dependencies = [
 name = "agent-doc"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-archive-io",
  "agent-doc-boundary-io",
  "agent-doc-callback-io",
+ "agent-doc-capture-io",
+ "agent-doc-codex-hook-io",
  "agent-doc-config",
  "agent-doc-controller",
+ "agent-doc-controller-io",
  "agent-doc-debounce",
  "agent-doc-diff",
+ "agent-doc-diff-io",
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-boundary",
  "agent-doc-element-exchange",
+ "agent-doc-element-exchange-io",
  "agent-doc-element-queue",
  "agent-doc-element-review",
  "agent-doc-ffi",
  "agent-doc-flow",
+ "agent-doc-flow-io",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
  "agent-doc-git-io",
  "agent-doc-harness",
  "agent-doc-hash",
+ "agent-doc-hooks-io",
+ "agent-doc-ipc-forensics-io",
+ "agent-doc-ipc-io",
  "agent-doc-ipc-protocol",
+ "agent-doc-lease-io",
+ "agent-doc-lint-io",
  "agent-doc-markdown-ast",
  "agent-doc-memory",
+ "agent-doc-memory-io",
  "agent-doc-merge",
+ "agent-doc-merge-io",
  "agent-doc-model-tier",
+ "agent-doc-op-capture-io",
+ "agent-doc-ops-log-io",
  "agent-doc-orchestration",
  "agent-doc-owner-pane-io",
  "agent-doc-plugin-owner",
+ "agent-doc-plugin-owner-io",
+ "agent-doc-process-owner-io",
  "agent-doc-project-config-io",
+ "agent-doc-project-root-io",
  "agent-doc-prompt-context",
+ "agent-doc-prompt-context-io",
  "agent-doc-prompt-contract",
  "agent-doc-queue",
  "agent-doc-queue-io",
+ "agent-doc-repair-io",
+ "agent-doc-response-replay-io",
  "agent-doc-response-toc-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
+ "agent-doc-session-accretion-io",
+ "agent-doc-session-registry",
+ "agent-doc-session-registry-io",
+ "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
  "agent-doc-state-wire",
+ "agent-doc-status-io",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
+ "agent-doc-sync-io",
  "agent-doc-template",
+ "agent-doc-template-io",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
  "agent-doc-turn",
@@ -108,6 +137,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-archive-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-document",
+ "agent-doc-project-root-io",
+ "tempfile",
+]
+
+[[package]]
 name = "agent-doc-boundary-io"
 version = "0.34.67"
 dependencies = [
@@ -131,6 +169,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-capture-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-project-root-io",
+ "anyhow",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-codex-hook-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-hash",
+ "agent-doc-project-root-io",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "agent-doc-config"
 version = "0.34.67"
 dependencies = [
@@ -147,6 +207,7 @@ name = "agent-doc-controller"
 version = "0.34.67"
 dependencies = [
  "agent-doc-element-backlog",
+ "agent-doc-flow",
  "agent-doc-fs",
  "agent-doc-queue",
  "agent-doc-supervisor",
@@ -157,6 +218,22 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-controller-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-controller",
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-secret-redact",
+ "agent-doc-tmux-commands",
+ "anyhow",
+ "fs2",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
@@ -188,6 +265,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-diff-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-debounce",
+ "agent-doc-diff",
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "anyhow",
+ "tempfile",
+]
+
+[[package]]
 name = "agent-doc-document"
 version = "0.34.67"
 dependencies = [
@@ -204,6 +293,7 @@ dependencies = [
  "pulldown-cmark",
  "serde",
  "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -215,6 +305,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-exchange",
+ "agent-doc-flow",
  "agent-doc-frontmatter",
  "agent-doc-merge",
  "agent-doc-prompt-lines",
@@ -278,6 +369,18 @@ dependencies = [
  "agent-doc-turn",
  "anyhow",
  "similar",
+]
+
+[[package]]
+name = "agent-doc-element-exchange-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-document",
+ "agent-doc-element-exchange",
+ "agent-doc-hash",
+ "agent-doc-template",
+ "agent-doc-turn",
+ "anyhow",
 ]
 
 [[package]]
@@ -367,6 +470,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-flow-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-flow",
+]
+
+[[package]]
 name = "agent-doc-frontmatter"
 version = "0.34.67"
 dependencies = [
@@ -420,6 +530,7 @@ dependencies = [
 name = "agent-doc-git-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-diff",
  "agent-doc-git",
  "agent-doc-hash",
  "anyhow",
@@ -450,6 +561,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-hooks-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-frontmatter",
+ "agent-doc-model-tier",
+ "agent-kit",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-ipc-forensics-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-project-root-io",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-ipc-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-ipc-protocol",
+ "anyhow",
+ "interprocess",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "agent-doc-ipc-protocol"
 version = "0.34.67"
 dependencies = [
@@ -462,6 +603,26 @@ dependencies = [
 [[package]]
 name = "agent-doc-lease"
 version = "0.34.67"
+
+[[package]]
+name = "agent-doc-lease-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-lease",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-lint-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-frontmatter",
+ "agent-doc-project-config-io",
+ "anyhow",
+ "tagpath",
+ "tempfile",
+]
 
 [[package]]
 name = "agent-doc-log-time"
@@ -488,6 +649,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-memory-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-document",
+ "agent-doc-element",
+ "agent-doc-element-backlog",
+ "agent-doc-fs",
+ "agent-doc-memory",
+ "agent-doc-queue",
+ "agent-doc-turn",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tsift-memory",
+]
+
+[[package]]
 name = "agent-doc-merge"
 version = "0.34.67"
 dependencies = [
@@ -504,6 +683,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-merge-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-merge",
+ "agent-doc-op-capture-io",
+ "agent-doc-snapshot-io",
+ "anyhow",
+ "tempfile",
+]
+
+[[package]]
 name = "agent-doc-model-tier"
 version = "0.34.67"
 dependencies = [
@@ -516,14 +708,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-op-capture-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-merge",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-ops-log-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-git-io",
+ "agent-doc-hash",
+ "agent-doc-log-time",
+ "agent-doc-project-root-io",
+ "agent-doc-turn",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "agent-doc-orchestration"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-archive-io",
  "agent-doc-callback-io",
+ "agent-doc-capture-io",
+ "agent-doc-codex-hook-io",
  "agent-doc-config",
  "agent-doc-controller",
+ "agent-doc-controller-io",
  "agent-doc-debounce",
  "agent-doc-diff",
+ "agent-doc-diff-io",
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
@@ -531,9 +756,11 @@ dependencies = [
  "agent-doc-element-boundary",
  "agent-doc-element-done",
  "agent-doc-element-exchange",
+ "agent-doc-element-exchange-io",
  "agent-doc-element-queue",
  "agent-doc-element-review",
  "agent-doc-flow",
+ "agent-doc-flow-io",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
@@ -541,32 +768,54 @@ dependencies = [
  "agent-doc-git-io",
  "agent-doc-harness",
  "agent-doc-hash",
+ "agent-doc-hooks-io",
+ "agent-doc-ipc-forensics-io",
+ "agent-doc-ipc-io",
  "agent-doc-ipc-protocol",
  "agent-doc-lease",
+ "agent-doc-lease-io",
+ "agent-doc-lint-io",
  "agent-doc-log-time",
  "agent-doc-markdown-ast",
  "agent-doc-memory",
+ "agent-doc-memory-io",
  "agent-doc-merge",
+ "agent-doc-merge-io",
  "agent-doc-model-tier",
+ "agent-doc-op-capture-io",
+ "agent-doc-ops-log-io",
  "agent-doc-owner-pane-io",
  "agent-doc-plugin-owner",
+ "agent-doc-plugin-owner-io",
+ "agent-doc-process-owner-io",
  "agent-doc-project-config-io",
+ "agent-doc-project-root-io",
  "agent-doc-prompt-cache",
  "agent-doc-prompt-context",
+ "agent-doc-prompt-context-io",
  "agent-doc-prompt-contract",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-queue-io",
+ "agent-doc-repair-io",
+ "agent-doc-response-replay-io",
  "agent-doc-response-toc-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
+ "agent-doc-session-accretion-io",
+ "agent-doc-session-registry",
+ "agent-doc-session-registry-io",
+ "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-status-io",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
  "agent-doc-sync",
+ "agent-doc-sync-io",
  "agent-doc-template",
+ "agent-doc-template-io",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
@@ -580,7 +829,6 @@ dependencies = [
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-doc-workflow-io",
- "agent-kit",
  "anyhow",
  "base64 0.22.1",
  "clap",
@@ -601,7 +849,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "similar",
- "tagpath",
  "tempfile",
  "tiny_http",
  "tmux-router",
@@ -641,6 +888,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-plugin-owner-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-plugin-owner",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-process-owner-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-controller",
+]
+
+[[package]]
 name = "agent-doc-project-config-io"
 version = "0.34.67"
 dependencies = [
@@ -649,6 +912,16 @@ dependencies = [
  "anyhow",
  "tempfile",
  "toml 1.1.2+spec-1.1.0",
+]
+
+[[package]]
+name = "agent-doc-project-root-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "anyhow",
+ "tempfile",
 ]
 
 [[package]]
@@ -682,6 +955,19 @@ dependencies = [
  "lazily 0.13.1",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "agent-doc-prompt-context-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
+ "agent-doc-prompt-context",
+ "agent-doc-response-toc-io",
+ "agent-doc-session-accretion",
+ "agent-doc-workflow",
+ "tempfile",
 ]
 
 [[package]]
@@ -729,15 +1015,41 @@ dependencies = [
 name = "agent-doc-queue-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-debounce",
  "agent-doc-document-realtime",
+ "agent-doc-element",
  "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-queue",
  "agent-doc-sqlite",
+ "agent-doc-state-backbone",
  "agent-doc-turn",
+ "agent-doc-workflow-io",
  "anyhow",
  "serde",
  "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-repair-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-hash",
+ "agent-doc-project-root-io",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-response-replay-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-turn",
+ "anyhow",
  "tempfile",
 ]
 
@@ -778,10 +1090,68 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-doc-sqlite"
+name = "agent-doc-session-accretion-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "agent-doc-log-time",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-config-io",
+ "agent-doc-session-accretion",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-session-registry"
+version = "0.34.67"
+dependencies = [
+ "tempfile",
+ "tmux-router",
+]
+
+[[package]]
+name = "agent-doc-session-registry-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-controller",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-session-registry",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+ "tmux-router",
+]
+
+[[package]]
+name = "agent-doc-snapshot-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-diff-io",
+ "agent-doc-document",
+ "agent-doc-document-realtime",
+ "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-project-root-io",
+ "agent-doc-secret-redact",
+ "agent-doc-session-registry-io",
+ "anyhow",
+ "fs2",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-sqlite"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-diff",
+ "agent-doc-frontmatter",
+ "agent-doc-log-time",
  "agent-doc-topic",
  "agent-doc-turn",
  "anyhow",
@@ -796,7 +1166,7 @@ name = "agent-doc-state-backbone"
 version = "0.34.67"
 dependencies = [
  "agent-doc-turn",
- "lazily 0.13.1",
+ "lazily 0.20.0",
  "serde",
  "serde_json",
 ]
@@ -810,6 +1180,16 @@ dependencies = [
  "base64 0.22.1",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "agent-doc-status-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-document",
+ "agent-doc-hash",
+ "anyhow",
+ "tempfile",
 ]
 
 [[package]]
@@ -839,10 +1219,13 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-hash",
+ "agent-doc-log-time",
  "agent-doc-project-config-io",
+ "agent-doc-session-registry-io",
  "agent-doc-supervisor",
  "anyhow",
  "indexmap",
+ "interprocess",
  "libc",
  "serde_json",
  "tempfile",
@@ -866,9 +1249,25 @@ name = "agent-doc-sync"
 version = "0.34.67"
 dependencies = [
  "agent-doc-fs",
+ "agent-doc-harness",
+ "agent-doc-turn",
  "anyhow",
  "serde",
  "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-sync-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-element",
+ "agent-doc-log-time",
+ "agent-doc-project-root-io",
+ "agent-doc-sync",
+ "anyhow",
+ "fs2",
+ "libc",
  "tempfile",
 ]
 
@@ -886,10 +1285,27 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-document",
  "agent-doc-element",
+ "agent-doc-flow",
  "anyhow",
  "serde",
  "tempfile",
  "uuid",
+]
+
+[[package]]
+name = "agent-doc-template-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-element",
+ "agent-doc-flow",
+ "agent-doc-flow-io",
+ "agent-doc-frontmatter",
+ "agent-doc-hash",
+ "agent-doc-project-config-io",
+ "agent-doc-template",
+ "anyhow",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -914,7 +1330,11 @@ dependencies = [
 name = "agent-doc-tmux-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-fs",
+ "agent-doc-tmux",
  "agent-doc-tmux-commands",
+ "anyhow",
+ "tmux-router",
 ]
 
 [[package]]
@@ -929,6 +1349,7 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-flow",
  "agent-doc-frontmatter",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
@@ -977,7 +1398,7 @@ dependencies = [
 name = "agent-doc-turn-status-io"
 version = "0.34.67"
 dependencies = [
- "agent-doc-fs",
+ "agent-doc-project-root-io",
  "agent-doc-turn",
  "anyhow",
  "serde_json",
@@ -989,6 +1410,12 @@ dependencies = [
 name = "agent-doc-watch-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-debounce",
+ "agent-doc-document",
+ "agent-doc-document-realtime",
+ "agent-doc-hash",
+ "agent-doc-markdown-ast",
+ "agent-doc-state-backbone",
  "anyhow",
  "tempfile",
 ]
@@ -999,6 +1426,7 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-flow",
  "anyhow",
  "serde",
 ]
@@ -1027,7 +1455,12 @@ dependencies = [
 name = "agent-doc-workflow-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-element-exchange",
+ "agent-doc-frontmatter-io",
+ "agent-doc-fs",
+ "agent-doc-git-io",
  "agent-doc-hash",
+ "agent-doc-snapshot-io",
  "anyhow",
  "serde",
  "serde_json",
@@ -2342,6 +2775,17 @@ name = "lazily"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52e55ec9b87350ceb5f565a119ee834ef549fa11608f12a94edc5982cf096f0"
+dependencies = [
+ "arc-swap",
+ "parking_lot",
+ "smallvec",
+]
+
+[[package]]
+name = "lazily"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01b46a8c9c6a40fb9dc88cb7558a6c88a93038f5e751a718c81c820cd2e3c1e3"
 dependencies = [
  "arc-swap",
  "parking_lot",

@@ -106,6 +106,101 @@ pub fn merge(request: MergeRequest<'_>) -> MergePlan {
     }
 }
 
+/// Resolve append-only conflicts in `git merge-file --diff3` output.
+///
+/// When the `||||||| original` section is empty or whitespace-only, both sides
+/// added at the same insertion point without modifying existing content. Resolve
+/// those blocks by concatenating ours first, then theirs. True conflicts keep the
+/// original conflict block.
+pub fn resolve_append_conflicts(merged: &str) -> (String, bool) {
+    let mut result = String::new();
+    let mut has_remaining = false;
+    let lines: Vec<&str> = merged.lines().collect();
+    let len = lines.len();
+    let mut i = 0;
+
+    while i < len {
+        if !lines[i].starts_with("<<<<<<< ") {
+            result.push_str(lines[i]);
+            result.push('\n');
+            i += 1;
+            continue;
+        }
+
+        let conflict_start = i;
+        i += 1;
+
+        let mut ours_lines: Vec<&str> = Vec::new();
+        while i < len && !lines[i].starts_with("||||||| ") && !lines[i].starts_with("=======") {
+            ours_lines.push(lines[i]);
+            i += 1;
+        }
+
+        let mut original_lines: Vec<&str> = Vec::new();
+        if i < len && lines[i].starts_with("||||||| ") {
+            i += 1;
+            while i < len && !lines[i].starts_with("=======") {
+                original_lines.push(lines[i]);
+                i += 1;
+            }
+        }
+
+        if i < len && lines[i].starts_with("=======") {
+            i += 1;
+        }
+
+        let mut theirs_lines: Vec<&str> = Vec::new();
+        while i < len && !lines[i].starts_with(">>>>>>> ") {
+            theirs_lines.push(lines[i]);
+            i += 1;
+        }
+
+        if i < len && lines[i].starts_with(">>>>>>> ") {
+            i += 1;
+        }
+
+        let is_append_only = original_lines.iter().all(|l| l.trim().is_empty());
+
+        if is_append_only {
+            for line in &ours_lines {
+                result.push_str(line);
+                result.push('\n');
+            }
+            for line in &theirs_lines {
+                result.push_str(line);
+                result.push('\n');
+            }
+        } else {
+            has_remaining = true;
+            result.push_str(lines[conflict_start]);
+            result.push('\n');
+            for line in &ours_lines {
+                result.push_str(line);
+                result.push('\n');
+            }
+            if !original_lines.is_empty() {
+                result.push_str("||||||| original\n");
+                for line in &original_lines {
+                    result.push_str(line);
+                    result.push('\n');
+                }
+            }
+            result.push_str("=======\n");
+            for line in &theirs_lines {
+                result.push_str(line);
+                result.push('\n');
+            }
+            result.push_str(">>>>>>> your-edits\n");
+        }
+    }
+
+    if !merged.ends_with('\n') && result.ends_with('\n') {
+        result.pop();
+    }
+
+    (result, has_remaining)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +244,103 @@ mod tests {
             component_conflict_policy("custom-plugin"),
             ConflictPolicy::TheirsWins
         );
+    }
+
+    #[test]
+    fn resolve_append_only_conflict() {
+        let merged = concat!(
+            "Before conflict\n",
+            "<<<<<<< agent-response\n",
+            "Agent added this line.\n",
+            "||||||| original\n",
+            "=======\n",
+            "User added this line.\n",
+            ">>>>>>> your-edits\n",
+            "After conflict\n"
+        );
+        let (resolved, has_remaining) = resolve_append_conflicts(merged);
+        assert!(!has_remaining);
+        assert!(resolved.contains("Agent added this line."));
+        assert!(resolved.contains("User added this line."));
+        assert!(!resolved.contains("<<<<<<<"));
+        assert!(!resolved.contains(">>>>>>>"));
+        let agent_pos = resolved.find("Agent added this line.").unwrap();
+        let user_pos = resolved.find("User added this line.").unwrap();
+        assert!(agent_pos < user_pos);
+    }
+
+    #[test]
+    fn preserve_true_conflict() {
+        let merged = concat!(
+            "<<<<<<< agent-response\n",
+            "Agent changed this.\n",
+            "||||||| original\n",
+            "Original line that both sides modified.\n",
+            "=======\n",
+            "User changed this differently.\n",
+            ">>>>>>> your-edits\n"
+        );
+        let (resolved, has_remaining) = resolve_append_conflicts(merged);
+        assert!(has_remaining);
+        assert!(resolved.contains("<<<<<<<"));
+        assert!(resolved.contains(">>>>>>>"));
+        assert!(resolved.contains("Original line that both sides modified."));
+    }
+
+    #[test]
+    fn mixed_append_and_true_conflicts() {
+        let merged = concat!(
+            "Clean line.\n",
+            "<<<<<<< agent-response\n",
+            "Agent appended here.\n",
+            "||||||| original\n",
+            "=======\n",
+            "User appended here.\n",
+            ">>>>>>> your-edits\n",
+            "Middle line.\n",
+            "<<<<<<< agent-response\n",
+            "Agent rewrote this.\n",
+            "||||||| original\n",
+            "Was originally this.\n",
+            "=======\n",
+            "User rewrote this differently.\n",
+            ">>>>>>> your-edits\n",
+            "End line.\n"
+        );
+        let (resolved, has_remaining) = resolve_append_conflicts(merged);
+        assert!(has_remaining);
+        assert!(resolved.contains("Agent appended here."));
+        assert!(resolved.contains("User appended here."));
+        assert!(resolved.contains("<<<<<<<"));
+        assert!(resolved.contains("Was originally this."));
+    }
+
+    #[test]
+    fn no_conflicts_passthrough() {
+        let merged = "Line one.\nLine two.\nLine three.\n";
+        let (resolved, has_remaining) = resolve_append_conflicts(merged);
+        assert!(!has_remaining);
+        assert_eq!(resolved, merged);
+    }
+
+    #[test]
+    fn multiline_append_conflict() {
+        let merged = concat!(
+            "<<<<<<< agent-response\n",
+            "Agent line 1.\n",
+            "Agent line 2.\n",
+            "Agent line 3.\n",
+            "||||||| original\n",
+            "=======\n",
+            "User line 1.\n",
+            "User line 2.\n",
+            ">>>>>>> your-edits\n"
+        );
+        let (resolved, has_remaining) = resolve_append_conflicts(merged);
+        assert!(!has_remaining);
+        assert!(resolved.contains("Agent line 1.\nAgent line 2.\nAgent line 3.\n"));
+        assert!(resolved.contains("User line 1.\nUser line 2.\n"));
+        assert!(resolved.find("Agent line 1.").unwrap() < resolved.find("User line 1.").unwrap());
     }
 
     #[test]

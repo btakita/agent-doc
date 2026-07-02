@@ -6,12 +6,34 @@
 
 use anyhow::Result;
 use std::path::Path;
+use std::sync::Arc;
 
 use agent_doc_frontmatter::frontmatter::{
     Frontmatter, SshResolverContext, contextualize_parse_error, ensure_session_with_ssh_resolver,
     parse_with_ssh_resolver, session_id_from_content,
 };
 use agent_doc_frontmatter::project_config::{self, ProjectConfig};
+
+/// Pre-resolved SSH/project context for frontmatter operations.
+///
+/// Long-lived callers can cache this value once, then parse frontmatter without
+/// walking the filesystem for the project config and document-relative path on
+/// every call.
+#[derive(Debug, Clone)]
+pub struct ResolvedSshContext {
+    pub config: Arc<ProjectConfig>,
+    pub doc_relative: String,
+}
+
+impl ResolvedSshContext {
+    pub fn as_resolver_context<'a>(&'a self, file_display: &'a str) -> SshResolverContext<'a> {
+        SshResolverContext {
+            project: &self.config,
+            doc_relative: &self.doc_relative,
+            file_display,
+        }
+    }
+}
 
 /// Parse frontmatter for a concrete document path so callers can surface
 /// actionable errors. Wraps the pure
@@ -28,6 +50,17 @@ pub fn parse_for_file<'a>(content: &'a str, file: &Path) -> Result<(Frontmatter,
     parse_with_ssh_resolver(content, &ctx).map_err(|err| contextualize_parse_error(&display, err))
 }
 
+/// Parse frontmatter using a cached SSH/project context.
+pub fn parse_for_file_with_context<'a>(
+    content: &'a str,
+    file: &Path,
+    ssh: &ResolvedSshContext,
+) -> Result<(Frontmatter, &'a str)> {
+    let display = file.display().to_string();
+    let ctx = ssh.as_resolver_context(&display);
+    parse_with_ssh_resolver(content, &ctx).map_err(|err| contextualize_parse_error(&display, err))
+}
+
 /// Ensure a document has a session id while preserving the target path in parse errors.
 pub fn ensure_session_for_file(content: &str, file: &Path) -> Result<(String, String)> {
     let display = file.display().to_string();
@@ -38,6 +71,69 @@ pub fn ensure_session_for_file(content: &str, file: &Path) -> Result<(String, St
         file_display: &display,
     };
     ensure_session_with_ssh_resolver(content, &ctx)
+}
+
+/// Ensure a document has a session id using a cached SSH/project context.
+pub fn ensure_session_for_file_with_context(
+    content: &str,
+    file: &Path,
+    ssh: &ResolvedSshContext,
+) -> Result<(String, String)> {
+    let display = file.display().to_string();
+    let ctx = ssh.as_resolver_context(&display);
+    ensure_session_with_ssh_resolver(content, &ctx)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnsureFormattedSessionResult {
+    pub assigned: bool,
+    pub session_id: Option<String>,
+}
+
+/// Assign a session UUID to a formatted agent-doc file that lacks one.
+///
+/// This is the file-backed initialization adapter for the historical
+/// `agent_doc_format` + missing `agent_doc_session` rule. Pure frontmatter owns
+/// the predicate; this function owns reading and writing the concrete document.
+pub fn ensure_session_uuid_for_formatted_file(file: &Path) -> Result<EnsureFormattedSessionResult> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => {
+            return Ok(EnsureFormattedSessionResult {
+                assigned: false,
+                session_id: None,
+            });
+        }
+    };
+    let (fm, _) = match parse_for_file(&content, file) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            return Ok(EnsureFormattedSessionResult {
+                assigned: false,
+                session_id: None,
+            });
+        }
+    };
+    if !fm.needs_session_for_formatted_document() {
+        return Ok(EnsureFormattedSessionResult {
+            assigned: false,
+            session_id: None,
+        });
+    }
+
+    let (updated, session_id) = ensure_session_for_file(&content, file)?;
+    if updated != content {
+        std::fs::write(file, &updated)?;
+        Ok(EnsureFormattedSessionResult {
+            assigned: true,
+            session_id: Some(session_id),
+        })
+    } else {
+        Ok(EnsureFormattedSessionResult {
+            assigned: false,
+            session_id: Some(session_id),
+        })
+    }
 }
 
 /// Read the session UUID from a document file. Returns `None` if not found.
@@ -157,5 +253,93 @@ mod tests {
 
         assert!(result.0.contains("agent_doc_session:"));
         assert!(result.0.contains("agent: opencode"));
+    }
+
+    #[test]
+    fn ensure_session_uuid_for_formatted_file_assigns_when_missing() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("doc.md");
+        let content = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let result = ensure_session_uuid_for_formatted_file(&doc).unwrap();
+
+        assert!(result.assigned);
+        assert!(result.session_id.is_some());
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("agent_doc_session:"));
+        assert!(updated.contains("agent_doc_format:"));
+    }
+
+    #[test]
+    fn ensure_session_uuid_for_formatted_file_noops_when_session_exists_or_unformatted() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let with_session = dir.path().join("with-session.md");
+        let with_session_content =
+            "---\nagent_doc_session: existing\nagent_doc_format: template\n---\nbody\n";
+        std::fs::write(&with_session, with_session_content).unwrap();
+        let plain = dir.path().join("plain.md");
+        let plain_content = "---\ntitle: notes\n---\nbody\n";
+        std::fs::write(&plain, plain_content).unwrap();
+
+        let existing = ensure_session_uuid_for_formatted_file(&with_session).unwrap();
+        let unformatted = ensure_session_uuid_for_formatted_file(&plain).unwrap();
+
+        assert!(!existing.assigned);
+        assert_eq!(
+            std::fs::read_to_string(&with_session).unwrap(),
+            with_session_content
+        );
+        assert!(!unformatted.assigned);
+        assert_eq!(std::fs::read_to_string(&plain).unwrap(), plain_content);
+    }
+
+    #[test]
+    fn context_parse_matches_file_backed_parse() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("doc.md");
+        let content = "---\nagent: opencode\n---\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let result_direct = parse_for_file(content, &doc).expect("file-backed parse succeeds");
+        let ssh = ResolvedSshContext {
+            config: Arc::new(ProjectConfig::default()),
+            doc_relative: "doc.md".to_string(),
+        };
+        let result_ctx = parse_for_file_with_context(content, &doc, &ssh).unwrap();
+
+        assert_eq!(result_direct.0.agent, result_ctx.0.agent);
+        assert_eq!(result_direct.1, result_ctx.1);
+    }
+
+    #[test]
+    fn context_ensure_session_matches_file_backed_ensure() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("doc.md");
+        let content = "---\nagent: opencode\n---\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let result_direct =
+            ensure_session_for_file(content, &doc).expect("file-backed ensure succeeds");
+        let ssh = ResolvedSshContext {
+            config: Arc::new(ProjectConfig::default()),
+            doc_relative: "doc.md".to_string(),
+        };
+        let result_ctx = ensure_session_for_file_with_context(content, &doc, &ssh).unwrap();
+
+        assert!(
+            result_direct.0.contains("agent_doc_session:"),
+            "direct result should have session"
+        );
+        assert!(
+            result_ctx.0.contains("agent_doc_session:"),
+            "context result should have session"
+        );
+        assert!(result_direct.0.contains("agent: opencode"));
+        assert!(result_ctx.0.contains("agent: opencode"));
     }
 }

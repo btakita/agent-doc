@@ -581,9 +581,10 @@ pub fn record_committed_baseline_for_file(file: &Path) {
 ///
 /// Under [`CrdtAuthority::GitAuthoritative`] there is no live in-memory authority
 /// to reconcile against — disk demotion does not apply, and the existing
-/// baseline-wins load path ([`crate::snapshot::crdt_merge_base_state`], which
-/// already discards a stale `.yrs` whose markdown projection does not match the
-/// cycle baseline) is left to run unchanged. Returns `None` (no live reconcile
+/// baseline-wins load path
+/// ([`agent_doc_snapshot_io::crdt_merge_base_state_with`], which already
+/// discards a stale `.yrs` whose markdown projection does not match the cycle
+/// baseline) is left to run unchanged. Returns `None` (no live reconcile
 /// performed).
 pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Result<Option<bool>> {
     let file_str = file.display().to_string();
@@ -650,7 +651,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
             return false;
         }
     };
-    let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let patch_id = uuid::Uuid::new_v4().to_string();
     let path_str = canonical.to_string_lossy().to_string();
     // `#vscodepublishparity` — mirror `converge.rs`'s
@@ -661,16 +662,16 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
     // Skipping (the old `cause=no_ipc_listener` early return) left VS Code sessions
     // silently missing this live-buffer publish even though the sibling converge path
     // already fell back to the file signal.
-    let listener_active = crate::ipc_socket::is_listener_active(&project_root);
+    let listener_active = agent_doc_ipc_io::is_listener_active(&project_root);
     let (transport, publish_result) = if listener_active {
         (
             "editor_ipc",
-            crate::ipc_socket::send_publish_live_buffer(&project_root, &path_str),
+            agent_doc_ipc_io::send_publish_live_buffer(&project_root, &path_str),
         )
     } else {
         (
             "file_signal",
-            crate::ipc_socket::send_publish_live_buffer_file_signal(&project_root, &path_str),
+            agent_doc_ipc_io::send_publish_live_buffer_file_signal(&project_root, &path_str),
         )
     };
     match publish_result {
@@ -922,7 +923,7 @@ mod tests {
         let file_for_listener = file_str.clone();
         let visible_for_listener = visible.clone();
         let server = thread::spawn(move || {
-            crate::ipc_socket::start_listener(&root_for_listener, move |msg| {
+            agent_doc_ipc_io::start_listener(&root_for_listener, move |msg| {
                 let parsed: serde_json::Value = serde_json::from_str(msg).ok()?;
                 *captured_for_listener.lock().unwrap() = Some(parsed.clone());
                 if parsed.get("type").and_then(|value| value.as_str())
@@ -968,7 +969,7 @@ mod tests {
             "barrier should mark a successfully published authority live buffer as synced"
         );
 
-        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(&root));
+        let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(&root));
         drop(server);
     }
 
@@ -1003,9 +1004,9 @@ mod tests {
 
         // Compute the project root exactly as settle_or_flush_editor_sync_barrier does,
         // and assert no socket listener is active so the file-signal branch is taken.
-        let root = crate::write::resolve_ipc_project_root_pub(&canonical);
+        let root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
         assert!(
-            !crate::ipc_socket::is_listener_active(&root),
+            !agent_doc_ipc_io::is_listener_active(&root),
             "test must run with no socket listener so the file-signal fallback is exercised"
         );
 

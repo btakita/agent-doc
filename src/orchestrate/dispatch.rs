@@ -214,9 +214,10 @@ pub(crate) fn run_ordered_task_step(
     let finalize_text = if mode.is_template() {
         let normalization =
             agent_doc_template::patchback::normalize_child_template_response(finalize_response);
-        agent_doc_orchestration::flow::orchestration_batch::log_child_patchback_normalization_event(
+        agent_doc_flow_io::log_flow_event(
             file,
-            &normalization,
+            agent_doc_template::patchback::child_patchback_normalization_event(&normalization),
+            agent_doc_orchestration::ops_log::log_op,
         );
         normalization.response
     } else {
@@ -271,8 +272,12 @@ pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
     );
     let file_content = fs::read_to_string(file)
         .with_context(|| format!("failed to read {} before orchestrating", file.display()))?;
-    let snapshot_content = snapshot::load(file)?;
-    snapshot::save(file, &file_content)?;
+    let snapshot_content = agent_doc_snapshot_io::load(file)?;
+    agent_doc_snapshot_io::save(
+        file,
+        &file_content,
+        agent_doc_orchestration::ops_log::log_op,
+    )?;
     agent_doc_orchestration::cycle_state::mark_abandoned(
         file,
         "orchestrate_preflight_handoff_closed",
@@ -416,7 +421,8 @@ mod tests {
 
         let snapshot = template_doc();
         fs::write(&doc, &snapshot).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
         Command::new("git")
             .current_dir(dir.path())
             .args(["add", "session.md"])
@@ -443,7 +449,7 @@ mod tests {
         close_open_preflight_handoff_cycle(&doc).unwrap();
         inject_prompt(&doc, "do #first").unwrap();
 
-        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         let live = fs::read_to_string(&doc).unwrap();
         assert!(snap.contains("synchronous orchestra"));
         assert!(!snap.contains("❯ do #first"));

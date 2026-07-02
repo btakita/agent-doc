@@ -36,8 +36,6 @@ use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
 use std::path::{Path, PathBuf};
 
-use agent_doc_orchestration::snapshot;
-
 const ANNOTATION_DIR: &str = ".agent-doc/annotations";
 
 /// Source attribution for a single line.
@@ -100,7 +98,7 @@ pub fn generate(doc: &Path, force: bool) -> Result<PathBuf> {
     let file_hash = content_hash(&file_content);
 
     // Load snapshot (baseline from last agent write).
-    let snapshot_content = snapshot::resolve(doc)?.unwrap_or_default();
+    let snapshot_content = agent_doc_snapshot_io::resolve(doc)?.unwrap_or_default();
     let snap_hash = content_hash(&snapshot_content);
 
     // Cache check: if sidecar exists with matching hashes, skip regeneration.
@@ -209,7 +207,8 @@ mod tests {
     }
 
     fn save_snapshot(doc: &Path, content: &str) {
-        snapshot::save(doc, content).unwrap();
+        agent_doc_snapshot_io::save(doc, content, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
     }
 
     #[test]

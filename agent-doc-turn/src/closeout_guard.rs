@@ -1,6 +1,7 @@
 //! Pure closeout guard vocabulary and terminal outcome policy.
 
 use crate::CyclePhase;
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommittedWithoutResponseBodyEvidence<'a> {
@@ -97,6 +98,14 @@ pub fn closeout_cycle_phase_from_str(phase: &str) -> Option<CyclePhase> {
         "abandoned" => Some(CyclePhase::Abandoned),
         _ => None,
     }
+}
+
+pub fn closeout_guard_event(
+    stage: FlowStage,
+    outcome: FlowOutcome,
+    reason: CloseoutGuardReason,
+) -> FlowEvent {
+    FlowEvent::new(FlowName::Closeout, stage, outcome).with_reason(reason.as_str())
 }
 
 pub const fn closeout_terminal_guard_outcome(phase: CyclePhase) -> CloseoutGuardOutcome {
@@ -280,6 +289,40 @@ mod tests {
             Some(CyclePhase::Abandoned)
         );
         assert_eq!(closeout_cycle_phase_from_str("unknown"), None);
+    }
+
+    #[test]
+    fn closeout_guard_event_is_typed() {
+        let event = closeout_guard_event(
+            FlowStage::PreCommitGuard,
+            FlowOutcome::Blocked,
+            CloseoutGuardReason::PendingCaptureRecommendations,
+        );
+
+        assert_eq!(event.flow, FlowName::Closeout);
+        assert_eq!(event.stage, FlowStage::PreCommitGuard);
+        assert_eq!(event.outcome, FlowOutcome::Blocked);
+        assert_eq!(
+            event.reason.as_deref(),
+            Some("pending_capture_recommendations")
+        );
+    }
+
+    #[test]
+    fn closeout_guard_event_carries_review_done_reason() {
+        let event = closeout_guard_event(
+            FlowStage::PreCommitGuard,
+            FlowOutcome::FailedClosed,
+            CloseoutGuardReason::ReviewDoneSourceNotReviewed,
+        );
+
+        assert_eq!(event.flow, FlowName::Closeout);
+        assert_eq!(event.stage, FlowStage::PreCommitGuard);
+        assert_eq!(event.outcome, FlowOutcome::FailedClosed);
+        assert_eq!(
+            event.reason.as_deref(),
+            Some("review_done_source_not_reviewed")
+        );
     }
 
     #[test]

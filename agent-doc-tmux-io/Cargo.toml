@@ -10,4 +10,8 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_tmux_io"
 
 [dependencies]
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.67" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.67" }
+anyhow = "1"
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }

@@ -607,7 +607,7 @@ fn list_sessions(state: &ServeState) -> Result<Vec<ServeSession>> {
         return Ok(by_path.into_values().collect());
     }
 
-    if let Ok(registry) = agent_doc_orchestration::sessions::load_in(&state.root) {
+    if let Ok(registry) = agent_doc_session_registry_io::load_in(&state.root) {
         for (key, entry) in registry {
             let path = registry_entry_path(&state.root, &key, &entry);
             let session_id = (!entry.session_id.is_empty()).then_some(entry.session_id);
@@ -1385,7 +1385,8 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_orchestration::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
         agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(content), Some(content))
             .unwrap();
         let mut writer = agent_doc_orchestration::capture::PartialCheckpointWriter::with_interval(
@@ -1499,7 +1500,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        agent_doc_orchestration::sessions::save_in(root, &registry).unwrap();
+        agent_doc_session_registry_io::save_in(root, &registry).unwrap();
 
         let state = ServeState {
             root: root.to_path_buf(),

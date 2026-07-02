@@ -67,7 +67,7 @@ use crate::{
     parallel, queue_dispatch,
 };
 use agent_doc_config::{AgentConfig, Config};
-use agent_doc_orchestration::{agent, preflight::PreflightOutput, snapshot, write};
+use agent_doc_orchestration::{agent, preflight::PreflightOutput, write};
 use agent_doc_prompt_context::AgentPromptContext;
 use agent_doc_queue::dispatch_item::{QueueItemKind, classify};
 #[cfg(test)]
@@ -467,11 +467,14 @@ fn build_agent_prompt(
     session_accretion: Option<&SessionAccretionReport>,
 ) -> String {
     let diff_text = diff_text.unwrap_or_default();
-    let document_section = agent_doc_orchestration::prompt_context::build_document_section(
+    let rc = agent_doc_orchestration::graph::RunContext::new(file.to_path_buf());
+    let ssh_context = rc.ssh_context();
+    let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
         file,
         diff_text,
         doc,
         session_accretion,
+        &ssh_context,
     );
 
     agent_doc_prompt_context::render_agent_prompt(AgentPromptContext {
@@ -673,7 +676,7 @@ fn exchange_task_source_changed(
 /// picked by `extract_tasks_from_text` when the user's directive is a bare
 /// line (not a list) at the exchange tail.
 fn scope_exchange_for_tasks(exchange: &str, file: &Path) -> String {
-    let snap_content = match snapshot::load(file) {
+    let snap_content = match agent_doc_snapshot_io::load(file) {
         Ok(Some(s)) => s,
         _ => return exchange.to_string(),
     };
@@ -816,10 +819,10 @@ fn finalize_orchestration_batch_changed(
     total_steps: usize,
     lifecycle: &impl LifecycleOps,
 ) -> Result<()> {
-    agent_doc_orchestration::flow::orchestration_batch::log_source_changed_event(
+    agent_doc_flow_io::log_flow_event(
         file,
-        completed_steps,
-        total_steps,
+        agent_doc_work_graph::source_changed_event(completed_steps, total_steps),
+        agent_doc_orchestration::ops_log::log_op,
     );
     eprintln!(
         "[orchestrate] source task list changed after step {}/{}; stopping before next step",
@@ -1912,7 +1915,12 @@ mod tests {
         );
 
         fs::write(&doc, current_content).unwrap();
-        snapshot::save(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            snapshot_content,
+            agent_doc_orchestration::ops_log::log_op,
+        )
+        .unwrap();
 
         let batch = resolve_task_batch(
             &doc,
@@ -1973,7 +1981,12 @@ mod tests {
         );
 
         fs::write(&doc, current_content).unwrap();
-        snapshot::save(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            snapshot_content,
+            agent_doc_orchestration::ops_log::log_op,
+        )
+        .unwrap();
 
         let batch = resolve_task_batch(
             &doc,
@@ -2079,7 +2092,12 @@ mod tests {
         );
 
         fs::write(&doc, current_content).unwrap();
-        snapshot::save(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            snapshot_content,
+            agent_doc_orchestration::ops_log::log_op,
+        )
+        .unwrap();
 
         let batch = resolve_task_batch(
             &doc,

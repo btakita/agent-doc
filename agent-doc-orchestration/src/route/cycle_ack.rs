@@ -105,7 +105,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
             live_child_for_file: true,
         }) {
             let baseline_id = baseline.map(|b| b.cycle_id.as_str());
-            let miss = crate::startup_miss::record(
+            let miss = agent_doc_supervisor_io::startup_miss::record_startup_miss(
                 file,
                 &dispatch_pane,
                 session_id,
@@ -193,7 +193,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                     ack_timeout.as_secs()
                 ),
             );
-            let _ = crate::startup_miss::clear(file);
+            let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
             Ok(Some(dispatch_pane))
         }
         None => {
@@ -202,7 +202,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                 live_child_for_file: true,
             }) {
                 let baseline_id = baseline.map(|b| b.cycle_id.as_str());
-                let miss = crate::startup_miss::record(
+                let miss = agent_doc_supervisor_io::startup_miss::record_startup_miss(
                     file,
                     &dispatch_pane,
                     session_id,
@@ -321,7 +321,7 @@ pub(crate) fn require_routed_cycle_ack(
                     ack_timeout.as_secs()
                 ),
             );
-            let _ = crate::startup_miss::clear(file);
+            let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
             Ok(None)
         }
         None => {
@@ -366,7 +366,7 @@ pub(crate) fn require_routed_cycle_ack(
                 ),
             );
             let baseline_id = baseline.map(|b| b.cycle_id.as_str());
-            let miss = crate::startup_miss::record(
+            let miss = agent_doc_supervisor_io::startup_miss::record_startup_miss(
                 file,
                 pane,
                 session_id,
@@ -428,9 +428,9 @@ pub(crate) fn require_routed_cycle_ack(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
+    use agent_doc_supervisor_io::ipc::SupervisorIpc;
     #[test]
     fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -451,7 +451,7 @@ mod tests {
             "❯ /clear\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()
@@ -481,7 +481,7 @@ mod tests {
             Some("/clear"),
             "queued exchange slash command should be the active literal drain head"
         );
-        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             snapshot, updated,
             "route queueing must sync the snapshot so the command head is not treated as edited drift"
@@ -507,7 +507,7 @@ mod tests {
             "/clear\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()
@@ -712,7 +712,7 @@ Body\n\
 <!-- /agent:exchange -->\n";
         let current = snapshot.replacen("agent: claude", "agent: codex", 1);
         std::fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
@@ -747,7 +747,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
@@ -783,7 +783,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
@@ -816,7 +816,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()

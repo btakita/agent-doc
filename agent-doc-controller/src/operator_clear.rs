@@ -1,5 +1,7 @@
 //! Pure operator-clear admission policy.
 
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorClearInputState {
     IdlePrompt,
@@ -46,6 +48,23 @@ pub const fn clear_guard_outcome(state: OperatorClearInputState) -> OperatorClea
         OperatorClearInputState::ProtectedInput => OperatorClearGuardOutcome::FailedClosed,
         OperatorClearInputState::Busy => OperatorClearGuardOutcome::Blocked,
     }
+}
+
+pub const fn clear_guard_flow_outcome(outcome: OperatorClearGuardOutcome) -> FlowOutcome {
+    match outcome {
+        OperatorClearGuardOutcome::Completed => FlowOutcome::Completed,
+        OperatorClearGuardOutcome::Blocked => FlowOutcome::Blocked,
+        OperatorClearGuardOutcome::FailedClosed => FlowOutcome::FailedClosed,
+    }
+}
+
+pub fn clear_guard_event(state: OperatorClearInputState) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::OperatorClear,
+        FlowStage::OperatorGuard,
+        clear_guard_flow_outcome(clear_guard_outcome(state)),
+    )
+    .with_reason(state.as_str())
 }
 
 #[cfg(test)]
@@ -96,5 +115,15 @@ mod tests {
             clear_guard_outcome(OperatorClearInputState::Busy),
             OperatorClearGuardOutcome::Blocked
         );
+    }
+
+    #[test]
+    fn operator_clear_guard_event_uses_policy_outcome_and_input_reason() {
+        let event = clear_guard_event(OperatorClearInputState::Busy);
+
+        assert_eq!(event.flow, FlowName::OperatorClear);
+        assert_eq!(event.stage, FlowStage::OperatorGuard);
+        assert_eq!(event.outcome, FlowOutcome::Blocked);
+        assert_eq!(event.reason.as_deref(), Some("busy"));
     }
 }

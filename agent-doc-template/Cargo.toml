@@ -12,6 +12,7 @@ name = "agent_doc_template"
 [dependencies]
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }

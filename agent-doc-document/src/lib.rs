@@ -4,6 +4,7 @@
 //! facts without touching disk, git, editors, tmux, snapshots, or turn state.
 
 pub mod claim_scaffold;
+pub mod commit_integrity;
 pub mod commit_normalization;
 pub mod compact_archive;
 pub mod compact_projection;

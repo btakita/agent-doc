@@ -74,7 +74,19 @@ pub(crate) fn request_controller<T: DeserializeOwned>(
         .set_recv_timeout(Some(CONTROLLER_RPC_TIMEOUT))
         .context("failed to set project controller response timeout")?;
     let (reader_half, mut writer_half) = stream.split();
-    let mut raw = serde_json::to_string(&request)?;
+    // #af88 B enforcement: stamp the caller's own binary version onto the wire as a
+    // skew-safe extra JSON key (ControllerRequest has no `deny_unknown_fields`, so
+    // older controllers ignore it). A controller whose running version differs can
+    // then refuse write-bearing commands authoritatively instead of relying only on
+    // the mtime/inode staleness heuristic.
+    let mut request_value = serde_json::to_value(&request)?;
+    if let Some(obj) = request_value.as_object_mut() {
+        obj.insert(
+            "binary_version".to_string(),
+            serde_json::Value::String(identity_version()),
+        );
+    }
+    let mut raw = serde_json::to_string(&request_value)?;
     raw.push('\n');
     writer_half.write_all(raw.as_bytes())?;
     writer_half.flush()?;
@@ -996,7 +1008,7 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
 /// PID, a dead PID, an unreadable `/proc/<pid>`, or any stat error yields `None` so this
 /// read-only check can never block a live cycle.
 pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<String> {
-    let project_root = agent_doc_fs::find_project_root(file)?;
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
     let record = authoritative_actor_binding(&project_root, file)
         .ok()
         .flatten()?;
@@ -1031,7 +1043,7 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
 /// an unreachable controller, a missing lease, or any stat error yields `None` so the
 /// read-only check can never block a cycle.
 pub(crate) fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
-    let project_root = agent_doc_fs::find_project_root(file)?;
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
     if let Ok(controller_status) = status(&project_root) {
         let current_binary = current_binary_identity().ok();
         if let Some(message) =
@@ -1061,7 +1073,7 @@ pub(crate) fn recycle_idle_grace() -> Duration {
 /// inherit dogfood build/install policy just because the crate is nearby.
 pub(crate) fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
     let file = file.canonicalize().ok()?;
-    let project_root = agent_doc_fs::find_project_root(&file)?;
+    let project_root = agent_doc_project_root_io::project_root_containing(&file)?;
     for candidate in [project_root.clone(), project_root.join("src/agent-doc")] {
         let cargo = candidate.join("Cargo.toml");
         if let Ok(content) = std::fs::read_to_string(&cargo)
@@ -1306,7 +1318,10 @@ fn clear_superseded_stale_supervisor_pause(
     let current_pid = lease.as_ref().and_then(|lease| lease.supervisor_pid);
     let stale_pid_dead = stale_pid.is_some_and(|pid| !process_is_alive(pid));
     let stale_pid_dead_after_reboot = stale_pid_dead
-        && queue_pause_predates_boot(control.updated_at, system_boot_timestamp_secs());
+        && queue_pause_predates_boot(
+            control.updated_at,
+            agent_doc_controller_io::process::system_boot_timestamp_secs(timestamp_secs()),
+        );
     let superseded_by_actor_transition = record.last_transition.prior_generation
         < record.generation
         && record.last_transition.new_generation == record.generation
@@ -1423,21 +1438,11 @@ pub(crate) fn discover_stale_duplicate_pids(
         }
     }
 
-    if let Ok(entries) = std::fs::read_dir("/proc") {
-        for entry in entries.flatten() {
-            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            let Ok(pid) = name.parse::<u32>() else {
-                continue;
-            };
-            if Some(pid) == authoritative_pid || pid == std::process::id() {
-                continue;
-            }
-            if is_same_project_controller_pid(project_root, pid) {
-                pids.insert(pid);
-            }
+    for pid in agent_doc_controller_io::process::project_controller_pids(project_root) {
+        if Some(pid) == authoritative_pid || pid == std::process::id() {
+            continue;
         }
+        pids.insert(pid);
     }
 
     pids.retain(|pid| {
@@ -1446,46 +1451,14 @@ pub(crate) fn discover_stale_duplicate_pids(
     pids.into_iter().collect()
 }
 
-pub(crate) fn is_same_project_controller_pid(project_root: &Path, pid: u32) -> bool {
-    let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
-        return false;
-    };
-    let args: Vec<String> = cmdline
-        .split(|byte| *byte == 0)
-        .filter(|arg| !arg.is_empty())
-        .map(|arg| String::from_utf8_lossy(arg).to_string())
-        .collect();
-    agent_doc_controller::command_line::same_project_controller_args_match_project_root(
-        &args,
-        project_root,
-    )
-}
-
-pub(crate) fn process_is_alive(pid: u32) -> bool {
-    Path::new("/proc").join(pid.to_string()).exists()
-}
-
-pub(crate) fn system_boot_timestamp_secs() -> Option<u64> {
-    let uptime_secs = std::fs::read_to_string("/proc/uptime")
-        .ok()?
-        .split_whitespace()
-        .next()?
-        .parse::<f64>()
-        .ok()?;
-    if !uptime_secs.is_finite() || uptime_secs.is_sign_negative() {
-        return None;
-    }
-    Some(timestamp_secs().saturating_sub(uptime_secs.floor() as u64))
-}
-
 pub(crate) fn reap_verified_controller_pid(project_root: &Path, pid: u32, generation: u64) {
     if pid == std::process::id() || !is_same_project_controller_pid(project_root, pid) {
         return;
     }
-    let _ = Command::new("kill")
-        .arg("-TERM")
-        .arg(pid.to_string())
-        .status();
+    agent_doc_controller_io::process::send_signal(
+        pid,
+        agent_doc_controller_io::process::ProcessSignal::Term,
+    );
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(750) {
         if !process_is_alive(pid) {
@@ -1494,10 +1467,10 @@ pub(crate) fn reap_verified_controller_pid(project_root: &Path, pid: u32, genera
         std::thread::sleep(Duration::from_millis(25));
     }
     if is_same_project_controller_pid(project_root, pid) {
-        let _ = Command::new("kill")
-            .arg("-KILL")
-            .arg(pid.to_string())
-            .status();
+        agent_doc_controller_io::process::send_signal(
+            pid,
+            agent_doc_controller_io::process::ProcessSignal::Kill,
+        );
         eprintln!(
             "[controller] reaped stale same-project controller pid={pid} generation={generation}"
         );
@@ -1575,27 +1548,7 @@ pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
 /// force flag applied to every project's recycle (`agent-doc admin recycle
 /// --all-projects --force`). `force == false` is the prior defer-at-idle behavior.
 pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usize)> {
-    let self_pid = std::process::id();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return Ok((0, 0));
-    };
-    let mut roots: BTreeSet<PathBuf> = BTreeSet::new();
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let Ok(pid) = name.parse::<u32>() else {
-            continue;
-        };
-        if pid == self_pid {
-            continue;
-        }
-        if let Some(root) = controller_serve_project_root(pid) {
-            roots.insert(
-                agent_doc_controller::command_line::canonical_path_for_command_line_compare(&root),
-            );
-        }
-    }
+    let roots = agent_doc_controller_io::process::controller_project_roots(std::process::id());
     let mut recycled = 0;
     let mut skipped = 0;
     for root in roots {
@@ -1612,28 +1565,6 @@ pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usi
     Ok((recycled, skipped))
 }
 
-/// `#turnsaferecycle` Goal 1 — resolve the document a live `agent-doc start
-/// --route-owned <doc>` supervisor process is serving, from its `/proc/<pid>/cmdline`.
-/// Pure-parse sibling of [`controller_serve_project_root`]; returns `None` for any
-/// non-route-owned process or unreadable cmdline.
-fn route_owned_supervisor_document(pid: u32) -> Option<PathBuf> {
-    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    let args: Vec<String> = cmdline
-        .split(|byte| *byte == 0)
-        .filter(|arg| !arg.is_empty())
-        .map(|arg| String::from_utf8_lossy(arg).to_string())
-        .collect();
-    agent_doc_controller::command_line::start_route_owned_document_from_args(&args)
-}
-
-/// `#turnsaferecycle` Goal 1 — write the per-document recycle-request marker the
-/// route-owned supervisor idle loop honors (recycle at the next idle boundary even
-/// when not yet stale / auto-recycle opted out). Best-effort but never silent: an
-/// error is returned so callers can log it.
-pub fn schedule_supervisor_recycle_for_doc(file: &Path, reason: &str) -> Result<()> {
-    agent_doc_supervisor_io::recycle_request::request_recycle(&file.to_string_lossy(), reason)
-}
-
 /// `#turnsaferecycle` Goal 1 — the supervisor breadth of an install fan-out. Today
 /// [`recycle_controllers_all_projects_force`] only marks lazy CONTROLLER (PCP)
 /// processes; the long-lived `agent-doc start --route-owned` supervisors that
@@ -1648,27 +1579,8 @@ pub fn recycle_supervisors_all_projects() -> Result<(usize, usize)> {
 }
 
 pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usize)> {
-    let self_pid = std::process::id();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return Ok((0, 0));
-    };
-    let mut docs: BTreeSet<PathBuf> = BTreeSet::new();
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let Ok(pid) = name.parse::<u32>() else {
-            continue;
-        };
-        if pid == self_pid {
-            continue;
-        }
-        if let Some(doc) = route_owned_supervisor_document(pid) {
-            docs.insert(
-                agent_doc_controller::command_line::canonical_path_for_command_line_compare(&doc),
-            );
-        }
-    }
+    let docs =
+        agent_doc_controller_io::process::route_owned_supervisor_documents(std::process::id());
     let reason = if force {
         "install_fanout_force"
     } else {
@@ -1677,7 +1589,7 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
     let mut marked = 0;
     let mut skipped = 0;
     for doc in docs {
-        match schedule_supervisor_recycle_for_doc(&doc, reason) {
+        match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(&doc, reason) {
             Ok(()) => marked += 1,
             Err(err) => {
                 skipped += 1;
@@ -1700,30 +1612,10 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
 /// plugin is wired for that project. The written broadcast file remains the
 /// authoritative fan-out that every plugin watches.
 pub fn editor_broadcast_project_root_count() -> usize {
-    let self_pid = std::process::id();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return 0;
-    };
-    let mut roots: BTreeSet<PathBuf> = BTreeSet::new();
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let Ok(pid) = name.parse::<u32>() else {
-            continue;
-        };
-        if pid == self_pid {
-            continue;
-        }
-        if let Some(root) = controller_serve_project_root(pid) {
-            let canon =
-                agent_doc_controller::command_line::canonical_path_for_command_line_compare(&root);
-            if canon.join(".agent-doc").join("patches").is_dir() {
-                roots.insert(canon);
-            }
-        }
-    }
-    roots.len()
+    agent_doc_controller_io::process::controller_project_roots(std::process::id())
+        .into_iter()
+        .filter(|root| root.join(".agent-doc").join("patches").is_dir())
+        .count()
 }
 
 /// M4 (#stuckhandoff2) — client handoff drop-guard. The two-phase handoff is
@@ -2030,7 +1922,7 @@ pub(crate) fn launch_detached_at(
     // reconcile tick) a replacement controller that immediately finds a live
     // peer owning the socket exits fast, and an unreaped handle becomes a
     // `<defunct>` zombie parented to the supervisor forever (`#zombiereap`).
-    crate::detached_child::reap_detached(child);
+    agent_doc_supervisor_process::detached_child::reap_detached(child);
     Ok(())
 }
 
@@ -2077,14 +1969,19 @@ pub(crate) fn serve_with_options(
     handoff_state: ControllerHandoffState,
 ) -> Result<()> {
     let public_sock = socket_path(project_root);
-    let sock = listen_socket.unwrap_or_else(|| public_sock.clone());
+    let mut sock = listen_socket.unwrap_or_else(|| public_sock.clone());
     // M1b (#stuckhandoff2 reopen): a controller launched on a non-public socket is
     // a handoff *replacement* (`controller-handoff-*` temp socket from
     // `handoff_stale_controller`). It becomes authoritative only when its client
     // renames that temp socket onto the public path; until then it is a candidate
     // for the structural stranded-replacement watchdog below. The initial
     // controller serves directly on the public socket, so this stays `None`.
-    let handoff_temp_socket: Option<PathBuf> = (sock != public_sock).then(|| sock.clone());
+    //
+    // `#stuckhandoffselfheal`: `sock`/`handoff_temp_socket` are `mut` because a
+    // promoted-but-stranded replacement now completes its OWN promotion in the serve
+    // loop (renames the temp socket onto `public_sock`), after which it serves as the
+    // authoritative public controller and is no longer a replacement.
+    let mut handoff_temp_socket: Option<PathBuf> = (sock != public_sock).then(|| sock.clone());
     if sock.exists() {
         let _ = std::fs::remove_file(&sock);
     }
@@ -2145,6 +2042,40 @@ pub(crate) fn serve_with_options(
                 // `promote_handoff` (flipping in-memory state to `Stable`, invisible
                 // to the predicate) but whose client died before renaming its temp
                 // socket onto the public path — detected structurally below.
+                //
+                // `#stuckhandoffselfheal`: for that promoted-but-stranded (`Stable`)
+                // shape, COMPLETE the promotion here instead of suiciding. The
+                // replacement already holds the authoritative generation; renaming its
+                // own temp socket onto `public_sock` restores the canonical
+                // `controller.sock` so clients resolving via the recorded `socket_path`
+                // (e.g. finalize/commit) stop timing out and never fall back to an
+                // out-of-band disk write the IPC snapshot cannot adopt (the drift root
+                // cause). Only the `Preparing` wedge below still suicides.
+                if let Some(temp) = handoff_temp_socket.clone()
+                    && controller_replacement_should_self_promote(
+                        &runtime,
+                        &temp,
+                        controller_launched_at.elapsed(),
+                    )
+                {
+                    match controller_self_promote_to_public(&runtime, &temp, &public_sock) {
+                        Ok(()) => {
+                            handoff_temp_socket = None;
+                            sock = public_sock.clone();
+                            std::thread::sleep(CONNECT_POLL);
+                            continue;
+                        }
+                        Err(err) => {
+                            crate::ops_log::log_op(
+                                project_root,
+                                &format!(
+                                    "controller_self_promote_failed temp={} err={err}",
+                                    temp.display()
+                                ),
+                            );
+                        }
+                    }
+                }
                 if controller_self_watchdog_should_suicide(
                     &runtime,
                     handoff_temp_socket.as_deref(),
@@ -2213,6 +2144,75 @@ pub(crate) fn controller_self_watchdog_should_suicide(
         handoff_replacement_socket_exists: handoff_temp_socket.is_some_and(|temp| temp.exists()),
         launched_elapsed,
     })
+}
+
+/// `#stuckhandoffselfheal` — grace before a promoted-but-stranded replacement
+/// completes its own promotion. Much shorter than the stale-preparing suicide
+/// threshold: once a replacement is `Stable`, a *healthy* client renames within
+/// milliseconds, so a few seconds unambiguously means the client died — while still
+/// bounding the canonical `controller.sock` outage that makes clients time out.
+const HANDOFF_SELF_PROMOTE_GRACE: Duration = Duration::from_secs(3);
+
+/// `#stuckhandoffselfheal` — runtime adapter for the pure self-promote policy. Reads
+/// the controller's live bootstrap snapshot and supplies wall-clock/socket facts. A
+/// poisoned lock reads as "no" (the stranded/suicide watchdog still covers the wedge).
+pub(crate) fn controller_replacement_should_self_promote(
+    runtime: &ControllerRuntime,
+    handoff_temp_socket: &Path,
+    launched_elapsed: Duration,
+) -> bool {
+    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
+        return false;
+    };
+    status::handoff_replacement_should_self_promote(
+        true,
+        handoff_temp_socket.exists(),
+        bootstrap.handoff_state,
+        launched_elapsed,
+        HANDOFF_SELF_PROMOTE_GRACE,
+    )
+}
+
+/// `#stuckhandoffselfheal` — perform the promotion the dead handoff client never
+/// finished: atomically rename this replacement's temp handoff socket onto the
+/// canonical public path, so the live listener (this process) becomes reachable at
+/// `controller.sock` again. Mirrors the client-side promotion in
+/// `handoff_stale_controller`. The bootstrap already records `socket_path = public`
+/// (set at `promote_handoff`); re-persist it defensively so state and filesystem
+/// agree, and log the self-promotion for closeout forensics.
+pub(crate) fn controller_self_promote_to_public(
+    runtime: &ControllerRuntime,
+    handoff_temp_socket: &Path,
+    public_sock: &Path,
+) -> Result<()> {
+    if public_sock.exists() {
+        let _ = std::fs::remove_file(public_sock);
+    }
+    std::fs::rename(handoff_temp_socket, public_sock).with_context(|| {
+        format!(
+            "self-promote: failed to rename handoff socket {} onto public {}",
+            handoff_temp_socket.display(),
+            public_sock.display()
+        )
+    })?;
+    let mut state = runtime
+        .bootstrap
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+    state.socket_path = public_sock.to_path_buf();
+    state.handoff_state = ControllerHandoffState::Stable;
+    state.handoff_started_at = None;
+    write_bootstrap_state(&state)?;
+    crate::ops_log::log_op(
+        &state.project_root,
+        &format!(
+            "controller_self_promoted pid={} generation={} public_sock={} reason=client_died_before_rename",
+            state.pid,
+            state.controller_generation,
+            public_sock.display()
+        ),
+    );
+    Ok(())
 }
 
 /// M1 (#stuckhandoff2) — supersede the wedged in-memory + on-disk bootstrap with
@@ -2404,6 +2404,17 @@ pub(crate) fn handle_request_locked(
     should_stop: &mut bool,
 ) -> Result<String> {
     let request: ControllerRequest = serde_json::from_str(line.trim())?;
+    // #af88 B enforcement: read the caller's stamped binary version (skew-safe;
+    // absent from older clients). A value that differs from this controller's own
+    // running version proves this controller is serving a different (stale) binary
+    // than the freshly-invoked caller — used to refuse write-bearing commands.
+    let client_binary_version = serde_json::from_str::<serde_json::Value>(line.trim())
+        .ok()
+        .and_then(|v| {
+            v.get("binary_version")
+                .and_then(|b| b.as_str())
+                .map(str::to_string)
+        });
     let bootstrap_snapshot = runtime.bootstrap_snapshot()?;
     match request.command.as_str() {
         "status" => Ok(serde_json::to_string(
@@ -2525,11 +2536,37 @@ pub(crate) fn handle_request_locked(
             Some(runtime.as_ref()),
             request,
         )),
-        "dispatch" => controller_envelope(handle_dispatch(
-            &bootstrap_snapshot,
-            Some(runtime.as_ref()),
-            request,
-        )),
+        "dispatch" => {
+            // #af88 B enforcement: refuse a session-write dispatch when the caller's
+            // binary version differs from this controller's running version — the
+            // controller is serving stale code. Reuse the `controller_binary_stale`
+            // reason so the caller's existing `#ctlstalebin` one-retry loop reconnects
+            // and `connect_or_launch` promotes the freshly-installed binary. This is
+            // the wire-authoritative complement to the mtime-based check in
+            // `handle_dispatch` (fires even when mtime/inode is ambiguous).
+            if let Some(client_version) = client_binary_version.as_deref()
+                && client_version != identity_version()
+            {
+                crate::ops_log::log_op(
+                    &bootstrap_snapshot.project_root,
+                    &format!(
+                        "dispatch_refused_client_binary_mismatch controller_version={} client_version={}",
+                        identity_version(),
+                        client_version
+                    ),
+                );
+                anyhow::bail!(
+                    "dispatch refused: controller_binary_stale (running controller binary {} differs from caller {}; reconnect to promote the fresh binary)",
+                    identity_version(),
+                    client_version
+                );
+            }
+            controller_envelope(handle_dispatch(
+                &bootstrap_snapshot,
+                Some(runtime.as_ref()),
+                request,
+            ))
+        }
         "session_status" => {
             controller_envelope(handle_session_status(&bootstrap_snapshot, request))
         }
@@ -4244,7 +4281,7 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
 fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> Result<()> {
     let initial_pid = agent_doc_supervisor_io::selfkill::supervisor_pid_for_doc(&work.file);
     let initial_host_stale = host_supervisor_stale_warning_for_doc(&work.file).is_some();
-    let socket = crate::supervisor::ipc::socket_path(&work.project_root, &work.session_id);
+    let socket = agent_doc_supervisor_io::ipc::socket_path(&work.project_root, &work.session_id);
     crate::ops_log::log_op(
         &work.file,
         &format!(
@@ -4346,8 +4383,8 @@ fn request_supervisor_replacement_ipc(
     socket: &Path,
 ) -> SupervisorReplacementIpcStatus {
     if matches!(
-        crate::supervisor::ipc::probe_socket(socket),
-        crate::supervisor::ipc::SocketLiveness::Dead
+        agent_doc_supervisor_io::ipc::probe_socket(socket),
+        agent_doc_supervisor_io::ipc::SocketLiveness::Dead
     ) {
         crate::ops_log::log_op(
             &work.file,
@@ -4362,7 +4399,7 @@ fn request_supervisor_replacement_ipc(
         );
         return SupervisorReplacementIpcStatus::Dead;
     }
-    match crate::supervisor::ipc::send_command(
+    match agent_doc_supervisor_io::ipc::send_command(
         socket,
         &agent_doc_supervisor::ipc_protocol::IpcMethod::Restart {
             mode: work.mode.clone(),
@@ -4402,8 +4439,8 @@ fn request_supervisor_replacement_ipc(
         }
         Err(err) => {
             let status = if matches!(
-                crate::supervisor::ipc::probe_socket(socket),
-                crate::supervisor::ipc::SocketLiveness::Dead
+                agent_doc_supervisor_io::ipc::probe_socket(socket),
+                agent_doc_supervisor_io::ipc::SocketLiveness::Dead
             ) {
                 SupervisorReplacementIpcStatus::Dead
             } else {
@@ -4463,8 +4500,8 @@ fn supervisor_replacement_wait_timeout() -> Duration {
 #[cfg(not(any(test, feature = "test-support")))]
 fn reap_dead_supervisor_socket(file: &Path, socket: &Path) {
     if !matches!(
-        crate::supervisor::ipc::probe_socket(socket),
-        crate::supervisor::ipc::SocketLiveness::Dead
+        agent_doc_supervisor_io::ipc::probe_socket(socket),
+        agent_doc_supervisor_io::ipc::SocketLiveness::Dead
     ) || !socket.exists()
     {
         return;
@@ -4508,14 +4545,19 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             "route_owned_start_enter",
             "Enter",
         );
-        crate::sessions::send_submitted_text(&tmux, &work.pane_id, &start_cmd).with_context(
-            || {
-                format!(
-                    "failed to submit replacement supervisor start command into pane {}",
-                    work.pane_id
-                )
-            },
-        )?;
+        agent_doc_tmux_io::send_submitted_text_logged(
+            &tmux,
+            &work.pane_id,
+            &start_cmd,
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+            "sessions.send_submitted_text",
+        )
+        .with_context(|| {
+            format!(
+                "failed to submit replacement supervisor start command into pane {}",
+                work.pane_id
+            )
+        })?;
         return Ok(work.pane_id.clone());
     }
     let file_str = work.file.to_string_lossy().to_string();
@@ -4550,27 +4592,8 @@ pub(crate) fn handle_admin_operation(
     )
 }
 
-pub fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
-    let cwd = std::env::current_dir()?;
-    let start = match root {
-        Some(path) if path.is_absolute() => path.to_path_buf(),
-        Some(path) => cwd.join(path),
-        None => cwd,
-    };
-    let start = start.canonicalize().unwrap_or(start);
-    agent_doc_fs::find_project_root(&start)
-        .or_else(|| {
-            if start.join(".git").exists() || start.join(".agent-doc").exists() {
-                Some(start.to_path_buf())
-            } else {
-                None
-            }
-        })
-        .with_context(|| format!("no project root found from {}", start.display()))
-}
-
 pub fn run_status(root: Option<&Path>, ensure: bool) -> Result<()> {
-    let project_root = project_root_from_arg(root)?;
+    let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
     if ensure {
         ensure_controller_running(&project_root, LaunchMode::Lazy)?;
     }
@@ -4586,7 +4609,7 @@ pub fn run_serve(
     previous_controller_pid: Option<u32>,
     handoff_state: &str,
 ) -> Result<()> {
-    let project_root = project_root_from_arg(root)?;
+    let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
     serve_with_options(
         &project_root,
         LaunchMode::parse(launch_mode)?,
@@ -4598,7 +4621,7 @@ pub fn run_serve(
 }
 
 pub fn run_shutdown(root: Option<&Path>) -> Result<()> {
-    let project_root = project_root_from_arg(root)?;
+    let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
     println!("{}", request(&project_root, "shutdown")?);
     Ok(())
 }
@@ -6101,7 +6124,7 @@ mod tests {
             "no request before scheduling"
         );
 
-        schedule_supervisor_recycle_for_doc(
+        agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
             &file,
             agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT,
         )

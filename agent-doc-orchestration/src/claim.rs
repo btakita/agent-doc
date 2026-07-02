@@ -208,38 +208,33 @@ pub fn run(
     // configured session, so run it first and fail closed before the scaffold
     // touches disk. The `// Pane validated — now safe to modify files` invariant
     // below applies to the auto-scaffold too.
+    let tmux = tmux_router::Tmux::default_server();
     let pane_id = if let Some(p) = pane {
         p.to_string() // Plugin-provided, authoritative
     } else if let Some(pos) = position {
         if let Some(ref win) = effective_window {
             // Scope position detection to the specified window
-            sessions::pane_by_position_in_window(pos, win)?
+            agent_doc_tmux_io::pane_by_position_in_window(&tmux, pos, win)?
         } else {
-            sessions::pane_by_position(pos)?
+            agent_doc_tmux_io::pane_by_position(&tmux, pos)?
         }
     } else {
-        sessions::current_pane()?
+        agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
+            .context("failed to query current tmux pane")?
     };
 
     // tmux_session frontmatter field is deprecated — no longer written on claim.
     // Session targeting now uses current_tmux_session() at route time.
-    let tmux = tmux_router::Tmux::default_server();
-
     // Validate claiming pane is in the configured target session.
     // Reject cross-session claims unless --force is passed.
-    if sessions::Multiplexer::pane_alive(&tmux, &pane_id) {
-        let pane_tmux_session = tmux
-            .cmd()
-            .args(["display-message", "-t", &pane_id, "-p", "#{session_name}"])
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
+    if tmux.pane_alive(&pane_id) {
+        let pane_tmux_session =
+            agent_doc_tmux_io::target_session_name(&tmux, &pane_id).unwrap_or_default();
         if let Some(configured) = project_config_io::project_tmux_session()
             && !pane_tmux_session.is_empty()
             && pane_tmux_session != configured
         {
-            let configured_alive = sessions::Multiplexer::session_alive(&tmux, &configured);
+            let configured_alive = tmux.session_alive(&configured);
             // `#xdocsuper0`: before an `AcceptStale` auto-force can commandeer
             // this document, consult its supervisor lease. If a live foreign
             // supervisor still holds a fresh lease on the document, refuse the
@@ -247,7 +242,7 @@ pub fn run(
             // own one document. The lease lookup is keyed by the canonical
             // document path (the controller's `document_id`); errors / absent
             // state degrade to `false` (no guard fired).
-            let fresh_foreign_lease = agent_doc_fs::find_project_root(file)
+            let fresh_foreign_lease = agent_doc_project_root_io::project_root_containing(file)
                 .map(|project_root| {
                     crate::project_controller::fresh_foreign_supervisor_lease_holds_document(
                         &project_root,
@@ -284,7 +279,7 @@ pub fn run(
             let session_id = uuid::Uuid::new_v4();
             let scaffold = render_empty_template_scaffold(&session_id.to_string());
             std::fs::write(file, &scaffold)?;
-            crate::snapshot::save(file, &scaffold)?;
+            agent_doc_snapshot_io::save(file, &scaffold, crate::ops_log::log_op)?;
             crate::git::commit(file).ok(); // best-effort commit
         }
     }
@@ -302,7 +297,7 @@ pub fn run(
     // find existing OR provision new, NEVER commandeer another document's pane."
     let file_str = file.to_string_lossy();
     {
-        let registry = sessions::load().unwrap_or_default();
+        let registry = agent_doc_session_registry_io::load().unwrap_or_default();
         for (registry_key, entry) in &registry {
             let same_document = registry_entry_matches_claimed_document(
                 file,
@@ -316,10 +311,7 @@ pub fn run(
                 },
                 agent_doc_git_io::dirs::resolve_canonical_or_absolute_file_path,
             );
-            if entry.pane == pane_id
-                && !same_document
-                && sessions::Multiplexer::pane_alive(&tmux, &pane_id)
-            {
+            if entry.pane == pane_id && !same_document && tmux.pane_alive(&pane_id) {
                 let existing_label = claimed_session_label(ClaimRegistryEntry {
                     registry_key,
                     session_id: &entry.session_id,
@@ -358,7 +350,7 @@ pub fn run(
     // live pane (e.g. a submodule Codex session) aliases onto that pane and no
     // real pane for the new document ever appears.
     if !force
-        && sessions::Multiplexer::pane_alive(&tmux, &pane_id)
+        && tmux.pane_alive(&pane_id)
         && crate::sync::pane_runs_other_document_owner(&tmux, &pane_id, file)
     {
         eprintln!(
@@ -426,8 +418,8 @@ pub fn run(
     // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
     // Resolve cwd to the nearest git repo root for the document to avoid superproject
     // drift when claiming submodule-hosted documents (#tw4a).
-    let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());
-    let resolved_cwd = crate::git::resolve_pane_cwd(file);
+    let pane_pid = agent_doc_tmux_io::pane_pid(&tmux, &pane_id).unwrap_or_else(std::process::id);
+    let resolved_cwd = agent_doc_git_io::dirs::resolve_pane_cwd(file);
     eprintln!(
         "[claim] using cwd={} for registry entry",
         resolved_cwd.display()
@@ -441,7 +433,7 @@ pub fn run(
     )?;
 
     // Focus the claimed pane (select-window + select-pane for cross-window support)
-    if sessions::Multiplexer::pane_alive(&tmux, &pane_id) {
+    if tmux.pane_alive(&pane_id) {
         if let Err(e) = tmux.select_pane(&pane_id) {
             eprintln!("warning: failed to focus pane {}: {}", pane_id, e);
         } else {
@@ -453,19 +445,14 @@ pub fn run(
 
     // Show a brief notification on the target pane
     let msg = format!("Claimed {} (pane {})", file_str, pane_id);
-    if let Err(e) = tmux
-        .cmd()
-        .args(["display-message", "-t", &pane_id, "-d", "3000", &msg])
-        .status()
-    {
+    if let Err(e) = agent_doc_tmux_io::show_message(&tmux, &pane_id, "3000", &msg) {
         eprintln!("warning: display-message failed: {}", e);
     }
 
     // Append to claims log so the skill can display it on next invocation
     let log_line = format!("Claimed {} for pane {}\n", file_str, pane_id);
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_fs::find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
     let log_path = project_root.join(".agent-doc/claims.log");
     if let Some(parent) = log_path.parent()
         && let Err(e) = std::fs::create_dir_all(parent)
@@ -494,7 +481,11 @@ pub fn run(
 
     // Ensure the document has a snapshot + git baseline. If already initialized
     // (snapshot exists), this is a no-op.
-    if let Err(e) = crate::snapshot::ensure_initialized(file) {
+    if let Err(e) = agent_doc_workflow_io::document_init::ensure_initialized(
+        file,
+        crate::git::commit,
+        crate::ops_log::log_op,
+    ) {
         eprintln!("warning: failed to initialize document: {}", e);
     }
 
@@ -517,11 +508,11 @@ pub fn run(
 /// was needed rather than getting a silent no-op.
 fn validate_file_claim(file: &Path) {
     let file_str = file.to_string_lossy();
-    let registry_path = sessions::registry_path();
+    let registry_path = agent_doc_session_registry_io::registry_path();
     let Ok(_lock) = tmux_router::RegistryLock::acquire(&registry_path) else {
         return;
     };
-    let Ok(registry) = sessions::load() else {
+    let Ok(registry) = agent_doc_session_registry_io::load() else {
         return;
     };
 
@@ -542,7 +533,7 @@ fn validate_file_claim(file: &Path) {
                     window: &entry.window,
                 },
                 agent_doc_git_io::dirs::resolve_canonical_or_absolute_file_path,
-            ) && !sessions::Multiplexer::pane_alive(&tmux, &entry.pane)
+            ) && !tmux.pane_alive(&entry.pane)
         })
         .map(|(k, e)| (k.clone(), e.pane.clone()))
         .collect();
@@ -560,16 +551,13 @@ fn validate_file_claim(file: &Path) {
         );
         registry.remove(key);
     }
-    let _ = sessions::save(&registry);
+    let _ = agent_doc_session_registry_io::save(&registry);
 }
 
 /// Check if a tmux window is alive by listing its panes.
 fn is_window_alive(window: &str) -> bool {
-    std::process::Command::new("tmux")
-        .args(["list-panes", "-t", window, "-F", "#{pane_id}"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    let tmux = tmux_router::Tmux::default_server();
+    agent_doc_tmux_io::list_panes(&tmux, Some(window), "#{pane_id}").is_ok()
 }
 
 /// Search sessions.json for a live window belonging to the current project.
@@ -578,7 +566,7 @@ fn is_window_alive(window: &str) -> bool {
 /// matches the current working directory and has a non-empty `window` field,
 /// checks if the window is alive. Returns the first alive match.
 fn find_alive_project_window() -> Option<String> {
-    let registry = sessions::load().ok()?;
+    let registry = agent_doc_session_registry_io::load().ok()?;
     let cwd = std::env::current_dir().ok()?.to_string_lossy().to_string();
     let result = find_alive_window_in_registry(
         registry
@@ -603,14 +591,12 @@ fn find_alive_project_window() -> Option<String> {
 /// nearest git repo root for the document. This scopes CLAUDE.md, memory, and
 /// skills to that repo rather than the superproject (#8jzg).
 fn run_isolate(file: &Path) -> Result<()> {
-    use std::process::Command;
-
     let file = &file
         .canonicalize()
         .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
 
     // Resolve nearest git root for the document
-    let cwd = crate::git::resolve_pane_cwd(file);
+    let cwd = agent_doc_git_io::dirs::resolve_pane_cwd(file);
     let file_str = file.to_string_lossy();
 
     eprintln!(
@@ -633,21 +619,14 @@ fn run_isolate(file: &Path) -> Result<()> {
         file_str,
     );
 
-    let status = Command::new("tmux")
-        .args([
-            "new-window",
-            "-c",
-            &cwd.to_string_lossy(),
-            "-n",
-            "agent-doc",
-            &shell_cmd,
-        ])
-        .status()
-        .context("failed to run tmux new-window")?;
-
-    if !status.success() {
-        anyhow::bail!("tmux new-window failed (exit {:?})", status.code());
-    }
+    let tmux = tmux_router::Tmux::default_server();
+    agent_doc_tmux_io::new_window_in_cwd(
+        &tmux,
+        cwd.to_string_lossy().as_ref(),
+        "agent-doc",
+        &shell_cmd,
+    )
+    .context("failed to run tmux new-window")?;
 
     eprintln!(
         "[claim --isolate] new window spawned with cwd={}",

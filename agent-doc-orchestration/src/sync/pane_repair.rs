@@ -26,17 +26,9 @@ pub(crate) fn registered_pane_proves_live_owner(
     sync_actor_or_live_owner_matches_cached(tmux, file_path, session_id, pane_id, proof_cache)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProtectedRegisteredPaneState {
-    pub(crate) reason: String,
-    pub(crate) last_visible_excerpt: Option<String>,
-}
+pub(crate) type ProtectedRegisteredPaneState = agent_doc_sync::ProtectedRegisteredPaneState;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OpenCycleProtectedPaneState {
-    pub(crate) file: PathBuf,
-    pub(crate) phase: &'static str,
-}
+pub(crate) type OpenCycleProtectedPaneState = agent_doc_sync::OpenCycleProtectedPaneState;
 
 pub(crate) fn resolve_harness_for_sync(file: &Path) -> agent_doc_harness::HarnessConfig {
     let content = std::fs::read_to_string(file).unwrap_or_default();
@@ -56,7 +48,7 @@ pub(crate) fn protected_registered_pane_state(
         return None;
     }
 
-    let capture = sessions::capture_pane(tmux, pane_id).ok()?;
+    let capture = agent_doc_tmux_io::capture_pane(tmux, pane_id).ok()?;
     protected_registered_pane_state_from_capture(file, &capture)
 }
 
@@ -65,42 +57,29 @@ pub(crate) fn protected_registered_pane_state_from_capture(
     capture: &str,
 ) -> Option<ProtectedRegisteredPaneState> {
     let harness = resolve_harness_for_sync(file);
-    let reason = harness.protected_prompt_input_reason(capture)?;
-    if reason == "active permission prompt" {
+    let protected =
+        agent_doc_sync::protected_registered_pane_state_from_capture(&harness, capture)?;
+    if protected.reason == "active permission prompt" {
         agent_doc_tmux_io::input_diag::log_prompt_detection(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
             "sync.protected_registered_pane",
             "registered_pane",
             &harness.binary,
-            &reason,
+            &protected.reason,
             "active",
         );
     }
-    Some(ProtectedRegisteredPaneState {
-        reason,
-        last_visible_excerpt: last_visible_excerpt(capture),
-    })
+    Some(protected)
 }
 
 pub(crate) fn open_cycle_protected_file_state(file: &Path) -> Option<OpenCycleProtectedPaneState> {
     let state = crate::cycle_state::load(file).ok().flatten()?;
-    let phase = match state.phase {
-        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
-        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
-        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
-        agent_doc_turn::CyclePhase::Committed | agent_doc_turn::CyclePhase::Abandoned => {
-            return None;
-        }
-    };
-    Some(OpenCycleProtectedPaneState {
-        file: file.to_path_buf(),
-        phase,
-    })
+    agent_doc_sync::open_cycle_protected_file_state_from_phase(file, state.phase)
 }
 
 pub(crate) fn registered_file_for_pane(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
     let project_root = pane_project_root(tmux, pane_id)?;
-    let registry = sessions::load_in(&project_root).ok()?;
+    let registry = agent_doc_session_registry_io::load_in(&project_root).ok()?;
     let entry = registry
         .values()
         .find(|entry| entry.pane == pane_id && !entry.file.is_empty())?;
@@ -140,11 +119,10 @@ pub(crate) fn select_visible_focus_pane_if_present(
             continue;
         }
         if let Err(err) = tmux.select_pane(&pane) {
-            let warning = format!(
-                "[sync] warning: failed to reselect visible focus pane {} for {} while preserving layout: {}",
-                pane,
-                canonical_focus.display(),
-                err
+            let warning = agent_doc_sync::reselect_visible_focus_pane_failed_warning(
+                &pane,
+                &canonical_focus.display().to_string(),
+                &err.to_string(),
             );
             eprintln!("{}", warning);
             sync_log(&warning);
@@ -156,38 +134,9 @@ pub(crate) fn select_visible_focus_pane_if_present(
 }
 
 pub(crate) fn emit_preserved_layout_focus_marker(pane: &str, reason: &str) {
-    let marker = format!(
-        "[sync] safe_passive_layout_preserved_reselected_focus pane={} reason={}",
-        pane, reason
-    );
+    let marker = agent_doc_sync::preserved_layout_focus_marker(pane, reason);
     eprintln!("{}", marker);
     sync_log(&marker);
-}
-
-pub(crate) fn persist_dead_pane_capture(
-    file: &Path,
-    session_id: &str,
-    pane_id: &str,
-    tail: &str,
-) -> Option<PathBuf> {
-    if tail.trim().is_empty() {
-        return None;
-    }
-    let canonical = file
-        .canonicalize()
-        .ok()
-        .unwrap_or_else(|| file.to_path_buf());
-    let root = agent_doc_fs::find_project_root(&canonical)?;
-    let dir = root.join(".agent-doc/logs/dead-panes");
-    std::fs::create_dir_all(&dir).ok()?;
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let pane_token = pane_id.trim_start_matches('%');
-    let path = dir.join(format!("{session_id}-{timestamp}-pane-{pane_token}.log"));
-    std::fs::write(&path, tail).ok()?;
-    Some(path)
 }
 
 pub(crate) fn capture_dead_pane_diagnostics(
@@ -202,36 +151,30 @@ pub(crate) fn capture_dead_pane_diagnostics(
     }
 
     let dead_status = tmux.pane_dead_status(pane_id)?;
-    let observed_window = tmux
-        .pane_window(pane_id)
-        .ok()
+    let observed_window = agent_doc_tmux_io::target_window_id(tmux, pane_id)
         .or_else(|| last_known_window.map(ToOwned::to_owned));
     let cycle_phase = cycle_phase_label(file);
     let tail = tmux.capture_pane(pane_id, Some(80)).unwrap_or_default();
-    let capture_path = persist_dead_pane_capture(file, session_id, pane_id, &tail);
+    let capture_path =
+        agent_doc_sync_io::persist_dead_pane_capture(file, session_id, pane_id, &tail);
     let last_visible_excerpt = last_visible_excerpt(&tail);
-    let mut event = format!(
-        "pane_death_detected pane={pane_id} status={} cycle_phase={}",
-        dead_status.as_deref().unwrap_or("unknown"),
-        cycle_phase.as_deref().unwrap_or("none")
+    let event = agent_doc_sync_io::dead_pane_detected_event(
+        agent_doc_sync_io::DeadPaneDetectedEventFacts {
+            pane_id,
+            dead_status: dead_status.as_deref(),
+            cycle_phase: cycle_phase.as_deref(),
+            observed_window: observed_window.as_deref(),
+            capture_path: capture_path.as_deref(),
+            last_visible_excerpt: last_visible_excerpt.as_deref(),
+        },
     );
-    if let Some(window_id) = observed_window.as_deref() {
-        event.push_str(&format!(" window={window_id}"));
-    }
-    if let Some(path) = capture_path.as_ref() {
-        event.push_str(&format!(" capture={}", path.display()));
-    }
-    if let Some(excerpt) = last_visible_excerpt.as_deref() {
-        event.push_str(&format!(" last_visible_excerpt={excerpt}"));
-    }
-    let _ = crate::startup_miss::append_session_log_event(file, session_id, &event);
+    let _ =
+        agent_doc_supervisor_io::startup_miss::append_session_log_event(file, session_id, &event);
 
-    let _ = crate::startup_miss::append_session_log_event(
+    let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
         file,
         session_id,
-        &format!(
-            "pane_death_cleanup pane={pane_id} action=keep_dead policy=normal_sync_never_kills"
-        ),
+        &agent_doc_sync_io::dead_pane_cleanup_event(pane_id),
     );
 
     Ok(Some(DeadPaneDiagnostics {
@@ -250,7 +193,7 @@ pub(crate) fn recover_missing_pane_closeout(
     pane_id: &str,
 ) -> (
     Option<String>,
-    Option<crate::repair::RepairOutcome>,
+    Option<agent_doc_turn::repair::RepairOutcome>,
     Option<String>,
 ) {
     let state = match crate::cycle_state::load(file) {
@@ -272,7 +215,7 @@ pub(crate) fn recover_missing_pane_closeout(
         _ => return (None, None, None),
     };
     let capture_present = crate::capture::load_active(file).ok().flatten().is_some();
-    let _ = crate::startup_miss::append_session_log_event(
+    let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
         file,
         session_id,
         &format!(
@@ -282,13 +225,13 @@ pub(crate) fn recover_missing_pane_closeout(
     );
     match crate::repair::repair(file) {
         Ok(outcome) => {
-            let _ = crate::startup_miss::append_session_log_event(
+            let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
                 file,
                 session_id,
                 &format!(
                     "sync_missing_pane_closeout_recovery_result pane={pane_id} cycle={} phase={phase} outcome={}",
                     state.cycle_id,
-                    repair_outcome_label(outcome)
+                    outcome.as_str()
                 ),
             );
             (Some(phase.to_string()), Some(outcome), None)
@@ -296,7 +239,7 @@ pub(crate) fn recover_missing_pane_closeout(
         Err(err) => {
             let detail =
                 sanitize_excerpt(&err.to_string()).unwrap_or_else(|| "unknown".to_string());
-            let _ = crate::startup_miss::append_session_log_event(
+            let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
                 file,
                 session_id,
                 &format!(
@@ -339,7 +282,7 @@ pub(crate) fn repair_missing_registered_pane(
             recover_missing_pane_closeout(file, session_id, pane_id)
         }
     };
-    let recorded_session_loss = crate::startup_miss::record_session_loss(
+    let recorded_session_loss = agent_doc_supervisor_io::startup_miss::record_session_loss(
         file,
         session_id,
         pane_id,
@@ -358,7 +301,7 @@ pub(crate) fn repair_missing_registered_pane(
         MissingRegisteredPaneRepairMode::ExplicitRepair if closeout_recovery_phase.is_none() => {
             matches!(
                 crate::repair::repair_stale_preflight_started_cycle(file)?,
-                crate::repair::RepairOutcome::StalePreflightLockRepaired
+                agent_doc_turn::repair::RepairOutcome::StalePreflightLockRepaired
             )
         }
         MissingRegisteredPaneRepairMode::ExplicitRepair => false,
@@ -534,7 +477,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let content = "---\nagent_doc_session: session-lost-pane\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
@@ -563,9 +506,10 @@ mod tests {
             .expect("cycle state should exist");
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 
-        let status = crate::startup_miss::session_log_status(&doc, "session-lost-pane")
-            .unwrap()
-            .expect("session log should be readable");
+        let status =
+            agent_doc_supervisor_io::startup_miss::session_log_status(&doc, "session-lost-pane")
+                .unwrap()
+                .expect("session log should be readable");
         assert!(status.latest_session_closed());
     }
     #[test]
@@ -591,7 +535,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -649,7 +593,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -680,7 +624,7 @@ mod tests {
         );
         assert_eq!(
             repair.closeout_recovery_outcome,
-            Some(crate::repair::RepairOutcome::ReplayedResponse)
+            Some(agent_doc_turn::repair::RepairOutcome::ReplayedResponse)
         );
         assert!(repair.closeout_recovery_error.is_none());
         assert!(repair.block_auto_start_reason.is_none());
@@ -689,8 +633,8 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(
-            crate::git::verify_snapshot_committed(&doc).unwrap(),
-            crate::git::SnapshotCommitStatus::Committed
+            agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
+            agent_doc_snapshot_io::SnapshotCommitStatus::Committed
         );
         assert!(
             !agent_doc_fs::pending_response_path_for(&doc)
@@ -723,7 +667,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -744,7 +688,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, updated).unwrap();
-        snapshot::save(&doc, updated).unwrap();
+        agent_doc_snapshot_io::save(&doc, updated, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_write_applied(
             &doc,
             "write_template",
@@ -778,7 +722,7 @@ mod tests {
         );
         assert_eq!(
             repair.closeout_recovery_outcome,
-            Some(crate::repair::RepairOutcome::AlreadyApplied)
+            Some(agent_doc_turn::repair::RepairOutcome::AlreadyApplied)
         );
         assert!(repair.closeout_recovery_error.is_none());
         assert!(repair.block_auto_start_reason.is_none());
@@ -787,8 +731,8 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(
-            crate::git::verify_snapshot_committed(&doc).unwrap(),
-            crate::git::SnapshotCommitStatus::Committed
+            agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
+            agent_doc_snapshot_io::SnapshotCommitStatus::Committed
         );
         assert!(
             !agent_doc_fs::pending_response_path_for(&doc)
@@ -807,7 +751,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let content = "---\nagent_doc_session: dead-pane-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
@@ -902,7 +846,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
         crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -1043,7 +987,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        sessions::save_in(root, &root_registry).unwrap();
+        agent_doc_session_registry_io::save_in(root, &root_registry).unwrap();
 
         let mut child_registry = tmux_router::Registry::new();
         let child_key = tmux_router::registry::canonical_registry_key_in(
@@ -1063,7 +1007,7 @@ mod tests {
                 supervisor_instance_id: "instance-1".to_string(),
             },
         );
-        sessions::save_in(&subroot, &child_registry).unwrap();
+        agent_doc_session_registry_io::save_in(&subroot, &child_registry).unwrap();
 
         let _cwd = ScopedCurrentDir::set(root);
         let root_col = root_doc
@@ -1241,7 +1185,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         assert_eq!(open_cycle_protected_file_state(&doc), None);
 

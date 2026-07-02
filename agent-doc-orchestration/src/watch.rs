@@ -3,7 +3,7 @@
 //! ## Spec
 //! - `start(config, WatchConfig)` runs the watch daemon. Acquires a PID file
 //!   (`.agent-doc/watch.pid`) to prevent duplicate daemons; bails if one is already alive.
-//! - `is_running()` checks the PID file and `/proc/<pid>` for daemon liveness.
+//! - `agent_doc_watch_io::is_running()` checks the PID file and `/proc/<pid>` for daemon liveness.
 //! - `ensure_running()` lazily starts the daemon if it is not running; spawns the
 //!   `agent-doc watch` subprocess from the project root. Returns `Ok(true)` if started,
 //!   `Ok(false)` if already running.
@@ -23,7 +23,7 @@
 //! - Loop prevention for file-watch: agent-triggered changes (within `debounce * 3` of
 //!   last run) increment a per-file cycle counter; hard cap at `max_cycles`. Content hash
 //!   equality stops the loop early (convergence detection).
-//! - Stream-capture path: every 500 ms poll tick, `sessions::capture_pane()` is called;
+//! - Stream-capture path: every 500 ms poll tick, `agent_doc_tmux_io::capture_pane()` is called;
 //!   new lines (from `agent_doc_turn_executor::capture::capture_delta`) are
 //!   flushed to the document via `stream::flush_to_document()`.
 //! - CRDT documents also get reactive file-watching with zero debounce (tracked in
@@ -40,7 +40,7 @@
 //!   onward.
 //!
 //! ## Agentic Contracts
-//! - `start()`, `stop()`, `status()`, `is_running()`, and `ensure_running()` are the
+//! - `start()`, `stop()`, `status()`, and `ensure_running()` are the
 //!   public API surface; all loop internals are private.
 //! - `ensure_running()` is safe to call from any subcommand needing the daemon; it
 //!   is idempotent and returns promptly when the daemon is already live.
@@ -80,10 +80,9 @@ use notify::{EventKind, RecursiveMode, Watcher};
 
 use agent_doc_config::Config;
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_markdown_ast::events::DocumentNodeEvent;
 use agent_doc_turn_executor::capture::{capture_delta, limit_capture_lines};
 
-use crate::{graph::ActorContext, sessions, stream};
+use crate::{graph::ActorContext, stream};
 
 /// Default idle timeout before daemon auto-exits (seconds).
 const IDLE_TIMEOUT_SECS: u64 = 60;
@@ -117,6 +116,26 @@ impl FileState {
     }
 }
 
+fn seed_node_snapshot(path: &Path, snapshots: &mut HashMap<PathBuf, String>) -> Result<()> {
+    let content = std::fs::read_to_string(path)?;
+    snapshots.insert(path.to_path_buf(), content);
+    Ok(())
+}
+
+fn refresh_node_snapshot_and_log(
+    path: &Path,
+    snapshots: &mut HashMap<PathBuf, String>,
+) -> Result<()> {
+    let content = std::fs::read_to_string(path)?;
+    let previous = snapshots.insert(path.to_path_buf(), content.clone());
+    let events = project_watch_node_events(previous.as_deref(), &content);
+    if !events.is_empty() {
+        let payload = document_node_events_payload(&path.display().to_string(), &events);
+        crate::ops_log::log_op(path, &format!("document_node_events {payload}"));
+    }
+    Ok(())
+}
+
 /// Per-file state for stream-mode capture polling.
 struct StreamState {
     pane: String,
@@ -146,41 +165,18 @@ enum DocMode {
     StreamCapture,
 }
 
-fn update_node_snapshot(
-    path: &Path,
-    snapshots: &mut HashMap<PathBuf, String>,
-) -> Result<Vec<DocumentNodeEvent>> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read {} for node-event snapshot", path.display()))?;
-    let previous = snapshots.insert(path.to_path_buf(), content.clone());
-    Ok(project_watch_node_events(previous.as_deref(), &content))
-}
-
-fn log_node_events(path: &Path, events: &[DocumentNodeEvent]) {
-    if events.is_empty() {
-        return;
-    }
-    let payload = document_node_events_payload(&path.display().to_string(), events);
-    crate::ops_log::log_op(path, &format!("document_node_events {payload}"));
-}
-
-/// Check if the watch daemon is currently running.
-pub fn is_running() -> bool {
-    agent_doc_watch_io::read_pid().is_some_and(agent_doc_watch_io::pid_alive)
-}
-
 /// Ensure the watch daemon is running. If not, spawn it in the background.
 ///
 /// Called from claim/pre-flight to implement lazy start.
 /// Returns Ok(true) if daemon was started, Ok(false) if already running.
 pub fn ensure_running() -> Result<bool> {
-    if is_running() {
+    if agent_doc_watch_io::is_running() {
         return Ok(false);
     }
 
     // Resolve project root (where .agent-doc/ lives)
     let cwd = std::env::current_dir().unwrap_or_default();
-    let project_root = agent_doc_fs::find_project_root(&cwd)
+    let project_root = agent_doc_project_root_io::project_root_containing(&cwd)
         .context("could not find .agent-doc/ directory — not in an agent-doc project")?;
 
     // Spawn daemon in background from project root
@@ -196,12 +192,12 @@ pub fn ensure_running() -> Result<bool> {
     // Reap the detached watch daemon instead of dropping the handle so it can
     // never linger as a `<defunct>` zombie under a long-lived launcher
     // (`#zombiereap`).
-    crate::detached_child::reap_detached(child);
+    agent_doc_supervisor_process::detached_child::reap_detached(child);
 
     // Wait briefly for daemon to write PID file
     for _ in 0..10 {
         std::thread::sleep(Duration::from_millis(50));
-        if is_running() {
+        if agent_doc_watch_io::is_running() {
             return Ok(true);
         }
     }
@@ -228,7 +224,7 @@ pub fn ensure_running() -> Result<bool> {
 pub fn start(config: &Config, watch_config: WatchConfig) -> Result<()> {
     // Resolve project root and cd there (critical for finding .agent-doc/)
     let cwd = std::env::current_dir().unwrap_or_default();
-    if let Some(root) = agent_doc_fs::find_project_root(&cwd)
+    if let Some(root) = agent_doc_project_root_io::project_root_containing(&cwd)
         && root != cwd
     {
         std::env::set_current_dir(&root)
@@ -310,7 +306,7 @@ fn run_event_loop(
                     eprintln!("Warning: could not watch {}: {}", entry.path.display(), e);
                 } else {
                     watched_files.push(entry.path.clone());
-                    if let Err(e) = update_node_snapshot(&entry.path, &mut node_snapshots) {
+                    if let Err(e) = seed_node_snapshot(&entry.path, &mut node_snapshots) {
                         eprintln!(
                             "[watch] could not seed node-event snapshot for {}: {}",
                             entry.path.display(),
@@ -335,7 +331,7 @@ fn run_event_loop(
                     } else {
                         watched_files.push(entry.path.clone());
                         reactive_paths.insert(entry.path.clone());
-                        if let Err(e) = update_node_snapshot(&entry.path, &mut node_snapshots) {
+                        if let Err(e) = seed_node_snapshot(&entry.path, &mut node_snapshots) {
                             eprintln!(
                                 "[watch] could not seed node-event snapshot for {}: {}",
                                 entry.path.display(),
@@ -370,7 +366,7 @@ fn run_event_loop(
 
     let config_toml_path = std::env::current_dir()
         .ok()
-        .and_then(|d| agent_doc_fs::find_project_root(&d))
+        .and_then(|d| agent_doc_project_root_io::project_root_containing(&d))
         .map(|r| r.join(".agent-doc").join("config.toml"));
     let base_dir = std::env::current_dir().context("resolve watch daemon project root")?;
 
@@ -422,8 +418,7 @@ fn run_event_loop(
                             } else {
                                 eprintln!("Now watching {}", entry.path.display());
                                 watched_files.push(entry.path.clone());
-                                if let Err(e) =
-                                    update_node_snapshot(&entry.path, &mut node_snapshots)
+                                if let Err(e) = seed_node_snapshot(&entry.path, &mut node_snapshots)
                                 {
                                     eprintln!(
                                         "[watch] could not seed node-event snapshot for {}: {}",
@@ -462,7 +457,7 @@ fn run_event_loop(
                                     eprintln!("Now watching {} (reactive)", entry.path.display());
                                     watched_files.push(entry.path.clone());
                                     if let Err(e) =
-                                        update_node_snapshot(&entry.path, &mut node_snapshots)
+                                        seed_node_snapshot(&entry.path, &mut node_snapshots)
                                     {
                                         eprintln!(
                                             "[watch] could not seed node-event snapshot for {}: {}",
@@ -495,7 +490,7 @@ fn run_event_loop(
 
         // Poll stream-mode documents (tmux capture)
         for (path, ss) in &mut stream_states {
-            match sessions::capture_pane(&tmux, &ss.pane) {
+            match agent_doc_tmux_io::capture_pane(&tmux, &ss.pane) {
                 Ok(captured) => {
                     if captured != ss.last_capture {
                         // Extract new lines since last capture, limited to last 50 lines
@@ -622,8 +617,8 @@ fn run_event_loop(
                     .map(|content| watch_content_hash(&content));
             }
 
-            match update_node_snapshot(&path, &mut node_snapshots) {
-                Ok(node_events) => log_node_events(&path, &node_events),
+            match refresh_node_snapshot_and_log(&path, &mut node_snapshots) {
+                Ok(()) => {}
                 Err(e) => eprintln!(
                     "[watch] node-event snapshot failed for {}: {}",
                     path.display(),
@@ -719,7 +714,7 @@ fn discover_entries() -> Result<Vec<WatchEntry>> {
 }
 
 fn discover_entries_in(base_dir: &Path) -> Result<Vec<WatchEntry>> {
-    let registry = sessions::load_in(base_dir)?;
+    let registry = agent_doc_session_registry_io::load_in(base_dir)?;
     let mut entries = Vec::new();
     for entry in registry.values() {
         let path = PathBuf::from(&entry.file);
@@ -905,65 +900,6 @@ mod tests {
         let mut state = FileState::new();
         state.last_hash = Some("hash".to_string());
         assert_eq!(state.last_hash.as_deref(), Some("hash"));
-    }
-
-    #[test]
-    fn update_node_snapshot_emits_node_keyed_events_after_seed() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("session.md");
-        std::fs::write(
-            &path,
-            "<!-- agent:queue -->\n- do [#alpha]\n<!-- /agent:queue -->\n",
-        )
-        .unwrap();
-        let mut snapshots = HashMap::new();
-
-        assert!(
-            update_node_snapshot(&path, &mut snapshots)
-                .unwrap()
-                .is_empty()
-        );
-
-        std::fs::write(
-            &path,
-            "<!-- agent:queue -->\n- do [#alpha]\n- do [#beta]\n<!-- /agent:queue -->\n",
-        )
-        .unwrap();
-        let events = update_node_snapshot(&path, &mut snapshots).unwrap();
-
-        assert_eq!(events.len(), 1);
-        assert_eq!(
-            events[0].kind,
-            agent_doc_markdown_ast::events::DocumentNodeEventKind::Insert
-        );
-        assert!(events[0].node_key.contains(":beta:"));
-        assert!(
-            events[0]
-                .previous_node_key
-                .as_deref()
-                .is_some_and(|key| key.contains(":alpha:"))
-        );
-    }
-
-    #[test]
-    fn log_node_events_writes_document_node_events_payload() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
-        let path = dir.path().join("session.md");
-        let before =
-            "<!-- agent:backlog -->\n1. [ ] [#task] old wording\n<!-- /agent:backlog -->\n";
-        let after = "<!-- agent:backlog -->\n1. [ ] [#task] new wording\n<!-- /agent:backlog -->\n";
-        std::fs::write(&path, after).unwrap();
-        let events = agent_doc_markdown_ast::events::diff_node_events(before, after);
-
-        log_node_events(&path, &events);
-
-        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("document_node_events"), "{log}");
-        assert!(log.contains("\"event\":\"document_node_events\""), "{log}");
-        assert!(log.contains("\"component\":\"backlog\""), "{log}");
-        assert!(log.contains("\"node_key\":\"backlog:0:task:0\""), "{log}");
-        assert!(log.contains("\"op\":\"replace\""), "{log}");
     }
 
     #[test]

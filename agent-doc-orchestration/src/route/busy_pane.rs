@@ -2,6 +2,7 @@
 
 use super::*;
 use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
+use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
 
 #[cfg(test)]
 pub(crate) fn maybe_run_test_busy_auto_fix_hook(
@@ -9,7 +10,7 @@ pub(crate) fn maybe_run_test_busy_auto_fix_hook(
     file: &Path,
     pane: &str,
 ) -> Result<bool> {
-    let Some(project_root) = agent_doc_fs::find_project_root(file)
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
         .or_else(|| file.parent().map(|parent| parent.to_path_buf()))
     else {
         return Ok(false);
@@ -24,7 +25,7 @@ pub(crate) fn maybe_run_test_busy_auto_fix_hook(
     if command.is_empty() {
         return Ok(false);
     }
-    tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, command])?;
+    agent_doc_tmux_io::respawn_pane(tmux, pane, command)?;
     Ok(true)
 }
 
@@ -43,7 +44,7 @@ pub(crate) fn maybe_run_test_busy_interrupt_hook(
     file: &Path,
     pane: &str,
 ) -> Result<bool> {
-    let Some(project_root) = agent_doc_fs::find_project_root(file)
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
         .or_else(|| file.parent().map(|parent| parent.to_path_buf()))
     else {
         return Ok(false);
@@ -58,7 +59,7 @@ pub(crate) fn maybe_run_test_busy_interrupt_hook(
     if command.is_empty() {
         return Ok(false);
     }
-    tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, command])?;
+    agent_doc_tmux_io::respawn_pane(tmux, pane, command)?;
     Ok(true)
 }
 
@@ -169,7 +170,7 @@ pub(crate) fn codex_pane_in_shell_search_state(
     if is_codex_shell_search_blocker(blocker_reason) {
         return true;
     }
-    let Ok(captured) = crate::sessions::capture_pane(tmux, pane) else {
+    let Ok(captured) = agent_doc_tmux_io::capture_pane(tmux, pane) else {
         return false;
     };
     is_codex_shell_search_blocker(

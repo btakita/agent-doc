@@ -31,8 +31,6 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_orchestration::sessions;
-use agent_doc_orchestration::supervisor::ipc as supervisor_ipc;
 #[cfg(test)]
 use agent_doc_queue::dispatch_item::classify;
 use agent_doc_queue::dispatch_item::{
@@ -42,6 +40,7 @@ use agent_doc_queue::dispatch_item::{
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 #[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
+use agent_doc_supervisor_io::ipc as supervisor_ipc;
 
 /// Result of dispatching a command.
 #[derive(Debug)]
@@ -291,7 +290,17 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
         profile.transform(),
         profile.submit_key(),
     );
-    sessions::send_submitted_text_for_harness(&tmux, &pane_id, &item.raw, &ctx.harness)?;
+    agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+        &tmux,
+        &pane_id,
+        &item.raw,
+        &ctx.harness,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(
+            None,
+            agent_doc_orchestration::ops_log::log_op,
+        ),
+        "sessions.send_submitted_text_for_harness",
+    )?;
 
     // Poll for completion: wait until the command text disappears from the
     // pane's last few visible lines (same approach as route.rs send_command).
@@ -300,7 +309,7 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     let poll_interval = std::time::Duration::from_millis(500);
     while start.elapsed() < timeout {
         std::thread::sleep(poll_interval);
-        if let Ok(content) = sessions::capture_pane(&tmux, &pane_id) {
+        if let Ok(content) = agent_doc_tmux_io::capture_pane(&tmux, &pane_id) {
             let still_visible = content
                 .lines()
                 .rev()
@@ -332,7 +341,7 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
 
 /// Look up the tmux pane for a document session from the registry.
 fn lookup_pane(_project_root: &Path, session_uuid: &str) -> Option<String> {
-    let registry = sessions::load().ok()?;
+    let registry = agent_doc_session_registry_io::load().ok()?;
     registry
         .values()
         .find(|entry| entry.session_id == session_uuid)
@@ -428,7 +437,7 @@ mod tests {
 
         let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let captured_for_ipc = captured.clone();
-        let mut ipc = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             dir.path(),
             "queue-session",
             move |method| match method {
@@ -494,7 +503,7 @@ mod tests {
 
         let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let captured_for_ipc = captured.clone();
-        let mut ipc = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             dir.path(),
             "queue-session",
             move |method| match method {

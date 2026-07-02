@@ -8,17 +8,20 @@ use agent_doc_queue::{
         answered_free_text_head_node_keys, consume_queue_nodes_by_key, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, mark_first_matching_prompts_completed_by_texts,
-        next_queue_head_selection, normalized_done_id_bag, queue_consume_count_for_done_ids,
-        queue_consume_node_ops, queue_prompt_node_keys_for_count,
-        queue_prompt_node_keys_for_done_ids, queue_prompt_node_keys_for_texts,
-        should_consume_queue_prompt_for_diff_content, strike_all_noise_queue_heads,
+        normalized_done_id_bag, queue_consume_count_for_done_ids, queue_consume_node_ops,
+        queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
+        queue_prompt_node_keys_for_texts, should_consume_queue_prompt_for_diff_content,
+        strike_all_noise_queue_heads,
     },
     queue_heads::active_queue_head_text,
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
-        queue_prompt_done_id, queue_prompt_text_is_free_text,
-        response_explicitly_targets_queue_head,
+        queue_prompt_text_is_free_text, response_explicitly_targets_queue_head,
     },
+};
+use agent_doc_queue_io::queue_consumption_proof::{
+    QueueConsumptionProofEffects, QueueConsumptionProofStage,
+    record_queue_consumption_proofs as record_queue_consumption_proofs_with_effects,
 };
 
 #[cfg(test)]
@@ -102,7 +105,7 @@ pub(crate) fn consume_queue_prompts_with_outcome(
             .context("queue consume: failed to write document")?;
     }
     if plan.save_snapshot {
-        snapshot::save(file, &plan.new_snapshot)?;
+        agent_doc_snapshot_io::save(file, &plan.new_snapshot, crate::ops_log::log_op)?;
     }
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
 
@@ -150,246 +153,40 @@ pub(crate) fn consume_queue_prompts_with_outcome(
     Ok(Some(outcome))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum QueueConsumptionProofStage {
-    BeforeMutation,
-    AfterMutation,
+struct QueueConsumptionProofRuntimeEffects;
+
+impl QueueConsumptionProofEffects for QueueConsumptionProofRuntimeEffects {
+    fn append_state_event(
+        &self,
+        project_root: &Path,
+        event: &agent_doc_state_backbone::StateEvent,
+    ) -> Result<bool> {
+        crate::project_controller::append_state_event(project_root, event)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        crate::ops_log::log_op(file, message);
+    }
+
+    fn now_millis(&self) -> u64 {
+        now_millis()
+    }
 }
+
+const QUEUE_CONSUMPTION_PROOF_EFFECTS: QueueConsumptionProofRuntimeEffects =
+    QueueConsumptionProofRuntimeEffects;
 
 pub(crate) fn record_queue_consumption_proofs(
     file: &Path,
     plan: &QueueConsumptionPlan,
     stage: QueueConsumptionProofStage,
 ) -> Result<()> {
-    let canonical = file
-        .canonicalize()
-        .with_context(|| format!("queue consume: failed to canonicalize {}", file.display()))?;
-    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
-        eprintln!(
-            "[queue] warning: proof ledger unavailable for {}: project root not found",
-            file.display()
-        );
-        return Ok(());
-    };
-    let document_hash = queue_state_document_hash(&canonical);
-    for (index, consumed_text) in plan.consumed_texts.iter().enumerate() {
-        let content_hash = agent_doc_hash::content_hash(consumed_text);
-        let node_id = plan
-            .node_ops
-            .get(index)
-            .map(|op| op.node_id.as_str())
-            .unwrap_or("<missing-node>");
-        let operation_id = format!("queue_head:{node_id}:{index}");
-        let (outcome, proof_kind, proof) = match stage {
-            QueueConsumptionProofStage::BeforeMutation => (
-                agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded,
-                agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::QueueHeadIdentity,
-                format!(
-                    "phase=before_mutation node_id={} index={} consumed_count={} text_hash={} text={:?}",
-                    node_id,
-                    index,
-                    plan.consumed_texts.len(),
-                    content_hash,
-                    consumed_text
-                ),
-            ),
-            QueueConsumptionProofStage::AfterMutation => (
-                agent_doc_workflow_io::proof_ledger::ProofOutcome::Consumed,
-                agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::WriteResult,
-                format!(
-                    "phase=after_mutation node_id={} index={} remaining={} drained={} auto={} save_snapshot={}",
-                    node_id, index, plan.remaining, plan.drained, plan.auto, plan.save_snapshot
-                ),
-            ),
-        };
-        let record = agent_doc_workflow_io::proof_ledger::OperationProofRecord::new(
-            agent_doc_workflow_io::proof_ledger::OperationProofInput {
-                operation_id,
-                operation_kind: agent_doc_workflow_io::proof_ledger::ProofOperationKind::QueueHead,
-                outcome,
-                subject_id: Some(node_id.to_string()),
-                content_hash,
-                proof_kind,
-                proof,
-                recorded_at_ms: now_millis(),
-            },
-        )?;
-        let path = agent_doc_workflow_io::proof_ledger::append_operation_proof(
-            &project_root,
-            &canonical,
-            &record,
-        )?;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "queue_consume_proof_recorded file={} stage={:?} operation_id={} ledger={}",
-                file.display(),
-                stage,
-                record.operation_id,
-                path.display()
-            ),
-        );
-        record_queue_consumption_state_event(QueueConsumptionStateEvent {
-            file,
-            project_root: &project_root,
-            document_hash: &document_hash,
-            node_id,
-            index,
-            consumed_text,
-            content_hash: &record.content_hash,
-            stage,
-        })?;
-    }
-    if stage == QueueConsumptionProofStage::AfterMutation && !plan.drained {
-        record_next_queue_head_selected_state(
-            file,
-            &project_root,
-            &document_hash,
-            &plan.new_document,
-        )?;
-    }
-    Ok(())
-}
-
-fn queue_state_document_hash(file: &Path) -> String {
-    agent_doc_hash::document_id_for_path(file)
-}
-
-struct QueueConsumptionStateEvent<'a> {
-    file: &'a Path,
-    project_root: &'a Path,
-    document_hash: &'a str,
-    node_id: &'a str,
-    index: usize,
-    consumed_text: &'a str,
-    content_hash: &'a str,
-    stage: QueueConsumptionProofStage,
-}
-
-fn record_queue_consumption_state_event(args: QueueConsumptionStateEvent<'_>) -> Result<()> {
-    let QueueConsumptionStateEvent {
+    record_queue_consumption_proofs_with_effects(
+        &QUEUE_CONSUMPTION_PROOF_EFFECTS,
         file,
-        project_root,
-        document_hash,
-        node_id,
-        index,
-        consumed_text,
-        content_hash,
+        plan,
         stage,
-    } = args;
-    let backlog_id = queue_prompt_done_id(consumed_text);
-    let (event_id, fact) = match stage {
-        QueueConsumptionProofStage::BeforeMutation => (
-            format!("queue-head-selected:{document_hash}:{node_id}:{index}:{content_hash}"),
-            agent_doc_state_backbone::StateFact::QueueHeadSelected {
-                document_hash: document_hash.to_string(),
-                node_key: node_id.to_string(),
-                backlog_id,
-                prompt_text: Some(consumed_text.to_string()),
-                drainable: true,
-                hosting_epoch: None,
-            },
-        ),
-        QueueConsumptionProofStage::AfterMutation => (
-            format!("queue-head-completed:{document_hash}:{node_id}:{index}:{content_hash}"),
-            agent_doc_state_backbone::StateFact::QueueHeadCompleted {
-                document_hash: document_hash.to_string(),
-                node_key: node_id.to_string(),
-                backlog_id,
-                hosting_epoch: None,
-            },
-        ),
-    };
-    let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
-    let inserted = crate::project_controller::append_state_event(project_root, &event)?;
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "queue_consume_state_event_recorded file={} stage={:?} event_id={} inserted={} document_hash={} node_id={}",
-            file.display(),
-            stage,
-            event.event_id,
-            inserted,
-            document_hash,
-            node_id
-        ),
-    );
-    Ok(())
-}
-
-fn record_next_queue_head_selected_state(
-    file: &Path,
-    project_root: &Path,
-    document_hash: &str,
-    content: &str,
-) -> Result<()> {
-    let Some(selection) = next_queue_head_selection(content)? else {
-        return Ok(());
-    };
-    let node_key = selection.node_key;
-    let head_text = selection.head_text;
-    let stop_fence_at_head = selection.stop_fence_at_head;
-    let content_hash = agent_doc_hash::content_hash(&head_text);
-    let drainable = !stop_fence_at_head
-        && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-            content,
-            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-        )
-        .is_some();
-    let selected_event = agent_doc_state_backbone::StateEvent::new(
-        format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
-        agent_doc_state_backbone::StateFact::QueueHeadSelected {
-            document_hash: document_hash.to_string(),
-            node_key: node_key.clone(),
-            backlog_id: queue_prompt_done_id(&head_text),
-            prompt_text: Some(head_text.clone()),
-            drainable,
-            hosting_epoch: None,
-        },
-    );
-    let inserted = crate::project_controller::append_state_event(project_root, &selected_event)?;
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "queue_next_selected_state_event_recorded file={} event_id={} inserted={} document_hash={} node_id={} drainable={}",
-            file.display(),
-            selected_event.event_id,
-            inserted,
-            document_hash,
-            node_key,
-            drainable
-        ),
-    );
-    if stop_fence_at_head {
-        let reason = "stop_fence";
-        let reason_hash = agent_doc_hash::content_hash(reason);
-        let deferred_event = agent_doc_state_backbone::StateEvent::new(
-            format!(
-                "queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"
-            ),
-            agent_doc_state_backbone::StateFact::QueueHeadDeferred {
-                document_hash: document_hash.to_string(),
-                node_key: node_key.clone(),
-                reason: reason.to_string(),
-                hosting_epoch: None,
-            },
-        );
-        let deferred_inserted =
-            crate::project_controller::append_state_event(project_root, &deferred_event)?;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "queue_next_deferred_state_event_recorded file={} event_id={} inserted={} document_hash={} node_id={} reason={}",
-                file.display(),
-                deferred_event.event_id,
-                deferred_inserted,
-                document_hash,
-                node_key,
-                reason
-            ),
-        );
-    }
-    Ok(())
+    )
 }
 
 fn now_millis() -> u64 {
@@ -472,7 +269,7 @@ pub fn strike_answered_free_text_queue_heads(
     // strike them by the snapshot's own node keys (keys are position/hash derived
     // and need not equal the document's). Required closeouts must prove both sides
     // converge on the struck state.
-    let new_snapshot = match snapshot::load(file)? {
+    let new_snapshot = match agent_doc_snapshot_io::load(file)? {
         Some(snap) => {
             let snap_keys =
                 answered_free_text_head_node_keys(&snap, response_body, baseline.as_deref())?;
@@ -493,7 +290,7 @@ pub fn strike_answered_free_text_queue_heads(
             .context("free-text strike: failed to write document")?;
     }
     if let Some(snap) = new_snapshot {
-        snapshot::save(file, &snap)?;
+        agent_doc_snapshot_io::save(file, &snap, crate::ops_log::log_op)?;
     }
 
     eprintln!(
@@ -568,7 +365,7 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
 
     // Snapshot sync: clear the same noise heads in the snapshot (its own node keys /
     // spans, derived independently) so required closeouts prove both sides converge.
-    let new_snapshot = match snapshot::load(file)? {
+    let new_snapshot = match agent_doc_snapshot_io::load(file)? {
         Some(snap) => {
             let (new_snap, _) = strike_all_noise_queue_heads(&snap)?;
             if new_snap == snap {
@@ -583,7 +380,7 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
     converge_document_or_disk(file, &new_document, &content, "noise_prune")
         .context("noise prune: failed to write document")?;
     if let Some(snap) = new_snapshot {
-        snapshot::save(file, &snap)?;
+        agent_doc_snapshot_io::save(file, &snap, crate::ops_log::log_op)?;
     }
 
     let base_hash = agent_doc_hash::content_hash(&content);
@@ -648,7 +445,7 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
     }
     // Snapshot sync: strike the same id-backed head in the snapshot by its own node
     // keys so required closeouts prove both sides converge on the struck state.
-    let new_snapshot = match snapshot::load(file)? {
+    let new_snapshot = match agent_doc_snapshot_io::load(file)? {
         Some(snap) => {
             let snap_keys = id_backed_head_node_keys(&snap, &target_id)?;
             if snap_keys.is_empty() {
@@ -663,7 +460,7 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
     converge_document_or_disk(file, &new_document, &content, "orphan_id_head_strike")
         .context("orphan strike: failed to write document")?;
     if let Some(snap) = new_snapshot {
-        snapshot::save(file, &snap)?;
+        agent_doc_snapshot_io::save(file, &snap, crate::ops_log::log_op)?;
     }
     eprintln!(
         "[queue] struck orphaned id-backed head [#{target_id}] ({} node(s); #orphanqhead)",
@@ -723,7 +520,7 @@ pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bo
     if new_document == content {
         return Ok(false);
     }
-    let new_snapshot = match snapshot::load(file)? {
+    let new_snapshot = match agent_doc_snapshot_io::load(file)? {
         Some(snap) => {
             let snap_keys = id_backed_head_node_keys(&snap, &target_id)?;
             if snap_keys.is_empty() {
@@ -738,7 +535,7 @@ pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bo
     converge_document_or_disk(file, &new_document, &content, "open_id_head_ack")
         .context("open-id ack: failed to write document")?;
     if let Some(snap) = new_snapshot {
-        snapshot::save(file, &snap)?;
+        agent_doc_snapshot_io::save(file, &snap, crate::ops_log::log_op)?;
     }
     eprintln!(
         "[queue] acknowledged id-backed correction head [#{target_id}] ({} node(s); backlog left open; #freshqueueauth)",
@@ -787,7 +584,7 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
     let new_body = agent_doc_queue::document_queue::render(&marked_entries);
     let new_document = queue_component.replace_content(&content, &new_body);
 
-    let new_snapshot = if let Some(snapshot_content) = snapshot::load(file)? {
+    let new_snapshot = if let Some(snapshot_content) = agent_doc_snapshot_io::load(file)? {
         let snapshot_components = element::parse(&snapshot_content)?;
         let snapshot_queue = snapshot_components
             .iter()
@@ -827,7 +624,7 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
             .context("queue done-id mark: failed to write document")?;
     }
     if let Some(new_snapshot) = new_snapshot {
-        snapshot::save(file, &new_snapshot)?;
+        agent_doc_snapshot_io::save(file, &new_snapshot, crate::ops_log::log_op)?;
     }
 
     eprintln!(
@@ -843,7 +640,7 @@ pub(crate) fn plan_queue_prompt_consumption(
     content: &str,
     done_ids: &[String],
 ) -> Result<Option<QueueConsumptionPlan>> {
-    let snapshot_content = snapshot::load(file)?;
+    let snapshot_content = agent_doc_snapshot_io::load(file)?;
     plan_queue_prompt_consumption_with_snapshot(
         file,
         content,
@@ -1495,7 +1292,7 @@ mod core_tests {
             prompt = prompt
         );
         fs::write(&doc, &content).unwrap();
-        snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
 
         let plan = plan_queue_prompt_consumption(&doc, &content, &[])
             .unwrap()
@@ -1569,7 +1366,7 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let marked =
             mark_completed_queue_prompts_for_done_ids(&doc, &["opportunistic".to_string()], true)
@@ -1580,7 +1377,7 @@ mod core_tests {
         assert!(updated.contains("- do [#head]\n"), "{updated}");
         assert!(updated.contains("- ~~do [#opportunistic]~~\n"), "{updated}");
         assert!(updated.contains("- do [#tail]\n"), "{updated}");
-        let snapshot = snapshot::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
             snapshot.contains("- ~~do [#opportunistic]~~\n"),
             "{snapshot}"
@@ -1772,7 +1569,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let outcome = consume_queue_prompt_with_outcome(&doc).unwrap();
         assert!(
@@ -1803,7 +1600,7 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .unwrap()
@@ -1894,7 +1691,8 @@ mod core_tests {
             "second queue state event should complete the consumed head: {queue_events:#?}"
         );
 
-        let document_hash = queue_state_document_hash(&canonical);
+        let document_hash =
+            agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(&canonical);
         let projection = state_ledger
             .project_document(&document_hash)
             .expect("queue state events should project for document");
@@ -1936,7 +1734,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .unwrap()
@@ -1957,7 +1755,9 @@ mod core_tests {
             .into_iter()
             .next()
             .expect("remaining head should have a node key");
-        let document_hash = queue_state_document_hash(&doc.canonicalize().unwrap());
+        let document_hash = agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(
+            &doc.canonicalize().unwrap(),
+        );
         let state_ledger = crate::project_controller::load_state_event_ledger(root)
             .expect("queue state events should reload from sqlite");
         let projection = state_ledger
@@ -2006,7 +1806,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .unwrap()
@@ -2021,7 +1821,9 @@ mod core_tests {
             .into_iter()
             .next()
             .expect("remaining head should have a node key");
-        let document_hash = queue_state_document_hash(&doc.canonicalize().unwrap());
+        let document_hash = agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(
+            &doc.canonicalize().unwrap(),
+        );
         let state_ledger = crate::project_controller::load_state_event_ledger(root)
             .expect("queue state events should reload from sqlite");
         let projection = state_ledger
@@ -2073,7 +1875,7 @@ mod core_tests {
             "- do the thing\n",
             "<!-- /agent:queue -->\n",
         );
-        snapshot::save(&doc, snap).unwrap();
+        agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .expect("consume must not bail on a reconcilable divergence");
@@ -2087,7 +1889,7 @@ mod core_tests {
             result.contains("- user added later"),
             "the concurrently-added item must be preserved (document wins):\n{result}"
         );
-        let snap_result = snapshot::load(&doc).unwrap().unwrap();
+        let snap_result = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
             snap_result.contains("- user added later"),
             "snapshot must adopt the reconciled document queue:\n{snap_result}"
@@ -2124,7 +1926,7 @@ mod core_tests {
             "- handle the old request\n",
             "<!-- /agent:queue -->\n",
         );
-        snapshot::save(&doc, snap).unwrap();
+        agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
 
         // Record the live-buffer drift evidence for the document head.
         crate::cycle_state::start_preflight(&doc, Some(snap), Some(content)).unwrap();
@@ -2145,7 +1947,7 @@ mod core_tests {
             result.contains("- handle the new live-buffer request"),
             "the live queue item must stay queued:\n{result}"
         );
-        let snap_result = snapshot::load(&doc).unwrap().unwrap();
+        let snap_result = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
             snap_result.contains("- handle the old request"),
             "no-consume path leaves the snapshot unchanged for later reconciliation:\n{snap_result}"
@@ -2188,7 +1990,7 @@ mod core_tests {
             "- handle the old request\n",
             "<!-- /agent:queue -->\n",
         );
-        snapshot::save(&doc, snap).unwrap();
+        agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
 
         crate::cycle_state::start_preflight(&doc, Some(snap), Some(content)).unwrap();
         crate::cycle_state::record_dropped_queue_prompts(&doc, &["test".to_string()]).unwrap();
@@ -2211,7 +2013,7 @@ mod core_tests {
             result.contains("- ~~handle the old request~~"),
             "snapshot head must be consumed in place:\n{result}"
         );
-        let snap_result = snapshot::load(&doc).unwrap().unwrap();
+        let snap_result = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
             snap_result.contains("- test\n")
                 && snap_result.contains("- ~~handle the old request~~"),
@@ -2246,7 +2048,7 @@ mod core_tests {
             "- handle the old request\n",
             "<!-- /agent:queue -->\n",
         );
-        snapshot::save(&doc, snap).unwrap();
+        agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
         // No cycle_state dropped-queue evidence recorded.
 
         let err = consume_queue_prompt_force_disk(&doc)
@@ -2281,7 +2083,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let keys = id_backed_head_node_keys(content, "orphangone").unwrap();
         assert_eq!(keys.len(), 1, "the orphaned head must be targetable");
@@ -2295,7 +2097,7 @@ mod core_tests {
             result.contains("- do [#liveone]\n"),
             "drainable open id head must remain queued:\n{result}"
         );
-        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(snap, result, "detached disk strike must update snapshot");
     }
     #[test]
@@ -2314,7 +2116,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let err = strike_orphan_id_backed_queue_head(&doc, "stillopen").unwrap_err();
         assert!(
@@ -2343,7 +2145,7 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .expect("node-keyed queue consume should handle duplicates")
@@ -2628,7 +2430,7 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let struck = strike_answered_free_text_queue_heads(&doc, FTSTRIKE_RESPONSE, true).unwrap();
         assert_eq!(struck, 2, "both answered free-text heads must be struck");
@@ -2902,7 +2704,7 @@ Old.
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(
@@ -2947,7 +2749,7 @@ Old.
         assert_eq!(prune_noise_queue_heads(&doc).unwrap(), 3);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, planned, "detached disk prune should apply plan");
-        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(snap, planned, "detached disk prune should update snapshot");
     }
 
@@ -2975,7 +2777,7 @@ Old.
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(struck, 1, "only the orphan #kcb5 head must be struck");
@@ -2996,7 +2798,7 @@ Old.
         assert_eq!(prune_noise_queue_heads(&doc).unwrap(), 1);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, planned, "detached disk prune should apply plan");
-        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(snap, planned, "detached disk prune should update snapshot");
     }
 
@@ -3016,7 +2818,7 @@ Old.
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let keys = id_backed_head_node_keys(content, "freshqueueauth").unwrap();
         assert_eq!(
@@ -3031,7 +2833,9 @@ Old.
             result, content,
             "detached disk ack must mutate the queue head"
         );
-        let snap = snapshot::load(&doc).unwrap().expect("snapshot saved");
+        let snap = agent_doc_snapshot_io::load(&doc)
+            .unwrap()
+            .expect("snapshot saved");
         assert_ne!(snap, content, "detached disk ack must mutate snapshot");
         assert!(
             result.contains("- [ ] [#freshqueueauth] preserve fresh operator queue heads"),
@@ -3059,7 +2863,7 @@ Old.
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let err = acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth")
             .expect_err("prose correction heads stay on the free-text consume path");
@@ -3090,7 +2894,7 @@ Old.
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         assert_eq!(
             prune_noise_queue_heads(&doc).unwrap(),
@@ -3137,7 +2941,7 @@ Old.
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(struck, 1, "only the all-log pasted block must be excised");
@@ -3159,7 +2963,7 @@ Old.
         assert_eq!(prune_noise_queue_heads(&doc).unwrap(), 1);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, planned, "detached disk prune should apply plan");
-        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(snap, planned, "detached disk prune should update snapshot");
     }
 }

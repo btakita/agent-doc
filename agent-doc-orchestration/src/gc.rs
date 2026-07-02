@@ -25,13 +25,12 @@
 //! - `clean_orphaned_sockets` acquires `RegistryLock` when pruning sessions.json
 //!   entries; read-only callers do not hold the lock.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
-use crate::sessions;
-use crate::supervisor::ipc;
+use agent_doc_supervisor_io::ipc;
 use tmux_router::RegistryLock;
 
 pub struct GcResult {
@@ -46,7 +45,7 @@ pub struct GcResult {
 pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     let project_root = match root {
         Some(r) => r.to_path_buf(),
-        None => find_project_root_from_cwd()?,
+        None => agent_doc_project_root_io::project_root_from_cwd()?,
     };
 
     let agent_doc_dir = project_root.join(".agent-doc");
@@ -318,7 +317,8 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     total_skipped += sock_kept;
 
     // Prune accumulated recovery checkpoint tags (pre-auto-run / pre-compact)
-    let (tag_deleted, tag_kept) = clean_old_recovery_tags(&project_root, dry_run)?;
+    let (tag_deleted, tag_kept) =
+        agent_doc_git_io::checkpoint::prune_old_recovery_tags(&project_root, dry_run)?;
     if tag_deleted > 0 {
         eprintln!(
             "[gc] recovery tags: {} old deleted, {} kept",
@@ -337,77 +337,6 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
         deleted: total_deleted,
         skipped: total_skipped,
     })
-}
-
-/// Number of recovery checkpoint tags to retain per `<doc>/<slug>` series.
-const KEEP_RECOVERY_TAGS: usize = 20;
-
-/// Prune accumulated recovery checkpoint tags (`agent-doc/<doc>/pre-auto-run-N`
-/// and `agent-doc/<doc>/pre-compact-N`), keeping the newest `KEEP_RECOVERY_TAGS`
-/// per `<doc>/<slug>` series. One tag is created per queue auto-run / compact, so
-/// without pruning they grow unbounded over a document's life
-/// (`#x8aw` / `#misfire-recovery-snapshot`). Best-effort: a non-git root or git
-/// failure yields `(0, 0)` rather than erroring.
-fn clean_old_recovery_tags(project_root: &Path, dry_run: bool) -> Result<(usize, usize)> {
-    let output = std::process::Command::new("git")
-        .current_dir(project_root)
-        .args(["tag", "-l", "agent-doc/*"])
-        .output();
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => return Ok((0, 0)),
-    };
-
-    // Group tags by series prefix (everything up to the trailing `-N`), retaining
-    // only `pre-auto-run` / `pre-compact` checkpoint series.
-    let mut groups: std::collections::HashMap<String, Vec<(u64, String)>> =
-        std::collections::HashMap::new();
-    for tag in String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-    {
-        let Some((prefix, ord)) = tag.rsplit_once('-') else {
-            continue;
-        };
-        if !(prefix.ends_with("pre-auto-run") || prefix.ends_with("pre-compact")) {
-            continue;
-        }
-        let Ok(n) = ord.parse::<u64>() else {
-            continue;
-        };
-        groups
-            .entry(prefix.to_string())
-            .or_default()
-            .push((n, tag.to_string()));
-    }
-
-    let mut deleted = 0usize;
-    let mut kept = 0usize;
-    for (_prefix, mut series) in groups {
-        // Newest (highest ordinal) first; keep the newest KEEP_RECOVERY_TAGS.
-        series.sort_by_key(|entry| std::cmp::Reverse(entry.0));
-        for (idx, (_n, tag)) in series.iter().enumerate() {
-            if idx < KEEP_RECOVERY_TAGS {
-                kept += 1;
-                continue;
-            }
-            if dry_run {
-                eprintln!("[gc] would delete old recovery tag: {}", tag);
-                deleted += 1;
-                continue;
-            }
-            match std::process::Command::new("git")
-                .current_dir(project_root)
-                .args(["tag", "-d", tag])
-                .output()
-            {
-                Ok(o) if o.status.success() => deleted += 1,
-                _ => kept += 1,
-            }
-        }
-    }
-    Ok((deleted, kept))
 }
 
 /// Walk the project to find all markdown documents and compute their hashes.
@@ -671,11 +600,7 @@ fn clean_stale_ephemeral_files(
 /// are left untouched. `max_age` is chosen well beyond any real editor
 /// ACK/reconnect delay so a briefly-unavailable editor can still consume a fresh
 /// patch (#patchgc).
-fn clean_stale_patch_files(
-    dir: &Path,
-    max_age: Duration,
-    dry_run: bool,
-) -> Result<(usize, usize)> {
+fn clean_stale_patch_files(dir: &Path, max_age: Duration, dry_run: bool) -> Result<(usize, usize)> {
     if !dir.is_dir() {
         return Ok((0, 0));
     }
@@ -808,28 +733,22 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
 
     // Apply registry pruning
     if !keys_to_prune.is_empty() && !dry_run {
-        let registry_path = sessions::registry_path_in(project_root);
+        let registry_path = agent_doc_session_registry_io::registry_path_in(project_root);
         if let Ok(_lock) = RegistryLock::acquire(&registry_path) {
             // Reload under lock to avoid stale reads
-            if let Ok(mut reg) = sessions::load_in(project_root) {
+            if let Ok(mut reg) = agent_doc_session_registry_io::load_in(project_root) {
                 for key in &keys_to_prune {
                     if let Some(entry) = reg.get(key) {
                         eprintln!("[gc] pruning stale session: {}", entry.session_id);
                     }
                     reg.remove(key);
                 }
-                let _ = sessions::save_in(project_root, &reg);
+                let _ = agent_doc_session_registry_io::save_in(project_root, &reg);
             }
         }
     }
 
     Ok((deleted, kept))
-}
-
-fn find_project_root_from_cwd() -> Result<PathBuf> {
-    let cwd = std::env::current_dir().context("failed to get CWD")?;
-    agent_doc_fs::find_project_root(&cwd)
-        .context("no .agent-doc/ directory found (walked up from CWD)")
 }
 
 #[cfg(test)]
@@ -870,7 +789,10 @@ mod tests {
         let (deleted, kept) =
             clean_stale_patch_files(&patches, Duration::from_secs(3600), false).unwrap();
 
-        assert_eq!(deleted, 1, "only the stale orphaned patch json should be reaped");
+        assert_eq!(
+            deleted, 1,
+            "only the stale orphaned patch json should be reaped"
+        );
         assert_eq!(kept, 1, "the fresh patch json should be kept");
         assert!(!stale.exists(), "stale orphaned patch must be removed");
         assert!(fresh.exists(), "fresh patch must be kept for editor retry");
@@ -938,7 +860,7 @@ mod tests {
         // Register in sessions.json with a dead PID
         let mut reg = SessionRegistry::new();
         reg.insert(uuid.to_string(), make_session_entry(uuid, 999999));
-        sessions::save_in(root, &reg).unwrap();
+        agent_doc_session_registry_io::save_in(root, &reg).unwrap();
 
         let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
         assert_eq!(deleted, 1, "should remove orphaned socket");
@@ -948,7 +870,7 @@ mod tests {
         assert!(!supervisor_dir.join(format!("{uuid}.sock")).exists());
 
         // sessions.json entry should be pruned
-        let loaded = sessions::load_in(root).unwrap();
+        let loaded = agent_doc_session_registry_io::load_in(root).unwrap();
         assert!(!loaded.values().any(|entry| entry.session_id == uuid));
     }
 
@@ -968,7 +890,7 @@ mod tests {
             uuid.to_string(),
             make_session_entry(uuid, std::process::id()),
         );
-        sessions::save_in(root, &reg).unwrap();
+        agent_doc_session_registry_io::save_in(root, &reg).unwrap();
 
         let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
         assert_eq!(deleted, 0);
@@ -1005,12 +927,12 @@ mod tests {
         let uuid = "ghost-session";
         let mut reg = SessionRegistry::new();
         reg.insert(uuid.to_string(), make_session_entry(uuid, 999999));
-        sessions::save_in(root, &reg).unwrap();
+        agent_doc_session_registry_io::save_in(root, &reg).unwrap();
 
         let (deleted, _kept) = clean_orphaned_sockets(root, false).unwrap();
         assert_eq!(deleted, 1, "should count pruned entry");
 
-        let loaded = sessions::load_in(root).unwrap();
+        let loaded = agent_doc_session_registry_io::load_in(root).unwrap();
         assert!(!loaded.values().any(|entry| entry.session_id == uuid));
     }
 
@@ -1027,7 +949,7 @@ mod tests {
 
         let mut reg = SessionRegistry::new();
         reg.insert(uuid.to_string(), make_session_entry(uuid, 999999));
-        sessions::save_in(root, &reg).unwrap();
+        agent_doc_session_registry_io::save_in(root, &reg).unwrap();
 
         let (deleted, kept) = clean_orphaned_sockets(root, true).unwrap();
         assert_eq!(deleted, 1, "should report would-delete count");
@@ -1037,7 +959,7 @@ mod tests {
         assert!(sock_path.exists());
 
         // And sessions.json should be unmodified
-        let loaded = sessions::load_in(root).unwrap();
+        let loaded = agent_doc_session_registry_io::load_in(root).unwrap();
         assert!(loaded.values().any(|entry| entry.session_id == uuid));
     }
 
@@ -1181,7 +1103,7 @@ mod tests {
             make_session_entry(live_uuid, std::process::id()),
         );
         reg.insert(dead_uuid.to_string(), make_session_entry(dead_uuid, 999999));
-        sessions::save_in(root, &reg).unwrap();
+        agent_doc_session_registry_io::save_in(root, &reg).unwrap();
 
         let (deleted, kept) = clean_orphaned_sockets(root, false).unwrap();
         assert_eq!(deleted, 1, "dead socket removed");
@@ -1190,95 +1112,8 @@ mod tests {
         assert!(supervisor_dir.join(format!("{live_uuid}.sock")).exists());
         assert!(!supervisor_dir.join(format!("{dead_uuid}.sock")).exists());
 
-        let loaded = sessions::load_in(root).unwrap();
+        let loaded = agent_doc_session_registry_io::load_in(root).unwrap();
         assert!(loaded.values().any(|entry| entry.session_id == live_uuid));
         assert!(!loaded.values().any(|entry| entry.session_id == dead_uuid));
-    }
-
-    fn git_in(dir: &Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
-            .current_dir(dir)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "git {:?} failed", args);
-    }
-
-    fn tag_count(dir: &Path, pattern: &str) -> usize {
-        let out = std::process::Command::new("git")
-            .current_dir(dir)
-            .args(["tag", "-l", pattern])
-            .output()
-            .unwrap();
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .count()
-    }
-
-    #[test]
-    fn clean_old_recovery_tags_keeps_newest_per_series() {
-        // #x8aw: recovery tags accumulate one-per-run; GC keeps the newest
-        // KEEP_RECOVERY_TAGS per <doc>/<slug> series, leaving other series and
-        // unrelated tags untouched.
-        let dir = TempDir::new().unwrap();
-        let root = dir.path();
-        git_in(root, &["init", "-q"]);
-        git_in(root, &["config", "user.email", "t@t.t"]);
-        git_in(root, &["config", "user.name", "t"]);
-        std::fs::write(root.join("f"), "x").unwrap();
-        git_in(root, &["add", "."]);
-        git_in(root, &["commit", "-q", "-m", "init"]);
-
-        // 22 pre-auto-run tags (2 over the cap), 3 pre-compact, 1 unrelated.
-        for n in 1..=22 {
-            git_in(
-                root,
-                &["tag", &format!("agent-doc/session/pre-auto-run-{n}")],
-            );
-        }
-        for n in 1..=3 {
-            git_in(
-                root,
-                &["tag", &format!("agent-doc/session/pre-compact-{n}")],
-            );
-        }
-        git_in(root, &["tag", "v1.0.0"]);
-
-        let (deleted, _kept) = clean_old_recovery_tags(root, false).unwrap();
-        assert_eq!(deleted, 2, "should delete 22-20 oldest pre-auto-run tags");
-        assert_eq!(
-            tag_count(root, "agent-doc/session/pre-auto-run-*"),
-            KEEP_RECOVERY_TAGS,
-            "newest {KEEP_RECOVERY_TAGS} pre-auto-run tags retained"
-        );
-        // The oldest two (ordinals 1, 2) are gone; the newest remain.
-        assert_eq!(tag_count(root, "agent-doc/session/pre-auto-run-1"), 0);
-        assert_eq!(tag_count(root, "agent-doc/session/pre-auto-run-22"), 1);
-        // Other series and unrelated tags untouched.
-        assert_eq!(tag_count(root, "agent-doc/session/pre-compact-*"), 3);
-        assert_eq!(tag_count(root, "v1.0.0"), 1);
-    }
-
-    #[test]
-    fn clean_old_recovery_tags_dry_run_deletes_nothing() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path();
-        git_in(root, &["init", "-q"]);
-        git_in(root, &["config", "user.email", "t@t.t"]);
-        git_in(root, &["config", "user.name", "t"]);
-        std::fs::write(root.join("f"), "x").unwrap();
-        git_in(root, &["add", "."]);
-        git_in(root, &["commit", "-q", "-m", "init"]);
-        for n in 1..=25 {
-            git_in(root, &["tag", &format!("agent-doc/d/pre-auto-run-{n}")]);
-        }
-        let (deleted, _kept) = clean_old_recovery_tags(root, true).unwrap();
-        assert_eq!(deleted, 5, "dry-run reports 25-20 deletions");
-        assert_eq!(
-            tag_count(root, "agent-doc/d/pre-auto-run-*"),
-            25,
-            "dry-run deletes nothing"
-        );
     }
 }

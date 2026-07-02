@@ -10,6 +10,12 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_watch_io"
 
 [dependencies]
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.67" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
 anyhow = "1"
 
 [dev-dependencies]

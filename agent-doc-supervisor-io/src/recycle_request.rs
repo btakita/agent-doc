@@ -62,6 +62,11 @@ pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
     Ok(())
 }
 
+/// Write (or refresh) a recycle-request for a document path.
+pub fn request_recycle_for_doc(file: &Path, reason: &str) -> Result<()> {
+    request_recycle(&file.to_string_lossy(), reason)
+}
+
 /// Read the raw recycle-request for `file` regardless of freshness.
 pub fn read_recycle_request(file: &str) -> Option<RecycleRequest> {
     let path = recycle_request_path(file);

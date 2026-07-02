@@ -17,7 +17,7 @@
 //! - When `.agent-doc/session-actors.json` has a live local actor projection for the
 //!   document session, focus prefers that actor-owned pane over a stale
 //!   `sessions.json` projection without launching or waiting on the project controller.
-//! - Otherwise, looks up the UUID in `sessions.json` via `sessions::lookup`.
+//! - Otherwise, looks up the UUID in `sessions.json` via `agent_doc_session_registry_io::lookup`.
 //! - Live-owner precedence: a pane resolved from the local actor projection or the
 //!   registry is only proof the pane is *alive*, not that it still owns the document.
 //!   After a reroute / fresh-restart the session can move to a new pane while the old
@@ -68,8 +68,6 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_tmux::{FocusPaneDecision, decide_focus_pane};
 use tmux_router::Tmux;
 
-use crate::sessions;
-
 /// Resolve the document's live owner pane, but only return it when it is alive
 /// and differs from `candidate`. This is the stale-projection / stale-registry
 /// repair used by [`run_with_tmux`]: after a reroute or fresh-restart moves the
@@ -98,7 +96,7 @@ pub fn local_actor_projection_pane_for_document(
         .canonicalize()
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
-    let base_dir = agent_doc_fs::find_project_root(&canonical)?;
+    let base_dir = agent_doc_project_root_io::project_root_containing(&canonical)?;
     let record = crate::session_actor::load_record_in(&base_dir, &canonical.to_string_lossy())
         .ok()
         .flatten()?;
@@ -218,7 +216,7 @@ pub fn run_with_tmux_opts(
         return Ok(());
     }
 
-    let pane = sessions::lookup(&session_id)?;
+    let pane = agent_doc_session_registry_io::lookup(&session_id)?;
     match pane {
         Some(pane_id) if tmux.pane_alive(&pane_id) => {
             // A registered pane that is alive as a *pane* is not proof it still
@@ -354,11 +352,7 @@ mod tests {
 
         run_with_tmux(&doc, None, &iso).unwrap();
 
-        let selected = iso
-            .raw_cmd(&["display-message", "-p", "#{pane_id}"])
-            .unwrap()
-            .trim()
-            .to_string();
+        let selected = agent_doc_tmux_io::current_pane_id(&iso).unwrap();
         assert_eq!(
             selected, actor_pane,
             "focus should select the locally projected actor pane instead of the stale registry pane"
@@ -419,11 +413,7 @@ mod tests {
 
         run_with_tmux(&doc, None, &iso).unwrap();
 
-        let selected = iso
-            .raw_cmd(&["display-message", "-p", "#{pane_id}"])
-            .unwrap()
-            .trim()
-            .to_string();
+        let selected = agent_doc_tmux_io::current_pane_id(&iso).unwrap();
         assert_eq!(
             selected, registry_pane,
             "focus should fall back to sessions.json when the local actor projection is closed"
@@ -462,11 +452,7 @@ mod tests {
         // NOT pull focus into the stash window.
         run_with_tmux(&doc, Some(&stashed), &iso).unwrap();
 
-        let selected = iso
-            .raw_cmd(&["display-message", "-p", "#{pane_id}"])
-            .unwrap()
-            .trim()
-            .to_string();
+        let selected = agent_doc_tmux_io::current_pane_id(&iso).unwrap();
         assert_eq!(
             selected, pane0,
             "default focus must stay on the agent-doc pane, not move into the stash"
@@ -503,11 +489,7 @@ mod tests {
         // Both panes are in the agent-doc window; focusing the sibling selects it.
         run_with_tmux(&doc, Some(&sibling), &iso).unwrap();
 
-        let selected = iso
-            .raw_cmd(&["display-message", "-p", "#{pane_id}"])
-            .unwrap()
-            .trim()
-            .to_string();
+        let selected = agent_doc_tmux_io::current_pane_id(&iso).unwrap();
         assert_eq!(
             selected, sibling,
             "default focus must select a visible non-stashed target pane in place"

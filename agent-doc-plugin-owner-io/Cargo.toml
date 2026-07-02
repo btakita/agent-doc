@@ -1,0 +1,17 @@
+[package]
+name = "agent-doc-plugin-owner-io"
+version = "0.34.67"
+edition = "2024"
+description = "Filesystem/process adapters for agent-doc editor plugin-owner cleanup"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_plugin_owner_io"
+
+[dependencies]
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
+
+[dev-dependencies]
+tempfile = "3"

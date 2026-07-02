@@ -33,21 +33,11 @@ use agent_doc_session_accretion::{
     DEFAULT_CLEAR_THRESHOLD, SessionAccretionLevel, compaction_guidance, restart_or_drain_guidance,
 };
 use agent_doc_session_accretion::{
-    POST_COMPACTION_NOOP_GRACE_SECS, RECENT_WINDOW_SECS, SessionAccretionInput,
-    SessionAccretionReport, context_reset_reason_for_recent_compaction,
+    SessionAccretionInput, SessionAccretionReport, context_reset_reason_for_recent_compaction,
     context_reset_reason_for_report, evaluate_session_accretion, exchange_metrics,
-    recent_restart_count_from_session_log, resolve_clear_threshold,
-    resolve_queue_context_reset_opt_in,
 };
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct RecentExchangeCompaction {
-    file: String,
-    timestamp: u64,
-}
+use std::path::Path;
 
 pub fn inspect(file: &Path) -> Result<SessionAccretionReport> {
     let content = std::fs::read_to_string(file)?;
@@ -62,81 +52,12 @@ pub fn inspect_with_context(
     inspect_at_with_context(file, &content, current_epoch_secs(), rc)
 }
 
-pub fn record_recent_exchange_compaction(file: &Path) -> Result<()> {
-    let Some(path) = recent_exchange_compaction_path(file)? else {
-        return Ok(());
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let marker = RecentExchangeCompaction {
-        file: canonical.display().to_string(),
-        timestamp: current_epoch_secs(),
-    };
-    let json = serde_json::to_string_pretty(&marker)?;
-    std::fs::write(path, json)?;
-    Ok(())
-}
-
-pub fn recent_exchange_compaction_timestamp(file: &Path) -> Result<Option<u64>> {
-    recent_exchange_compaction_timestamp_at(file, current_epoch_secs())
-}
-
-fn recent_exchange_compaction_timestamp_at(file: &Path, now: u64) -> Result<Option<u64>> {
-    Ok(load_recent_exchange_compaction(file)?
-        .map(|marker| marker.timestamp)
-        .filter(|timestamp| now.saturating_sub(*timestamp) <= POST_COMPACTION_NOOP_GRACE_SECS))
-}
-
-/// Whether the supervisor idle-queue watch is allowed to pre-emptively
-/// interleave a context-clear (`/clear`) before a queue head
-/// (`#nm1x-no-preempt-clear`). Off by default: a frontmatter
-/// `agent_doc_queue_context_reset: true` takes precedence, then the project
-/// config `.agent-doc/config.toml`. Without an explicit opt-in the watch never
-/// fires a pre-emptive `/clear`, so a manual `Run Agent Doc` or an auto-loop
-/// drain does not churn the session or hit `/clear` rejected mid-turn.
-pub fn queue_context_reset_opted_in(file: &Path) -> bool {
-    let frontmatter_flag = if let Ok(content) = std::fs::read_to_string(file)
-        && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
-    {
-        fm.queue_context_reset
-    } else {
-        None
-    };
-    let project_flag =
-        agent_doc_project_config_io::load_project_for_doc(file).agent_doc_queue_context_reset;
-    resolve_queue_context_reset_opt_in(frontmatter_flag, project_flag)
-}
-
-/// Resolve the context-usage percentage (0–100) at or above which an opted-in
-/// editor should pre-emptively run `/clear` (`#clear-opt-in-threshold`).
-///
-/// Resolution order mirrors [`queue_context_reset_opted_in`]: a per-document
-/// frontmatter `agent_doc_clear_threshold` takes precedence, then the project
-/// config `.agent-doc/config.toml`, then [`DEFAULT_CLEAR_THRESHOLD`]. The value
-/// is clamped to `0..=100`. The binary owns this threshold so every editor and
-/// harness shares the same gate; supported transcript readers compare live
-/// context usage against it and fail safe when no reliable percentage is known.
-pub fn clear_threshold_for_doc(file: &Path) -> u8 {
-    let frontmatter_threshold = if let Ok(content) = std::fs::read_to_string(file)
-        && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
-    {
-        fm.clear_threshold
-    } else {
-        None
-    };
-    let project_threshold =
-        agent_doc_project_config_io::load_project_for_doc(file).agent_doc_clear_threshold;
-    resolve_clear_threshold(frontmatter_threshold, project_threshold)
-}
-
 pub fn queue_context_reset_reason(
     file: &Path,
     last_context_clear_at: Option<u64>,
 ) -> Result<Option<String>> {
     if let Some(reason) = context_reset_reason_for_recent_compaction(
-        recent_exchange_compaction_timestamp(file)?,
+        agent_doc_session_accretion_io::recent_exchange_compaction_timestamp(file)?,
         last_context_clear_at,
     ) {
         return Ok(Some(reason));
@@ -161,7 +82,7 @@ pub fn queue_context_reset_reason_if_opted_in(
     file: &Path,
     last_context_clear_at: Option<u64>,
 ) -> Result<Option<String>> {
-    if !queue_context_reset_opted_in(file) {
+    if !agent_doc_session_accretion_io::queue_context_reset_opted_in(file) {
         return Ok(None);
     }
     queue_context_reset_reason(file, last_context_clear_at)
@@ -190,10 +111,16 @@ fn session_accretion_input(
     rc: &crate::graph::RunContext,
 ) -> Result<SessionAccretionInput> {
     let (exchange_lines, response_sections) = exchange_metrics(content);
-    let (recent_committed_cycles, recent_noop_closeouts) = recent_cycle_metrics(file, now)?;
-    let startup_miss_active = crate::startup_miss::load(file)?.is_some();
-    let parsed_frontmatter =
-        crate::frontmatter_io::parse_for_file_with_context(content, file, rc).ok();
+    let (recent_committed_cycles, recent_noop_closeouts) =
+        agent_doc_session_accretion_io::recent_cycle_metrics(file, now)?;
+    let startup_miss_active =
+        agent_doc_supervisor_io::startup_miss::load_startup_miss(file)?.is_some();
+    let parsed_frontmatter = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+        content,
+        file,
+        &rc.ssh_context(),
+    )
+    .ok();
     let session_id = parsed_frontmatter
         .as_ref()
         .and_then(|(fm, _)| fm.session.as_ref().map(|s| s.trim().to_string()))
@@ -209,13 +136,15 @@ fn session_accretion_input(
         .unwrap_or(false);
     let recent_restart_count = session_id
         .as_deref()
-        .map(|session_id| recent_restart_metrics(file, session_id, now))
+        .map(|session_id| {
+            agent_doc_session_accretion_io::recent_restart_metrics(file, session_id, now)
+        })
         .transpose()?
         .unwrap_or(0);
     let recent_session_loss_count = session_id
         .as_deref()
         .and_then(|session_id| {
-            crate::startup_miss::recent_session_loss_window(file, session_id)
+            agent_doc_supervisor_io::startup_miss::recent_session_loss_window(file, session_id)
                 .ok()
                 .flatten()
                 .map(|window| window.count)
@@ -231,134 +160,10 @@ fn session_accretion_input(
         recent_restart_count,
         recent_session_loss_count,
         startup_miss_active,
-        clear_threshold: clear_threshold_for_doc(file),
+        clear_threshold: agent_doc_session_accretion_io::clear_threshold_for_doc(file),
         auto_compact_opt_in,
         queue_active,
     })
-}
-
-fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
-    let Some(path) = cycles_log_path(file)? else {
-        return Ok((0, 0));
-    };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
-        return Ok((0, 0));
-    };
-    let Some(relative_file) = relative_file_key(file) else {
-        return Ok((0, 0));
-    };
-    let window_start = now.saturating_sub(RECENT_WINDOW_SECS);
-    let recent_compaction_timestamp = recent_exchange_compaction_timestamp_at(file, now)?;
-    let post_compaction_noop_grace_until = recent_compaction_timestamp
-        .filter(|timestamp| now.saturating_sub(*timestamp) <= POST_COMPACTION_NOOP_GRACE_SECS)
-        .map(|timestamp| timestamp.saturating_add(POST_COMPACTION_NOOP_GRACE_SECS));
-    let mut committed = 0;
-    let mut noops = 0;
-
-    for line in content.lines() {
-        let Ok(entry) = serde_json::from_str::<crate::ops_log::CycleEntry>(line) else {
-            continue;
-        };
-        if entry.file != relative_file {
-            continue;
-        }
-        let Some(timestamp) = agent_doc_log_time::parse_log_timestamp(&entry.timestamp) else {
-            continue;
-        };
-        if timestamp < window_start {
-            continue;
-        }
-        if recent_compaction_timestamp.is_some_and(|compact_ts| timestamp <= compact_ts) {
-            continue;
-        }
-        if entry.op == "commit_noop"
-            && post_compaction_noop_grace_until.is_some_and(|grace_until| timestamp <= grace_until)
-        {
-            continue;
-        }
-        match entry.op.as_str() {
-            "commit" | "commit_noop" => committed += 1,
-            _ => {}
-        }
-        if entry.op == "commit_noop" {
-            noops += 1;
-        }
-    }
-
-    Ok((committed, noops))
-}
-
-fn recent_restart_metrics(file: &Path, session_id: &str, now: u64) -> Result<usize> {
-    let Some(path) = session_log_path(file, session_id)? else {
-        return Ok(0);
-    };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
-        return Ok(0);
-    };
-    Ok(recent_restart_count_from_session_log(&content, now))
-}
-
-fn cycles_log_path(file: &Path) -> Result<Option<PathBuf>> {
-    let canonical = match file.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return Ok(None),
-    };
-    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    Ok(Some(root.join(".agent-doc/logs/cycles.jsonl")))
-}
-
-fn recent_exchange_compaction_path(file: &Path) -> Result<Option<PathBuf>> {
-    let canonical = match file.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return Ok(None),
-    };
-    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    Ok(Some(
-        root.join(".agent-doc/state/session-accretion-compaction")
-            .join(format!("{hash}.json")),
-    ))
-}
-
-fn load_recent_exchange_compaction(file: &Path) -> Result<Option<RecentExchangeCompaction>> {
-    let Some(path) = recent_exchange_compaction_path(file)? else {
-        return Ok(None);
-    };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
-        return Ok(None);
-    };
-    let marker: RecentExchangeCompaction = serde_json::from_str(&content)?;
-    Ok(Some(marker))
-}
-
-fn session_log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
-    let canonical = match file.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return Ok(None),
-    };
-    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    Ok(Some(
-        root.join(".agent-doc/logs")
-            .join(format!("{session_id}.log")),
-    ))
-}
-
-fn relative_file_key(file: &Path) -> Option<String> {
-    let canonical = file.canonicalize().ok()?;
-    let root = agent_doc_fs::find_project_root(&canonical)?;
-    Some(
-        canonical
-            .strip_prefix(&root)
-            .unwrap_or(&canonical)
-            .to_string_lossy()
-            .to_string(),
-    )
 }
 
 fn current_epoch_secs() -> u64 {
@@ -372,6 +177,7 @@ fn current_epoch_secs() -> u64 {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn setup_doc(content: &str) -> (TempDir, PathBuf) {
@@ -379,11 +185,11 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         (dir, doc)
     }
 
-    fn write_cycles_log(doc: &Path, entries: &[crate::ops_log::CycleEntry]) {
+    fn write_cycles_log(doc: &Path, entries: &[agent_doc_ops_log_io::CycleEntry]) {
         let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
         std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
         let mut file = std::fs::File::create(log_path).unwrap();
@@ -451,14 +257,14 @@ mod tests {
         let off = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir_off, doc_off) = setup_doc(off);
         assert!(
-            !queue_context_reset_opted_in(&doc_off),
+            !agent_doc_session_accretion_io::queue_context_reset_opted_in(&doc_off),
             "opt-in defaults off"
         );
 
         let on = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\nagent_doc_queue_context_reset: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir_on, doc_on) = setup_doc(on);
         assert!(
-            queue_context_reset_opted_in(&doc_on),
+            agent_doc_session_accretion_io::queue_context_reset_opted_in(&doc_on),
             "frontmatter opt-in honored"
         );
     }
@@ -470,7 +276,7 @@ mod tests {
         let base = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir_d, doc_d) = setup_doc(base);
         assert_eq!(
-            clear_threshold_for_doc(&doc_d),
+            agent_doc_session_accretion_io::clear_threshold_for_doc(&doc_d),
             DEFAULT_CLEAR_THRESHOLD,
             "unconfigured threshold defaults to 50"
         );
@@ -478,7 +284,7 @@ mod tests {
         let fm70 = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent_doc_clear_threshold: 70\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir_70, doc_70) = setup_doc(fm70);
         assert_eq!(
-            clear_threshold_for_doc(&doc_70),
+            agent_doc_session_accretion_io::clear_threshold_for_doc(&doc_70),
             70,
             "frontmatter agent_doc_clear_threshold is honored"
         );
@@ -487,7 +293,7 @@ mod tests {
         let fm_over = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent_doc_clear_threshold: 150\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nx\n<!-- /agent:exchange -->\n";
         let (_dir_o, doc_o) = setup_doc(fm_over);
         assert_eq!(
-            clear_threshold_for_doc(&doc_o),
+            agent_doc_session_accretion_io::clear_threshold_for_doc(&doc_o),
             100,
             "threshold clamps to 100"
         );
@@ -572,16 +378,17 @@ mod tests {
         let (_dir, doc) = setup_doc(content);
         assert!(queue_context_reset_reason(&doc, None).unwrap().is_none());
 
-        record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
         let reason = queue_context_reset_reason(&doc, None)
             .unwrap()
             .expect("recent compaction should require one fresh context");
         assert!(reason.contains("exchange was compacted"), "{reason}");
         assert!(reason.contains("already-loaded conversation"), "{reason}");
 
-        let compaction_ts = recent_exchange_compaction_timestamp(&doc)
-            .unwrap()
-            .expect("compaction timestamp should be recorded");
+        let compaction_ts =
+            agent_doc_session_accretion_io::recent_exchange_compaction_timestamp(&doc)
+                .unwrap()
+                .expect("compaction timestamp should be recorded");
         assert!(
             queue_context_reset_reason(&doc, Some(compaction_ts))
                 .unwrap()
@@ -707,7 +514,7 @@ mod tests {
         write_cycles_log(
             &doc,
             &[
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(10).to_string(),
@@ -715,7 +522,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(20).to_string(),
@@ -748,7 +555,7 @@ mod tests {
         write_cycles_log(
             &doc,
             &[
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(120).to_string(),
@@ -756,7 +563,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(110).to_string(),
@@ -764,7 +571,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(100).to_string(),
@@ -772,7 +579,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(90).to_string(),
@@ -780,7 +587,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(80).to_string(),
@@ -788,7 +595,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(70).to_string(),
@@ -796,7 +603,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(60).to_string(),
@@ -804,7 +611,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(50).to_string(),
@@ -812,7 +619,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(40).to_string(),
@@ -820,7 +627,7 @@ mod tests {
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "session.md".to_string(),
                     timestamp: now.saturating_sub(30).to_string(),
@@ -831,7 +638,7 @@ mod tests {
             ],
         );
 
-        record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         let report = inspect(&doc).unwrap();
 
@@ -872,7 +679,7 @@ mod tests {
                 ),
             ],
         );
-        crate::startup_miss::record(
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
             &doc,
             "%1",
             session_id,

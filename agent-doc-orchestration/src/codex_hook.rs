@@ -38,6 +38,7 @@
 //! - `stop_blocks_open_cycle_without_recoverable_response`
 //! - `stop_fails_closed_after_one_auto_continue`
 
+use agent_doc_codex_hook_io::{project_roots_for, push_unique_root, tracking_roots};
 use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_model_tier::context_transcript_io::{
     latest_codex_transcript, transcript_context_pct,
@@ -53,6 +54,9 @@ use agent_doc_turn::response_text::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+#[cfg(test)]
+use agent_doc_codex_hook_io::project_root_for;
 
 #[derive(Debug, Deserialize)]
 struct UserPromptSubmitInput {
@@ -120,19 +124,6 @@ enum StopCloseAttempt {
     Closed,
     StillOpen { note: String },
     NotPossible,
-}
-
-#[derive(Debug, Serialize)]
-struct BlockedStopPayloadRecord<'a> {
-    captured_at: u64,
-    file: String,
-    kind: &'a str,
-    reason: &'a str,
-    payload_sha256: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_assistant_message: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_prompt: Option<&'a str>,
 }
 
 pub fn handle_user_prompt_submit() -> Result<()> {
@@ -479,8 +470,8 @@ pub(crate) fn codex_queue_context_reset_reason(
         file,
         last_context_clear_at,
     )?;
-    if crate::session_accretion::queue_context_reset_opted_in(file) {
-        let threshold = crate::session_accretion::clear_threshold_for_doc(file);
+    if agent_doc_session_accretion_io::queue_context_reset_opted_in(file) {
+        let threshold = agent_doc_session_accretion_io::clear_threshold_for_doc(file);
         let pct = codex_live_context_pct(file);
         let decision = clear_decision(true, pct, threshold);
         if reason.is_none() && decision.clear {
@@ -508,8 +499,8 @@ fn codex_continuation_clear_reason(
             None
         }
     };
-    if crate::session_accretion::queue_context_reset_opted_in(file) {
-        let threshold = crate::session_accretion::clear_threshold_for_doc(file);
+    if agent_doc_session_accretion_io::queue_context_reset_opted_in(file) {
+        let threshold = agent_doc_session_accretion_io::clear_threshold_for_doc(file);
         let pct = codex_live_context_pct(file);
         let decision = clear_decision(true, pct, threshold);
         crate::ops_log::log_op(file, &decision.diagnostic);
@@ -612,8 +603,8 @@ fn consume_recovered_queue_head(
         .canonicalize()
         .ok()
         .map(|canonical| {
-            let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
-            !crate::ipc_socket::is_listener_active(&project_root)
+            let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+            !agent_doc_ipc_io::is_listener_active(&project_root)
         })
         .unwrap_or(false);
     crate::write::consume_queue_prompts_with_outcome(
@@ -705,7 +696,7 @@ fn try_recover_repeated_queue_head_response(
     let repair_outcome = crate::repair::run_with_queue_completion_ids(file, &queue_completion_ids)?;
     if repair_outcome.replayed_response() {
         note.push_str(" The response was written through the normal repair/write path.");
-    } else if repair_outcome == crate::repair::RepairOutcome::AlreadyApplied {
+    } else if repair_outcome == agent_doc_turn::repair::RepairOutcome::AlreadyApplied {
         note.push_str(" The response was already present and was adopted by repair.");
     } else {
         return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
@@ -734,7 +725,7 @@ fn try_recover_repeated_queue_head_response(
         }
     }
 
-    if !crate::git::is_in_git_repo(file) {
+    if !agent_doc_git_io::status::is_in_git_repo(file) {
         return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
             note: format!(
                 "{note} The document is not in a git repository, so the hook could not finish the required commit boundary automatically."
@@ -1222,7 +1213,7 @@ fn attempt_stop_closeout(
         note.push_str(" The hook preserved the active queue head because the repair did not explicitly close it.");
     }
 
-    if !crate::git::is_in_git_repo(file) {
+    if !agent_doc_git_io::status::is_in_git_repo(file) {
         note.push_str(
             " The document is not in a git repository, so the hook could not finish the required commit boundary automatically.",
         );
@@ -1278,7 +1269,7 @@ fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) 
 
 fn capture_missing_stop_response(file: &Path, last_prompt: Option<&str>) -> String {
     let reason = "the Stop hook received no final assistant closeout; this can happen when Codex stops after a tool-only or authentication step before the assistant emits the final response";
-    match save_blocked_stop_payload(
+    match agent_doc_codex_hook_io::save_blocked_stop_payload(
         file,
         "",
         reason,
@@ -1310,7 +1301,13 @@ fn capture_blocked_stop_payload(
     reason: &str,
     last_prompt: Option<&str>,
 ) -> String {
-    match save_blocked_stop_payload(file, payload, reason, "blocked_replay_payload", last_prompt) {
+    match agent_doc_codex_hook_io::save_blocked_stop_payload(
+        file,
+        payload,
+        reason,
+        "blocked_replay_payload",
+        last_prompt,
+    ) {
         Ok(path) => {
             crate::ops_log::log_op(
                 file,
@@ -1333,41 +1330,6 @@ fn capture_blocked_stop_payload(
     }
 }
 
-fn save_blocked_stop_payload(
-    file: &Path,
-    payload: &str,
-    reason: &str,
-    kind: &str,
-    last_prompt: Option<&str>,
-) -> Result<PathBuf> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = agent_doc_fs::find_project_root(&canonical)
-        .or_else(|| canonical.parent().map(Path::to_path_buf))
-        .context("resolve project root for blocked stop payload")?;
-    let dir = root.join(".agent-doc/codex-hooks/blocked-stop");
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("create blocked-stop dir {}", dir.display()))?;
-    let filename = format!(
-        "{}-{}.json",
-        agent_doc_hash::content_hash(canonical.to_string_lossy().as_ref()),
-        now_millis()
-    );
-    let path = dir.join(filename);
-    let record = BlockedStopPayloadRecord {
-        captured_at: now_secs(),
-        file: canonical.display().to_string(),
-        kind,
-        reason,
-        payload_sha256: agent_doc_hash::content_hash(payload),
-        last_assistant_message: (!payload.trim().is_empty()).then_some(payload),
-        last_prompt: last_prompt.filter(|prompt| !prompt.trim().is_empty()),
-    };
-    let json = serde_json::to_string_pretty(&record)?;
-    std::fs::write(&path, json)
-        .with_context(|| format!("write blocked stop payload {}", path.display()))?;
-    Ok(path)
-}
-
 fn read_stdin_payload() -> Result<String> {
     use std::io::Read;
 
@@ -1388,62 +1350,6 @@ fn resolve_agent_doc_path(prompt: &str, cwd: &Path) -> Option<PathBuf> {
         cwd.join(path)
     };
     Some(joined.canonicalize().unwrap_or(joined))
-}
-
-#[cfg(test)]
-fn project_root_for(path: &Path) -> Option<PathBuf> {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    agent_doc_fs::find_project_root(&canonical)
-}
-
-fn project_roots_for(path: &Path) -> Vec<PathBuf> {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let Some(nearest_root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Vec::new();
-    };
-    let mut roots = vec![nearest_root.clone()];
-    let Some(git_root) = find_git_root(&canonical) else {
-        return roots;
-    };
-    if !nearest_root.starts_with(&git_root) {
-        return roots;
-    }
-    if git_root.join(".agent-doc").is_dir() {
-        push_unique_root(&mut roots, git_root);
-    }
-    roots
-}
-
-fn find_git_root(path: &Path) -> Option<PathBuf> {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let mut current = if canonical.is_file() {
-        canonical.parent()
-    } else {
-        Some(canonical.as_path())
-    };
-    while let Some(path) = current {
-        if path.join(".git").exists() {
-            return Some(path.to_path_buf());
-        }
-        current = path.parent();
-    }
-    None
-}
-
-fn tracking_roots(cwd: &Path, doc_path: Option<&Path>) -> Vec<PathBuf> {
-    let mut roots = project_roots_for(cwd);
-    if let Some(doc_path) = doc_path {
-        for root in project_roots_for(doc_path) {
-            push_unique_root(&mut roots, root);
-        }
-    }
-    roots
-}
-
-fn push_unique_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
-    if !roots.iter().any(|existing| existing == &root) {
-        roots.push(root);
-    }
 }
 
 fn load_state_any(roots: &[PathBuf], session_id: &str) -> Result<Option<(PathBuf, SessionState)>> {
@@ -1675,13 +1581,6 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-fn now_millis() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1791,7 +1690,7 @@ mod tests {
         let doc = dir.path().join("task.md");
         let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         doc
     }
 
@@ -1805,7 +1704,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         doc
     }
 
@@ -1832,7 +1731,7 @@ Done.\n\
 <!-- /agent:queue -->\n"
         );
         fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         doc
     }
 
@@ -1859,7 +1758,7 @@ Done.\n\
 <!-- no-free-text-queue-head-guard -->\n"
         );
         fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         doc
     }
 
@@ -1875,7 +1774,7 @@ Done.\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         doc
     }
 
@@ -1912,7 +1811,7 @@ Done.\n\
         let doc = project.join("task.md");
         let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         apply_user_prompt_submit(&UserPromptSubmitInput {
             session_id: "codex-session".to_string(),
@@ -2345,7 +2244,7 @@ agent-doc {}\n",
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         git(&submodule_root, &["add", "session.md"]);
         git(&submodule_root, &["commit", "-m", "add doc", "--no-verify"]);
         git(&parent, &["add", "src/submodule"]);
@@ -2404,7 +2303,9 @@ agent-doc {}\n",
         assert!(content.contains("direct-chat answer was written through the Stop hook"));
         if blocked_after_submodule_commit {
             assert!(
-                crate::git::submodule_pointer_drift(&doc).unwrap().is_some(),
+                agent_doc_git_io::submodule::submodule_pointer_drift(&doc)
+                    .unwrap()
+                    .is_some(),
                 "parent gitlink should remain stale while index.lock is held"
             );
         }
@@ -2427,7 +2328,7 @@ agent-doc {}\n",
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
 
         let current = concat!(
@@ -2477,7 +2378,7 @@ agent-doc {}\n",
             "<!-- /agent:backlog -->\n"
         );
         fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
         crate::cycle_state::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -2532,7 +2433,7 @@ agent-doc {}\n",
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
         crate::cycle_state::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -2592,7 +2493,7 @@ agent-doc {}\n",
             "<!-- /agent:backlog -->\n"
         );
         fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
         crate::cycle_state::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -3021,7 +2922,7 @@ agent-doc {}\n",
             "<!-- /agent:queue -->\n",
         );
         fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
         track_doc(&dir, &doc, "turn-1");
 
@@ -3248,7 +3149,7 @@ agent-doc {}\n",
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
         crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
-        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         let response = apply_stop(&StopInput {
             session_id: "untracked-session".to_string(),
@@ -3293,7 +3194,7 @@ agent-doc {}\n",
         .unwrap();
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
-        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let response = apply_stop(&StopInput {
@@ -3350,7 +3251,7 @@ agent-doc {}\n",
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
         crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
-        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         apply_stop(&StopInput {
             session_id: "untracked-session".to_string(),
@@ -3456,7 +3357,7 @@ agent-doc {}\n",
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
         crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
-        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         apply_stop(&StopInput {
             session_id: "untracked-session".to_string(),
@@ -3484,10 +3385,11 @@ agent-doc {}\n",
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
         init_git_repo(dir.path(), &doc);
-        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
-        let compaction_ts = crate::session_accretion::recent_exchange_compaction_timestamp(&doc)
-            .unwrap()
-            .expect("compaction marker should be visible");
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
+        let compaction_ts =
+            agent_doc_session_accretion_io::recent_exchange_compaction_timestamp(&doc)
+                .unwrap()
+                .expect("compaction marker should be visible");
         let root = project_root_for(dir.path()).unwrap();
         save_state(
             &root,

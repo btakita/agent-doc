@@ -1,15 +1,10 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_document::write_normalization::{
-    MAX_NORMALIZE_USER_LINES, normalize_user_prompt_prefix_application_exceeds_threshold,
-    normalize_user_prompt_prefixes_applied,
-};
+#[cfg(test)]
+use agent_doc_element_exchange::normalize_user_prompts_in_exchange;
 #[cfg(test)]
 use agent_doc_element_exchange::{extract_normalization_targets, verify_sidecar_normalization};
-use agent_doc_element_exchange::{
-    normalize_user_prompts_in_exchange, preserve_head_exchange_prompt_prefix_state,
-};
 
 pub fn enforce_imperative_response_contract(
     file: &Path,
@@ -19,7 +14,7 @@ pub fn enforce_imperative_response_contract(
 ) -> Result<()> {
     let baseline_owned = baseline
         .map(ToOwned::to_owned)
-        .or_else(|| snapshot::load(file).ok().flatten());
+        .or_else(|| agent_doc_snapshot_io::load(file).ok().flatten());
     let Some(base) = baseline_owned.as_deref() else {
         return Ok(());
     };
@@ -67,7 +62,7 @@ pub(crate) fn template_mode_overrides_for_current_doc(
     let mut overrides = std::collections::HashMap::new();
     let baseline_owned = baseline
         .map(ToOwned::to_owned)
-        .or_else(|| snapshot::load(file).ok().flatten());
+        .or_else(|| agent_doc_snapshot_io::load(file).ok().flatten());
     let Some(base) = baseline_owned.as_deref() else {
         return overrides;
     };
@@ -85,7 +80,7 @@ pub(crate) fn template_mode_overrides_for_current_doc(
 /// 1. **Forensic logging** — every call writes `normalize_user_prompts`
 ///    metrics (`snap_len`, `base_len`, `applied`) to `ops.log` so divergence
 ///    incidents can be caught in the wild.
-/// 2. **Safety rail** — if more than [`MAX_NORMALIZE_USER_LINES`] prefixes
+/// 2. **Safety rail** — if more than the maximum safe prefix count
 ///    would be applied, the normalization is discarded (content passes
 ///    through unchanged) and an event is logged.
 /// 3. **No broad recovery side effects** — on overrun, the content passes
@@ -101,54 +96,14 @@ pub fn normalize_user_prompts_in_exchange_safe(
     snapshot: &str,
     file: &std::path::Path,
 ) -> String {
-    let mut normalized = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-    if normalized != content
-        && let Ok(Some(head)) = crate::git::show_head(file)
-    {
-        let preserved = preserve_head_exchange_prompt_prefix_state(&normalized, &head);
-        if preserved != normalized {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "normalize_preserved_head_prompt_prefix_state file={}",
-                    file.display()
-                ),
-            );
-            normalized = preserved;
-        }
-    }
-
-    let applied = normalize_user_prompt_prefixes_applied(content, &normalized);
-
-    crate::ops_log::log_op(
+    agent_doc_element_exchange_io::normalize_user_prompts_in_exchange_safe_with_log(
+        content,
+        baseline,
+        snapshot,
         file,
-        &format!(
-            "normalize_user_prompts snap_len={} base_len={} applied={}",
-            snapshot.len(),
-            baseline.len(),
-            applied
-        ),
-    );
-
-    if normalize_user_prompt_prefix_application_exceeds_threshold(applied) {
-        eprintln!(
-            "[normalize] WARN: {} ❯-prefixes would be applied, exceeds threshold {} for {} — \
-             suspected snapshot/baseline divergence. Skipping ❯ prefix application this cycle.",
-            applied,
-            MAX_NORMALIZE_USER_LINES,
-            file.display()
-        );
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "normalize_threshold_exceeded applied={} threshold={} action=passthrough",
-                applied, MAX_NORMALIZE_USER_LINES
-            ),
-        );
-        return content.to_string();
-    }
-
-    normalized
+        |file| agent_doc_git_io::revision::show_head(file).ok().flatten(),
+        crate::ops_log::log_op,
+    )
 }
 
 #[cfg(test)]

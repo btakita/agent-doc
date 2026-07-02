@@ -518,6 +518,11 @@ pub fn prompt_only_exchange_tail_guard_message(prompt: &str, file: &str) -> Stri
     )
 }
 
+pub fn prompt_only_exchange_tail_guard(content: &str, file: &str) -> Option<String> {
+    let prompt = agent_doc_turn::exchange_tail::prompt_only_exchange_tail(content)?;
+    Some(prompt_only_exchange_tail_guard_message(&prompt, file))
+}
+
 pub fn likely_direct_response_patchback_message(
     marker: &str,
     side_effects: &str,
@@ -1043,5 +1048,21 @@ mod tests {
         assert!(missing_message.contains("cycle `cycle-1` is `committed`"));
         assert!(missing_message.contains("missing the latest committed HEAD response"));
         assert!(missing_message.contains("agent-doc write --commit doc.md"));
+    }
+
+    #[test]
+    fn prompt_only_exchange_tail_guard_detects_unanswered_tail() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "do [#next]\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let message = prompt_only_exchange_tail_guard(content, "doc.md")
+            .expect("prompt-only tail should interrupt session-check");
+
+        assert!(message.contains("do [#next]"), "{message}");
+        assert!(message.contains("agent-doc finalize doc.md"), "{message}");
     }
 }

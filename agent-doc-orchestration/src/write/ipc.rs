@@ -16,6 +16,10 @@ use agent_doc_element_exchange::{
     normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
     verify_sidecar_normalization,
 };
+use agent_doc_ipc_protocol::{
+    AlreadyAppliedSnapshotOutcome, FullContentRepairRedelivery, IpcDiskRepairReason,
+    IpcSnapshotSource,
+};
 use agent_doc_template::response_materialization::{
     extract_response_headings_from_patches, response_materialization_probe_from_response,
 };
@@ -84,10 +88,6 @@ pub(crate) fn cleanup_legacy_ipc_degraded(project_root: &Path) {
 
 pub(crate) const IPC_DEWEDGE_TIMEOUT_THRESHOLD: u64 = 2;
 
-pub(crate) fn ipc_dewedge_session_id(file: &Path) -> String {
-    agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_else(|| "-".to_string())
-}
-
 pub(crate) fn ipc_dewedge_marker_path(project_root: &Path, file: &Path) -> Result<PathBuf> {
     let hash = agent_doc_fs::document_state_hash(file)?;
     Ok(project_root
@@ -111,7 +111,9 @@ pub(crate) fn ipc_dewedge_marker_for_current_session(
         .get("session_id")
         .and_then(|v| v.as_str())
         .unwrap_or("-");
-    if marker_session != ipc_dewedge_session_id(file) {
+    let session_id =
+        agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_else(|| "-".to_string());
+    if marker_session != session_id {
         return Ok(None);
     }
     Ok(Some(value))
@@ -130,7 +132,7 @@ pub(crate) fn ipc_direct_disk_degraded(project_root: &Path, file: &Path) -> Resu
     // `.agent-doc/ipc.sock` connectable (or with a full accept backlog) while the
     // plugin handler no longer returns acks; a connect-only probe would wrongly
     // clear the latch and route the next write back into the bad socket path.
-    match crate::ipc_socket::probe_listener_ack(project_root, ipc_dewedge_probe_timeout()) {
+    match agent_doc_ipc_io::probe_listener_ack(project_root, ipc_dewedge_probe_timeout()) {
         Ok(true) => {
             remove_ipc_dewedge_marker(project_root, file, "listener_ack_recovered")?;
             return Ok(false);
@@ -214,7 +216,8 @@ pub(crate) fn record_ipc_socket_ack_timeout(
         IPC_DEWEDGE_TIMEOUT_THRESHOLD,
     );
     let value = serde_json::json!({
-        "session_id": ipc_dewedge_session_id(file),
+        "session_id": agent_doc_frontmatter_io::session::read_session_id(file)
+            .unwrap_or_else(|| "-".to_string()),
         "consecutive_timeouts": consecutive_timeouts,
         "degraded": degraded,
         "last_patch_id": patch_id.unwrap_or("-"),
@@ -353,7 +356,12 @@ pub(crate) fn content_ours_merged_with_disk_edits(
         return on_disk_content;
     }
 
-    let base_state = match snapshot::crdt_merge_base_state(file, base) {
+    let base_state = match agent_doc_snapshot_io::crdt_merge_base_state_with(
+        file,
+        base,
+        agent_doc_op_capture_io::has_pending_editor_ops,
+        crate::ops_log::log_op,
+    ) {
         Ok(base) => base.state,
         Err(e) => {
             eprintln!(
@@ -363,11 +371,12 @@ pub(crate) fn content_ours_merged_with_disk_edits(
             agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state()
         }
     };
-    match merge::merge_contents_crdt_with_ops(
+    match agent_doc_merge_io::merge_contents_crdt_with_ops(
         file,
         Some(&base_state),
         content_ours,
         &on_disk_content,
+        crate::ops_log::log_op,
     ) {
         Ok((merged, _)) => merged,
         Err(e) => {
@@ -399,27 +408,6 @@ pub(crate) fn normalized_content_ours_fallback(
     )
     .map(|(repaired, _)| repaired)
     .unwrap_or(normalized)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum IpcSnapshotSource {
-    AckContentSidecar,
-    ContentOurs,
-    FileRead,
-}
-
-impl IpcSnapshotSource {
-    fn label(self) -> &'static str {
-        match self {
-            Self::AckContentSidecar => "ack_content_sidecar",
-            Self::ContentOurs => "content_ours",
-            Self::FileRead => "file_read",
-        }
-    }
-
-    fn is_ack_content_proven(self) -> bool {
-        matches!(self, Self::AckContentSidecar)
-    }
 }
 
 fn live_buffer_file_keys(file: &Path) -> Vec<String> {
@@ -522,42 +510,6 @@ const ACK_CONTENT_TYPING_SETTLE_MS: u64 = 500;
 const ACK_CONTENT_TYPING_TIMEOUT_MS: u64 = 1_000;
 #[cfg(not(test))]
 const ACK_CONTENT_TYPING_TIMEOUT_MS: u64 = 2_000;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum IpcDiskRepairReason {
-    PrefixDivergence,
-    IpcDedupe,
-    PrefixDivergenceThenIpcDedupe,
-    LivePromptDrift,
-}
-
-impl IpcDiskRepairReason {
-    fn label(self) -> &'static str {
-        match self {
-            Self::PrefixDivergence => "prefix_divergence",
-            Self::IpcDedupe => "ipc_dedupe",
-            Self::PrefixDivergenceThenIpcDedupe => "prefix_divergence_then_ipc_dedupe",
-            Self::LivePromptDrift => "live_prompt_drift",
-        }
-    }
-
-    fn redelivery_kind(self) -> FullContentRepairRedelivery {
-        match self {
-            Self::PrefixDivergence => FullContentRepairRedelivery::NormalizationFallback,
-            Self::IpcDedupe | Self::PrefixDivergenceThenIpcDedupe => {
-                FullContentRepairRedelivery::IpcDedupe
-            }
-            Self::LivePromptDrift => FullContentRepairRedelivery::LivePromptDrift,
-        }
-    }
-
-    fn merge_with_ipc_dedupe(self) -> Self {
-        match self {
-            Self::PrefixDivergence => Self::PrefixDivergenceThenIpcDedupe,
-            Self::IpcDedupe | Self::PrefixDivergenceThenIpcDedupe | Self::LivePromptDrift => self,
-        }
-    }
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct EditorBadStateFingerprint {
@@ -719,12 +671,6 @@ impl IpcRepairDecision {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AlreadyAppliedSnapshotOutcome {
-    Persisted,
-    NeedsFileFallback,
-}
-
 /// `#smconv` (`#semmerge-converge-adapter`, Phase 2): attempt a node-keyed
 /// semantic merge of `base`, `candidate` (the agent's response snapshot =
 /// `ours_agent`), and `content_ours` (the editor buffer = `theirs_operator`),
@@ -865,7 +811,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     }
 
     let prior_source = decision.snap_source.label();
-    crate::flow::proof::log_flow_event(
+    agent_doc_flow_io::log_flow_event(
         file,
         agent_doc_flow::types::FlowEvent::new(
             agent_doc_flow::types::FlowName::DocumentMutation,
@@ -873,6 +819,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             agent_doc_flow::types::FlowOutcome::Blocked,
         )
         .with_reason("live_prompt_drift_after_preflight"),
+        crate::ops_log::log_op,
     );
     crate::ops_log::log_op(
         file,
@@ -1006,8 +953,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
         base,
         &queue_reconciled_ours,
         &candidate,
-        |base, ours, theirs| crate::merge::merge_contents(base, ours, theirs).ok(),
-    ) && let Ok(union) = crate::merge::merge_contents(base, &queue_reconciled_ours, &candidate)
+        |base, ours, theirs| agent_doc_merge_io::merge_contents(base, ours, theirs).ok(),
+    ) && let Ok(union) =
+        agent_doc_merge_io::merge_contents(base, &queue_reconciled_ours, &candidate)
         && !union.contains("<<<<<<<")
     {
         crate::ops_log::log_op(
@@ -1149,7 +1097,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
 
     let prior_source = decision.snap_source.label();
     let bad_state = decision.snapshot_content.clone();
-    crate::flow::proof::log_flow_event(
+    agent_doc_flow_io::log_flow_event(
         file,
         agent_doc_flow::types::FlowEvent::new(
             agent_doc_flow::types::FlowName::DocumentMutation,
@@ -1157,6 +1105,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
             agent_doc_flow::types::FlowOutcome::Blocked,
         )
         .with_reason("prompt_duplication_in_ack_content"),
+        crate::ops_log::log_op,
     );
     crate::ops_log::log_op(
         file,
@@ -1294,36 +1243,9 @@ pub(crate) fn log_ipcfullprompt_corruption_if_any(
             summary,
         ),
     );
-    preserve_ipcfullprompt_forensic(file, patch_id, base, candidate);
-}
-
-/// Best-effort: preserve the baseline + corrupted candidate buffers under
-/// `.agent-doc/logs/ipcfullprompt/` so the exact corruption shape can be analyzed
-/// later (the plan's Phase-1 "preserve the pre/post for one failing cycle").
-/// Never panics or returns errors.
-pub(crate) fn preserve_ipcfullprompt_forensic(
-    file: &Path,
-    patch_id: Option<&str>,
-    baseline: &str,
-    candidate: &str,
-) {
-    let Ok(canonical) = file.canonicalize() else {
-        return;
-    };
-    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
-        return;
-    };
-    let dir = root.join(".agent-doc/logs/ipcfullprompt");
-    if std::fs::create_dir_all(&dir).is_err() {
-        return;
-    }
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let stem = format!("{}-{}", ts, patch_id.unwrap_or("nopatch"));
-    let _ = std::fs::write(dir.join(format!("{stem}.baseline.md")), baseline);
-    let _ = std::fs::write(dir.join(format!("{stem}.candidate.md")), candidate);
+    let _ = agent_doc_ipc_forensics_io::preserve_ipcfullprompt_forensic(
+        file, patch_id, base, candidate,
+    );
 }
 
 pub(crate) fn materialize_missing_response_for_socket_ack_drift(
@@ -1524,7 +1446,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
 
     let ack_content = if !patch_id.is_empty() {
         file.canonicalize().ok().and_then(|canonical| {
-            let project_root = super::resolve_ipc_project_root_pub(&canonical);
+            let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
             poll_ack_content_sidecar(
                 &project_root,
                 patch_id,
@@ -1787,9 +1709,13 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
             &repair_decision.snapshot_content,
         );
     }
-    snapshot::save(file, &repair_decision.snapshot_content)?;
+    agent_doc_snapshot_io::save(
+        file,
+        &repair_decision.snapshot_content,
+        crate::ops_log::log_op,
+    )?;
     let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
-    snapshot::save_document_crdt(
+    agent_doc_merge_io::save_document_crdt(
         file,
         &crdt_doc.encode_state(),
         &repair_decision.snapshot_content,
@@ -2011,64 +1937,6 @@ pub(crate) fn ipc_repair_decision_from_sidecar(
     }
 
     IpcRepairDecision::ack_content(snap_content)
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum FullContentRepairRedelivery {
-    NormalizationFallback,
-    IpcDedupe,
-    LivePromptDrift,
-}
-
-impl FullContentRepairRedelivery {
-    fn label(self) -> &'static str {
-        match self {
-            Self::NormalizationFallback => "sidecar_normalization_fallback",
-            Self::IpcDedupe => "ipc_dedupe",
-            Self::LivePromptDrift => "live_prompt_drift",
-        }
-    }
-
-    fn success_message(self) -> &'static str {
-        match self {
-            Self::NormalizationFallback => {
-                "[write] sidecar normalization fallback re-delivered to editor via full-content IPC"
-            }
-            Self::IpcDedupe => "[write] IPC duplicate-response repair re-delivered to editor",
-            Self::LivePromptDrift => "[write] live prompt drift repair re-delivered to editor",
-        }
-    }
-
-    fn not_consumed_message(self) -> &'static str {
-        match self {
-            Self::NormalizationFallback => {
-                "[write] sidecar normalization fallback editor repair was not consumed; refusing direct document write"
-            }
-            Self::IpcDedupe => {
-                "[write] IPC duplicate-response repair was not consumed; refusing direct document write"
-            }
-            Self::LivePromptDrift => {
-                "[write] live prompt drift visible repair was not consumed; refusing direct document write"
-            }
-        }
-    }
-
-    fn failed_message(self, error: &anyhow::Error) -> String {
-        match self {
-            Self::NormalizationFallback => format!(
-                "[write] sidecar normalization fallback editor repair failed: {}; refusing direct document write",
-                error
-            ),
-            Self::IpcDedupe => format!(
-                "[write] IPC duplicate-response repair failed: {}; refusing direct document write",
-                error
-            ),
-            Self::LivePromptDrift => format!(
-                "[write] live prompt drift visible repair failed: {}; refusing direct document write",
-                error
-            ),
-        }
-    }
 }
 
 fn redelivery_missing_operator_text_authority(
@@ -2397,7 +2265,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
     }
 
     let canonical = file.canonicalize()?;
-    let project_root = resolve_ipc_project_root(&canonical);
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let patch_id = uuid::Uuid::new_v4().to_string();
     let canonical_path = canonical.to_string_lossy();
     let proof = agent_doc_document_realtime::write_policy::FullContentSourceProof::from_content(
@@ -2426,8 +2294,8 @@ pub(crate) fn try_ipc_normalization_repair_patch(
         ),
     );
 
-    if crate::ipc_socket::is_listener_active(&project_root) {
-        match crate::ipc_socket::send_message(&project_root, &payload) {
+    if agent_doc_ipc_io::is_listener_active(&project_root) {
+        match agent_doc_ipc_io::send_message(&project_root, &payload) {
             Ok(Some(_)) => {
                 if verify_normalization_repair_observed(
                     file,
@@ -2686,9 +2554,9 @@ pub(crate) fn repair_ipc_decision_visible_state(
         let listener_active = file
             .canonicalize()
             .ok()
-            .map(|canonical| super::resolve_ipc_project_root_pub(&canonical))
+            .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
             .as_deref()
-            .map(crate::ipc_socket::is_listener_active)
+            .map(agent_doc_ipc_io::is_listener_active)
             .unwrap_or(false);
         if listener_active
             && let Ok(file_content) = std::fs::read_to_string(file)
@@ -3956,7 +3824,7 @@ mod ack_content_snapshot_tests {
             "missing-prefix sidecar must not trigger a direct document rewrite"
         );
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "unproven normalization fallback must not save a snapshot"
         );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -4115,7 +3983,7 @@ agent response
             disk
         );
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "unproven normalization fallback must not save a snapshot"
         );
     }
@@ -4226,7 +4094,7 @@ Covered.
             "unproven normalization fallback must leave the stripped editor state untouched: {disk}"
         );
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "unproven normalization fallback must not save a snapshot"
         );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -4294,7 +4162,7 @@ agent response
         let listener_repair_payloads = seen_repair_payloads.clone();
         std::fs::create_dir_all(listener_root.join(".agent-doc")).unwrap();
         let _listener = std::thread::spawn(move || {
-            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if let Some(full_content) = v.get("fullContent").and_then(|value| value.as_str()) {
@@ -4328,13 +4196,13 @@ agent response
             });
         });
         for _ in 0..100 {
-            if crate::ipc_socket::is_listener_active(dir.path()) {
+            if agent_doc_ipc_io::is_listener_active(dir.path()) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(
-            crate::ipc_socket::is_listener_active(dir.path()),
+            agent_doc_ipc_io::is_listener_active(dir.path()),
             "fake socket listener did not start"
         );
 
@@ -4696,7 +4564,7 @@ Done.
         let captured_clone = captured.clone();
         std::fs::create_dir_all(listener_root.join(".agent-doc")).unwrap();
         let _listener = std::thread::spawn(move || {
-            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+            let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 *captured_clone.lock().unwrap() = Some(v.clone());
@@ -4716,13 +4584,13 @@ Done.
             });
         });
         for _ in 0..100 {
-            if crate::ipc_socket::is_listener_active(dir.path()) {
+            if agent_doc_ipc_io::is_listener_active(dir.path()) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(
-            crate::ipc_socket::is_listener_active(dir.path()),
+            agent_doc_ipc_io::is_listener_active(dir.path()),
             "fake socket listener did not start"
         );
 
@@ -4984,7 +4852,7 @@ agent response
             "unproven normalization fallback must leave pending disk mutations untouched"
         );
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
             "unproven normalization fallback must not save a snapshot"
         );
     }
@@ -5094,7 +4962,7 @@ agent response
             !disk.contains("The tmux focus should be snappy."),
             "operator-visible deletion from the sidecar must not be resurrected from content_ours: {disk}"
         );
-        let snapshot = snapshot::load(&doc)
+        let snapshot = agent_doc_snapshot_io::load(&doc)
             .unwrap()
             .expect("snapshot should be saved");
         assert!(
@@ -5765,7 +5633,7 @@ mod core_tests {
         // Bring a live socket listener up (the recovered plugin).
         let root_clone = dir.path().to_path_buf();
         let server = std::thread::spawn(move || {
-            let _ = crate::ipc_socket::start_listener(&root_clone, |_msg| {
+            let _ = agent_doc_ipc_io::start_listener(&root_clone, |_msg| {
                 Some(r#"{"type":"ack","id":"x"}"#.to_string())
             });
         });
@@ -5784,7 +5652,7 @@ mod core_tests {
             "self-heal must remove the degraded marker"
         );
 
-        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(dir.path()));
+        let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(dir.path()));
         drop(server);
     }
     #[test]
@@ -5803,7 +5671,7 @@ mod core_tests {
 
         let root_clone = dir.path().to_path_buf();
         let server = std::thread::spawn(move || {
-            let _ = crate::ipc_socket::start_listener(&root_clone, |_msg| None);
+            let _ = agent_doc_ipc_io::start_listener(&root_clone, |_msg| None);
         });
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
 
@@ -5826,7 +5694,7 @@ mod core_tests {
             "failed self-heal probe must be observable:\n{log}"
         );
 
-        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(dir.path()));
+        let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(dir.path()));
         drop(server);
     }
     #[test]

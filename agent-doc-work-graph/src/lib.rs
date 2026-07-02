@@ -6,6 +6,7 @@
 //! agents, or commit.
 
 use agent_doc_element_backlog::backlog::{self, PendingState};
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
@@ -166,6 +167,78 @@ pub fn classify_batch_progress(
         return BatchProgressDecision::StopChildNotCompleted;
     }
     BatchProgressDecision::Continue
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchChildResult {
+    pub label: String,
+    pub outcome: FlowOutcome,
+    pub proof: Option<String>,
+}
+
+pub fn queue_freeze_event(task_count: usize, from_exchange: bool) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::OrchestrationBatch,
+        FlowStage::QueueFreeze,
+        FlowOutcome::Completed,
+    )
+    .with_reason(format!(
+        "tasks:{task_count}:source:{}",
+        if from_exchange {
+            "exchange"
+        } else {
+            "explicit"
+        }
+    ))
+}
+
+pub fn source_changed_event(completed_steps: usize, total_steps: usize) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::OrchestrationBatch,
+        FlowStage::QueueFreeze,
+        FlowOutcome::Blocked,
+    )
+    .with_reason(format!(
+        "{}:{}_of_{}",
+        BatchProgressDecision::StopSourceChanged.as_str(),
+        completed_steps,
+        total_steps
+    ))
+}
+
+pub fn child_closeout_event(child: &BatchChildResult) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::OrchestrationBatch,
+        FlowStage::ChildCloseout,
+        child.outcome,
+    )
+    .with_reason(
+        child
+            .proof
+            .as_deref()
+            .unwrap_or(child.label.as_str())
+            .to_string(),
+    )
+}
+
+pub fn auto_dag_schedule_event(
+    decision: AutoDagScheduleDecision,
+    node_count: usize,
+    batch_count: usize,
+) -> FlowEvent {
+    let outcome = match decision {
+        AutoDagScheduleDecision::Ready => FlowOutcome::Completed,
+        AutoDagScheduleDecision::SessionReviewBlocked => FlowOutcome::Blocked,
+    };
+    FlowEvent::new(
+        FlowName::OrchestrationBatch,
+        FlowStage::QueueFreeze,
+        outcome,
+    )
+    .with_reason(format!(
+        "auto_dag_schedule:{}:nodes:{node_count}:batches:{batch_count}",
+        decision.as_str()
+    ))
 }
 
 const LANES_IN_ORDER: [Lane; 5] = [
@@ -364,6 +437,38 @@ mod tests {
         assert_eq!(
             classify_batch_progress(false, true),
             BatchProgressDecision::Continue
+        );
+    }
+
+    #[test]
+    fn orchestration_batch_events_use_work_graph_decisions() {
+        let freeze = queue_freeze_event(3, true);
+        assert_eq!(freeze.flow, FlowName::OrchestrationBatch);
+        assert_eq!(freeze.stage, FlowStage::QueueFreeze);
+        assert_eq!(freeze.outcome, FlowOutcome::Completed);
+        assert_eq!(freeze.reason.as_deref(), Some("tasks:3:source:exchange"));
+
+        let source_changed = source_changed_event(1, 3);
+        assert_eq!(source_changed.outcome, FlowOutcome::Blocked);
+        assert_eq!(
+            source_changed.reason.as_deref(),
+            Some("source_changed_after_child:1_of_3")
+        );
+
+        let child = BatchChildResult {
+            label: "child".to_string(),
+            outcome: FlowOutcome::Completed,
+            proof: Some("session_check".to_string()),
+        };
+        let child_event = child_closeout_event(&child);
+        assert_eq!(child_event.stage, FlowStage::ChildCloseout);
+        assert_eq!(child_event.reason.as_deref(), Some("session_check"));
+
+        let schedule = auto_dag_schedule_event(AutoDagScheduleDecision::SessionReviewBlocked, 2, 1);
+        assert_eq!(schedule.outcome, FlowOutcome::Blocked);
+        assert_eq!(
+            schedule.reason.as_deref(),
+            Some("auto_dag_schedule:session_review_blocked:nodes:2:batches:1")
         );
     }
 

@@ -349,7 +349,7 @@ enum SupervisorLifecycle {
 /// `#supdead-coldstart-fallback`: connect-liveness of the supervisor's AF_UNIX
 /// socket file, modeled so a scenario can assert "socket present but not
 /// accepting" independently of the lifecycle. Maps onto the production
-/// [`agent_doc_orchestration::supervisor::ipc::SocketLiveness`] (Live vs Dead)
+/// [`agent_doc_supervisor_io::ipc::SocketLiveness`] (Live vs Dead)
 /// that `probe_socket` returns, but keeps a third `Absent` state so the model can
 /// distinguish a reaped socket from a stale-but-present one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -366,8 +366,8 @@ enum SupervisorSocket {
 impl SupervisorSocket {
     /// Map to the production `SocketLiveness` the live `probe_socket` returns: both
     /// a refused stale socket and a missing socket classify as `Dead`.
-    fn liveness(self) -> agent_doc_orchestration::supervisor::ipc::SocketLiveness {
-        use agent_doc_orchestration::supervisor::ipc::SocketLiveness;
+    fn liveness(self) -> agent_doc_supervisor_io::ipc::SocketLiveness {
+        use agent_doc_supervisor_io::ipc::SocketLiveness;
         match self {
             Self::Live => SocketLiveness::Live,
             Self::StaleRefused | Self::Absent => SocketLiveness::Dead,
@@ -379,7 +379,7 @@ impl SupervisorSocket {
     fn is_dead(self) -> bool {
         matches!(
             self.liveness(),
-            agent_doc_orchestration::supervisor::ipc::SocketLiveness::Dead
+            agent_doc_supervisor_io::ipc::SocketLiveness::Dead
         )
     }
 
@@ -722,7 +722,7 @@ struct RecycleClearModel {
     /// `#midturn-recycle-resume`: an agent-doc cycle is OPEN — preflight taken,
     /// finalize not yet committed, or an IPC ack connection in flight (mirrors
     /// idle_watch.rs's `cycle_open` computed from `cycle_state::is_open()` +
-    /// `ipc_socket::inflight_connection_handlers()`). While true, every recycle /
+    /// `agent_doc_ipc_io::inflight_connection_handlers()`). While true, every recycle /
     /// restart-reexec arm must DEFER so the `execve` cannot sever the in-flight IPC
     /// listener mid-cycle and drive the next finalize into
     /// `live_prompt_drift_after_preflight`.
@@ -1469,7 +1469,8 @@ fn setup_baseline_drift_capture(
     let mut world = SimWorld::new(seed);
     world.apply(SimCommand::EditPrompt).unwrap();
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_orchestration::snapshot::save(&doc, &world.doc).unwrap();
+    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_orchestration::ops_log::log_op)
+        .unwrap();
     let capture = agent_doc_orchestration::capture::capture_response(&doc, response).unwrap();
     (dir, doc, capture, world)
 }
@@ -1479,7 +1480,7 @@ fn apply_response_and_save_current(doc: &Path, world: &mut SimWorld, response: &
     world.apply_captured_response()?;
     world.apply(SimCommand::Commit)?;
     std::fs::write(doc, &world.doc)?;
-    agent_doc_orchestration::snapshot::save(doc, &world.doc)?;
+    agent_doc_snapshot_io::save(doc, &world.doc, agent_doc_orchestration::ops_log::log_op)?;
     Ok(())
 }
 
@@ -5876,13 +5877,9 @@ fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
     let baseline = world.doc.clone();
     let response = response_patch("live queue IPC race");
     let (patches, unmatched) = agent_doc_template::parse_patches(&response).unwrap();
-    let content_ours = agent_doc_orchestration::template_io::apply_patches(
-        &baseline,
-        &patches,
-        &unmatched,
-        Path::new("sim.md"),
-    )
-    .unwrap();
+    let content_ours =
+        agent_doc_template_io::apply_patches(&baseline, &patches, &unmatched, Path::new("sim.md"))
+            .unwrap();
     let live_queue_prompt = "- do #liveipcrace. #spec-test-build-install-commit-push";
     let ack_candidate = content_ours.replace(
         "<!-- agent:queue -->\n<!-- /agent:queue -->",
@@ -5931,8 +5928,7 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
     let response = response_patch("transition queue drift");
     let (patches, unmatched) = agent_doc_template::parse_patches(&response).unwrap();
     let content_ours =
-        agent_doc_orchestration::template_io::apply_patches(&baseline, &patches, &unmatched, file)
-            .unwrap();
+        agent_doc_template_io::apply_patches(&baseline, &patches, &unmatched, file).unwrap();
     let live_queue_prompt = "- do #transitionqueue. spec-test-build-install-commit-push";
     let queue_candidate = content_ours.replace(
         "<!-- agent:queue -->\n<!-- /agent:queue -->",
@@ -6092,7 +6088,7 @@ fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
         "<!-- /agent:queue -->\n",
     );
     std::fs::write(&doc, content).unwrap();
-    agent_doc_orchestration::snapshot::save(&doc, content).unwrap();
+    agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op).unwrap();
 
     // A halt response that names the head with a trailing modifier must NOT
     // register as targeting the head (exact-topic match only).
@@ -6149,7 +6145,8 @@ fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
         )
         .unwrap();
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_orchestration::snapshot::save(&doc, &world.doc).unwrap();
+    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_orchestration::ops_log::log_op)
+        .unwrap();
 
     agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect("benign user commit outside response must auto-refresh");
@@ -6185,7 +6182,8 @@ fn baseline_drift_user_edit_inside_committed_response_fails_closed() {
         "User rewrote the committed response.",
     );
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_orchestration::snapshot::save(&doc, &world.doc).unwrap();
+    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_orchestration::ops_log::log_op)
+        .unwrap();
 
     let err = agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect_err("editing the committed response body must fail closed");
@@ -6206,7 +6204,8 @@ fn baseline_drift_user_edit_matches_normalized_response_adopts() {
         .doc
         .replace("❯ Submodule pointer updated.", "Submodule pointer updated.");
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_orchestration::snapshot::save(&doc, &world.doc).unwrap();
+    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_orchestration::ops_log::log_op)
+        .unwrap();
 
     agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect("user-normalized response body should be adopted");

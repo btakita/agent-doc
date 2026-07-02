@@ -24,7 +24,9 @@
 //! `plugin_watch_readonly` `ops.log` marker. The plugin's socket IPC apply path
 //! (the controller's writer arm into the editor) stays active.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 /// Minimal classification of a raw filesystem event, mirroring the
 /// `notify::EventKind` subset the controller watcher reacts to.
@@ -143,6 +145,61 @@ impl DocumentWatchGate {
     }
 }
 
+/// Registry of one watch gate per document.
+///
+/// Registration is idempotent: a second registration for the same document id
+/// reuses the existing gate, so callers cannot accidentally create duplicate
+/// per-document watchers for the same realtime authority stream.
+#[derive(Default)]
+pub struct WatcherRegistry {
+    gates: Mutex<HashMap<String, Arc<Mutex<DocumentWatchGate>>>>,
+}
+
+impl WatcherRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get-or-create the gate for `doc_id`. Returns the gate and whether it was
+    /// newly created (`true` only on the first registration). `file` is the
+    /// document path this gate accepts raw events for.
+    pub fn register(&self, doc_id: &str, file: &str) -> (Arc<Mutex<DocumentWatchGate>>, bool) {
+        let mut gates = self.gates.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(gate) = gates.get(doc_id) {
+            return (Arc::clone(gate), false);
+        }
+        let gate = Arc::new(Mutex::new(DocumentWatchGate::new(file)));
+        gates.insert(doc_id.to_string(), Arc::clone(&gate));
+        (gate, true)
+    }
+
+    /// Whether `doc_id` is currently watched.
+    pub fn is_watched(&self, doc_id: &str) -> bool {
+        self.gates
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(doc_id)
+    }
+
+    /// Drop the watch for `doc_id`, returning whether one existed.
+    pub fn unregister(&self, doc_id: &str) -> bool {
+        self.gates
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(doc_id)
+            .is_some()
+    }
+
+    /// Number of watched documents.
+    pub fn len(&self) -> usize {
+        self.gates.lock().unwrap_or_else(|p| p.into_inner()).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 /// Whether the editor plugin's own `WatchService` file-apply path is demoted to
 /// read-only buffer reporting. Always `true` post-cutover — the plugin never
 /// autonomously applies file-IPC patches it observes on disk; the
@@ -243,5 +300,28 @@ mod tests {
             WatchDelivery::Ignored
         );
         assert_eq!(gate.generation(), 0);
+    }
+
+    #[test]
+    fn registry_is_idempotent_one_watcher_per_document() {
+        let reg = WatcherRegistry::new();
+        let (g1, new1) = reg.register("doc-A", "/tmp/doc-A.md");
+        let (g2, new2) = reg.register("doc-A", "/tmp/doc-A.md");
+        assert!(new1, "first registration is new");
+        assert!(!new2, "second registration must reuse the one watcher");
+        assert!(Arc::ptr_eq(&g1, &g2), "same gate for the same document");
+        assert_eq!(reg.len(), 1, "exactly one watcher for the document");
+        assert!(reg.is_watched("doc-A"));
+        assert!(reg.unregister("doc-A"));
+        assert!(!reg.is_watched("doc-A"));
+    }
+
+    #[test]
+    fn registry_distinct_documents_get_distinct_gates() {
+        let reg = WatcherRegistry::new();
+        let (a, _) = reg.register("doc-A", "/tmp/a.md");
+        let (b, _) = reg.register("doc-B", "/tmp/b.md");
+        assert!(!Arc::ptr_eq(&a, &b));
+        assert_eq!(reg.len(), 2);
     }
 }

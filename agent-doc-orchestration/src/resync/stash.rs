@@ -2,10 +2,12 @@
 
 use super::*;
 #[cfg(test)]
+use crate::sessions;
+#[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
 
 pub(crate) fn return_stashed_panes(tmux: &Tmux) {
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     return_stashed_panes_with_registry(tmux, &registry);
 }
 
@@ -19,23 +21,16 @@ pub(crate) fn return_stashed_panes_with_registry(tmux: &Tmux, registry: &tmux_ro
             .collect();
 
     // List all windows to find stash windows
-    let output = tmux
-        .cmd()
-        .args([
-            "list-windows",
-            "-a",
-            "-F",
-            "#{window_id}\t#{window_name}\t#{session_name}",
-        ])
-        .output();
+    let output =
+        agent_doc_tmux_io::list_windows_all(tmux, "#{window_id}\t#{window_name}\t#{session_name}");
     let output = match output {
-        Ok(o) if o.status.success() => o,
+        Ok(output) => output,
         _ => return,
     };
 
     let mut returned = 0;
 
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    for line in output.lines() {
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
         if parts.len() < 3 {
             continue;
@@ -47,22 +42,17 @@ pub(crate) fn return_stashed_panes_with_registry(tmux: &Tmux, registry: &tmux_ro
         }
 
         // List panes in this stash window with their current command
-        let pane_output = tmux
-            .cmd()
-            .args([
-                "list-panes",
-                "-t",
-                window_id,
-                "-F",
-                "#{pane_id}\t#{pane_current_command}",
-            ])
-            .output();
+        let pane_output = agent_doc_tmux_io::list_panes(
+            tmux,
+            Some(window_id),
+            "#{pane_id}\t#{pane_current_command}",
+        );
         let pane_output = match pane_output {
-            Ok(o) if o.status.success() => o,
+            Ok(output) => output,
             _ => continue,
         };
 
-        for pane_line in String::from_utf8_lossy(&pane_output.stdout).lines() {
+        for pane_line in pane_output.lines() {
             let pane_parts: Vec<&str> = pane_line.splitn(2, '\t').collect();
             if pane_parts.len() < 2 {
                 continue;
@@ -133,17 +123,12 @@ pub(crate) type PaneMeta = std::collections::HashMap<String, (String, String, St
 
 /// Fetch all window metadata in a single subprocess call.
 pub(crate) fn fetch_all_window_metadata(tmux: &Tmux) -> WindowMeta {
-    let output = tmux
-        .cmd()
-        .args([
-            "list-windows",
-            "-a",
-            "-F",
-            "#{window_id}\t#{window_name}\t#{session_name}\t#{window_activity}",
-        ])
-        .output();
+    let output = agent_doc_tmux_io::list_windows_all(
+        tmux,
+        "#{window_id}\t#{window_name}\t#{session_name}\t#{window_activity}",
+    );
     match output {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+        Ok(output) => output
             .lines()
             .filter_map(|line| {
                 let parts: Vec<&str> = line.splitn(4, '\t').collect();
@@ -165,17 +150,12 @@ pub(crate) fn fetch_all_window_metadata(tmux: &Tmux) -> WindowMeta {
 
 /// Fetch all pane metadata in a single subprocess call.
 pub(crate) fn fetch_all_pane_metadata(tmux: &Tmux) -> PaneMeta {
-    let output = tmux
-        .cmd()
-        .args([
-            "list-panes",
-            "-a",
-            "-F",
-            "#{pane_id}\t#{window_id}\t#{window_name}\t#{pane_current_command}",
-        ])
-        .output();
+    let output = agent_doc_tmux_io::list_panes_all(
+        tmux,
+        "#{pane_id}\t#{window_id}\t#{window_name}\t#{pane_current_command}",
+    );
     match output {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+        Ok(output) => output
             .lines()
             .filter_map(|line| {
                 let parts: Vec<&str> = line.splitn(4, '\t').collect();
@@ -231,7 +211,7 @@ pub(crate) fn purge_stash_windows_bulk(tmux: &Tmux, windows: &WindowMeta, panes:
         let has_panes = panes.iter().any(|(_, (wid, _, _))| wid == window_id);
 
         if has_panes && all_idle {
-            if let Err(e) = tmux.cmd().args(["kill-window", "-t", window_id]).output() {
+            if let Err(e) = agent_doc_tmux_io::kill_window(tmux, window_id) {
                 eprintln!("resync: failed to purge stash window {}: {}", window_id, e);
             } else {
                 eprintln!("resync: purged stash window {} (all panes idle)", window_id);
@@ -247,7 +227,7 @@ pub(crate) fn purge_unregistered_stash_panes_bulk(
     panes: &PaneMeta,
 ) {
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&project_root);
+    let live_supervisors = agent_doc_supervisor_io::ipc::active_supervisor_pids(&project_root);
     purge_unregistered_stash_panes_bulk_with_supervisors(tmux, windows, panes, &live_supervisors);
 }
 
@@ -258,7 +238,7 @@ pub(crate) fn purge_unregistered_stash_panes_bulk_in_mode(
     preserve_live_agent_stash_panes: bool,
 ) {
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&project_root);
+    let live_supervisors = agent_doc_supervisor_io::ipc::active_supervisor_pids(&project_root);
     purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
         tmux,
         windows,
@@ -292,7 +272,7 @@ pub(crate) fn purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
 ) {
     let current_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut pane_context_cache = PaneProjectContextCache::default();
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     let registered_panes: std::collections::HashSet<&str> =
         registry.values().map(|e| e.pane.as_str()).collect();
 
@@ -413,7 +393,7 @@ pub(crate) fn sync_log_safe_passive_stash_skip(pane_id: &str) {
 }
 
 pub(crate) fn purge_unregistered_dead_non_stash_panes(tmux: &Tmux) {
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     purge_unregistered_dead_non_stash_panes_with_registry(tmux, &registry);
 }
 
@@ -421,21 +401,14 @@ pub(crate) fn purge_unregistered_dead_non_stash_panes_with_registry(
     tmux: &Tmux,
     registry: &tmux_router::Registry,
 ) {
-    let output = tmux
-        .cmd()
-        .args([
-            "list-panes",
-            "-a",
-            "-F",
-            "#{pane_id}\t#{window_id}\t#{window_name}",
-        ])
-        .output();
+    let output =
+        agent_doc_tmux_io::list_panes_all(tmux, "#{pane_id}\t#{window_id}\t#{window_name}");
     let output = match output {
-        Ok(o) if o.status.success() => o,
+        Ok(output) => output,
         _ => return,
     };
 
-    let panes: PaneMeta = String::from_utf8_lossy(&output.stdout)
+    let panes: PaneMeta = output
         .lines()
         .filter_map(|line| {
             let parts: Vec<&str> = line.splitn(3, '\t').collect();
@@ -453,7 +426,7 @@ pub(crate) fn purge_unregistered_dead_non_stash_panes_with_registry(
 }
 
 pub(crate) fn purge_unregistered_dead_non_stash_panes_bulk(tmux: &Tmux, panes: &PaneMeta) {
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     purge_unregistered_dead_non_stash_panes_bulk_with_registry(tmux, panes, &registry);
 }
 
@@ -513,7 +486,7 @@ pub(crate) fn purge_unregistered_dead_non_stash_panes_bulk_with_registry(
 /// repeated expensive lookups on subsequent cycles.
 #[allow(dead_code)]
 pub(crate) fn return_stashed_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes: &PaneMeta) {
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     let pane_to_entry: std::collections::HashMap<&str, (&str, &tmux_router::RegistryEntry)> =
         registry
             .iter()
@@ -595,12 +568,12 @@ pub(crate) fn return_stashed_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes
 
     // Deregister stranded panes so they don't retry every cycle
     if !deregistered.is_empty()
-        && let Ok(mut reg) = sessions::load()
+        && let Ok(mut reg) = agent_doc_session_registry_io::load()
     {
         for key in &deregistered {
             reg.remove(key);
         }
-        if let Err(e) = sessions::save(&reg) {
+        if let Err(e) = agent_doc_session_registry_io::save(&reg) {
             eprintln!("resync: failed to save registry after deregister: {}", e);
         } else {
             eprintln!(
@@ -697,7 +670,7 @@ pub(crate) fn find_return_target(
         && !panes.is_empty()
     {
         // Check it's not a stash window itself
-        if let Some(wname) = pane_window_name(tmux, &panes[0])
+        if let Some(wname) = agent_doc_tmux_io::target_window_name(tmux, &panes[0])
             && !is_stash_window_name(&wname)
         {
             return Some(panes[0].clone());
@@ -728,22 +701,14 @@ pub(crate) fn find_return_target(
 
 /// Find the first pane in the first non-stash window of a tmux session.
 pub(crate) fn first_non_stash_pane(tmux: &Tmux, session_name: &str) -> Option<String> {
-    let output = tmux
-        .cmd()
-        .args([
-            "list-windows",
-            "-t",
-            &format!("{}:", session_name),
-            "-F",
-            "#{window_id}\t#{window_name}",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
+    let output = agent_doc_tmux_io::list_windows(
+        tmux,
+        Some(&format!("{}:", session_name)),
+        "#{window_id}\t#{window_name}",
+    )
+    .ok()?;
 
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    for line in output.lines() {
         let parts: Vec<&str> = line.splitn(2, '\t').collect();
         if parts.len() < 2 {
             continue;
@@ -772,7 +737,7 @@ pub(crate) fn first_non_stash_pane(tmux: &Tmux, session_name: &str) -> Option<St
 ///
 /// This catches orphaned Claude sessions in non-stash windows (e.g., session 3).
 pub(crate) fn purge_orphaned_agent_panes(tmux: &Tmux) {
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     purge_orphaned_agent_panes_with_registry(tmux, &registry);
 }
 
@@ -781,30 +746,25 @@ pub(crate) fn purge_orphaned_agent_panes_with_registry(
     registry: &tmux_router::Registry,
 ) {
     let current_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&current_root);
+    let live_supervisors = agent_doc_supervisor_io::ipc::active_supervisor_pids(&current_root);
     let mut pane_context_cache = PaneProjectContextCache::default();
     let registered_panes: std::collections::HashSet<&str> =
         registry.values().map(|e| e.pane.as_str()).collect();
 
     // List all panes across all sessions
-    let output = tmux
-        .cmd()
-        .args([
-            "list-panes",
-            "-a",
-            "-F",
-            "#{pane_id}\t#{window_id}\t#{pane_current_command}",
-        ])
-        .output();
+    let output = agent_doc_tmux_io::list_panes_all(
+        tmux,
+        "#{pane_id}\t#{window_id}\t#{pane_current_command}",
+    );
     let output = match output {
-        Ok(o) if o.status.success() => o,
+        Ok(output) => output,
         _ => return,
     };
 
     // Group panes by window
     let mut window_panes: std::collections::HashMap<String, Vec<(String, String)>> =
         std::collections::HashMap::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    for line in output.lines() {
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
         if parts.len() < 3 {
             continue;
@@ -1001,7 +961,7 @@ mod tests {
             &script.display().to_string(),
             std::time::Duration::from_secs(3),
         );
-        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             dir.path(),
             "super-live-bulk",
             move |method| match method {
@@ -1030,7 +990,7 @@ mod tests {
 
         let windows = fetch_all_window_metadata(&iso);
         let panes = fetch_all_pane_metadata(&iso);
-        let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(dir.path());
+        let live_supervisors = agent_doc_supervisor_io::ipc::active_supervisor_pids(dir.path());
         purge_unregistered_stash_panes_bulk_with_supervisors(
             &iso,
             &windows,
@@ -1063,7 +1023,7 @@ mod tests {
             &script.display().to_string(),
             std::time::Duration::from_secs(3),
         );
-        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             &child_root,
             "super-live-cross-root",
             move |method| match method {

@@ -2,46 +2,23 @@
 
 use super::*;
 use agent_doc_document_realtime::write_policy::{
-    SnapshotPersistMode, content_ours_drops_operator_text, snapshot_content_to_persist,
-    snapshot_persist_mode, snapshot_persist_mode_with_current,
+    SnapshotPersistMode, committed_snapshot_union_excluding_carry_forward,
+    snapshot_content_to_persist, snapshot_persist_mode, snapshot_persist_mode_with_current,
 };
 use agent_doc_element_exchange::extract_normalization_targets;
 use agent_doc_frontmatter::frontmatter::content_uses_crdt_write;
+use agent_doc_queue_io::queue_consumption_proof::QueueConsumptionProofStage;
 use agent_doc_template::response_materialization::sanitize_template_patchback_response;
 use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;
 use agent_doc_template_io as template_io;
 
-/// `#qftlossdelta` safety net: when the operator-wins merge selects `ContentOurs`
-/// and doing so would drop operator-authored exchange text present in
-/// `final_content` but not in `content_ours`, persist `final_content` to a durable
-/// recovery sidecar so the concurrent operator text is recoverable instead of
-/// silently lost. Purely additive — it never changes the merge decision, it only
-/// guarantees a recoverable artifact at the one point where operator text could
-/// otherwise vanish. Best-effort: a sidecar write failure is warned, never fatal.
-fn preserve_dropped_operator_buffer_if_needed(
-    file: &Path,
-    mode: SnapshotPersistMode,
-    baseline: Option<&str>,
-    content_ours: &str,
-    final_content: &str,
-) {
-    if mode != SnapshotPersistMode::ContentOurs {
-        return;
-    }
-    if !content_ours_drops_operator_text(baseline.unwrap_or(""), final_content, content_ours) {
-        return;
-    }
-    match agent_doc_fs::preserve_dropped_operator_buffer(file, final_content) {
-        Ok(path) => eprintln!(
-            "[agent-doc] #qftlossdelta: operator-wins merge chose the agent candidate over a differing operator buffer; preserved the dropped buffer to recovery sidecar {}",
-            path.display()
-        ),
-        Err(err) => eprintln!(
-            "[agent-doc] warning: failed to preserve dropped operator buffer for {}: {err}",
-            file.display()
-        ),
-    }
-}
+// Deeper root cause A superseded the interim `#qftlossdelta` recovery-sidecar
+// safety net (`preserve_dropped_operator_buffer_if_needed`): the committed
+// snapshot is now the full union minus carry-forward prompts
+// (`committed_snapshot_union_excluding_carry_forward`), so operator edits are
+// retained in-place and never need after-the-fact recovery. The pure detector
+// `content_ours_drops_operator_text` and `agent_doc_fs::preserve_dropped_operator_buffer`
+// remain available for diagnostics.
 
 /// Run the write command: append assistant response to document.
 ///
@@ -111,7 +88,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         content_ours.clone()
     } else {
         eprintln!("[write] File was modified during response generation. Merging...");
-        merge::merge_contents(base, &content_ours, &content_current)?
+        agent_doc_merge_io::merge_contents(base, &content_ours, &content_current)?
     };
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
@@ -137,13 +114,21 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     );
     let snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
-    preserve_dropped_operator_buffer_if_needed(
-        file,
-        snapshot_mode,
-        baseline,
-        &content_ours,
-        &final_content,
-    );
+    // Deeper root cause A: when the merge would commit `content_ours` (to carry a
+    // concurrently-typed prompt forward), commit the full union instead — the
+    // on-disk `final_content` (agent response + operator edits) minus only the
+    // carry-forward prompt lines. Operator edits are never lost (#qftlossdelta) and
+    // the new prompt still stays uncommitted on disk for the next cycle (#fintol/#pcwc).
+    let snapshot_content = if snapshot_mode == SnapshotPersistMode::ContentOurs {
+        committed_snapshot_union_excluding_carry_forward(
+            base,
+            &content_ours,
+            &content_current,
+            &final_content,
+        )
+    } else {
+        snapshot_content.to_string()
+    };
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
@@ -166,7 +151,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         &content_current,
         Some(&final_content),
     )?;
-    snapshot::save(file, snapshot_content)?;
+    agent_doc_snapshot_io::save(file, &snapshot_content, crate::ops_log::log_op)?;
 
     atomic_write(file, &final_content)?;
 
@@ -233,7 +218,7 @@ pub fn run_template(
 
     let mut current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let snapshot_doc = snapshot::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     guard_no_stale_snapshot_reset_drift(
         file,
         snapshot_doc.as_deref(),
@@ -245,8 +230,12 @@ pub fn run_template(
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     // Parse and validate patchback shape before any visible document mutation.
-    let parsed =
-        crate::flow::document_mutation::parse_template_patchback(file, &response, "run_template")?;
+    let parsed = agent_doc_template_io::parse_template_patchback(
+        file,
+        &response,
+        "run_template",
+        crate::ops_log::log_op,
+    )?;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
 
@@ -315,7 +304,7 @@ pub fn run_template(
         strict_closeout: flags.strict_closeout,
     })?;
     let base = base_cow.as_ref();
-    let snapshot_doc = snapshot::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
 
     // Apply patches to baseline
     let content_ours = template_io::apply_patches_with_overrides_with_project_config(
@@ -355,7 +344,7 @@ pub fn run_template(
             content_ours.clone()
         } else {
             eprintln!("[write] File was modified during response generation. Merging...");
-            merge::merge_contents(base, &content_ours, content_current)?
+            agent_doc_merge_io::merge_contents(base, &content_ours, content_current)?
         };
         let mut final_content = normalize_final_template_content(
             file,
@@ -438,13 +427,21 @@ pub fn run_template(
     };
     let snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
-    preserve_dropped_operator_buffer_if_needed(
-        file,
-        snapshot_mode,
-        baseline,
-        &content_ours,
-        &final_content,
-    );
+    // Deeper root cause A: when the merge would commit `content_ours` (to carry a
+    // concurrently-typed prompt forward), commit the full union instead — the
+    // on-disk `final_content` (agent response + operator edits) minus only the
+    // carry-forward prompt lines. Operator edits are never lost (#qftlossdelta) and
+    // the new prompt still stays uncommitted on disk for the next cycle (#fintol/#pcwc).
+    let snapshot_content = if snapshot_mode == SnapshotPersistMode::ContentOurs {
+        committed_snapshot_union_excluding_carry_forward(
+            base,
+            &content_ours,
+            &content_current,
+            &final_content,
+        )
+    } else {
+        snapshot_content.to_string()
+    };
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
@@ -462,7 +459,7 @@ pub fn run_template(
         &unmatched,
     );
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
-    snapshot::save(file, snapshot_content)?;
+    agent_doc_snapshot_io::save(file, &snapshot_content, crate::ops_log::log_op)?;
 
     // `#fcc0`: template (non-CRDT) mode must converge through the editor path;
     // if editor convergence is unavailable or unproven, fail closed instead of
@@ -549,14 +546,14 @@ pub fn run_stream(
 
     let mut current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let mut snapshot_doc = snapshot::load(file).ok().flatten();
+    let mut snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     if guard_no_stale_snapshot_reset_drift(
         file,
         snapshot_doc.as_deref(),
         &current_content,
         "stream write",
     )? {
-        snapshot_doc = snapshot::load(file).ok().flatten();
+        snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     }
     sanitize_template_patchback_response(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
@@ -572,8 +569,12 @@ pub fn run_stream(
     }
 
     // Parse and validate patchback shape before any visible document mutation.
-    let parsed =
-        crate::flow::document_mutation::parse_template_patchback(file, &response, "run_stream")?;
+    let parsed = agent_doc_template_io::parse_template_patchback(
+        file,
+        &response,
+        "run_stream",
+        crate::ops_log::log_op,
+    )?;
     let parsed_marker_count = parsed.marker_count;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
@@ -667,7 +668,7 @@ pub fn run_stream(
     // Try IPC when plugin is installed and --force-disk is not set
     if !force_disk {
         let canonical = file.canonicalize()?;
-        let project_root = resolve_ipc_project_root(&canonical);
+        let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
         let patches_dir = project_root.join(".agent-doc/patches");
 
         // `#ipc-degraded-prefers-file-ipc`: always route through `try_ipc` when
@@ -724,7 +725,7 @@ pub fn run_stream(
             // that the baseline's corresponding component contains the snapshot content.
             // This handles user edits anywhere in the document (not just appended at end).
             if baseline.is_none()
-                && let Ok(Some(current_snap)) = snapshot::load(file)
+                && let Ok(Some(current_snap)) = agent_doc_snapshot_io::load(file)
                 && is_stale_baseline(base, &current_snap)
             {
                 eprintln!(
@@ -830,7 +831,13 @@ pub fn run_stream(
                 // Fire post_write hook for cross-session coordination
                 let session_id =
                     agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_default();
-                crate::hooks::fire_post_write(file, &session_id, patches.len());
+                let hook_effects = crate::post_response_hook_effects();
+                agent_doc_hooks_io::fire_post_write_with_effects(
+                    &hook_effects,
+                    file,
+                    &session_id,
+                    patches.len(),
+                );
                 agent_doc_hooks_io::fire_doc_event(file, "post_write");
                 drop(doc_lock);
                 repair::clear_pending(file)?;
@@ -860,7 +867,7 @@ pub fn run_stream(
     // When --force-disk is set, clean up any pending IPC patch files to prevent
     // the plugin from applying them later (which would cause double-write).
     if force_disk && let Ok(canonical) = file.canonicalize() {
-        let project_root = resolve_ipc_project_root(&canonical);
+        let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
         let patches_dir = project_root.join(".agent-doc/patches");
         if let Ok(hash) = agent_doc_fs::document_state_hash(file) {
             let patch_file = patches_dir.join(format!("{}.json", hash));
@@ -971,15 +978,22 @@ pub fn run_stream(
             // from, giving clean diffs. Using a stale stored state causes character-level
             // interleaving when the agent replaces component content while the user
             // appends within the same region (lazily-rs.md corruption bug).
-            let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
+            let base_state = agent_doc_snapshot_io::crdt_merge_base_state_with(
+                file,
+                base,
+                agent_doc_op_capture_io::has_pending_editor_ops,
+                crate::ops_log::log_op,
+            )?
+            .state;
             // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
             // Prefer the editor's real captured ops over the diff-guess when aligned
             // (#qnodemerge4wire); inert (byte-identical) until the editor reporters land.
-            match merge::merge_contents_crdt_with_ops(
+            match agent_doc_merge_io::merge_contents_crdt_with_ops(
                 file,
                 Some(&base_state),
                 &content_ours,
                 content_current,
+                crate::ops_log::log_op,
             ) {
                 Ok(merged) => merged,
                 Err(e) => {
@@ -1080,15 +1094,19 @@ pub fn run_stream(
         )
     };
     let mut final_content = final_content;
-    let mut snapshot_content =
-        snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content).to_string();
-    preserve_dropped_operator_buffer_if_needed(
-        file,
-        snapshot_mode,
-        baseline,
-        &content_ours,
-        &final_content,
-    );
+    // Deeper root cause A (see run_template/run_inline): commit the union minus
+    // carry-forward prompts rather than bare content_ours, so operator edits are
+    // never lost while the concurrently-typed prompt still carries forward.
+    let mut snapshot_content = if snapshot_mode == SnapshotPersistMode::ContentOurs {
+        committed_snapshot_union_excluding_carry_forward(
+            base,
+            &content_ours,
+            &content_current,
+            &final_content,
+        )
+    } else {
+        snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content).to_string()
+    };
     let integrated_queue_plan = if flags.queue_completion_ids.is_empty() {
         None
     } else {
@@ -1123,8 +1141,8 @@ pub fn run_stream(
         &unmatched,
     );
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
-    snapshot::save(file, &snapshot_content)?;
-    snapshot::save_document_crdt(file, &snapshot_crdt_state, &snapshot_content)?;
+    agent_doc_snapshot_io::save(file, &snapshot_content, crate::ops_log::log_op)?;
+    agent_doc_merge_io::save_document_crdt(file, &snapshot_crdt_state, &snapshot_content)?;
 
     atomic_write(file, &final_content)?;
     if let Some(plan) = integrated_queue_plan.as_ref() {
@@ -1236,7 +1254,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let disk = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let mut current_content = crate::realtime_model::resolve_current_doc(file, &disk).content;
-    let snapshot_doc = snapshot::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     guard_no_stale_snapshot_reset_drift(
         file,
         snapshot_doc.as_deref(),
@@ -1247,8 +1265,12 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Parse and validate patchback shape before any visible document mutation.
-    let parsed =
-        crate::flow::document_mutation::parse_template_patchback(file, &response, "run_ipc")?;
+    let parsed = agent_doc_template_io::parse_template_patchback(
+        file,
+        &response,
+        "run_ipc",
+        crate::ops_log::log_op,
+    )?;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
 
@@ -1301,7 +1323,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     // Build IPC patch file
     let canonical = file.canonicalize()?;
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let project_root = resolve_ipc_project_root(&canonical);
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let patches_dir = project_root.join(".agent-doc/patches");
     std::fs::create_dir_all(&patches_dir)?;
     let patch_file = patches_dir.join(format!("{}.json", hash));
@@ -1425,7 +1447,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 consumed_without_materialization = true;
                 break;
             }
-            snapshot::save(file, &content)?;
+            agent_doc_snapshot_io::save(file, &content, crate::ops_log::log_op)?;
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -1446,7 +1468,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 &unmatched,
             );
             let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&content);
-            snapshot::save_document_crdt(file, &crdt_doc.encode_state(), &content)?;
+            agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), &content)?;
             drop(doc_lock);
             repair::clear_pending(file)?;
             eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
@@ -1542,25 +1564,32 @@ fn merge_recovery_content(
                 source
             ),
         );
-        let base_state = snapshot::crdt_merge_base_state(file, base)?.state;
-        let (merged, _) = merge::merge_contents_crdt_with_ops(
+        let base_state = agent_doc_snapshot_io::crdt_merge_base_state_with(
+            file,
+            base,
+            agent_doc_op_capture_io::has_pending_editor_ops,
+            crate::ops_log::log_op,
+        )?
+        .state;
+        let (merged, _) = agent_doc_merge_io::merge_contents_crdt_with_ops(
             file,
             Some(&base_state),
             content_ours,
             content_current,
+            crate::ops_log::log_op,
         )
         .with_context(|| format!("CRDT merge failed during {source}"))?;
         Ok(merged)
     } else {
-        merge::merge_contents(base, content_ours, content_current)
+        agent_doc_merge_io::merge_contents(base, content_ours, content_current)
     }
 }
 
 fn save_recovery_snapshot(file: &Path, content: &str, use_crdt: bool) -> Result<()> {
-    snapshot::save(file, content)?;
+    agent_doc_snapshot_io::save(file, content, crate::ops_log::log_op)?;
     if use_crdt {
         let doc = agent_doc_merge::crdt::CrdtDoc::from_text(content);
-        snapshot::save_document_crdt(file, &doc.encode_state(), content)?;
+        agent_doc_merge_io::save_document_crdt(file, &doc.encode_state(), content)?;
     }
     Ok(())
 }
@@ -1634,10 +1663,11 @@ pub fn apply_template_from_string_with_options(
     let mut response = response.to_string();
     sanitize_template_patchback_response(&mut response)?;
 
-    let parsed = crate::flow::document_mutation::parse_template_patchback(
+    let parsed = agent_doc_template_io::parse_template_patchback(
         file,
         &response,
         "apply_template_from_string",
+        crate::ops_log::log_op,
     )?;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
@@ -1656,7 +1686,7 @@ pub fn apply_template_from_string_with_options(
     enforce_no_destructive_todo_patch(&content, &patches)?;
 
     let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);
-    let snapshot_doc = snapshot::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     let content_ours = template_io::apply_patches_with_overrides_with_project_config(
         &content,
         &patches,
@@ -1771,7 +1801,7 @@ mod tests {
             "<!-- /agent:pending -->\n",
         );
         fs::write(&doc, current_content).unwrap();
-        snapshot::save(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
 
         let response = "<!-- patch:exchange -->\nCompacted summary.\n<!-- /patch:exchange -->\n";
         apply_template_from_string_with_options(
@@ -1807,7 +1837,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current_content).unwrap();
-        snapshot::save(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -1884,7 +1914,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let response = concat!(
             "I am checking the write path and existing replay guard before editing.\n",
@@ -1950,7 +1980,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         // Operator pipes the raw template form (component markers) instead of
         // `<!-- patch:exchange -->` blocks — this is the shape that previously

@@ -32,7 +32,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use agent_doc_element::element;
-use agent_doc_orchestration::{snapshot, write};
+use agent_doc_orchestration::write;
 
 pub fn run(files: &[PathBuf], all: bool, dry_run: bool) -> Result<()> {
     let targets = if all {
@@ -75,7 +75,7 @@ pub fn run(files: &[PathBuf], all: bool, dry_run: bool) -> Result<()> {
         }
 
         write::atomic_write_pub(file, &result)?;
-        snapshot::save(file, &result)?;
+        agent_doc_snapshot_io::save(file, &result, agent_doc_orchestration::ops_log::log_op)?;
         eprintln!("[migrate] migrated: {}", file.display());
         migrated += 1;
     }

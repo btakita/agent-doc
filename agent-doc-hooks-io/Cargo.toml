@@ -1,0 +1,19 @@
+[package]
+name = "agent-doc-hooks-io"
+version = "0.34.67"
+edition = "2024"
+description = "Hook registry and document-hook I/O adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_hooks_io"
+
+[dependencies]
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.67" }
+agent-kit = { version = "0.4.1", features = ["hooks"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

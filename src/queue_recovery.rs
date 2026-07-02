@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use agent_doc_element::element;
-use agent_doc_orchestration::snapshot;
 use agent_doc_queue::document_queue as queue;
 
 const QUEUE_COMPONENT: &str = "queue";
@@ -246,7 +245,7 @@ fn print_human_report(report: &LostQueueReport) {
 }
 
 fn collect_snapshot_sources(file: &Path, sources: &mut Vec<QueueSource>) {
-    if let Ok(Some(content)) = snapshot::load(file) {
+    if let Ok(Some(content)) = agent_doc_snapshot_io::load(file) {
         sources.push(QueueSource {
             name: "snapshot".to_string(),
             content,

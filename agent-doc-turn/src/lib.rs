@@ -19,6 +19,7 @@ pub mod heuristics;
 pub mod no_change;
 pub mod op_log;
 pub mod owner_pane_recursion;
+pub mod repair;
 pub mod response_replay;
 pub mod response_text;
 pub mod turn_scope;

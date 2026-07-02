@@ -188,42 +188,42 @@
 use anyhow::{Context, Result};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fs::{File, OpenOptions};
+#[cfg(test)]
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
-use agent_doc_controller::command_line::{
-    agent_doc_cmdline_is_owner, cmdline_owns_other_document, owner_document_from_cmdline,
-};
 use agent_doc_controller::dispatch::is_stash_window_name;
-use agent_doc_element::element;
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 #[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_supervisor::startup_miss::unresolved_startup_miss_blocks_autostart;
 use agent_doc_sync::{
-    AutoStartMode, RENAME_DEBOUNCE_TTL_SECS, STALE_SYNC_LOCK_OWNER_AGE,
-    SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET, SYNC_LOCK_POLL_INTERVAL, SYNC_LOCK_WAIT_BUDGET,
-    SYNC_LOCK_WAIT_LATENCY_BUDGET, SYNC_OWNERSHIP_PROOF_BUDGET, SYNC_PRELOCK_ACTOR_FOCUS_BUDGET,
-    SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET, SYNC_PRUNE_SUBPHASE_BUDGET,
-    SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET, SYNC_WINDOW_RESOLUTION_BUDGET,
-    WindowIndexNormalizationPlan, auto_started_panes_summary, effective_sync_columns,
-    epoch_millis_now, is_file_rename, last_visible_excerpt, latency_budget_status,
-    plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
-    rename_debounce_expired, safe_passive_prune_cleanup_throttle, sanitize_excerpt,
-    sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
+    AutoStartMode, RENAME_DEBOUNCE_TTL_SECS, SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
+    SYNC_LOCK_WAIT_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET, SYNC_OWNERSHIP_PROOF_BUDGET,
+    SYNC_PRELOCK_ACTOR_FOCUS_BUDGET, SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET,
+    SYNC_PRUNE_SUBPHASE_BUDGET, SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
+    SYNC_WINDOW_RESOLUTION_BUDGET, WindowIndexNormalizationPlan, auto_started_panes_summary,
+    effective_sync_columns, epoch_millis_now, is_file_rename, last_visible_excerpt,
+    latency_budget_status, plan_window_index_normalization, planned_stash_window_indices,
+    registry_relative_file_path, rename_debounce_expired, safe_passive_prune_cleanup_throttle,
+    sanitize_excerpt, sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
 };
+#[cfg(test)]
+use agent_doc_sync_io::SyncLockAcquire;
+use agent_doc_sync_io::acquire_sync_lock;
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
     associated_pane_candidates_detail, auto_start_candidate_files, parse_pane_inventory_line,
     projected_sync_pane_count, resolve_associated_panes,
 };
+use agent_doc_tmux_io::pane_project_root;
 use tmux_router::{PaneMoveOp, Tmux};
 
 use agent_doc_frontmatter::frontmatter;
 
-use crate::{frontmatter_io, resync, route, sessions, snapshot};
+use crate::{resync, route, sessions};
 
 use tmux_router::FileResolution;
 
@@ -233,9 +233,6 @@ mod layout;
 pub(crate) use layout::*;
 mod pane_repair;
 pub(crate) use pane_repair::*;
-
-mod lock;
-pub(crate) use lock::*;
 
 fn log_sync_latency(
     focus: Option<&str>,
@@ -264,8 +261,24 @@ fn log_sync_latency(
     }
 }
 
-mod frontmatter_status;
-pub(crate) use frontmatter_status::*;
+fn parse_frontmatter_for_sync<'a>(
+    content: &'a str,
+    file: &Path,
+    phase: &str,
+) -> Result<(frontmatter::Frontmatter, &'a str)> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    agent_doc_frontmatter_io::session::parse_for_file_with_context(content, file, &rc.ssh_context())
+        .map_err(|err| anyhow::anyhow!("sync {} frontmatter: {}", phase, err))
+}
+
+fn save_sync_status_snapshot(file: &Path, updated: &str) -> Result<()> {
+    agent_doc_snapshot_io::save(file, updated, crate::ops_log::log_op)
+}
+
+fn log_sync_status(message: String) {
+    eprintln!("{}", message);
+    sync_log(&message);
+}
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct MissingRegisteredPaneRepair {
@@ -273,7 +286,7 @@ pub(crate) struct MissingRegisteredPaneRepair {
     recorded_session_loss: bool,
     repaired_stale_preflight: bool,
     closeout_recovery_phase: Option<String>,
-    closeout_recovery_outcome: Option<crate::repair::RepairOutcome>,
+    closeout_recovery_outcome: Option<agent_doc_turn::repair::RepairOutcome>,
     closeout_recovery_error: Option<String>,
     block_auto_start_reason: Option<String>,
 }
@@ -377,7 +390,7 @@ pub fn repair_file_state_with_tmux(tmux: &Tmux, file: &Path) -> Result<Vec<Strin
             actions.push(format!(
                 "Recovered `{phase}` closeout for `{}` ({}) before replacement logic resumes.",
                 canonical.display(),
-                repair_outcome_label(outcome)
+                outcome.as_str()
             ));
         } else if let Some(err) = repair.closeout_recovery_error.as_deref() {
             actions.push(format!(
@@ -397,7 +410,9 @@ pub fn repair_file_state_with_tmux(tmux: &Tmux, file: &Path) -> Result<Vec<Strin
 }
 
 fn skip_auto_start_for_recent_session_loss(file: &Path, session_id: &str) -> Result<bool> {
-    let Some(window) = crate::startup_miss::recent_session_loss_window(file, session_id)? else {
+    let Some(window) =
+        agent_doc_supervisor_io::startup_miss::recent_session_loss_window(file, session_id)?
+    else {
         return Ok(false);
     };
 
@@ -543,7 +558,7 @@ fn load_live_authoritative_actor_record_uncached(
         .canonicalize()
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
-    let base_dir = agent_doc_fs::find_project_root(&canonical)?;
+    let base_dir = agent_doc_project_root_io::project_root_containing(&canonical)?;
     let record = crate::project_controller::authoritative_actor_binding(&base_dir, &canonical)
         .ok()
         .flatten()?;
@@ -717,7 +732,7 @@ fn passive_autostart_skip_reason(
     session_id: &str,
     unresolved_startup_miss: Option<&agent_doc_supervisor::startup_miss::StartupMiss>,
 ) -> Result<Option<String>> {
-    let status = crate::startup_miss::session_log_status(file, session_id)?;
+    let status = agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)?;
     let live_registry_rebind_successor = status
         .as_ref()
         .and_then(agent_doc_supervisor::startup_miss::latest_registry_rebind_successor)
@@ -738,13 +753,14 @@ fn open_session_log_owner_fail_closed_diagnostic(
     session_id: &str,
     pane_id: &str,
 ) -> Result<Option<String>> {
-    let Some(status) = crate::startup_miss::session_log_status(file, session_id)? else {
+    let Some(status) = agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)?
+    else {
         return Ok(None);
     };
     if status.latest_start_pane.as_deref() != Some(pane_id) || !status.latest_session_open() {
         return Ok(None);
     }
-    crate::startup_miss::session_log_diagnostic(file, session_id)
+    agent_doc_supervisor_io::startup_miss::session_log_diagnostic(file, session_id)
 }
 
 #[cfg(test)]
@@ -777,7 +793,7 @@ fn rescue_missing_agent_doc_window_from_candidates(
         );
         if tmux.break_pane(pane).is_ok() {
             if let Ok(new_win) = tmux.pane_window(pane) {
-                let _ = tmux.raw_cmd(&["rename-window", "-t", &new_win, target_window_name]);
+                let _ = agent_doc_tmux_io::rename_window(tmux, &new_win, target_window_name);
                 eprintln!(
                     "[sync] recreated window {} as {}",
                     new_win, target_window_name
@@ -812,13 +828,11 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
         "sync::repair_layout start"
     );
     // List all windows in the session: window_id, window_name, pane count
-    let output = tmux.raw_cmd(&[
-        "list-windows",
-        "-t",
-        &format!("{}:", session_name),
-        "-F",
+    let output = agent_doc_tmux_io::list_windows(
+        tmux,
+        Some(&format!("{}:", session_name)),
         "#{window_id} #{window_name} #{window_panes}",
-    ]);
+    );
     let window_list = match output {
         Ok(s) => s,
         Err(e) => {
@@ -930,7 +944,7 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                 let panes = tmux.list_window_panes(sec_id).unwrap_or_default();
                 for pane in &panes {
                     // Resize stash to 1000 rows before each join to prevent "too small"
-                    let _ = tmux.raw_cmd(&["resize-window", "-t", &primary_id, "-y", "1000"]);
+                    let _ = agent_doc_tmux_io::resize_window_height(tmux, &primary_id, "1000");
 
                     // Find the largest pane in primary stash as join target
                     let target = tmux.largest_pane_in_window(&primary_id).unwrap_or_else(|| {
@@ -980,7 +994,7 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                 let remaining = tmux.list_window_panes(sec_id).unwrap_or_default();
                 if remaining.is_empty() {
                     // Window should have auto-deleted, but try to kill just in case
-                    let _ = tmux.raw_cmd(&["kill-window", "-t", sec_id]);
+                    let _ = agent_doc_tmux_io::kill_window(tmux, sec_id);
                     eprintln!("[repair] killed empty stash window {}", sec_id);
                 } else {
                     normalize_stash_window_name(tmux, sec_id);
@@ -1004,7 +1018,7 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
 
             // Load the registry and find a same-session stashed pane we can
             // safely break back out into a visible agent-doc window.
-            if let Ok(registry) = sessions::load() {
+            if let Ok(registry) = agent_doc_session_registry_io::load() {
                 let mut rescued = false;
                 for entry in registry.values() {
                     if !tmux.pane_alive(&entry.pane) {
@@ -1013,7 +1027,8 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                     if tmux.pane_session(&entry.pane).ok().as_deref() != Some(session_name) {
                         continue;
                     }
-                    let Ok(window_id) = tmux.pane_window(&entry.pane) else {
+                    let Some(window_id) = agent_doc_tmux_io::target_window_id(tmux, &entry.pane)
+                    else {
                         continue;
                     };
                     let Some(window_name) = window_name_for_window_id(tmux, &window_id) else {
@@ -1026,7 +1041,9 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                     eprintln!("[repair] rescuing pane {} from {}", entry.pane, window_name);
                     match tmux.break_pane(&entry.pane) {
                         Ok(()) => {
-                            if let Ok(new_win) = tmux.pane_window(&entry.pane) {
+                            if let Some(new_win) =
+                                agent_doc_tmux_io::target_window_id(tmux, &entry.pane)
+                            {
                                 let _ = tmux.raw_cmd(&[
                                     "rename-window",
                                     "-t",
@@ -1156,30 +1173,17 @@ fn consolidate_duplicate_target_windows(tmux: &Tmux, session_name: &str, target_
             .unwrap_or_default()
             .is_empty()
         {
-            let _ = tmux.raw_cmd(&["kill-window", "-t", &duplicate_window]);
+            let _ = agent_doc_tmux_io::kill_window(tmux, &duplicate_window);
         }
     }
 }
 
 fn normalize_stash_window_name(tmux: &Tmux, window_id: &str) {
-    let _ = tmux.raw_cmd(&["rename-window", "-t", window_id, "stash"]);
+    let _ = agent_doc_tmux_io::rename_window(tmux, window_id, "stash");
 }
 
 fn sync_log(msg: &str) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/agent-doc-sync.log")
-    {
-        let ts = agent_doc_log_time::format_log_timestamp(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
-        );
-        let _ = writeln!(f, "[{}] {}", ts, msg);
-    }
+    agent_doc_sync_io::append_sync_log(msg);
 }
 
 /// Check the per-server-per-session destructive-repair stamp. Returns `true`
@@ -1226,13 +1230,7 @@ fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
 }
 
 fn session_name_for_target_window(tmux: &Tmux, window: &str) -> Option<String> {
-    tmux.cmd()
-        .args(["display-message", "-t", window, "-p", "#{session_name}"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|name| !name.is_empty())
+    agent_doc_tmux_io::target_session_name(tmux, window)
 }
 
 fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
@@ -1331,15 +1329,12 @@ fn resolve_agent_doc_window_id(
     session_name: &str,
     target_window_name: &str,
 ) -> Option<String> {
-    let listing = tmux
-        .raw_cmd(&[
-            "list-windows",
-            "-t",
-            &format!("{}:", session_name),
-            "-F",
-            "#{window_id} #{window_name}",
-        ])
-        .ok()?;
+    let listing = agent_doc_tmux_io::list_windows(
+        tmux,
+        Some(&format!("{}:", session_name)),
+        "#{window_id} #{window_name}",
+    )
+    .ok()?;
     listing.lines().find_map(|line| {
         let mut parts = line.splitn(2, ' ');
         match (parts.next(), parts.next()) {
@@ -1352,13 +1347,7 @@ fn resolve_agent_doc_window_id(
 }
 
 fn window_name_for_window_id(tmux: &Tmux, window_id: &str) -> Option<String> {
-    tmux.cmd()
-        .args(["display-message", "-t", window_id, "-p", "#{window_name}"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|name| !name.is_empty())
+    agent_doc_tmux_io::target_window_name(tmux, window_id)
 }
 
 fn target_is_agent_doc_window(tmux: &Tmux, target: &str) -> bool {
@@ -1377,7 +1366,7 @@ fn target_is_agent_doc_window(tmux: &Tmux, target: &str) -> bool {
 /// in/out transition. Best-effort: an unresolved window returns `false` so the
 /// caller falls back to selecting in place.
 pub fn pane_in_stash_window(tmux: &Tmux, pane_id: &str) -> bool {
-    let Ok(window_id) = tmux.pane_window(pane_id) else {
+    let Some(window_id) = agent_doc_tmux_io::target_window_id(tmux, pane_id) else {
         return false;
     };
     match window_name_for_window_id(tmux, &window_id) {
@@ -1403,7 +1392,7 @@ pub fn promote_pane_to_agent_doc_window(tmux: &Tmux, pane_id: &str) -> Result<bo
     if !tmux.pane_alive(pane_id) {
         return Ok(false);
     }
-    let Ok(window_id) = tmux.pane_window(pane_id) else {
+    let Some(window_id) = agent_doc_tmux_io::target_window_id(tmux, pane_id) else {
         return Ok(false);
     };
     let Some(window_name) = window_name_for_window_id(tmux, &window_id) else {
@@ -1467,8 +1456,8 @@ pub fn promote_pane_to_agent_doc_window(tmux: &Tmux, pane_id: &str) -> Result<bo
             pane_id, window_name
         ));
         if tmux.break_pane(pane_id).is_ok() {
-            if let Ok(new_win) = tmux.pane_window(pane_id) {
-                let _ = tmux.raw_cmd(&["rename-window", "-t", &new_win, "agent-doc"]);
+            if let Some(new_win) = agent_doc_tmux_io::target_window_id(tmux, pane_id) {
+                let _ = agent_doc_tmux_io::rename_window(tmux, &new_win, "agent-doc");
             }
             eprintln!(
                 "[focus] promoted live-owner pane {} from {} into a new agent-doc window",
@@ -1490,13 +1479,11 @@ pub fn promote_pane_to_agent_doc_window(tmux: &Tmux, pane_id: &str) -> Result<bo
 }
 
 fn list_session_windows(tmux: &Tmux, session_name: &str) -> Vec<(String, String, String)> {
-    let Ok(output) = tmux.raw_cmd(&[
-        "list-windows",
-        "-t",
-        &format!("{}:", session_name),
-        "-F",
+    let Ok(output) = agent_doc_tmux_io::list_windows(
+        tmux,
+        Some(&format!("{}:", session_name)),
         "#{window_index} #{window_id} #{window_name}",
-    ]) else {
+    ) else {
         return Vec::new();
     };
     agent_doc_tmux::parse_session_windows(&output)
@@ -1523,7 +1510,7 @@ fn normalize_window_to_index(
                 "{}_action=swap-window src={} dst={} session={} src_name={} dst_name={}",
                 log_prefix, current_index, desired_index, session_name, current_name, occupant_name
             ));
-            let result = tmux.raw_cmd(&["swap-window", "-s", window_id, "-t", &occupant_id]);
+            let result = agent_doc_tmux_io::swap_window(tmux, window_id, &occupant_id);
             sync_log(&format!(
                 "{}_result=swap-window ok={} src={} dst={}",
                 log_prefix,
@@ -1644,7 +1631,12 @@ fn run_with_options_internal(
         SYNC_LOCK_WAIT_BUDGET
     };
     let sync_lock_start = Instant::now();
-    let lock_guard = acquire_sync_lock(lock_path, sync_lock_wait_budget);
+    let lock_guard = acquire_sync_lock(lock_path, sync_lock_wait_budget, |message| {
+        if message.starts_with("[sync] stale_sync_lock_owner_reaped ") {
+            eprintln!("{}", message);
+        }
+        sync_log(&message);
+    });
     let sync_lock_elapsed = sync_lock_start.elapsed();
     log_sync_latency(
         focus,
@@ -1667,7 +1659,7 @@ fn run_with_options_internal(
     // Check for new build and clear stale caches
     check_build_stamp();
     if let Ok(cwd) = std::env::current_dir()
-        && let Some(project_root) = agent_doc_fs::find_project_root(&cwd)
+        && let Some(project_root) = agent_doc_project_root_io::project_root_containing(&cwd)
     {
         match crate::project_controller::close_stale_starting_actors_for_caller(
             &project_root,
@@ -1963,7 +1955,7 @@ fn run_with_options_internal(
         ));
     }
 
-    let registry_path = sessions::registry_path();
+    let registry_path = agent_doc_session_registry_io::registry_path();
     // Track session_id → file path for post-sync claim updates
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
     let blocked_unresolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
@@ -1994,7 +1986,8 @@ fn run_with_options_internal(
                 // Save snapshot BEFORE committing — git::commit() uses the snapshot
                 // to determine what to stage. Without this, the snapshot has stale
                 // content and the commit fails with a drift warning.
-                if let Err(e) = crate::snapshot::save(path, &scaffold) {
+                if let Err(e) = agent_doc_snapshot_io::save(path, &scaffold, crate::ops_log::log_op)
+                {
                     eprintln!(
                         "[sync] warning: failed to save scaffold snapshot for {}: {}",
                         path.display(),
@@ -2015,7 +2008,11 @@ fn run_with_options_internal(
         // Step 2: Ensure initialized (UUID + snapshot + git baseline).
         // For scaffolded files, this creates the snapshot and git tracking.
         // For files with agent_doc_format but no session, this assigns a UUID.
-        if let Err(e) = crate::snapshot::ensure_initialized(path) {
+        if let Err(e) = agent_doc_workflow_io::document_init::ensure_initialized(
+            path,
+            crate::git::commit,
+            crate::ops_log::log_op,
+        ) {
             eprintln!(
                 "[sync] warning: ensure_initialized failed for {}: {}",
                 path.display(),
@@ -2031,11 +2028,21 @@ fn run_with_options_internal(
                 let warning = format!("[sync] warning: {}", e);
                 eprintln!("{}", warning);
                 sync_log(&warning);
-                surface_frontmatter_status(path, "resolve_file", &e);
+                agent_doc_sync_io::surface_frontmatter_status_with(
+                    path,
+                    "resolve_file",
+                    &e,
+                    save_sync_status_snapshot,
+                    log_sync_status,
+                );
                 return None;
             }
         };
-        clear_frontmatter_status(path);
+        agent_doc_sync_io::clear_frontmatter_status_with(
+            path,
+            save_sync_status_snapshot,
+            log_sync_status,
+        );
 
         match fm.session {
             Some(ref key) => {
@@ -2106,11 +2113,21 @@ fn run_with_options_internal(
                     let warning = format!("[sync] warning: {}", e);
                     eprintln!("{}", warning);
                     sync_log(&warning);
-                    surface_frontmatter_status(file_path, "auto-start", &e);
+                    agent_doc_sync_io::surface_frontmatter_status_with(
+                        file_path,
+                        "auto-start",
+                        &e,
+                        save_sync_status_snapshot,
+                        log_sync_status,
+                    );
                     continue;
                 }
             };
-            clear_frontmatter_status(file_path);
+            agent_doc_sync_io::clear_frontmatter_status_with(
+                file_path,
+                save_sync_status_snapshot,
+                log_sync_status,
+            );
             let session_id = match fm.session {
                 Some(ref id) => id.clone(),
                 None => continue,
@@ -2128,7 +2145,10 @@ fn run_with_options_internal(
             let registered_pane = authoritative_actor_pane
                 .or_else(|| registered_entry.as_ref().map(|entry| entry.pane.clone()));
             if let Some((miss, supersession)) =
-                crate::startup_miss::take_superseded_startup_miss(file_path)?
+                agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(
+                    agent_doc_supervisor_io::startup_miss::session_registry_lookup(),
+                    file_path,
+                )?
             {
                 let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
                 eprintln!(
@@ -2147,7 +2167,10 @@ fn run_with_options_internal(
                     supersession.latest_start_timestamp
                 ));
             }
-            let unresolved_startup_miss = crate::startup_miss::load(file_path).ok().flatten();
+            let unresolved_startup_miss =
+                agent_doc_supervisor_io::startup_miss::load_startup_miss(file_path)
+                    .ok()
+                    .flatten();
 
             // Files with session UUIDs but no registry entry are auto-started.
             // The registry was likely pruned when the pane died. The user's intent
@@ -2225,7 +2248,7 @@ fn run_with_options_internal(
                     let reason = sanitize_excerpt(&diagnostic).unwrap_or_else(|| {
                         "latest open session-log owner still points to this pane".to_string()
                     });
-                    let _ = crate::startup_miss::append_session_log_event(
+                    let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
                         file_path,
                         &session_id,
                         &format!(
@@ -2267,7 +2290,7 @@ fn run_with_options_internal(
                     if let Some(excerpt) = protected.last_visible_excerpt.as_deref() {
                         event.push_str(&format!(" last_visible_excerpt={excerpt}"));
                     }
-                    let _ = crate::startup_miss::append_session_log_event(
+                    let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
                         file_path,
                         &session_id,
                         &event,
@@ -2298,23 +2321,14 @@ fn run_with_options_internal(
                         // Stashed panes are alive — don't rescue here. The reconciler's
                         // SWAP fast path handles 1-in/1-out atomically via swap-pane,
                         // avoiding the 3-pane bounce (rescue→reconcile→stash another).
-                        if let Ok(win_id) = tmux.pane_window(pane) {
-                            let win_name = tmux
-                                .cmd()
-                                .args(["display-message", "-t", &win_id, "-p", "#{window_name}"])
-                                .output()
-                                .ok()
-                                .filter(|o| o.status.success())
-                                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                                .unwrap_or_default();
-                            if win_name == "stash" || win_name.starts_with("stash-") {
-                                let pane_session = tmux
-                                    .cmd()
-                                    .args(["display-message", "-t", pane, "-p", "#{session_name}"])
-                                    .output()
-                                    .ok()
-                                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                        if let Some(win_id) = agent_doc_tmux_io::target_window_id(tmux, pane) {
+                            let win_name =
+                                agent_doc_tmux_io::target_window_name(tmux, &win_id)
                                     .unwrap_or_default();
+                            if win_name == "stash" || win_name.starts_with("stash-") {
+                                let pane_session =
+                                    agent_doc_tmux_io::target_session_name(tmux, pane)
+                                        .unwrap_or_default();
                                 let target_sess = context_session.as_deref().unwrap_or("");
                                 if !target_sess.is_empty() && pane_session != target_sess {
                                     eprintln!(
@@ -2608,14 +2622,14 @@ fn run_with_options_internal(
                                     phase,
                                     file_path.display(),
                                     pane,
-                                    repair_outcome_label(outcome)
+                                    outcome.as_str()
                                 );
                                 sync_log(&format!(
                                     "missing-pane closeout recovered file={} pane={} phase={} outcome={}",
                                     file_path.display(),
                                     pane,
                                     phase,
-                                    repair_outcome_label(outcome)
+                                    outcome.as_str()
                                 ));
                             } else if let Some(err) = repair.closeout_recovery_error.as_deref() {
                                 eprintln!(
@@ -2957,13 +2971,7 @@ fn run_with_options_internal(
 
         // Session health check: verify the session still exists after sync.
         // If the session was destroyed (e.g., all windows stashed), log a critical warning.
-        if let Ok(session) = tmux
-            .cmd()
-            .args(["display-message", "-t", w, "-p", "#{session_name}"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            && !session.is_empty()
-        {
+        if let Some(session) = agent_doc_tmux_io::target_session_name(tmux, w) {
             let session_alive = tmux
                 .cmd()
                 .args(["has-session", "-t", &session])
@@ -3044,7 +3052,11 @@ fn run_with_options_internal(
         );
     }
     if let Some(focus) = focus.map(str::trim).filter(|path| !path.is_empty()) {
-        crate::editor_route_errors::clear_for_success(Path::new(focus), "sync_success");
+        agent_doc_controller_io::editor_route_errors::clear_for_success(
+            Path::new(focus),
+            "sync_success",
+            crate::ops_log::log_op,
+        );
     }
 
     Ok(())
@@ -3100,7 +3112,7 @@ fn register_synced_files_with_cache(
         let Some((_, project_root, registry_key)) = registry_location_for_file(file_path) else {
             continue;
         };
-        let registry_root_matches = sessions::load_in(&project_root)
+        let registry_root_matches = agent_doc_session_registry_io::load_in(&project_root)
             .ok()
             .and_then(|registry| registry.get(&registry_key).cloned())
             .is_some_and(|entry| {
@@ -3153,11 +3165,14 @@ fn register_synced_files_with_cache(
             pane_id,
             proof_cache,
         );
-        let fail_closed_binding_guard = crate::startup_miss::load(file_path)
-            .ok()
-            .flatten()
-            .is_some()
-            || crate::startup_miss::recent_session_loss_window(file_path, session_id)
+        let fail_closed_binding_guard =
+            agent_doc_supervisor_io::startup_miss::load_startup_miss(file_path)
+                .ok()
+                .flatten()
+                .is_some()
+                || agent_doc_supervisor_io::startup_miss::recent_session_loss_window(
+                    file_path, session_id,
+                )
                 .ok()
                 .flatten()
                 .is_some();
@@ -3166,11 +3181,11 @@ fn register_synced_files_with_cache(
         else {
             continue;
         };
-        let registry_path = sessions::registry_path_in(&project_root);
+        let registry_path = agent_doc_session_registry_io::registry_path_in(&project_root);
         let Ok(_lock) = tmux_router::RegistryLock::acquire(&registry_path) else {
             continue;
         };
-        let Ok(mut registry) = sessions::load_in(&project_root) else {
+        let Ok(mut registry) = agent_doc_session_registry_io::load_in(&project_root) else {
             continue;
         };
         if fail_closed_binding_guard && !live_owner_matches {
@@ -3183,7 +3198,7 @@ fn register_synced_files_with_cache(
                     pane_id
                 );
                 registry.remove(&registry_key);
-                let _ = sessions::save_in(&project_root, &registry);
+                let _ = agent_doc_session_registry_io::save_in(&project_root, &registry);
             }
             eprintln!(
                 "[sync] refusing geometry-only pane assignment {} for {} while fail-closed recovery is active",
@@ -3221,7 +3236,7 @@ fn register_synced_files_with_cache(
                         pane_id
                     );
                     registry.remove(&registry_key);
-                    let _ = sessions::save_in(&project_root, &registry);
+                    let _ = agent_doc_session_registry_io::save_in(&project_root, &registry);
                 }
                 eprintln!(
                     "[sync] refusing duplicate pane assignment {} for {} (claims={}, acceptable={})",
@@ -3236,7 +3251,7 @@ fn register_synced_files_with_cache(
 
         let file_str = registry_relative_file_path(&project_root, &canonical_file);
         let pane_pid = pane_pid_from_tmux(tmux, pane_id).unwrap_or(std::process::id());
-        let window = tmux.pane_window(pane_id).unwrap_or_default();
+        let window = agent_doc_tmux_io::target_window_id(tmux, pane_id).unwrap_or_default();
         let cwd = project_root.to_string_lossy().to_string();
         let mut changed = false;
 
@@ -3311,7 +3326,7 @@ fn register_synced_files_with_cache(
         }
 
         if changed {
-            let _ = sessions::save_in(&project_root, &registry);
+            let _ = agent_doc_session_registry_io::save_in(&project_root, &registry);
         }
     }
 }
@@ -3328,16 +3343,8 @@ fn find_alive_pane_for_file_inner(
     excluded_pane: Option<&str>,
     log_hits: bool,
 ) -> Option<String> {
-    let output = tmux
-        .cmd()
-        .args(["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
+    let output = agent_doc_tmux_io::list_panes_all(tmux, "#{pane_id} #{pane_pid}").ok()?;
+    for line in output.lines() {
         let parts: Vec<&str> = line.splitn(2, ' ').collect();
         if parts.len() != 2 {
             continue;
@@ -3348,34 +3355,27 @@ fn find_alive_pane_for_file_inner(
             continue;
         }
 
-        // Check the pane's process and its children for agent-doc + file_path
-        if pid_has_agent_doc_for_file(pid_str, file_path) {
-            if log_hits {
-                eprintln!(
-                    "[sync] found alive agent-doc pane {} (pid {}) for {}",
-                    pane_id, pid_str, file_path
-                );
-            }
-            return Some(pane_id.to_string());
-        }
-
-        // Check child processes (pane PID is usually a shell)
-        if let Ok(children) = std::process::Command::new("pgrep")
-            .args(["-P", pid_str])
-            .output()
+        // Check the pane's process tree (pane PID is usually a shell) for
+        // agent-doc + file_path.
+        if let Some(owner_pid) =
+            agent_doc_process_owner_io::process_tree_agent_doc_owner_pid_for_file(
+                pid_str, file_path,
+            )
         {
-            for child_pid in String::from_utf8_lossy(&children.stdout).lines() {
-                let child_pid = child_pid.trim();
-                if !child_pid.is_empty() && pid_has_agent_doc_for_file(child_pid, file_path) {
-                    if log_hits {
-                        eprintln!(
-                            "[sync] found alive agent-doc child (pid {}) in pane {} for {}",
-                            child_pid, pane_id, file_path
-                        );
-                    }
-                    return Some(pane_id.to_string());
+            if log_hits {
+                if owner_pid == pid_str {
+                    eprintln!(
+                        "[sync] found alive agent-doc pane {} (pid {}) for {}",
+                        pane_id, pid_str, file_path
+                    );
+                } else {
+                    eprintln!(
+                        "[sync] found alive agent-doc child (pid {}) in pane {} for {}",
+                        owner_pid, pane_id, file_path
+                    );
                 }
             }
+            return Some(pane_id.to_string());
         }
     }
     None
@@ -3387,21 +3387,15 @@ pub fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> 
 }
 
 fn list_associated_pane_inventory(tmux: &Tmux) -> Vec<AssociatedPaneCandidate> {
-    let output = match tmux
-        .cmd()
-        .args([
-            "list-panes",
-            "-a",
-            "-F",
-            "#{pane_id}\t#{pane_pid}\t#{window_id}\t#{window_name}\t#{session_name}\t#{pane_current_command}",
-        ])
-        .output()
-    {
-        Ok(output) if output.status.success() => output,
+    let output = match agent_doc_tmux_io::list_panes_all(
+        tmux,
+        "#{pane_id}\t#{pane_pid}\t#{window_id}\t#{window_name}\t#{session_name}\t#{pane_current_command}",
+    ) {
+        Ok(output) => output,
         _ => return Vec::new(),
     };
 
-    String::from_utf8_lossy(&output.stdout)
+    output
         .lines()
         .filter_map(parse_pane_inventory_line)
         .collect()
@@ -3417,22 +3411,11 @@ fn collect_process_tree_matches(
         if candidate.pane_pid.is_empty() {
             continue;
         }
-        if pid_has_agent_doc_for_file(&candidate.pane_pid, file_path) {
+        if agent_doc_process_owner_io::process_tree_has_agent_doc_owner_for_file(
+            &candidate.pane_pid,
+            file_path,
+        ) {
             matches.insert(candidate.pane_id.clone());
-            continue;
-        }
-
-        if let Ok(children) = std::process::Command::new("pgrep")
-            .args(["-P", &candidate.pane_pid])
-            .output()
-        {
-            for child_pid in String::from_utf8_lossy(&children.stdout).lines() {
-                let child_pid = child_pid.trim();
-                if !child_pid.is_empty() && pid_has_agent_doc_for_file(child_pid, file_path) {
-                    matches.insert(candidate.pane_id.clone());
-                    break;
-                }
-            }
         }
     }
 
@@ -3521,14 +3504,7 @@ fn log_stashed_associated_pane(tmux: &Tmux, pane_id: &str, file_path: &Path) {
     let win_name = tmux
         .pane_window(pane_id)
         .ok()
-        .and_then(|win_id| {
-            tmux.cmd()
-                .args(["display-message", "-t", &win_id, "-p", "#{window_name}"])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        })
+        .and_then(|win_id| agent_doc_tmux_io::target_window_name(tmux, &win_id))
         .unwrap_or_default();
     sync_log(&format!(
         "stash_associated_pane_deferred pane={} file={} stash_window={}",
@@ -3697,8 +3673,8 @@ fn find_normal_path_owner_pane_excluding_with_logging(
 /// (#jb-tsift-pane-sync cross-document variant). Returns `None` (forcing a
 /// correct cold-start / proper-owner path) when the candidate owns another
 /// document; otherwise returns the candidate unchanged. A candidate that owns
-/// `file` itself, or a bare non-owner pane, is preserved (see
-/// `cmdline_owns_other_document`).
+/// `file` itself, or a bare non-owner pane, is preserved by the focused
+/// process-owner IO check.
 fn reject_cross_document_owner_pane(
     tmux: &Tmux,
     candidate: Option<String>,
@@ -3787,12 +3763,12 @@ struct SupervisorIdentity {
 }
 
 fn query_supervisor_identity(file: &Path, session_id: &str) -> Option<SupervisorIdentity> {
-    let project_root = agent_doc_fs::find_project_root(file)?;
-    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let sock = agent_doc_supervisor_io::ipc::socket_path(&project_root, session_id);
     if !sock.exists() {
         return None;
     }
-    let response = crate::supervisor::ipc::send_command(&sock, &IpcMethod::State).ok()?;
+    let response = agent_doc_supervisor_io::ipc::send_command(&sock, &IpcMethod::State).ok()?;
     if !response.ok {
         return None;
     }
@@ -3812,41 +3788,7 @@ fn query_supervisor_identity(file: &Path, session_id: &str) -> Option<Supervisor
 }
 
 fn pane_pid_from_tmux(tmux: &Tmux, pane_id: &str) -> Option<u32> {
-    let output = tmux
-        .cmd()
-        .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<u32>()
-        .ok()
-}
-
-fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
-    let output = tmux
-        .cmd()
-        .args([
-            "display-message",
-            "-t",
-            pane_id,
-            "-p",
-            "#{pane_current_path}",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let current_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if current_path.is_empty() {
-        return None;
-    }
-    let path = PathBuf::from(current_path);
-    agent_doc_fs::find_project_root(&path).or(Some(path))
+    agent_doc_tmux_io::pane_pid(tmux, pane_id)
 }
 
 fn registry_entry_matches_document_root(
@@ -3857,7 +3799,7 @@ fn registry_entry_matches_document_root(
     if cwd.as_os_str().is_empty() {
         return false;
     }
-    agent_doc_fs::find_project_root(cwd)
+    agent_doc_project_root_io::project_root_containing(cwd)
         .or_else(|| cwd.is_dir().then_some(cwd.to_path_buf()))
         .is_some_and(|root| root == project_root)
 }
@@ -3872,7 +3814,7 @@ fn pane_contains_supervisor_pid(tmux: &Tmux, pane_id: &str, target_pid: u32) -> 
     let Some(pane_pid) = pane_pid_from_tmux(tmux, pane_id) else {
         return false;
     };
-    pane_process_tree_contains_pid(&pane_pid.to_string(), target_pid)
+    agent_doc_process_owner_io::process_tree_contains_pid(&pane_pid.to_string(), target_pid)
 }
 
 pub fn reregister_recovered_owner(
@@ -3917,7 +3859,7 @@ pub fn reregister_recovered_owner(
     }
 
     let pid = pane_pid_from_tmux(tmux, pane_id).unwrap_or(std::process::id());
-    let window = tmux.pane_window(pane_id).unwrap_or_default();
+    let window = agent_doc_tmux_io::target_window_id(tmux, pane_id).unwrap_or_default();
     sessions::register_full_with_cwd_in(
         &project_root,
         session_id,
@@ -3937,7 +3879,7 @@ fn find_registered_pane_via_path_provenance(
     log_hits: bool,
 ) -> Option<String> {
     let (_, project_root, registry_key) = registry_location_for_file(file)?;
-    let registry = sessions::load_in(&project_root).ok()?;
+    let registry = agent_doc_session_registry_io::load_in(&project_root).ok()?;
     let entry = registry.get(&registry_key)?;
     if entry.session_id != session_id
         || entry.pid == 0
@@ -3953,14 +3895,8 @@ fn find_registered_pane_via_path_provenance(
         return None;
     }
 
-    let pane_pid = tmux
-        .cmd()
-        .args(["display-message", "-t", &entry.pane, "-p", "#{pane_pid}"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?;
-    if pane_pid.is_empty() || !pane_process_tree_contains_pid(&pane_pid, identity.pid) {
+    let pane_pid = agent_doc_tmux_io::pane_pid(tmux, &entry.pane)?;
+    if !agent_doc_process_owner_io::process_tree_contains_pid(&pane_pid.to_string(), identity.pid) {
         return None;
     }
 
@@ -3976,50 +3912,18 @@ fn find_registered_pane_via_path_provenance(
     Some(entry.pane.clone())
 }
 
-fn pane_process_tree_contains_pid(pane_pid: &str, target_pid: u32) -> bool {
-    let mut frontier = vec![pane_pid.to_string()];
-    let target = target_pid.to_string();
-
-    while let Some(pid) = frontier.pop() {
-        if pid == target {
-            return true;
-        }
-
-        let output = match std::process::Command::new("pgrep")
-            .args(["-P", &pid])
-            .output()
-        {
-            Ok(o) if o.status.success() => o,
-            _ => continue,
-        };
-
-        for child_pid in String::from_utf8_lossy(&output.stdout).lines() {
-            let child_pid = child_pid.trim();
-            if child_pid.is_empty() {
-                continue;
-            }
-            if child_pid == target {
-                return true;
-            }
-            frontier.push(child_pid.to_string());
-        }
-    }
-
-    false
-}
-
 fn find_alive_pane_via_supervisor_pid(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
 ) -> Option<String> {
-    let project_root = agent_doc_fs::find_project_root(file)?;
-    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let sock = agent_doc_supervisor_io::ipc::socket_path(&project_root, session_id);
     if !sock.exists() {
         return None;
     }
 
-    let response = crate::supervisor::ipc::send_command(&sock, &IpcMethod::Pid).ok()?;
+    let response = agent_doc_supervisor_io::ipc::send_command(&sock, &IpcMethod::Pid).ok()?;
     if !response.ok {
         return None;
     }
@@ -4034,16 +3938,9 @@ fn find_alive_pane_via_supervisor_pid(
         return None;
     }
 
-    let output = tmux
-        .cmd()
-        .args(["list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
+    let output = agent_doc_tmux_io::list_panes_all(tmux, "#{pane_id} #{pane_pid}").ok()?;
 
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    for line in output.lines() {
         let mut parts = line.splitn(2, ' ');
         let Some(pane_id) = parts.next() else {
             continue;
@@ -4056,7 +3953,7 @@ fn find_alive_pane_via_supervisor_pid(
         if pane_id.is_empty() || pane_pid.is_empty() {
             continue;
         }
-        if pane_process_tree_contains_pid(pane_pid, target_pid) {
+        if agent_doc_process_owner_io::process_tree_contains_pid(pane_pid, target_pid) {
             eprintln!(
                 "[sync] recovered live pane {} for session {} via supervisor pid {}",
                 pane_id,
@@ -4077,7 +3974,7 @@ fn find_alive_pane_via_open_session_log(
     excluded_pane: Option<&str>,
     log_hits: bool,
 ) -> Option<String> {
-    let status = crate::startup_miss::session_log_status(file, session_id)
+    let status = agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
         .ok()
         .flatten()?;
     if !status.latest_session_open() {
@@ -4088,7 +3985,7 @@ fn find_alive_pane_via_open_session_log(
         return None;
     }
 
-    let project_root = agent_doc_fs::find_project_root(file)?;
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
     if !pane_assignment_matches_document_root(tmux, pane_id, &project_root) {
         return None;
     }
@@ -4111,7 +4008,7 @@ fn find_alive_pane_via_registry_rebind_successor(
     excluded_pane: Option<&str>,
     log_hits: bool,
 ) -> Option<String> {
-    let status = crate::startup_miss::session_log_status(file, session_id)
+    let status = agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
         .ok()
         .flatten()?;
     if !status.latest_session_closed() {
@@ -4122,7 +4019,7 @@ fn find_alive_pane_via_registry_rebind_successor(
         return None;
     }
 
-    let project_root = agent_doc_fs::find_project_root(file)?;
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
     if !pane_assignment_matches_document_root(tmux, pane_id, &project_root) {
         return None;
     }
@@ -4147,53 +4044,11 @@ fn find_alive_pane_via_registry_rebind_successor(
 /// Checks the pane's PID and its child processes for agent process names in the command line.
 #[allow(dead_code)]
 fn is_pane_busy(tmux: &Tmux, pane_id: &str) -> bool {
-    let output = tmux
-        .cmd()
-        .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
-        .output();
-    let pid_str = match output {
-        Ok(ref o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => return false,
-    };
-    if pid_str.is_empty() {
+    let Some(pid) = agent_doc_tmux_io::pane_pid(tmux, pane_id) else {
         return false;
-    }
-
-    // Check the pane's direct process
-    if pid_is_agent_session(&pid_str) {
-        return true;
-    }
-
-    // Check child processes (pane PID is usually a shell)
-    if let Ok(children) = std::process::Command::new("pgrep")
-        .args(["-P", &pid_str])
-        .output()
-    {
-        for child_pid in String::from_utf8_lossy(&children.stdout).lines() {
-            let child_pid = child_pid.trim();
-            if !child_pid.is_empty() && pid_is_agent_session(child_pid) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Check if a process (by PID) is running an agent session.
-#[allow(dead_code)]
-fn pid_is_agent_session(pid: &str) -> bool {
-    let output = match std::process::Command::new("ps")
-        .args(["-p", pid, "-o", "command="])
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        _ => return false,
     };
-    let cmdline = String::from_utf8_lossy(&output.stdout);
-    cmdline.contains("agent-doc")
-        || cmdline.contains("claude")
-        || cmdline.contains("codex")
-        || cmdline.contains("opencode")
+    let pid_str = pid.to_string();
+    agent_doc_process_owner_io::process_tree_has_agent_session(&pid_str)
 }
 
 /// Diagnostic sibling of [`pane_runs_other_document_owner`]: returns the foreign
@@ -4205,34 +4060,10 @@ fn pane_owned_document_other_than(
     claimed_file: &Path,
 ) -> Option<String> {
     let pane_pid = pane_pid_from_tmux(tmux, pane_id)?;
-    let claimed = claimed_file.to_string_lossy();
-    let mut pids = vec![pane_pid.to_string()];
-    if let Ok(children) = std::process::Command::new("pgrep")
-        .args(["-P", &pane_pid.to_string()])
-        .output()
-    {
-        for child in String::from_utf8_lossy(&children.stdout).lines() {
-            let child = child.trim();
-            if !child.is_empty() {
-                pids.push(child.to_string());
-            }
-        }
-    }
-    for pid in pids {
-        let cmdline = match std::process::Command::new("ps")
-            .args(["-p", &pid, "-o", "command="])
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout).to_string()
-            }
-            _ => continue,
-        };
-        if cmdline_owns_other_document(&cmdline, &claimed) {
-            return owner_document_from_cmdline(&cmdline);
-        }
-    }
-    None
+    agent_doc_process_owner_io::process_tree_owner_document_other_than(
+        &pane_pid.to_string(),
+        claimed_file,
+    )
 }
 
 /// `#jb-tsift-pane-sync` cross-document execution diagnostic. Logs (best-effort,
@@ -4246,11 +4077,11 @@ fn pane_owned_document_other_than(
 /// vector is invisible in the logs. `origin` names the entry point (e.g. `run`,
 /// `preflight`) so a future repro pins where the cross-document cycle started.
 pub fn log_cross_document_execution_context(file: &Path, origin: &str) {
-    let current_pane = match crate::sessions::current_pane() {
-        Ok(pane) if !pane.is_empty() => pane,
+    let tmux = Tmux::default_server();
+    let current_pane = match agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux) {
+        Some(pane) if !pane.is_empty() => pane,
         _ => return,
     };
-    let tmux = Tmux::default_server();
     if let Some(other) = pane_owned_document_other_than(&tmux, &current_pane, file) {
         crate::ops_log::log_op(
             file,
@@ -4278,46 +4109,10 @@ pub(crate) fn pane_runs_other_document_owner(
     let Some(pane_pid) = pane_pid_from_tmux(tmux, pane_id) else {
         return false;
     };
-    let claimed = claimed_file.to_string_lossy();
-    let mut pids = vec![pane_pid.to_string()];
-    if let Ok(children) = std::process::Command::new("pgrep")
-        .args(["-P", &pane_pid.to_string()])
-        .output()
-    {
-        for child in String::from_utf8_lossy(&children.stdout).lines() {
-            let child = child.trim();
-            if !child.is_empty() {
-                pids.push(child.to_string());
-            }
-        }
-    }
-    for pid in pids {
-        let cmdline = match std::process::Command::new("ps")
-            .args(["-p", &pid, "-o", "command="])
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout).to_string()
-            }
-            _ => continue,
-        };
-        if cmdline_owns_other_document(&cmdline, &claimed) {
-            return true;
-        }
-    }
-    false
-}
-
-fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
-    let output = match std::process::Command::new("ps")
-        .args(["-p", pid, "-o", "command="])
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        _ => return false,
-    };
-    let cmdline = String::from_utf8_lossy(&output.stdout);
-    agent_doc_cmdline_is_owner(&cmdline, file_path)
+    agent_doc_process_owner_io::process_tree_owns_other_document(
+        &pane_pid.to_string(),
+        claimed_file,
+    )
 }
 
 #[cfg(test)]
@@ -4360,21 +4155,7 @@ mod th {
         predicate()
     }
     pub(crate) fn pane_current_command(tmux: &IsolatedTmux, pane: &str) -> Option<String> {
-        let output = tmux
-            .cmd()
-            .args([
-                "display-message",
-                "-p",
-                "-t",
-                pane,
-                "#{pane_current_command}",
-            ])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        agent_doc_tmux_io::target_current_command(tmux, pane)
     }
     pub(crate) fn wait_for_shell(tmux: &IsolatedTmux, pane: &str, timeout: Duration) -> bool {
         wait_for(timeout, || {
@@ -4608,7 +4389,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, original).unwrap();
-        crate::snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         init_git_repo(root, &doc);
 
         let materialized = original.replace(
@@ -4616,7 +4397,7 @@ mod tests {
             "### Re: crash recovery -- gpt-5\n\nRecovered by sync.\n<!-- agent:boundary:test -->",
         );
         std::fs::write(&doc, &materialized).unwrap();
-        crate::snapshot::save(&doc, &materialized).unwrap();
+        agent_doc_snapshot_io::save(&doc, &materialized, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
             "commit_success",
@@ -4635,8 +4416,8 @@ mod tests {
             .expect("sync repair should close the commit boundary");
         assert!(note.contains("jb_cache_conflict_cancel"));
         assert!(matches!(
-            crate::git::verify_snapshot_committed(&doc).unwrap(),
-            crate::git::SnapshotCommitStatus::Committed
+            agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
+            agent_doc_snapshot_io::SnapshotCommitStatus::Committed
         ));
         assert!(
             !crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
@@ -5095,13 +4876,19 @@ mod tests {
         )
         .unwrap_err();
 
-        surface_frontmatter_status(&doc, "auto-start", &err);
+        agent_doc_sync_io::surface_frontmatter_status_with(
+            &doc,
+            "auto-start",
+            &err,
+            save_sync_status_snapshot,
+            log_sync_status,
+        );
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX));
         assert!(updated.contains("sync auto-start frontmatter"));
 
-        let snapshot = snapshot::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(snapshot.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX));
 
         std::fs::write(
@@ -5109,20 +4896,25 @@ mod tests {
             "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n[agent-doc sync] malformed frontmatter during auto-start.\n\nsync auto-start frontmatter: invalid YAML frontmatter in tasks/bad.md: boom\n<!-- /agent:status -->\n",
         )
         .unwrap();
-        snapshot::save(
+        agent_doc_snapshot_io::save(
             &doc,
             "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n[agent-doc sync] malformed frontmatter during auto-start.\n\nsync auto-start frontmatter: invalid YAML frontmatter in tasks/bad.md: boom\n<!-- /agent:status -->\n",
+            crate::ops_log::log_op,
         )
         .unwrap();
 
-        clear_frontmatter_status(&doc);
+        agent_doc_sync_io::clear_frontmatter_status_with(
+            &doc,
+            save_sync_status_snapshot,
+            log_sync_status,
+        );
 
         let cleared = std::fs::read_to_string(&doc).unwrap();
         assert!(
             !cleared.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX),
             "managed sync warning should be removed once parsing succeeds"
         );
-        let cleared_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        let cleared_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
             !cleared_snapshot.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX),
             "snapshot should track the cleared status too"
@@ -5138,12 +4930,19 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let original = "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\nuser-owned status\n<!-- /agent:status -->\n";
         std::fs::write(&doc, original).unwrap();
-        snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
 
-        clear_frontmatter_status(&doc);
+        agent_doc_sync_io::clear_frontmatter_status_with(
+            &doc,
+            save_sync_status_snapshot,
+            log_sync_status,
+        );
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), original);
-        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), original);
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            original
+        );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
@@ -5539,7 +5338,7 @@ mod tests {
             "agent-doc window should NOT exist before repair"
         );
 
-        // Note: repair_layout uses sessions::load() which reads from CWD.
+        // Note: repair_layout uses agent_doc_session_registry_io::load() which reads from CWD.
         // In tests without CWD override, Phase 2 rescue may not find the pane
         // in the registry. But stash consolidation, target consolidation, and
         // index normalization still run. The key assertion is that repair doesn't
@@ -6312,7 +6111,7 @@ mod tests {
         fs2::FileExt::lock_exclusive(&holder).unwrap();
 
         let start = Instant::now();
-        let acquired = acquire_sync_lock(&lock_path, Duration::from_millis(120));
+        let acquired = acquire_sync_lock(&lock_path, Duration::from_millis(120), |_| {});
         let elapsed = start.elapsed();
 
         fs2::FileExt::unlock(&holder).unwrap();
@@ -6324,41 +6123,6 @@ mod tests {
             elapsed < Duration::from_secs(1),
             "sync lock timeout should be bounded, elapsed={elapsed:?}"
         );
-    }
-    #[test]
-    fn stale_orphaned_sync_lock_owner_requires_all_guards() {
-        let stale_owner = SyncLockProcess {
-            pid: 42,
-            ppid: 1,
-            age: STALE_SYNC_LOCK_OWNER_AGE + Duration::from_secs(1),
-            cmdline: vec!["/home/brian/.cargo/bin/agent-doc".into(), "sync".into()],
-            has_lock_fd: true,
-        };
-        assert!(is_stale_orphaned_sync_lock_owner(&stale_owner));
-
-        let live_parent = SyncLockProcess {
-            ppid: 100,
-            ..stale_owner.clone()
-        };
-        assert!(!is_stale_orphaned_sync_lock_owner(&live_parent));
-
-        let too_young = SyncLockProcess {
-            age: STALE_SYNC_LOCK_OWNER_AGE - Duration::from_secs(1),
-            ..stale_owner.clone()
-        };
-        assert!(!is_stale_orphaned_sync_lock_owner(&too_young));
-
-        let different_command = SyncLockProcess {
-            cmdline: vec!["/home/brian/.cargo/bin/agent-doc".into(), "route".into()],
-            ..stale_owner.clone()
-        };
-        assert!(!is_stale_orphaned_sync_lock_owner(&different_command));
-
-        let no_lock_fd = SyncLockProcess {
-            has_lock_fd: false,
-            ..stale_owner.clone()
-        };
-        assert!(!is_stale_orphaned_sync_lock_owner(&no_lock_fd));
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
@@ -6596,13 +6360,7 @@ mod tests {
 
         // Verify pane1 is in a stash window
         let win_id = iso.pane_window(&pane1).unwrap();
-        let win_name = iso
-            .cmd()
-            .args(["display-message", "-t", &win_id, "-p", "#{window_name}"])
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
+        let win_name = agent_doc_tmux_io::target_window_name(&iso, &win_id).unwrap_or_default();
         assert!(
             win_name == "stash" || win_name.starts_with("stash-"),
             "pane should be in stash window, got: {}",
@@ -6621,7 +6379,8 @@ mod tests {
 
         // Rescue the pane into the agent-doc window without swapping pane0 out.
         let target = window_panes.first().unwrap();
-        let rescue_result = sessions::join_pane_guarded(&iso, &pane1, target, target_sess, "-dh");
+        let rescue_result =
+            agent_doc_tmux_io::join_pane_guarded(&iso, &pane1, target, target_sess, "-dh");
         assert!(
             rescue_result.is_ok(),
             "join-pane rescue should succeed: {:?}",
@@ -6630,19 +6389,8 @@ mod tests {
 
         // Verify pane1 is no longer in stash
         let post_win_id = iso.pane_window(&pane1).unwrap();
-        let post_win_name = iso
-            .cmd()
-            .args([
-                "display-message",
-                "-t",
-                &post_win_id,
-                "-p",
-                "#{window_name}",
-            ])
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
+        let post_win_name =
+            agent_doc_tmux_io::target_window_name(&iso, &post_win_id).unwrap_or_default();
         assert_eq!(
             post_win_name, "agent-doc",
             "pane should be in agent-doc window after rescue, got: {}",
@@ -6940,7 +6688,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        sessions::save_in(&subroot, &child_registry).unwrap();
+        agent_doc_session_registry_io::save_in(&subroot, &child_registry).unwrap();
 
         let _cwd = ScopedCurrentDir::set(root);
         register_synced_files(
@@ -6964,7 +6712,7 @@ mod tests {
             ],
         );
 
-        let root_registry = sessions::load_in(root).unwrap();
+        let root_registry = agent_doc_session_registry_io::load_in(root).unwrap();
         let root_key = tmux_router::registry::canonical_registry_key_in(
             root,
             root_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
@@ -6976,7 +6724,7 @@ mod tests {
         assert_eq!(root_entry.file, "tasks/agent-doc-bugs2.md");
         assert_eq!(root_registry.len(), 1);
 
-        let child_registry = sessions::load_in(&subroot).unwrap();
+        let child_registry = agent_doc_session_registry_io::load_in(&subroot).unwrap();
         let child_key = tmux_router::registry::canonical_registry_key_in(
             &subroot,
             child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
@@ -7036,7 +6784,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        sessions::save_in(root, &root_registry).unwrap();
+        agent_doc_session_registry_io::save_in(root, &root_registry).unwrap();
 
         let child_key = tmux_router::registry::canonical_registry_key_in(
             &subroot,
@@ -7056,7 +6804,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        sessions::save_in(&subroot, &child_registry).unwrap();
+        agent_doc_session_registry_io::save_in(&subroot, &child_registry).unwrap();
 
         let _cwd = ScopedCurrentDir::set(root);
         register_synced_files(
@@ -7080,14 +6828,14 @@ mod tests {
             ],
         );
 
-        let root_registry = sessions::load_in(root).unwrap();
+        let root_registry = agent_doc_session_registry_io::load_in(root).unwrap();
         let root_entry = root_registry
             .values()
             .find(|entry| entry.session_id == "root-session")
             .expect("root document should remain registered");
         assert_eq!(root_entry.pane, root_pane);
 
-        let child_registry = sessions::load_in(&subroot).unwrap();
+        let child_registry = agent_doc_session_registry_io::load_in(&subroot).unwrap();
         assert!(
             child_registry.is_empty(),
             "duplicate cross-root pane binding should be pruned instead of preserved"
@@ -7150,7 +6898,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        sessions::save_in(&subroot, &child_registry).unwrap();
+        agent_doc_session_registry_io::save_in(&subroot, &child_registry).unwrap();
 
         let _cwd = ScopedCurrentDir::set(root);
         register_synced_files(
@@ -7165,7 +6913,7 @@ mod tests {
             )],
         );
 
-        let child_registry = sessions::load_in(&subroot).unwrap();
+        let child_registry = agent_doc_session_registry_io::load_in(&subroot).unwrap();
         assert!(
             child_registry.is_empty(),
             "fail-closed recovery should not let sync rebind a geometry-only pane assignment"
@@ -7267,8 +7015,8 @@ mod tests {
         );
         std::fs::write(&doc_a, content_a).unwrap();
         std::fs::write(&doc_b, content_b).unwrap();
-        snapshot::save(&doc_a, content_a).unwrap();
-        snapshot::save(&doc_b, content_b).unwrap();
+        agent_doc_snapshot_io::save(&doc_a, content_a, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc_b, content_b, crate::ops_log::log_op).unwrap();
 
         let pane_a = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
@@ -7373,7 +7121,7 @@ mod tests {
         let agent_doc_window = iso.pane_window(&bugs_pane).unwrap();
         let dev_pane_pid = pane_pid_from_tmux(&iso, &dev_pane).unwrap();
 
-        let _ipc = crate::supervisor::ipc::SupervisorIpc::start(
+        let _ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             subroot.as_path(),
             "claudescore-session",
             {
@@ -7424,7 +7172,7 @@ mod tests {
         )
         .unwrap();
 
-        let root_registry = sessions::load_in(root).unwrap();
+        let root_registry = agent_doc_session_registry_io::load_in(root).unwrap();
         assert!(
             !root_registry
                 .values()
@@ -7776,8 +7524,10 @@ mod tests {
         let agent_doc_window = iso.pane_window(&bugs_pane).unwrap();
         let dev_pane_pid = pane_pid_from_tmux(&iso, &dev_pane).unwrap();
 
-        let _ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(subroot.path(), "claudescore-session", {
+        let _ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            subroot.path(),
+            "claudescore-session",
+            {
                 move |method| match method {
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({
                         "pid": dev_pane_pid
@@ -7788,8 +7538,9 @@ mod tests {
                     })),
                     _ => IpcResponse::ok_empty(),
                 }
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
 
         sessions::register_full_with_cwd(
             "bugs-session",

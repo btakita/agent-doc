@@ -28,10 +28,10 @@ use std::sync::Arc;
 use agent_doc_element::element::{self, Component};
 use agent_doc_frontmatter::frontmatter::{self, Frontmatter};
 use agent_doc_frontmatter::project_config::ProjectConfig;
+use agent_doc_frontmatter_io::session::ResolvedSshContext;
 use lazily::{CellHandle, Context, SlotHandle};
 
 use crate::cycle_state::CycleState;
-use crate::sessions;
 use agent_doc_project_config_io as project_config_io;
 
 pub type FilePathCell = CellHandle<PathBuf>;
@@ -42,7 +42,7 @@ pub type ConfigPathSlot = SlotHandle<Option<PathBuf>>;
 pub type ProjectConfigSlot = SlotHandle<Arc<ProjectConfig>>;
 pub type SnapshotPathSlot = SlotHandle<Option<PathBuf>>;
 pub type DocRelativeSlot = SlotHandle<Option<String>>;
-pub type SshContextSlot = SlotHandle<Arc<SshContextValue>>;
+pub type SshContextSlot = SlotHandle<Arc<ResolvedSshContext>>;
 pub type FrontmatterSlot = SlotHandle<Arc<Frontmatter>>;
 pub type ComponentsSlot = SlotHandle<Arc<Vec<Component>>>;
 pub type DocHashSlot = SlotHandle<String>;
@@ -57,7 +57,7 @@ pub type SnapshotContentSlot = SlotHandle<Option<Arc<String>>>;
 /// HEAD cannot provide content.
 pub type HeadContentSlot = SlotHandle<Option<Arc<String>>>;
 /// Phase 8 (#lr-head-8): cached comparison of snapshot content against HEAD.
-pub type SnapshotCommitStatusSlot = SlotHandle<crate::git::SnapshotCommitStatus>;
+pub type SnapshotCommitStatusSlot = SlotHandle<agent_doc_snapshot_io::SnapshotCommitStatus>;
 /// Phase 9 (#lr-wire-9): cached harness detection. Harness env vars are
 /// process-static for a CLI run, so compute once per [`RunContext`].
 pub type HarnessSlot = SlotHandle<String>;
@@ -68,11 +68,6 @@ pub type GlobalConfigSlot = SlotHandle<Arc<agent_doc_config::Config>>;
 /// Phase 10 (#lr-actor-10): cached session registry for the current document's
 /// project root. Read-modify-write callers still load under `RegistryLock`.
 pub type SessionRegistrySlot = SlotHandle<Arc<tmux_router::Registry>>;
-
-pub struct SshContextValue {
-    pub config: Arc<ProjectConfig>,
-    pub doc_relative: String,
-}
 
 pub struct RunContext {
     ctx: Context,
@@ -115,7 +110,7 @@ impl RunContext {
             let cp = canonical_path;
             move |ctx: &Context| -> Option<PathBuf> {
                 let path: PathBuf = ctx.get(&cp);
-                agent_doc_fs::find_project_root(&path)
+                agent_doc_project_root_io::project_root_containing(&path)
             }
         });
 
@@ -165,10 +160,10 @@ impl RunContext {
         let ssh_context = ctx.slot({
             let pc = project_config;
             let dr = doc_relative;
-            move |ctx: &Context| -> Arc<SshContextValue> {
+            move |ctx: &Context| -> Arc<ResolvedSshContext> {
                 let config: Arc<ProjectConfig> = ctx.get(&pc);
                 let doc_rel: Option<String> = ctx.get(&dr);
-                Arc::new(SshContextValue {
+                Arc::new(ResolvedSshContext {
                     config,
                     doc_relative: doc_rel.unwrap_or_default(),
                 })
@@ -182,12 +177,8 @@ impl RunContext {
             let sc = ssh_context;
             move |ctx: &Context| -> Arc<Frontmatter> {
                 let content: String = ctx.get_cell(&dc);
-                let ssh: Arc<SshContextValue> = ctx.get(&sc);
-                let resolver = agent_doc_frontmatter::frontmatter::SshResolverContext {
-                    project: &ssh.config,
-                    doc_relative: &ssh.doc_relative,
-                    file_display: &ssh.doc_relative,
-                };
+                let ssh: Arc<ResolvedSshContext> = ctx.get(&sc);
+                let resolver = ssh.as_resolver_context(&ssh.doc_relative);
                 let fm = frontmatter::parse_with_ssh_resolver(&content, &resolver)
                     .map(|(fm, _)| fm)
                     .unwrap_or_default();
@@ -239,7 +230,7 @@ impl RunContext {
             let fp = file_path_cell;
             move |ctx: &Context| -> Option<Arc<String>> {
                 let path: PathBuf = ctx.get_cell(&fp);
-                match crate::snapshot::load(&path) {
+                match agent_doc_snapshot_io::load(&path) {
                     Ok(content) => content.map(Arc::new),
                     Err(e) => {
                         eprintln!("[graph] snapshot load failed for {}: {}", path.display(), e);
@@ -259,7 +250,7 @@ impl RunContext {
                 // Register the project-root dependency even though
                 // `git::show_head` performs the final submodule narrowing.
                 let _root: Option<PathBuf> = ctx.get(&pr);
-                match crate::git::show_head(&canonical) {
+                match agent_doc_git_io::revision::show_head(&canonical) {
                     Ok(content) => content.map(Arc::new),
                     Err(e) => {
                         eprintln!(
@@ -280,33 +271,17 @@ impl RunContext {
             let fp = file_path_cell;
             let sc = snapshot_content;
             let hc = head_content;
-            move |ctx: &Context| -> crate::git::SnapshotCommitStatus {
+            move |ctx: &Context| -> agent_doc_snapshot_io::SnapshotCommitStatus {
                 let path: PathBuf = ctx.get_cell(&fp);
-                if !crate::git::is_in_git_repo(&path) {
-                    return crate::git::SnapshotCommitStatus::NotInGitRepo;
+                if !agent_doc_git_io::status::is_in_git_repo(&path) {
+                    return agent_doc_snapshot_io::SnapshotCommitStatus::NotInGitRepo;
                 }
-                let Some(snapshot) = ctx.get(&sc) else {
-                    return crate::git::SnapshotCommitStatus::NoSnapshot;
-                };
-                let Some(head) = ctx.get(&hc) else {
-                    return crate::git::SnapshotCommitStatus::NoHead;
-                };
-                let normalized_snapshot =
-                    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-                        &snapshot,
-                    );
-                let normalized_head =
-                    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-                        &head,
-                    );
-                if normalized_snapshot == normalized_head {
-                    crate::git::SnapshotCommitStatus::Committed
-                } else {
-                    crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead {
-                        snapshot_len: normalized_snapshot.len(),
-                        head_len: normalized_head.len(),
-                    }
-                }
+                let snapshot: Option<Arc<String>> = ctx.get(&sc);
+                let head: Option<Arc<String>> = ctx.get(&hc);
+                agent_doc_snapshot_io::snapshot_commit_status_from_contents(
+                    snapshot.as_deref().map(String::as_str),
+                    head.as_deref().map(String::as_str),
+                )
             }
         });
 
@@ -327,13 +302,13 @@ impl RunContext {
             move |ctx: &Context| -> Arc<tmux_router::Registry> {
                 let root: Option<PathBuf> = ctx.get(&pr);
                 let loaded = match root {
-                    Some(ref root) => sessions::load_in(root).map_err(|e| {
+                    Some(ref root) => agent_doc_session_registry_io::load_in(root).map_err(|e| {
                         anyhow::anyhow!(
                             "failed to load session registry from {}: {e}",
-                            sessions::registry_path_in(root).display()
+                            agent_doc_session_registry_io::registry_path_in(root).display()
                         )
                     }),
-                    None => sessions::load()
+                    None => agent_doc_session_registry_io::load()
                         .map_err(|e| anyhow::anyhow!("failed to load session registry: {e}")),
                 };
 
@@ -407,7 +382,7 @@ impl RunContext {
         self.ctx.get(&self.doc_relative)
     }
 
-    pub fn ssh_context(&self) -> Arc<SshContextValue> {
+    pub fn ssh_context(&self) -> Arc<ResolvedSshContext> {
         self.ctx.get(&self.ssh_context)
     }
 
@@ -447,7 +422,7 @@ impl RunContext {
     }
 
     /// Phase 8 (#lr-head-8): cached snapshot-vs-HEAD comparison.
-    pub fn snapshot_commit_status(&self) -> crate::git::SnapshotCommitStatus {
+    pub fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus {
         self.ctx.get(&self.snapshot_commit_status)
     }
 
@@ -589,19 +564,6 @@ impl RunContext {
     }
 }
 
-impl SshContextValue {
-    pub fn as_resolver_context<'a>(
-        &'a self,
-        file_display: &'a str,
-    ) -> agent_doc_frontmatter::frontmatter::SshResolverContext<'a> {
-        agent_doc_frontmatter::frontmatter::SshResolverContext {
-            project: &self.config,
-            doc_relative: &self.doc_relative,
-            file_display,
-        }
-    }
-}
-
 pub struct ActorContext {
     inner: RunContext,
 }
@@ -646,7 +608,6 @@ impl ActorContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snapshot;
     use std::path::Path;
     use std::process::Command;
     use tempfile::TempDir;
@@ -951,7 +912,7 @@ mod tests {
     #[test]
     fn ssh_context_value_builds_resolver_context() {
         let config = Arc::new(ProjectConfig::default());
-        let val = SshContextValue {
+        let val = ResolvedSshContext {
             config,
             doc_relative: "path/to/doc.md".to_string(),
         };
@@ -1167,7 +1128,7 @@ mod tests {
         setup_project(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "hello").unwrap();
-        snapshot::save(&doc, "snapshot body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "snapshot body", crate::ops_log::log_op).unwrap();
 
         let rc = RunContext::new(doc);
         assert!(!rc.is_snapshot_content_cached());
@@ -1261,27 +1222,27 @@ mod tests {
         init_git_repo(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "committed\n").unwrap();
-        snapshot::save(&doc, "committed\n").unwrap();
+        agent_doc_snapshot_io::save(&doc, "committed\n", crate::ops_log::log_op).unwrap();
         commit_path(dir.path(), "file.md", "add doc");
 
         let rc = RunContext::new(doc.clone());
         assert!(!rc.is_snapshot_commit_status_cached());
         assert_eq!(
             rc.snapshot_commit_status(),
-            crate::git::SnapshotCommitStatus::Committed
+            agent_doc_snapshot_io::SnapshotCommitStatus::Committed
         );
         assert!(rc.is_snapshot_commit_status_cached());
 
-        snapshot::save(&doc, "snapshot drift\n").unwrap();
+        agent_doc_snapshot_io::save(&doc, "snapshot drift\n", crate::ops_log::log_op).unwrap();
         assert_eq!(
             rc.snapshot_commit_status(),
-            crate::git::SnapshotCommitStatus::Committed,
+            agent_doc_snapshot_io::SnapshotCommitStatus::Committed,
             "status stays cached until the snapshot slot is invalidated"
         );
 
         rc.invalidate_snapshot_content();
         match rc.snapshot_commit_status() {
-            crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead {
+            agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead {
                 snapshot_len,
                 head_len,
             } => {
@@ -1378,7 +1339,7 @@ mod tests {
 
         let mut first_registry = tmux_router::Registry::new();
         first_registry.insert("first".to_string(), registry_entry("%1", "first", &doc));
-        sessions::save_in(dir.path(), &first_registry).unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &first_registry).unwrap();
 
         let rc = RunContext::new(doc.clone());
         assert!(!rc.is_session_registry_cached());
@@ -1388,7 +1349,7 @@ mod tests {
 
         let mut second_registry = tmux_router::Registry::new();
         second_registry.insert("second".to_string(), registry_entry("%2", "second", &doc));
-        sessions::save_in(dir.path(), &second_registry).unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &second_registry).unwrap();
 
         assert!(
             rc.session_registry()
@@ -1415,7 +1376,7 @@ mod tests {
 
         let mut registry = tmux_router::Registry::new();
         registry.insert("live".to_string(), registry_entry("%9", "live", &doc));
-        sessions::save_in(dir.path(), &registry).unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
 
         assert!(
             ac.context().session_registry().is_empty(),

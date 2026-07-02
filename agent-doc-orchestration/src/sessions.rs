@@ -1,21 +1,16 @@
 //! # Module: sessions
 //!
-//! Session registry — maps canonical absolute document paths to tmux pane IDs
-//! and supervisor metadata.
+//! Session registration — records document-to-pane ownership and supervisor
+//! metadata.
 //!
 //! Registry lives at `.agent-doc/sessions.json` relative to the project root.
-//! Agent-doc-specific operations (registry load/save with the hardcoded
-//! `.agent-doc/sessions.json` path, pane/window queries, and positional pane
-//! query execution) live here. Pure tmux geometry selection lives in
-//! `agent_doc_tmux`. Callers that need tmux-router types import them from
-//! `tmux_router` directly.
+//! Low-level registry path/load/save/lookup IO lives in
+//! `agent-doc-session-registry-io`. Agent-doc-specific registration, rebind
+//! logging, and supervisor metadata updates live here. Tmux observation and
+//! command effects live in focused tmux crates; callers that need tmux-router
+//! types import them from `tmux_router` directly.
 //!
 //! ## Spec
-//! - `registry_path()` returns the canonical `.agent-doc/sessions.json` path.
-//! - `load()` deserialises the registry from disk; returns an empty map when the file
-//!   does not exist. Not locked internally — read-only callers may call directly.
-//! - `save(registry)` serialises the registry to disk with pretty-printing. Callers
-//!   MUST hold a `RegistryLock` before calling.
 //! - `register(session_id, pane_id, file)` acquires the lock, calls
 //!   `register_with_pid` using the current process ID.
 //! - `register_with_pid` queries the pane's window and delegates to `register_full`.
@@ -24,55 +19,20 @@
 //! - `register_full` enforces single-session-per-pane by evicting stale entries that
 //!   share the same pane before inserting the new `SessionEntry`.
 //! - When the same session UUID is rebound to a different pane, `register_full`
-//!   best-effort appends `session_superseded ...` plus
-//!   `session_end origin=registry_rebind ...` to the prior session log before the
-//!   new pane registration lands.
-//! - `lookup(session_id)` returns the pane ID for a session UUID, or `None` if not found.
-//! - `lookup_entry(session_id)` returns the full `SessionEntry`, or `None`.
-//! - `current_pane()` reads `TMUX_PANE` env var; falls back to querying tmux for the
-//!   active pane (works from IDE processes outside a tmux shell).
-//! - `pane_pid(pane_id)` queries the foreground process PID of a pane via
-//!   `tmux display-message`.
-//! - `pane_window(pane_id)` returns the tmux window ID (`@N`) for a pane.
-//! - `capture_pane(tmux, pane_id)` returns visible pane content via
-//!   `tmux capture-pane -p`; `capture_pane_with_ansi` preserves attributes
-//!   for TUI prompt selection parsing.
-//! - `Multiplexer` is the backend boundary for pane/window/session queries,
-//!   capture, and submitted input. `Tmux` is the production implementation;
-//!   unit tests can inject a mock backend without a live tmux server.
-//! - `send_key(tmux, pane_id, key)` sends a single named key (e.g. `"Enter"`,
-//!   `"Up"`) — does NOT append a newline, unlike `Tmux::send_keys`.
-//! - `pane_by_position(position)` resolves a pane in the current window by
-//!   positional hint: `left`, `right`, `top`, `bottom`.
-//! - `pane_by_position_in_window(position, window)` is the same but scoped to a
-//!   specific window ID.
-//! - `in_tmux()` returns `true` when the `TMUX` env var is set.
-//!
+//!   best-effort appends supervisor session-log rebind events before the new
+//!   pane registration lands.
 //! ## Agentic Contracts
-//! - The registry file path is always `.agent-doc/sessions.json` relative to CWD at
-//!   call time; callers must ensure CWD is the project root.
-//! - `load` and `save` are NOT self-locking. Any read-modify-write cycle must acquire
-//!   `RegistryLock` first; prefer `tmux_router::with_registry` for safe cycles.
+//! - Registry snapshot IO is not self-locking. Any read-modify-write cycle must
+//!   acquire `RegistryLock` first; prefer `tmux_router::with_registry` for safe
+//!   cycles.
 //! - `register_full` guarantees at most one registry entry per pane ID; pre-existing
 //!   entries pointing to the same pane are removed before the new entry is inserted.
-//! - `capture_pane` and `send_key` propagate tmux errors as `anyhow::Error` — callers
-//!   should treat failures as non-fatal warnings when used for display or navigation.
-//! - `pane_by_position` errors on unrecognised position strings with an explicit
-//!   message; valid values are exactly `left`, `right`, `top`, `bottom`.
-//! - `current_pane` never returns an empty string; an empty tmux response is an error.
 //!
 //! ## Evals
-//! - registry_roundtrip: save a `SessionEntry` → load from same dir → entry is
-//!   preserved with identical fields.
-//! - load_empty_returns_empty_map: load from a dir with no sessions.json → empty map.
 //! - registry_multiple_sessions_isolated: two entries with distinct pane IDs round-trip
 //!   independently without cross-contamination.
 //! - registry_overwrite_existing_session: inserting the same session_id twice replaces
 //!   the entry; registry length stays at 1.
-//! - multiplexer_queries_support_mock_backend: active pane, pane PID, and window ID
-//!   queries work through the trait without tmux.
-//! - multiplexer_position_selection_is_backend_independent: position selection
-//!   parses multiplexer pane geometry independent of the concrete backend.
 //! - prune_removes_dead_panes: retain entries whose pane is alive removes fabricated
 //!   dead pane IDs, leaving an empty registry.
 //! - register_full_deduplicates_pane: seeding two sessions with the same pane then
@@ -83,375 +43,24 @@
 //! - tmux_auto_start_cascade: auto_start on no-server, no-session, and existing-session
 //!   each produce a live pane in the correct session.
 
-use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use agent_doc_session_registry as session_registry;
+use agent_doc_session_registry_io as session_registry_io;
+use anyhow::Result;
+use std::path::Path;
 
-use agent_doc_tmux::{TMUX_PANE_GEOMETRY_FORMAT, select_pane_by_position};
-use agent_doc_tmux_commands::{
-    TmuxSubmitProfile, text_only_command, text_submit_command, tmux_submit_profile_for_harness,
-};
 #[cfg(test)]
 use tmux_router::IsolatedTmux;
-use tmux_router::registry::{
-    canonical_registry_key_in, entry_session_id, find_registry_key_by_session_id,
-    normalize_registry,
-};
-use tmux_router::{
-    PaneMoveOp, Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock, Tmux,
-};
-
-const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
-
-/// Multiplexer operations agent-doc needs at the session/pane boundary.
-///
-/// The implementation is tmux-backed today, but callers that only need pane
-/// state or geometry should depend on this trait instead of shelling out to
-/// `tmux` directly. That keeps future backends such as Zellij from inheriting
-/// tmux-specific command formatting throughout the codebase.
-pub trait Multiplexer {
-    fn display_message(&self, target: Option<&str>, format: &str) -> Result<String>;
-    fn list_panes(&self, target: Option<&str>, format: &str) -> Result<String>;
-    fn pane_alive(&self, pane_id: &str) -> bool;
-    fn session_alive(&self, name: &str) -> bool;
-    fn capture_pane_plain(&self, pane_id: &str) -> Result<String>;
-    fn capture_pane_with_ansi(&self, pane_id: &str) -> Result<String>;
-    fn send_key(&self, pane_id: &str, key: &str) -> Result<()>;
-    fn send_submitted_text(&self, pane_id: &str, text: &str) -> Result<()>;
-    fn send_submitted_text_for_harness(
-        &self,
-        pane_id: &str,
-        text: &str,
-        harness: &str,
-    ) -> Result<()>;
-}
-
-impl Multiplexer for Tmux {
-    fn display_message(&self, target: Option<&str>, format: &str) -> Result<String> {
-        let mut cmd = self.cmd();
-        cmd.arg("display-message");
-        if let Some(target) = target {
-            cmd.args(["-t", target]);
-        }
-        let output = cmd
-            .args(["-p", format])
-            .output()
-            .context("failed to run multiplexer display-message")?;
-        if !output.status.success() {
-            anyhow::bail!(
-                "multiplexer display-message failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    }
-
-    fn list_panes(&self, target: Option<&str>, format: &str) -> Result<String> {
-        let mut cmd = self.cmd();
-        cmd.arg("list-panes");
-        if let Some(target) = target {
-            cmd.args(["-t", target]);
-        }
-        let output = cmd
-            .args(["-F", format])
-            .output()
-            .context("failed to run multiplexer list-panes")?;
-        if !output.status.success() {
-            anyhow::bail!(
-                "multiplexer list-panes failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    fn pane_alive(&self, pane_id: &str) -> bool {
-        Tmux::pane_alive(self, pane_id)
-    }
-
-    fn session_alive(&self, name: &str) -> bool {
-        Tmux::session_alive(self, name)
-    }
-
-    fn capture_pane_plain(&self, pane_id: &str) -> Result<String> {
-        Tmux::capture_pane(self, pane_id, None)
-    }
-
-    fn capture_pane_with_ansi(&self, pane_id: &str) -> Result<String> {
-        let output = self
-            .cmd()
-            .args(["capture-pane", "-t", pane_id, "-p", "-e"])
-            .output()
-            .context("failed to run multiplexer capture-pane with ANSI")?;
-        if !output.status.success() {
-            anyhow::bail!(
-                "multiplexer capture-pane failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    fn send_key(&self, pane_id: &str, key: &str) -> Result<()> {
-        agent_doc_tmux_io::input_diag::log_key_event(
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
-            "sessions.send_key",
-            &format!("pane:{pane_id}"),
-            "tmux_send_key",
-            key,
-            key.len(),
-            agent_doc_tmux_commands::input_diag::KeyEventMeta::default(),
-        );
-        Tmux::send_key(self, pane_id, key)
-    }
-
-    fn send_submitted_text(&self, pane_id: &str, text: &str) -> Result<()> {
-        let profile = tmux_submit_profile_for_harness("");
-        agent_doc_tmux_io::input_diag::log_text_submit(
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
-            "sessions.send_submitted_text",
-            &format!("pane:{pane_id}"),
-            text,
-            None,
-            profile.transform(),
-            profile.submit_key(),
-        );
-        send_submitted_text_with_profile(self, pane_id, text, profile)
-            .with_context(|| format!("failed to submit input to pane {}", pane_id))
-    }
-
-    fn send_submitted_text_for_harness(
-        &self,
-        pane_id: &str,
-        text: &str,
-        harness: &str,
-    ) -> Result<()> {
-        let profile = tmux_submit_profile_for_harness(harness);
-        agent_doc_tmux_io::input_diag::log_text_submit(
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
-            "sessions.send_submitted_text_for_harness",
-            &format!("pane:{pane_id}"),
-            text,
-            Some(harness),
-            profile.transform(),
-            profile.submit_key(),
-        );
-        send_submitted_text_with_profile(self, pane_id, text, profile)
-            .with_context(|| format!("failed to submit input to {harness} pane {pane_id}"))
-    }
-}
-
-/// Submit text and the named Enter key in one tmux call.
-///
-/// Keep this as the single live-pane command path for routed reopens, queue
-/// drains, and session clear so Codex does not grow another submit variant.
-fn send_text_with_submit_key(
-    tmux: &Tmux,
-    pane_id: &str,
-    text: &str,
-    profile: TmuxSubmitProfile,
-) -> Result<()> {
-    let split_delay_ms = profile.split_text_and_submit_delay_ms();
-    if split_delay_ms == 0 {
-        let status = tmux
-            .cmd()
-            .args(text_submit_command(pane_id, text, profile).into_args())
-            .status()
-            .context("failed to run tmux send-keys (text + submit key)")?;
-        if !status.success() {
-            anyhow::bail!("tmux send-keys text submit failed for pane {}", pane_id);
-        }
-        return Ok(());
-    }
-    // `#opencodeclearnewsubmit`: OpenCode's slash-command palette opens on
-    // `/` and can swallow an Enter sent in the same `tmux send-keys` call as
-    // the text. Split into two calls with a brief sleep so the palette
-    // settles before the Enter confirms the highlighted row and submits.
-    let text_status = tmux
-        .cmd()
-        .args(text_only_command(pane_id, text).into_args())
-        .status()
-        .context("failed to run tmux send-keys (text only, split path)")?;
-    if !text_status.success() {
-        anyhow::bail!("tmux send-keys split text step failed for pane {}", pane_id);
-    }
-    std::thread::sleep(std::time::Duration::from_millis(split_delay_ms));
-    let enter_status = tmux
-        .cmd()
-        .args(agent_doc_tmux_commands::send_key(pane_id, profile.submit_key()).into_args())
-        .status()
-        .context("failed to run tmux send-keys (submit key only, split path)")?;
-    if !enter_status.success() {
-        anyhow::bail!(
-            "tmux send-keys split submit-key step failed for pane {}",
-            pane_id
-        );
-    }
-    Ok(())
-}
-
-fn send_submitted_text_with_profile(
-    tmux: &Tmux,
-    pane_id: &str,
-    text: &str,
-    profile: TmuxSubmitProfile,
-) -> Result<()> {
-    send_text_with_submit_key(tmux, pane_id, text, profile)
-}
-
-/// Return the path to the sessions registry file (relative to CWD).
-pub fn registry_path() -> PathBuf {
-    PathBuf::from(SESSIONS_FILE)
-}
-
-/// Return the path to the sessions registry file under `base_dir`.
-pub fn registry_path_in(base_dir: &Path) -> PathBuf {
-    base_dir.join(SESSIONS_FILE)
-}
+use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock, Tmux};
 
 // ---------------------------------------------------------------------------
-// Agent-doc-specific tmux operations (not in tmux-router)
+// Free functions — registration operations and env-based checks
 // ---------------------------------------------------------------------------
-
-/// Capture the visible content of a tmux pane.
-pub fn capture_pane(tmux: &Tmux, pane_id: &str) -> Result<String> {
-    tmux.capture_pane_plain(pane_id)
-}
-
-/// Capture visible pane content while preserving ANSI attributes.
-///
-/// Prompt selection parsers need the highlighted option color; the normal
-/// tmux-router capture helper intentionally returns plain text.
-pub fn capture_pane_with_ansi(tmux: &Tmux, pane_id: &str) -> Result<String> {
-    tmux.capture_pane_with_ansi(pane_id)
-}
-
-/// Join `src` beside `dst` only if both belong to `expected_session`.
-///
-/// Rescue paths use this to make a stashed pane visible again without
-/// displacing another live pane into stash.
-pub fn join_pane_guarded(
-    tmux: &Tmux,
-    src: &str,
-    dst: &str,
-    expected_session: &str,
-    join_flag: &str,
-) -> Result<()> {
-    tmux.ensure_pane_in_session(src, expected_session)?;
-    tmux.ensure_pane_in_session(dst, expected_session)?;
-    PaneMoveOp::new(tmux, src, dst).join(join_flag)
-}
-
-/// Send a single key (not literal text) to a tmux pane.
-///
-/// Unlike `Tmux::send_keys` (which submits literal text), this sends
-/// a single key name like "Up", "Down", "Enter" — used for TUI navigation.
-pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
-    Multiplexer::send_key(tmux, pane_id, key)
-}
-
-/// Submit a single-line command through the default tmux submit profile.
-///
-/// This is the canonical live-pane submission helper for agent-doc-managed
-/// harness commands such as routed reopen triggers and file-scoped `/clear`.
-pub fn send_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()> {
-    tmux.send_submitted_text(pane_id, text)
-}
-
-/// Submit a single-line command through a harness-aware tmux submit path.
-///
-/// The submit profile is the single place that defines harness-specific tmux
-/// key boundaries. Codex, Claude, OpenCode, and the default harness profile use
-/// normalized text plus the named profile submit key in one tmux `send-keys`
-/// operation.
-pub fn send_submitted_text_for_harness(
-    tmux: &Tmux,
-    pane_id: &str,
-    text: &str,
-    harness: &str,
-) -> Result<()> {
-    tmux.send_submitted_text_for_harness(pane_id, text, harness)
-}
-
-// ---------------------------------------------------------------------------
-// Free functions — registry operations and env-based checks
-// ---------------------------------------------------------------------------
-
-/// Load the session registry from disk. Returns empty map if file doesn't exist.
-///
-/// **Not locked internally.** Callers performing read-modify-write must acquire
-/// `RegistryLock` first (or use `tmux_router::with_registry`). Read-only callers
-/// can call this directly for a point-in-time snapshot.
-pub fn load() -> Result<SessionRegistry> {
-    load_in(&std::env::current_dir()?)
-}
-
-/// Load the session registry from `base_dir/.agent-doc/sessions.json`.
-pub fn load_in(base_dir: &Path) -> Result<SessionRegistry> {
-    let path = registry_path_in(base_dir);
-    if !path.exists() {
-        return Ok(SessionRegistry::new());
-    }
-    let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let registry: SessionRegistry = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(normalize_registry(base_dir, registry))
-}
-
-/// Save the session registry to disk.
-///
-/// **Not locked internally.** Callers MUST hold `RegistryLock` before calling.
-/// Prefer `tmux_router::with_registry()` for safe read-modify-write cycles.
-pub fn save(registry: &SessionRegistry) -> Result<()> {
-    save_in(&std::env::current_dir()?, registry)
-}
-
-/// Save the session registry to `base_dir/.agent-doc/sessions.json`.
-pub fn save_in(base_dir: &Path, registry: &SessionRegistry) -> Result<()> {
-    let path = registry_path_in(base_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let content = serde_json::to_string_pretty(registry)?;
-    std::fs::write(&path, content)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-/// Register a session → pane mapping.
-/// Get the PID of the foreground process in a tmux pane.
-pub fn pane_pid(pane_id: &str) -> Result<u32> {
-    pane_pid_with_mux(&Tmux::default_server(), pane_id)
-}
-
-pub fn pane_pid_with_mux(mux: &dyn Multiplexer, pane_id: &str) -> Result<u32> {
-    let pid_str = mux
-        .display_message(Some(pane_id), "#{pane_pid}")
-        .with_context(|| format!("failed to query multiplexer pane PID for {}", pane_id))?;
-    pid_str
-        .parse::<u32>()
-        .with_context(|| format!("invalid PID '{}' for pane {}", pid_str, pane_id))
-}
 
 pub fn register(session_id: &str, pane_id: &str, file: &str) -> Result<()> {
     register_with_pid(session_id, pane_id, file, std::process::id())
 }
 
 #[allow(dead_code)]
-pub fn deregister(session_id: &str) -> Result<bool> {
-    let registry_path = registry_path();
-    let _lock = RegistryLock::acquire(&registry_path)?;
-    let mut registry = load()?;
-    let removed = find_registry_key_by_session_id(&registry, session_id)
-        .and_then(|key| registry.remove(&key))
-        .is_some();
-    if removed {
-        save(&registry)?;
-    }
-    Ok(removed)
-}
-
 pub fn register_with_pid(session_id: &str, pane_id: &str, file: &str, pid: u32) -> Result<()> {
     register_with_pid_internal(session_id, pane_id, file, pid, "register", "register")
 }
@@ -464,8 +73,8 @@ fn register_with_pid_internal(
     transition_caller: &'static str,
     transition_reason: &'static str,
 ) -> Result<()> {
-    // Query the window ID for this pane
-    let window = pane_window(pane_id).unwrap_or_default();
+    let tmux = Tmux::default_server();
+    let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
     register_full_internal_call(
         session_id,
         pane_id,
@@ -489,7 +98,8 @@ pub fn register_with_pid_and_cwd(
     pid: u32,
     cwd: &str,
 ) -> Result<()> {
-    let window = pane_window(pane_id).unwrap_or_default();
+    let tmux = Tmux::default_server();
+    let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
     register_full_with_cwd_internal_call(
         session_id,
         pane_id,
@@ -513,8 +123,8 @@ pub fn attach_with_pid_and_cwd_in(
     window: &str,
     cwd: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
-    let mut registry = load_in(base_dir)?;
+    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let mut registry = session_registry_io::load_in(base_dir)?;
     register_full_internal(
         base_dir,
         &mut registry,
@@ -539,36 +149,25 @@ pub fn attach_projection_only_in(
     window: &str,
     cwd: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
-    let mut registry = load_in(base_dir)?;
+    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let mut registry = session_registry_io::load_in(base_dir)?;
     let started = chrono_now();
-    let registry_key = canonical_registry_key_in(base_dir, file);
-    let stale_keys: Vec<String> = registry
-        .iter()
-        .filter(|(key, entry)| entry.pane == pane_id && entry_session_id(key, entry) != session_id)
-        .map(|(key, _)| key.clone())
-        .collect();
-    for key in stale_keys {
-        eprintln!(
-            "[registry] removing stale session {} (was pane {})",
-            key, pane_id
-        );
-        registry.remove(&key);
-    }
-    registry.insert(
-        registry_key,
-        SessionEntry {
-            pane: pane_id.to_string(),
+    let replacement = session_registry::replace_registry_entry(
+        base_dir,
+        &mut registry,
+        session_registry::RegistryEntryFields {
+            session_id,
+            pane_id,
+            file,
             pid,
-            cwd: cwd.to_string(),
-            started,
-            session_id: session_id.to_string(),
-            file: file.to_string(),
-            window: window.to_string(),
-            supervisor_instance_id: String::new(),
+            cwd,
+            started: &started,
+            window,
+            supervisor_instance_id: "",
         },
     );
-    save_in(base_dir, &registry)
+    log_stale_registry_keys(&replacement.stale_keys, pane_id);
+    session_registry_io::save_in(base_dir, &registry)
 }
 
 pub fn register_supervisor(
@@ -578,7 +177,8 @@ pub fn register_supervisor(
     supervisor_pid: u32,
     supervisor_instance_id: &str,
 ) -> Result<()> {
-    let window = pane_window(pane_id).unwrap_or_default();
+    let tmux = Tmux::default_server();
+    let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
     register_full_internal_call(
         session_id,
         pane_id,
@@ -600,7 +200,8 @@ pub fn register_supervisor_in(
     supervisor_pid: u32,
     supervisor_instance_id: &str,
 ) -> Result<()> {
-    let window = pane_window(pane_id).unwrap_or_default();
+    let tmux = Tmux::default_server();
+    let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
     register_full_with_cwd_and_instance_in(
         base_dir,
         session_id,
@@ -647,8 +248,8 @@ pub fn register_full_in(
     pid: u32,
     window: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
-    let mut registry = load_in(base_dir)?;
+    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let mut registry = session_registry_io::load_in(base_dir)?;
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -700,8 +301,8 @@ pub fn register_full_with_cwd_in(
     window: &str,
     cwd: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
-    let mut registry = load_in(base_dir)?;
+    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let mut registry = session_registry_io::load_in(base_dir)?;
     register_full_internal(
         base_dir,
         &mut registry,
@@ -730,8 +331,8 @@ fn register_full_with_cwd_and_instance_in(
     transition_caller: &'static str,
     transition_reason: &'static str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
-    let mut registry = load_in(base_dir)?;
+    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let mut registry = session_registry_io::load_in(base_dir)?;
     register_full_internal(
         base_dir,
         &mut registry,
@@ -763,8 +364,8 @@ fn register_full_internal_call(
     let resolved_cwd = cwd
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| base_dir.to_string_lossy().to_string());
-    let _lock = RegistryLock::acquire(&registry_path_in(&base_dir))?;
-    let mut registry = load_in(&base_dir)?;
+    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(&base_dir))?;
+    let mut registry = session_registry_io::load_in(&base_dir)?;
     register_full_internal(
         &base_dir,
         &mut registry,
@@ -793,8 +394,8 @@ fn register_full_with_cwd_internal_call(
     transition_reason: &'static str,
 ) -> Result<()> {
     let base_dir = std::env::current_dir()?;
-    let _lock = RegistryLock::acquire(&registry_path_in(&base_dir))?;
-    let mut registry = load_in(&base_dir)?;
+    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(&base_dir))?;
+    let mut registry = session_registry_io::load_in(&base_dir)?;
     register_full_internal(
         &base_dir,
         &mut registry,
@@ -825,22 +426,12 @@ fn register_full_internal(
     transition_reason: &'static str,
 ) -> Result<()> {
     let started = chrono_now();
-    let registry_key = canonical_registry_key_in(base_dir, file);
+    let registry_key = session_registry::canonical_registry_key_in(base_dir, file);
     let supervisor_instance_id = supervisor_instance_id.unwrap_or_default().to_string();
 
     // Enforce single session per pane: remove stale entries pointing to same pane
-    let stale_keys: Vec<String> = registry
-        .iter()
-        .filter(|(k, e)| e.pane == pane_id && entry_session_id(k, e) != session_id)
-        .map(|(k, _)| k.clone())
-        .collect();
-    for key in &stale_keys {
-        eprintln!(
-            "[registry] removing stale session {} (was pane {})",
-            key, pane_id
-        );
-        registry.remove(key);
-    }
+    let stale_keys = session_registry::remove_stale_pane_bindings(registry, pane_id, session_id);
+    log_stale_registry_keys(&stale_keys, pane_id);
 
     let mut controller_row_exists = false;
     if let Some(previous) = registry.get(&registry_key).cloned() {
@@ -899,23 +490,33 @@ fn register_full_internal(
         return Ok(());
     }
 
-    registry.insert(
-        registry_key.clone(),
-        SessionEntry {
-            pane: pane_id.to_string(),
+    session_registry::insert_registry_entry(
+        base_dir,
+        registry,
+        session_registry::RegistryEntryFields {
+            session_id,
+            pane_id,
+            file,
             pid,
-            cwd: cwd.to_string(),
-            started,
-            session_id: session_id.to_string(),
-            file: file.to_string(),
-            window: window.to_string(),
-            supervisor_instance_id,
+            cwd,
+            started: &started,
+            window,
+            supervisor_instance_id: &supervisor_instance_id,
         },
     );
-    save_in(base_dir, registry)?;
+    session_registry_io::save_in(base_dir, registry)?;
     let _ =
         crate::project_controller::project_sessions_projection_for_actor(base_dir, &registry_key);
     Ok(())
+}
+
+fn log_stale_registry_keys(stale_keys: &[String], pane_id: &str) {
+    for key in stale_keys {
+        eprintln!(
+            "[registry] removing stale session {} (was pane {})",
+            key, pane_id
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -929,190 +530,30 @@ fn log_session_rebind(
     transition_reason: &str,
     generations: agent_doc_supervisor::OwnershipGeneration,
 ) {
-    if previous.pane == new_pane {
-        return;
-    }
-
-    let log_file = resolve_log_file_path(base_dir, &previous.file);
-    let old_window = if previous.window.is_empty() {
-        "unknown"
-    } else {
-        previous.window.as_str()
-    };
-    let new_window = if new_window.is_empty() {
-        "unknown"
-    } else {
-        new_window
-    };
-
-    let transition = agent_doc_supervisor::format_transition_event(
-        agent_doc_supervisor::OwnershipTransitionEvent {
-            caller: transition_caller,
-            reason: transition_reason,
-            prior_generation: generations.prior_generation,
-            new_generation: generations.new_generation,
-            old_pane: Some(previous.pane.as_str()),
+    if let Err(err) = agent_doc_supervisor_io::startup_miss::append_registry_rebind_session_log(
+        agent_doc_supervisor_io::startup_miss::RegistryRebindSessionLog {
+            base_dir,
+            session_id,
+            previous_file: &previous.file,
+            previous_pane: &previous.pane,
+            previous_window: &previous.window,
             new_pane,
-            old_window: Some(old_window),
-            new_window: Some(new_window),
+            new_window,
+            transition_caller,
+            transition_reason,
+            generations,
         },
-    );
-    if let Err(err) =
-        crate::startup_miss::append_session_log_event(&log_file, session_id, &transition)
-    {
-        eprintln!(
-            "[registry] warning: failed to append ownership transition for {}: {}",
-            session_id, err
-        );
-        return;
-    }
-
-    let superseded = format!(
-        "session_superseded old_pane={} new_pane={} old_window={} new_window={} prior_generation={} new_generation={}",
-        previous.pane,
-        new_pane,
-        old_window,
-        new_window,
-        generations.prior_generation,
-        generations.new_generation
-    );
-    if let Err(err) =
-        crate::startup_miss::append_session_log_event(&log_file, session_id, &superseded)
-    {
-        eprintln!(
-            "[registry] warning: failed to append session superseded event for {}: {}",
-            session_id, err
-        );
-        return;
-    }
-    if let Err(err) = crate::startup_miss::append_session_log_event(
-        &log_file,
-        session_id,
-        &format!(
-            "session_end origin=registry_rebind pane={} next_pane={} generation={} next_generation={}",
-            previous.pane, new_pane, generations.prior_generation, generations.new_generation
-        ),
     ) {
         eprintln!(
-            "[registry] warning: failed to append registry-rebind session_end for {}: {}",
+            "[registry] warning: failed to append registry-rebind session log for {}: {}",
             session_id, err
         );
     }
-}
-
-fn resolve_log_file_path(base_dir: &Path, file: &str) -> PathBuf {
-    let file_path = Path::new(file);
-    if file_path.is_absolute() {
-        file_path.to_path_buf()
-    } else {
-        base_dir.join(file_path)
-    }
-}
-
-/// Query the tmux window ID for a pane.
-pub fn pane_window(pane_id: &str) -> Result<String> {
-    pane_window_with_mux(&Tmux::default_server(), pane_id)
-}
-
-pub fn pane_window_with_mux(mux: &dyn Multiplexer, pane_id: &str) -> Result<String> {
-    mux.display_message(Some(pane_id), "#{window_id}")
-        .with_context(|| format!("failed to query multiplexer window ID for {}", pane_id))
-}
-
-/// Look up the pane ID for a session.
-pub fn lookup(session_id: &str) -> Result<Option<String>> {
-    let registry = load()?;
-    Ok(find_registry_key_by_session_id(&registry, session_id)
-        .and_then(|key| registry.get(&key).map(|entry| entry.pane.clone())))
-}
-
-/// Look up the pane ID for a session in a specific base directory's registry.
-pub fn lookup_in(base_dir: &Path, session_id: &str) -> Result<Option<String>> {
-    let registry = load_in(base_dir)?;
-    Ok(find_registry_key_by_session_id(&registry, session_id)
-        .and_then(|key| registry.get(&key).map(|entry| entry.pane.clone())))
-}
-
-/// Look up a full registry entry by session ID.
-pub fn lookup_entry(session_id: &str) -> Result<Option<SessionEntry>> {
-    let registry = load()?;
-    Ok(find_registry_key_by_session_id(&registry, session_id)
-        .and_then(|key| registry.get(&key).cloned()))
-}
-
-/// Get the pane ID of the current pane.
-/// Tries TMUX_PANE env var first, then falls back to querying tmux
-/// for the active pane (works from outside tmux, e.g. IDE processes).
-pub fn current_pane() -> Result<String> {
-    if let Ok(pane) = std::env::var("TMUX_PANE") {
-        return Ok(pane);
-    }
-    current_pane_with_mux(&Tmux::default_server())
-}
-
-pub fn current_pane_with_mux(mux: &dyn Multiplexer) -> Result<String> {
-    let pane = mux
-        .display_message(None, "#{pane_id}")
-        .context("failed to query multiplexer for active pane")?;
-    if pane.is_empty() {
-        anyhow::bail!("multiplexer returned empty pane ID");
-    }
-    Ok(pane)
-}
-
-/// Resolve a pane by positional hint (left, right, top, bottom).
-/// Queries `tmux list-panes` for the current window and selects the pane
-/// at the requested position based on coordinates.
-pub fn pane_by_position(position: &str) -> Result<String> {
-    pane_by_position_with_mux(&Tmux::default_server(), position)
-}
-
-pub fn pane_by_position_with_mux(mux: &dyn Multiplexer, position: &str) -> Result<String> {
-    let text = mux
-        .list_panes(None, TMUX_PANE_GEOMETRY_FORMAT)
-        .context("failed to query multiplexer panes")?;
-    Ok(select_pane_by_position(
-        &text,
-        position,
-        "current multiplexer window",
-    )?)
-}
-
-/// Resolve a pane by positional hint within a specific tmux window.
-/// Like `pane_by_position` but scoped to the given window ID (e.g. `@1`).
-pub fn pane_by_position_in_window(position: &str, window: &str) -> Result<String> {
-    pane_by_position_in_window_with_mux(&Tmux::default_server(), position, window)
-}
-
-pub fn pane_by_position_in_window_with_mux(
-    mux: &dyn Multiplexer,
-    position: &str,
-    window: &str,
-) -> Result<String> {
-    let text = mux
-        .list_panes(Some(window), TMUX_PANE_GEOMETRY_FORMAT)
-        .with_context(|| format!("failed to query multiplexer panes for window {}", window))?;
-    Ok(select_pane_by_position(
-        &text,
-        position,
-        &format!("multiplexer window {}", window),
-    )?)
-}
-
-/// Check if we're inside tmux.
-pub fn in_tmux() -> bool {
-    std::env::var("TMUX").is_ok()
 }
 
 /// Simple UTC timestamp without pulling in chrono.
 fn chrono_now() -> String {
-    let output = Command::new("date")
-        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
-        .output();
-    match output {
-        Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        Err(_) => "unknown".to_string(),
-    }
+    agent_doc_log_time::current_log_timestamp()
 }
 
 #[cfg(test)]
@@ -1120,100 +561,6 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tempfile::TempDir;
-
-    #[derive(Default)]
-    struct MockMultiplexer {
-        active_pane: String,
-        pane_pid: String,
-        pane_window: String,
-        list_panes: String,
-        window_list_panes: String,
-    }
-
-    impl Multiplexer for MockMultiplexer {
-        fn display_message(&self, target: Option<&str>, format: &str) -> Result<String> {
-            match (target, format) {
-                (None, "#{pane_id}") => Ok(self.active_pane.clone()),
-                (Some(_), "#{pane_pid}") => Ok(self.pane_pid.clone()),
-                (Some(_), "#{window_id}") => Ok(self.pane_window.clone()),
-                _ => anyhow::bail!("unexpected display-message query: {target:?} {format}"),
-            }
-        }
-
-        fn list_panes(&self, target: Option<&str>, _format: &str) -> Result<String> {
-            if target.is_some() {
-                Ok(self.window_list_panes.clone())
-            } else {
-                Ok(self.list_panes.clone())
-            }
-        }
-
-        fn pane_alive(&self, _pane_id: &str) -> bool {
-            true
-        }
-
-        fn session_alive(&self, _name: &str) -> bool {
-            true
-        }
-
-        fn capture_pane_plain(&self, _pane_id: &str) -> Result<String> {
-            Ok(String::new())
-        }
-
-        fn capture_pane_with_ansi(&self, _pane_id: &str) -> Result<String> {
-            Ok(String::new())
-        }
-
-        fn send_key(&self, _pane_id: &str, _key: &str) -> Result<()> {
-            Ok(())
-        }
-
-        fn send_submitted_text(&self, _pane_id: &str, _text: &str) -> Result<()> {
-            Ok(())
-        }
-
-        fn send_submitted_text_for_harness(
-            &self,
-            _pane_id: &str,
-            _text: &str,
-            _harness: &str,
-        ) -> Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn multiplexer_queries_support_mock_backend() {
-        let mux = MockMultiplexer {
-            active_pane: "%active".to_string(),
-            pane_pid: "4242".to_string(),
-            pane_window: "@7".to_string(),
-            ..Default::default()
-        };
-        let mux_ref: &dyn Multiplexer = &mux;
-
-        assert_eq!(current_pane_with_mux(&mux).unwrap(), "%active");
-        assert_eq!(pane_pid_with_mux(&mux, "%active").unwrap(), 4242);
-        assert_eq!(pane_window_with_mux(&mux, "%active").unwrap(), "@7");
-        assert!(mux_ref.pane_alive("%active"));
-        assert!(mux_ref.session_alive("agent-doc"));
-    }
-
-    #[test]
-    fn multiplexer_position_selection_is_backend_independent() {
-        let mux = MockMultiplexer {
-            list_panes: "%left 0 0 80 24\n%right 120 0 80 24\n%bottom 0 24 160 24\n".to_string(),
-            window_list_panes: "%top 0 0 160 12\n%low 0 12 160 36\n".to_string(),
-            ..Default::default()
-        };
-
-        assert_eq!(pane_by_position_with_mux(&mux, "left").unwrap(), "%left");
-        assert_eq!(pane_by_position_with_mux(&mux, "right").unwrap(), "%right");
-        assert_eq!(
-            pane_by_position_in_window_with_mux(&mux, "bottom", "@1").unwrap(),
-            "%low"
-        );
-    }
 
     #[test]
     fn registry_roundtrip() {
@@ -1233,9 +580,9 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        save_in(dir.path(), &reg).unwrap();
-        let loaded = load_in(dir.path()).unwrap();
-        let key = canonical_registry_key_in(dir.path(), "test.md");
+        session_registry_io::save_in(dir.path(), &reg).unwrap();
+        let loaded = session_registry_io::load_in(dir.path()).unwrap();
+        let key = session_registry::canonical_registry_key_in(dir.path(), "test.md");
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[&key].pane, "%42");
     }
@@ -1243,7 +590,7 @@ mod tests {
     #[test]
     fn load_empty_returns_empty_map() {
         let dir = TempDir::new().unwrap();
-        let reg = load_in(dir.path()).unwrap();
+        let reg = session_registry_io::load_in(dir.path()).unwrap();
         assert!(reg.is_empty());
     }
 
@@ -1466,7 +813,15 @@ mod tests {
             "expected raw reader to enter raw mode before payload submit"
         );
 
-        send_submitted_text_for_harness(&t, &pane_id, "agent-doc plan.md\n", "opencode").unwrap();
+        agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+            &t,
+            &pane_id,
+            "agent-doc plan.md\n",
+            "opencode",
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+            "sessions.send_submitted_text_for_harness",
+        )
+        .unwrap();
 
         for _ in 0..60 {
             if done_path.exists() {
@@ -1560,8 +915,8 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = load_in(dir.path()).unwrap();
-        let key = canonical_registry_key_in(dir.path(), "plan.md");
+        let loaded = session_registry_io::load_in(dir.path()).unwrap();
+        let key = session_registry::canonical_registry_key_in(dir.path(), "plan.md");
         assert!(loaded.contains_key(&key), "session should be registered");
         let entry = &loaded[&key];
         assert_eq!(
@@ -1592,8 +947,8 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = load_in(dir.path()).unwrap();
-        let key = canonical_registry_key_in(dir.path(), "doc.md");
+        let loaded = session_registry_io::load_in(dir.path()).unwrap();
+        let key = session_registry::canonical_registry_key_in(dir.path(), "doc.md");
         let entry = &loaded[&key];
         assert_eq!(entry.cwd, explicit_cwd);
         // Verify it differs from the actual process cwd
@@ -1641,15 +996,15 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        save_in(dir.path(), &reg).unwrap();
+        session_registry_io::save_in(dir.path(), &reg).unwrap();
 
         // Now register session-c with the same pane %42
         register_full_in(dir.path(), "session-c", "%42", "new-file.md", 200, "@1").unwrap();
 
-        let loaded = load_in(dir.path()).unwrap();
-        let new_key = canonical_registry_key_in(dir.path(), "new-file.md");
-        let old_key_a = canonical_registry_key_in(dir.path(), "old-file.md");
-        let old_key_b = canonical_registry_key_in(dir.path(), "another-old.md");
+        let loaded = session_registry_io::load_in(dir.path()).unwrap();
+        let new_key = session_registry::canonical_registry_key_in(dir.path(), "new-file.md");
+        let old_key_a = session_registry::canonical_registry_key_in(dir.path(), "old-file.md");
+        let old_key_b = session_registry::canonical_registry_key_in(dir.path(), "another-old.md");
         // Only session-c should remain for pane %42
         assert!(loaded.contains_key(&new_key), "new session should exist");
         assert!(
@@ -1691,7 +1046,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        save_in(dir.path(), &reg).unwrap();
+        session_registry_io::save_in(dir.path(), &reg).unwrap();
 
         register_full_in(
             dir.path(),

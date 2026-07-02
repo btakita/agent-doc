@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_controller::dispatch::routed_dispatch_start_timeout_for_binary;
 
 fn dispatch_only_starting_pane_ready_via_authoritative_actor(
     tmux: &Tmux,
@@ -142,9 +143,10 @@ pub(crate) fn dispatch_only_send_reopen(
     }
 
     let mut dispatch_pane = pane.to_string();
-    let mut log_status = crate::startup_miss::session_log_status(file, session_id)
-        .ok()
-        .flatten();
+    let mut log_status =
+        agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
+            .ok()
+            .flatten();
     let mut recovery_attempts = 0usize;
     let requires_ready_probe =
         agent_doc_supervisor::startup_miss::dispatch_only_requires_ready_probe(
@@ -221,9 +223,11 @@ pub(crate) fn dispatch_only_send_reopen(
                                 recovery_attempts
                             ),
                         );
-                        log_status = crate::startup_miss::session_log_status(file, session_id)
-                            .ok()
-                            .flatten();
+                        log_status = agent_doc_supervisor_io::startup_miss::session_log_status(
+                            file, session_id,
+                        )
+                        .ok()
+                        .flatten();
                         continue;
                     }
                     StartingPaneRecoveryTarget::DifferentPane(next_pane) => {
@@ -239,9 +243,11 @@ pub(crate) fn dispatch_only_send_reopen(
                             ),
                         );
                         dispatch_pane = next_pane;
-                        log_status = crate::startup_miss::session_log_status(file, session_id)
-                            .ok()
-                            .flatten();
+                        log_status = agent_doc_supervisor_io::startup_miss::session_log_status(
+                            file, session_id,
+                        )
+                        .ok()
+                        .flatten();
                         continue;
                     }
                 }
@@ -274,7 +280,7 @@ pub(crate) fn dispatch_only_send_reopen(
         }
     }
 
-    if let Ok(content) = sessions::capture_pane(tmux, &dispatch_pane)
+    if let Ok(content) = agent_doc_tmux_io::capture_pane(tmux, &dispatch_pane)
         && let Some(reason) = agent_doc_harness::dispatch_only_blocker_reason(harness, &content)
     {
         crate::ops_log::log_op(
@@ -326,7 +332,11 @@ pub(crate) fn dispatch_only_send_reopen(
         // #snrun: name the interactive shell substate distinctly from a generic
         // busy actor so the failure says which terminal state blocked dispatch.
         let guard_reason = dispatch_only_blocked_guard_reason(&reason);
-        log_prompt_ready_barrier_failed(file, guard_reason);
+        agent_doc_flow_io::log_flow_event(
+            file,
+            prompt_ready_barrier_failed_event(guard_reason),
+            crate::ops_log::log_op,
+        );
         if guard_reason == RoutedReopenGuardReason::BlockedInInteractiveSubstate {
             anyhow::bail!(
                 "dispatch-only {} reopen refused to inject into pane {} for {} because the pane is blocked in an interactive terminal substate ({}), not a dispatch-ready composer; {}",
@@ -437,9 +447,10 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
         dispatch_start,
         timeout_secs: timeout,
     };
-    log_dispatch_proof_failed(
+    agent_doc_flow_io::log_flow_event(
         file,
-        RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof,
+        dispatch_proof_failed_event(RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof),
+        crate::ops_log::log_op,
     );
     if let Err(err) = agent_doc_supervisor_io::route_submit_inflight::mark_route_submit_blocked(
         file,
@@ -550,7 +561,7 @@ pub(crate) fn dispatch_only_reopen_existing_pane(
             ),
         );
     }
-    let log_status = crate::startup_miss::session_log_status(file, session_id)
+    let log_status = agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
         .ok()
         .flatten();
     if agent_doc_supervisor::startup_miss::dispatch_only_requires_ready_probe(
@@ -572,7 +583,7 @@ pub(crate) fn dispatch_only_reopen_existing_pane(
         );
     }
     if harness.binary == "codex"
-        && crate::startup_miss::load(file)
+        && agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
             .ok()
             .flatten()
             .is_some_and(|miss| miss.pane_id == dispatch_pane)
@@ -842,8 +853,8 @@ pub(crate) fn retry_dispatch_only_after_busy_pane(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
+    use agent_doc_supervisor_io::ipc::SupervisorIpc;
     #[test]
     fn dispatch_only_progress_policy_is_harness_neutral() {
         let dir = tempfile::tempdir().unwrap();

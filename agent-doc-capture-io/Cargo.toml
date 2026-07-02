@@ -1,0 +1,18 @@
+[package]
+name = "agent-doc-capture-io"
+version = "0.34.67"
+edition = "2024"
+description = "Response capture ledger path I/O for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_capture_io"
+
+[dependencies]
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

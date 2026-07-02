@@ -30,7 +30,7 @@ use agent_doc_turn_executor_tmux::prompt::{
 use serde::Serialize;
 use tmux_router::{Registry as SessionRegistry, Tmux};
 
-use crate::sessions;
+use crate::ops_log;
 
 pub fn run(file: &Path) -> Result<()> {
     run_with_tmux(file, &Tmux::default_server())
@@ -45,7 +45,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
         .with_context(|| format!("failed to read {}", file.display()))?;
     let (_updated, session_id) = frontmatter::ensure_session(&content)?;
 
-    let pane = sessions::lookup(&session_id)?;
+    let pane = agent_doc_session_registry_io::lookup(&session_id)?;
     let pane_id = match pane {
         Some(p) => p,
         None => {
@@ -71,7 +71,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
         return Ok(());
     }
 
-    let pane_content = sessions::capture_pane_with_ansi(tmux, &pane_id)?;
+    let pane_content = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &pane_id)?;
     let info = parse_prompt(&pane_content);
     println!("{}", serde_json::to_string(&info)?);
     Ok(())
@@ -93,7 +93,7 @@ pub fn run_all() -> Result<()> {
 }
 
 pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
-    let registry: SessionRegistry = sessions::load()?;
+    let registry: SessionRegistry = agent_doc_session_registry_io::load()?;
     let mut entries: Vec<PromptAllEntry> = Vec::new();
     let verbose = std::env::var("AGENT_DOC_PROMPT_DEBUG").is_ok();
 
@@ -108,7 +108,7 @@ pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
             continue;
         }
 
-        let prompt = match sessions::capture_pane_with_ansi(tmux, &entry.pane) {
+        let prompt = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, &entry.pane) {
             Ok(content) => {
                 if verbose {
                     // Log the last 5 non-empty lines for debugging prompt detection
@@ -165,7 +165,7 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
         .with_context(|| format!("failed to read {}", file.display()))?;
     let (_updated, session_id) = frontmatter::ensure_session(&content)?;
 
-    let pane = sessions::lookup(&session_id)?;
+    let pane = agent_doc_session_registry_io::lookup(&session_id)?;
     let pane_id = pane.context("no pane registered for this session")?;
 
     if !tmux.pane_alive(&pane_id) {
@@ -173,7 +173,7 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     }
 
     // Verify there's actually a prompt active
-    let pane_content = sessions::capture_pane_with_ansi(tmux, &pane_id)?;
+    let pane_content = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &pane_id)?;
     let info = parse_prompt(&pane_content);
     if !info.active {
         anyhow::bail!("no active prompt detected");
@@ -194,24 +194,48 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
 
     if target < current {
         for _ in 0..(current - target) {
-            sessions::send_key(tmux, &pane_id, keys.prev)?;
+            agent_doc_tmux_io::send_key_logged(
+                tmux,
+                &pane_id,
+                keys.prev,
+                agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), ops_log::log_op),
+                "prompt.answer",
+            )?;
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     } else if target > current {
         for _ in 0..(target - current) {
-            sessions::send_key(tmux, &pane_id, keys.next)?;
+            agent_doc_tmux_io::send_key_logged(
+                tmux,
+                &pane_id,
+                keys.next,
+                agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), ops_log::log_op),
+                "prompt.answer",
+            )?;
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     }
 
     // Brief pause then press Enter to confirm
     std::thread::sleep(std::time::Duration::from_millis(50));
-    sessions::send_key(tmux, &pane_id, "Enter")?;
+    agent_doc_tmux_io::send_key_logged(
+        tmux,
+        &pane_id,
+        "Enter",
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), ops_log::log_op),
+        "prompt.answer",
+    )?;
     if navigation_axis_for_prompt(&pane_content) == PromptNavigationAxis::Horizontal
         && opencode_option_requires_confirmation(&options[target])
     {
         std::thread::sleep(std::time::Duration::from_millis(100));
-        sessions::send_key(tmux, &pane_id, "Enter")?;
+        agent_doc_tmux_io::send_key_logged(
+            tmux,
+            &pane_id,
+            "Enter",
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), ops_log::log_op),
+            "prompt.answer",
+        )?;
     }
 
     eprintln!("Sent option {} to pane {}", option_index, pane_id);
@@ -346,7 +370,7 @@ sleep 1
 
         assert!(
             wait_for(Duration::from_secs(3), || {
-                crate::sessions::capture_pane_with_ansi(&tmux, &pane)
+                agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &pane)
                     .map(|content| parse_prompt(&content).active)
                     .unwrap_or(false)
             }),
@@ -368,7 +392,7 @@ sleep 1
                 supervisor_instance_id: String::new(),
             },
         );
-        crate::sessions::save(&registry).unwrap();
+        agent_doc_session_registry_io::save(&registry).unwrap();
 
         answer_with_tmux(&doc, 2, &tmux).unwrap();
 

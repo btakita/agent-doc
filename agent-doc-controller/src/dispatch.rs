@@ -1,5 +1,6 @@
 //! Pure controller dispatch admission helpers.
 
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_supervisor::route_runtime::SupervisorHealth;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1072,6 +1073,24 @@ impl RoutedReopenGuardReason {
             Self::BlockedInInteractiveSubstate => "blocked_in_interactive_substate",
         }
     }
+}
+
+pub fn prompt_ready_barrier_failed_event(reason: RoutedReopenGuardReason) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::RoutedReopen,
+        FlowStage::PromptReadyBarrier,
+        FlowOutcome::FailedClosed,
+    )
+    .with_reason(reason.as_str())
+}
+
+pub fn dispatch_proof_failed_event(reason: RoutedReopenGuardReason) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::RoutedReopen,
+        FlowStage::DispatchProof,
+        FlowOutcome::FailedClosed,
+    )
+    .with_reason(reason.as_str())
 }
 
 pub fn is_interactive_shell_substate_reason(reason: &str) -> bool {
@@ -4264,6 +4283,29 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
             );
         }
+    }
+
+    #[test]
+    fn routed_reopen_guard_events_use_route_flow_stages() {
+        let prompt_event =
+            prompt_ready_barrier_failed_event(RoutedReopenGuardReason::StartingActorNotReady);
+        assert_eq!(prompt_event.flow, FlowName::RoutedReopen);
+        assert_eq!(prompt_event.stage, FlowStage::PromptReadyBarrier);
+        assert_eq!(prompt_event.outcome, FlowOutcome::FailedClosed);
+        assert_eq!(
+            prompt_event.reason.as_deref(),
+            Some("starting_actor_not_ready")
+        );
+
+        let proof_event =
+            dispatch_proof_failed_event(RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof);
+        assert_eq!(proof_event.flow, FlowName::RoutedReopen);
+        assert_eq!(proof_event.stage, FlowStage::DispatchProof);
+        assert_eq!(proof_event.outcome, FlowOutcome::FailedClosed);
+        assert_eq!(
+            proof_event.reason.as_deref(),
+            Some("accepted_only_dispatch_start_proof")
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use crate::frontmatter_io;
+use crate::sessions;
 use agent_doc_controller::status::LaunchMode;
 use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
@@ -245,7 +245,11 @@ fn build_harness_launch_spec(
             ));
         }
     }
-    crate::agent::append_workspace_access_args(&harness.binary, &mut base_args, canonical);
+    agent_doc_git_io::dirs::append_workspace_access_args(
+        &harness.binary,
+        &mut base_args,
+        canonical,
+    );
     if harness.supports_no_mcp && fm.no_mcp.unwrap_or(false) {
         base_args.push("--no-mcp".into());
     }
@@ -369,13 +373,18 @@ pub fn run_with_reap_policy(
         // edit into the existing `#qdurcrash` substrate so the very next
         // `replay_missing` below re-inserts it instead of dropping it when the
         // reloaded document predates the add.
-        if let Err(err) = crate::queue_journal::record_live_buffer(file) {
+        if let Err(err) = agent_doc_queue_io::queue_journal::record_live_buffer(file) {
             eprintln!(
                 "[agent-doc] queue_journal: live-buffer record failed for {} ({err:#}) — continuing",
                 file.display()
             );
         }
-        let missing = crate::queue_journal::replay_missing(file, &updated_content);
+        let durable_content = agent_doc_snapshot_io::load(file).ok().flatten();
+        let missing = agent_doc_queue_io::queue_journal::replay_missing(
+            file,
+            &updated_content,
+            durable_content.as_deref(),
+        );
         match agent_doc_queue::queue_journal::merge_missing_into_content(&missing, &updated_content)
         {
             Ok(Some(merged)) => {
@@ -406,14 +415,19 @@ pub fn run_with_reap_policy(
     };
 
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _body) = frontmatter_io::parse_for_file_with_context(&updated_content, file, &rc)?;
+    let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+        &updated_content,
+        file,
+        &rc.ssh_context(),
+    )?;
     let global_config = agent_doc_config::load().unwrap_or_default();
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_fs::find_project_root(&canonical).unwrap_or_else(|| {
-        std::env::current_dir()
-            .ok()
-            .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
-    });
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
+        });
     let mut session_log = open_session_log(&canonical, &session_id);
     if generated_session_uuid {
         start_console_status(
@@ -500,7 +514,7 @@ pub fn run_with_reap_policy(
     }
 
     // Must be inside tmux
-    if !sessions::in_tmux() {
+    if !agent_doc_tmux_io::in_tmux() {
         // Distinguish "tmux not installed" from "not inside a tmux session"
         let tmux_installed = std::process::Command::new("which")
             .arg("tmux")
@@ -524,8 +538,9 @@ pub fn run_with_reap_policy(
         );
     }
 
-    let pane_id = sessions::current_pane()?;
     let tmux = tmux_router::Tmux::default_server();
+    let pane_id = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
+        .context("failed to query current tmux pane")?;
 
     // `#recursion-guard-wedge-escape` (part 1): hard-refuse a recursive
     // self-owned-pane start. When `agent-doc start <FILE>` runs inside the Codex
@@ -549,7 +564,12 @@ pub fn run_with_reap_policy(
         anyhow::bail!("{}", diagnostic);
     }
 
-    if let Some((miss, supersession)) = crate::startup_miss::take_superseded_startup_miss(file)? {
+    if let Some((miss, supersession)) =
+        agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(
+            agent_doc_supervisor_io::startup_miss::session_registry_lookup(),
+            file,
+        )?
+    {
         let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
         start_console_status(
             &mut session_log,
@@ -574,7 +594,9 @@ pub fn run_with_reap_policy(
             ),
         );
     }
-    let unresolved_startup_miss = crate::startup_miss::load(file).ok().flatten();
+    let unresolved_startup_miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
+        .ok()
+        .flatten();
 
     if !force {
         if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
@@ -634,8 +656,8 @@ pub fn run_with_reap_policy(
     // Register session → pane (with relative file path)
     let file_str = file.to_string_lossy();
     let supervisor_instance_id = uuid::Uuid::new_v4().to_string();
-    let prior_entry = sessions::lookup_entry(&session_id)?;
-    let pane_window = sessions::pane_window(&pane_id).unwrap_or_default();
+    let prior_entry = agent_doc_session_registry_io::lookup_entry(&session_id)?;
+    let pane_window = agent_doc_tmux_io::target_window_id(&tmux, &pane_id).unwrap_or_default();
     sessions::register_supervisor(
         &session_id,
         &pane_id,
@@ -791,7 +813,7 @@ pub fn run_with_reap_policy(
     let resolved_model = fm.resolve_harness_model(&harness_name).map(|s| {
         agent_doc_model_tier::canonical_model_name(s, &harness_name, &global_config.model)
     });
-    crate::hooks::fire_doc_hooks(
+    agent_doc_hooks_io::fire_doc_hooks(
         &fm.hooks,
         "session_start",
         file,
@@ -820,7 +842,11 @@ pub fn run_with_reap_policy(
     // If file was moved (JB plugin respawn after rename), the old path hash
     // won't match — migrate state files or bootstrap a fresh snapshot before
     // the IPC listener starts. Prevents CRDT corruption from stale state.
-    match crate::snapshot::ensure_initialized(file) {
+    match agent_doc_workflow_io::document_init::ensure_initialized(
+        file,
+        crate::git::commit,
+        crate::ops_log::log_op,
+    ) {
         Ok(true) => {
             log_event(&mut session_log, "snapshot_validated action=initialized");
             start_console_status(
@@ -939,7 +965,7 @@ pub fn run_with_reap_policy(
         &mut session_log,
         &format!("ipc_started project_root={}", project_root.display()),
     );
-    let supervisor_socket = crate::supervisor::ipc::socket_path(&project_root, &session_id)
+    let supervisor_socket = agent_doc_supervisor_io::ipc::socket_path(&project_root, &session_id)
         .to_string_lossy()
         .to_string();
     crate::project_controller::register_supervisor(
@@ -1984,7 +2010,7 @@ pub fn run_with_reap_policy(
                 pane_id
             ),
         );
-        let _ = tmux.raw_cmd(&["kill-pane", "-t", &pane_id]);
+        let _ = agent_doc_tmux_io::kill_pane(&tmux, &pane_id);
     }
     Ok(())
 }
@@ -1993,9 +2019,9 @@ pub fn run_with_reap_policy(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::hooks::fire_doc_hooks;
     use agent_doc_config::Config;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
+    use agent_doc_hooks_io::fire_doc_hooks;
     use agent_doc_project_config_io as project_config_io;
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -2410,12 +2436,13 @@ mod tests {
             Some(pane.clone()),
         ));
         let shared_for_ipc = shared.clone();
-        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), "test-session", {
-            move |method| handle_ipc(method, &shared_for_ipc)
-        })
-        .unwrap();
+        let mut ipc =
+            agent_doc_supervisor_io::ipc::SupervisorIpc::start(tmp.path(), "test-session", {
+                move |method| handle_ipc(method, &shared_for_ipc)
+            })
+            .unwrap();
 
-        let response = crate::supervisor::ipc::send_command(
+        let response = agent_doc_supervisor_io::ipc::send_command(
             ipc.path(),
             &IpcMethod::Inject {
                 bytes: prompt.to_string(),
@@ -2424,11 +2451,11 @@ mod tests {
         .expect("supervisor IPC inject should succeed");
         assert!(response.ok, "supervisor IPC inject should return ok");
 
-        crate::sessions::send_key(&iso, &pane, "Up").unwrap();
-        crate::sessions::send_key(&iso, &pane, "Down").unwrap();
-        crate::sessions::send_key(&iso, &pane, "Left").unwrap();
-        crate::sessions::send_key(&iso, &pane, "Right").unwrap();
-        crate::sessions::send_key(&iso, &pane, "Enter").unwrap();
+        agent_doc_tmux_io::send_key(&iso, &pane, "Up").unwrap();
+        agent_doc_tmux_io::send_key(&iso, &pane, "Down").unwrap();
+        agent_doc_tmux_io::send_key(&iso, &pane, "Left").unwrap();
+        agent_doc_tmux_io::send_key(&iso, &pane, "Right").unwrap();
+        agent_doc_tmux_io::send_key(&iso, &pane, "Enter").unwrap();
 
         for _ in 0..40 {
             if done_path.exists() {

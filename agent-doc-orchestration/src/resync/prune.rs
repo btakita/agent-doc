@@ -35,14 +35,14 @@ pub(crate) fn prune_targeted_in(
     target: &Path,
     base_dir: &Path,
 ) -> Result<Vec<(String, tmux_router::RegistryEntry)>> {
-    let registry_path = sessions::registry_path_in(base_dir);
+    let registry_path = agent_doc_session_registry_io::registry_path_in(base_dir);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
-    let mut registry = sessions::load_in(base_dir)?;
+    let mut registry = agent_doc_session_registry_io::load_in(base_dir)?;
     let removed = prune_dead_entries_for_target_in_registry(&mut registry, target, |pane| {
         tmux.pane_alive(pane)
     });
     if !removed.is_empty() {
-        sessions::save_in(base_dir, &registry)?;
+        agent_doc_session_registry_io::save_in(base_dir, &registry)?;
     }
     Ok(removed)
 }
@@ -61,7 +61,8 @@ pub fn apply_targeted_fix_for_route(
     let recovered = recover_target_document_pane_in(tmux, &target, &base_dir)?;
     outcome.reregistered_owner = recovered.reregistered_owner;
     outcome.killed_redundant_stash_panes = recovered.killed_redundant_stash_panes;
-    let scoped_registry = filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
+    let scoped_registry =
+        filter_registry_for_target(&agent_doc_session_registry_io::load_in(&base_dir)?, &target);
     let issues = detect_issues_in_registry(tmux, &scoped_registry);
     if !issues.is_empty() {
         outcome.fixed_issues =
@@ -86,7 +87,7 @@ pub fn prune_with_tmux_timed_in_mode(
 ) -> Result<(usize, Vec<PrunePhaseTiming>)> {
     tracing::debug!("resync::prune start");
     let mut timings = Vec::new();
-    let registry_path = sessions::registry_path();
+    let registry_path = agent_doc_session_registry_io::registry_path();
     let removed = record_prune_phase(&mut timings, "prune_registry", || {
         tmux_router::prune(&registry_path, tmux)
     })?;
@@ -153,17 +154,12 @@ pub fn prune() -> Result<usize> {
 /// 2. ALL panes are running idle shells (not claude/agent-doc/etc.)
 /// 3. Window was created more than 30 seconds ago (grace period for auto-start)
 pub(crate) fn purge_stash_windows(tmux: &Tmux) {
-    let output = tmux
-        .cmd()
-        .args([
-            "list-windows",
-            "-a",
-            "-F",
-            "#{window_id}\t#{window_name}\t#{window_activity}",
-        ])
-        .output();
+    let output = agent_doc_tmux_io::list_windows_all(
+        tmux,
+        "#{window_id}\t#{window_name}\t#{window_activity}",
+    );
     let output = match output {
-        Ok(o) if o.status.success() => o,
+        Ok(output) => output,
         _ => return,
     };
 
@@ -172,7 +168,7 @@ pub(crate) fn purge_stash_windows(tmux: &Tmux) {
         .unwrap_or_default()
         .as_secs();
 
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    for line in output.lines() {
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
         if parts.len() < 3 {
             continue;
@@ -192,32 +188,22 @@ pub(crate) fn purge_stash_windows(tmux: &Tmux) {
         }
 
         // Check that ALL panes are idle shells
-        let pane_output = tmux
-            .cmd()
-            .args([
-                "list-panes",
-                "-t",
-                window_id,
-                "-F",
-                "#{pane_current_command}",
-            ])
-            .output();
+        let pane_output =
+            agent_doc_tmux_io::list_panes(tmux, Some(window_id), "#{pane_current_command}");
         let pane_output = match pane_output {
-            Ok(o) if o.status.success() => o,
+            Ok(output) => output,
             _ => continue,
         };
 
-        let all_idle = String::from_utf8_lossy(&pane_output.stdout)
-            .lines()
-            .all(|cmd| {
-                matches!(
-                    pane_process_kind_from_current_command(cmd),
-                    TmuxPaneProcessKind::IdleShell(_)
-                )
-            });
+        let all_idle = pane_output.lines().all(|cmd| {
+            matches!(
+                pane_process_kind_from_current_command(cmd),
+                TmuxPaneProcessKind::IdleShell(_)
+            )
+        });
 
         if all_idle {
-            if let Err(e) = tmux.cmd().args(["kill-window", "-t", window_id]).output() {
+            if let Err(e) = agent_doc_tmux_io::kill_window(tmux, window_id) {
                 eprintln!("resync: failed to purge stash window {}: {}", window_id, e);
             } else {
                 eprintln!("resync: purged stash window {} (all panes idle)", window_id);
@@ -235,7 +221,7 @@ pub(crate) fn purge_stash_windows(tmux: &Tmux) {
 ///
 /// After purging panes, kills any stash window that becomes empty.
 pub(crate) fn purge_unregistered_stash_panes(tmux: &Tmux) {
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     purge_unregistered_stash_panes_with_registry(tmux, &registry);
 }
 
@@ -245,7 +231,7 @@ pub(crate) fn purge_unregistered_stash_panes_with_registry(
     registry: &tmux_router::Registry,
 ) {
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&project_root);
+    let live_supervisors = agent_doc_supervisor_io::ipc::active_supervisor_pids(&project_root);
     purge_unregistered_stash_panes_with_registry_and_supervisors(tmux, registry, &live_supervisors);
 }
 
@@ -259,23 +245,16 @@ pub(crate) fn purge_unregistered_stash_panes_with_registry_and_supervisors(
     let registered_panes: std::collections::HashSet<&str> =
         registry.values().map(|e| e.pane.as_str()).collect();
 
-    let output = tmux
-        .cmd()
-        .args([
-            "list-windows",
-            "-a",
-            "-F",
-            "#{window_id}\t#{window_name}\t#{session_name}",
-        ])
-        .output();
+    let output =
+        agent_doc_tmux_io::list_windows_all(tmux, "#{window_id}\t#{window_name}\t#{session_name}");
     let output = match output {
-        Ok(o) if o.status.success() => o,
+        Ok(output) => output,
         _ => return,
     };
 
     let mut killed_count = 0;
 
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    for line in output.lines() {
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
         if parts.len() < 3 {
             continue;
@@ -601,30 +580,31 @@ mod tests {
             &script.display().to_string(),
             std::time::Duration::from_secs(3),
         );
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), "super-live", move |method| {
-                match method {
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": live_pid })),
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Restart { .. }
-                    | IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            "super-live",
+            move |method| match method {
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": live_pid })),
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
-            })
-            .unwrap();
+                IpcMethod::Restart { .. }
+                | IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
         iso.stash_pane(&pane2, "test").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
 
-        let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(dir.path());
+        let live_supervisors = agent_doc_supervisor_io::ipc::active_supervisor_pids(dir.path());
         purge_unregistered_stash_panes_with_registry_and_supervisors(
             &iso,
             &SessionRegistry::new(),
@@ -656,26 +636,27 @@ mod tests {
             &script.display().to_string(),
             std::time::Duration::from_secs(3),
         );
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": live_pid })),
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Restart { .. }
-                    | IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            session_id,
+            move |method| match method {
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": live_pid })),
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
-            })
-            .unwrap();
+                IpcMethod::Restart { .. }
+                | IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
         iso.stash_pane(&live_pane, "test").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
 
@@ -715,10 +696,10 @@ mod tests {
             canonical.to_string_lossy().to_string(),
             test_entry("%99998", &canonical.to_string_lossy()),
         );
-        sessions::save_in(&sub, &registry).unwrap();
+        agent_doc_session_registry_io::save_in(&sub, &registry).unwrap();
 
         // Superproject registry should be empty
-        sessions::save_in(dir.path(), &SessionRegistry::new()).unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &SessionRegistry::new()).unwrap();
 
         let target = canonical;
         let removed = prune_targeted_in(&iso, &target, &sub).unwrap();
@@ -729,7 +710,7 @@ mod tests {
         );
 
         // Verify the submodule registry is now empty
-        let after = sessions::load_in(&sub).unwrap();
+        let after = agent_doc_session_registry_io::load_in(&sub).unwrap();
         assert!(
             after.is_empty(),
             "submodule registry should be empty after prune"

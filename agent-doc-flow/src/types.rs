@@ -201,3 +201,124 @@ impl FlowEvent {
         self
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionCycleStep {
+    pub stage: FlowStage,
+    pub outcome: FlowOutcome,
+    pub reason: Option<String>,
+}
+
+impl SessionCycleStep {
+    pub fn completed(stage: FlowStage) -> Self {
+        Self {
+            stage,
+            outcome: FlowOutcome::Completed,
+            reason: None,
+        }
+    }
+}
+
+pub fn flow_event(
+    flow: FlowName,
+    stage: FlowStage,
+    outcome: FlowOutcome,
+    reason: impl Into<Option<String>>,
+) -> FlowEvent {
+    let mut event = FlowEvent::new(flow, stage, outcome);
+    if let Some(reason) = reason.into() {
+        event = event.with_reason(reason);
+    }
+    event
+}
+
+pub fn session_cycle_event(
+    stage: FlowStage,
+    outcome: FlowOutcome,
+    reason: impl Into<Option<String>>,
+) -> FlowEvent {
+    flow_event(FlowName::SessionCycle, stage, outcome, reason)
+}
+
+pub fn flow_event_log_message(file: &str, event: &FlowEvent) -> String {
+    let mut message = format!(
+        "flow_event file={} flow={} stage={} outcome={}",
+        file,
+        event.flow.as_str(),
+        event.stage.as_str(),
+        event.outcome.as_str()
+    );
+    if let Some(reason) = &event.reason {
+        message.push_str(" reason=");
+        message.push_str(&sanitize_field_value(reason));
+    }
+    message
+}
+
+fn sanitize_field_value(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flow_event_log_message_is_field_parseable() {
+        let event = FlowEvent::new(
+            FlowName::RoutedReopen,
+            FlowStage::PromptReadyBarrier,
+            FlowOutcome::FailedClosed,
+        )
+        .with_reason("starting actor not ready");
+
+        let message = flow_event_log_message("tasks/a.md", &event);
+
+        assert!(message.contains("flow=routed_reopen"));
+        assert!(message.contains("stage=prompt_ready_barrier"));
+        assert!(message.contains("outcome=failed_closed"));
+        assert!(message.contains("reason=starting_actor_not_ready"));
+    }
+
+    #[test]
+    fn flow_event_sets_optional_reason() {
+        let event = flow_event(
+            FlowName::SessionCycle,
+            FlowStage::Plan,
+            FlowOutcome::Completed,
+            Some("normal".to_string()),
+        );
+
+        assert_eq!(event.flow, FlowName::SessionCycle);
+        assert_eq!(event.stage, FlowStage::Plan);
+        assert_eq!(event.outcome, FlowOutcome::Completed);
+        assert_eq!(event.reason.as_deref(), Some("normal"));
+    }
+
+    #[test]
+    fn session_cycle_event_adapts_flow_name_stage_outcome_and_reason() {
+        let event = session_cycle_event(
+            FlowStage::Preflight,
+            FlowOutcome::Blocked,
+            Some("waiting".to_string()),
+        );
+
+        assert_eq!(event.flow, FlowName::SessionCycle);
+        assert_eq!(event.stage, FlowStage::Preflight);
+        assert_eq!(event.outcome, FlowOutcome::Blocked);
+        assert_eq!(event.reason.as_deref(), Some("waiting"));
+        assert_eq!(
+            SessionCycleStep::completed(FlowStage::Plan).outcome,
+            FlowOutcome::Completed
+        );
+    }
+}

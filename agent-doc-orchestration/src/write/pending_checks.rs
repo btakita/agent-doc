@@ -920,7 +920,7 @@ mod precommit_pending_capture_tests {
         let doc = root.join("doc.md");
         let content = format!("{frontmatter}## Exchange\n\nHello\n");
         fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if had_pending_mutations {
@@ -976,7 +976,7 @@ mod precommit_pending_capture_tests {
             content.push_str("<!-- /agent:icebox -->\n");
         }
         fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if !pending_done_ids.is_empty() {
@@ -1631,7 +1631,7 @@ mod precommit_pending_capture_tests {
         );
         fs::write(&doc, initial).unwrap();
         init_git_repo(tmp.path(), &doc);
-        crate::snapshot::save(&doc, initial).unwrap();
+        agent_doc_snapshot_io::save(&doc, initial, crate::ops_log::log_op).unwrap();
 
         let drifted = initial.replace(
             "<!-- /agent:exchange -->\n",

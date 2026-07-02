@@ -96,7 +96,6 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::sessions;
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_sync::{ResyncTargetMatcher, superseded_candidates};
@@ -105,6 +104,7 @@ use agent_doc_tmux::{
     pane_process_kind_from_current_command, pane_process_kind_from_current_command_samples,
     stash_ttl_prune_targets,
 };
+use agent_doc_tmux_io::pane_project_root;
 use tmux_router::{PaneMoveOp, Tmux};
 
 use agent_doc_project_config_io as project_config_io;
@@ -115,7 +115,7 @@ const PROCESS_GRACE_DELAY_MS: u64 = 75;
 fn classify_pane_process(tmux: &Tmux, pane_id: &str) -> TmuxPaneProcessKind {
     let mut samples = Vec::with_capacity(PROCESS_GRACE_SAMPLES);
     for sample_idx in 0..PROCESS_GRACE_SAMPLES {
-        samples.push(pane_current_command(tmux, pane_id));
+        samples.push(agent_doc_tmux_io::target_current_command(tmux, pane_id));
         if sample_idx + 1 < PROCESS_GRACE_SAMPLES {
             std::thread::sleep(std::time::Duration::from_millis(PROCESS_GRACE_DELAY_MS));
         }
@@ -231,7 +231,7 @@ fn resolve_target_file(file: &Path) -> Result<PathBuf> {
 /// Resolve the `.agent-doc` project root for a target file.
 /// Falls back to the current working directory when no `.agent-doc/` ancestor is found.
 fn resolve_registry_root(target: &Path) -> PathBuf {
-    agent_doc_fs::find_project_root(target)
+    agent_doc_project_root_io::project_root_containing(target)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
@@ -262,7 +262,7 @@ fn kill_redundant_associated_stash_panes(
     tmux: &Tmux,
     redundant: &[agent_doc_tmux::AssociatedPaneCandidate],
 ) -> usize {
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     let mut killed = 0;
 
     for candidate in redundant {
@@ -355,7 +355,7 @@ fn recover_target_document_pane_in(
         agent_doc_tmux::AssociatedPaneResolution::None => Ok(TargetDocumentFixOutcome::default()),
         agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } => {
             let mut outcome = TargetDocumentFixOutcome::default();
-            if sessions::lookup_in(base_dir, &session_id)?.as_deref()
+            if agent_doc_session_registry_io::lookup_in(base_dir, &session_id)?.as_deref()
                 != Some(winner.pane_id.as_str())
             {
                 crate::sync::reregister_recovered_owner(
@@ -401,29 +401,6 @@ struct PaneProjectContextCache {
     live_supervisors: std::collections::HashMap<PathBuf, Vec<(String, u32)>>,
 }
 
-fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
-    let output = tmux
-        .cmd()
-        .args([
-            "display-message",
-            "-t",
-            pane_id,
-            "-p",
-            "#{pane_current_path}",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let current_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if current_path.is_empty() {
-        return None;
-    }
-    let path = PathBuf::from(current_path);
-    agent_doc_fs::find_project_root(&path).or(Some(path))
-}
-
 fn registry_for_project_root<'a>(
     cache: &'a mut PaneProjectContextCache,
     project_root: &Path,
@@ -444,7 +421,7 @@ fn live_supervisors_for_project_root<'a>(
     cache
         .live_supervisors
         .entry(project_root.to_path_buf())
-        .or_insert_with(|| crate::supervisor::ipc::active_supervisor_pids(project_root))
+        .or_insert_with(|| agent_doc_supervisor_io::ipc::active_supervisor_pids(project_root))
 }
 
 fn live_owned_registered_file_for_pane(
@@ -472,54 +449,10 @@ fn pane_hosts_live_supervisor_session(
     live_supervisors: &[(String, u32)],
 ) -> Option<String> {
     live_supervisors.iter().find_map(|(session_id, pid)| {
-        pane_process_tree_contains_pid(tmux, pane_id, *pid).then(|| session_id.clone())
+        let pane_pid = agent_doc_tmux_io::pane_pid(tmux, pane_id)?;
+        agent_doc_process_owner_io::process_tree_contains_pid(&pane_pid.to_string(), *pid)
+            .then(|| session_id.clone())
     })
-}
-
-fn pane_process_tree_contains_pid(tmux: &Tmux, pane_id: &str, target_pid: u32) -> bool {
-    let output = match tmux
-        .cmd()
-        .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
-        .output()
-    {
-        Ok(output) if output.status.success() => output,
-        _ => return false,
-    };
-    let pane_pid = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if pane_pid.is_empty() {
-        return false;
-    }
-    process_tree_contains_pid(&pane_pid, target_pid)
-}
-
-fn process_tree_contains_pid(root_pid: &str, target_pid: u32) -> bool {
-    let mut frontier = vec![root_pid.to_string()];
-    let target_pid = target_pid.to_string();
-
-    while let Some(pid) = frontier.pop() {
-        if pid == target_pid {
-            return true;
-        }
-        let output = match std::process::Command::new("pgrep")
-            .args(["-P", &pid])
-            .output()
-        {
-            Ok(output) if output.status.success() => output,
-            _ => continue,
-        };
-        for child_pid in String::from_utf8_lossy(&output.stdout).lines() {
-            let child_pid = child_pid.trim();
-            if child_pid.is_empty() {
-                continue;
-            }
-            if child_pid == target_pid {
-                return true;
-            }
-            frontier.push(child_pid.to_string());
-        }
-    }
-
-    false
 }
 
 /// Return active (non-idle) panes from stash windows back to their original sessions.
@@ -538,7 +471,7 @@ pub(crate) use stash::*;
 /// Detect issues with alive panes: wrong tmux session or wrong process.
 fn detect_issues(tmux: &Tmux) -> Vec<Issue> {
     tracing::debug!("resync::detect_issues start");
-    let registry = match sessions::load() {
+    let registry = match agent_doc_session_registry_io::load() {
         Ok(r) => r,
         Err(e) => {
             eprintln!("resync: failed to load registry: {}", e);
@@ -580,7 +513,7 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &tmux_router::Registry) -> V
         // Check 0: Is the pane in a stash window?
         // Stash panes are alive but not in the active workspace. Fix promotes
         // live owners back into agent-doc and only deregisters unproven panes.
-        if let Some(ref wname) = pane_window_name(tmux, &entry.pane)
+        if let Some(ref wname) = agent_doc_tmux_io::target_window_name(tmux, &entry.pane)
             && is_stash_window_name(wname)
         {
             issues.push(Issue::InStash {
@@ -671,8 +604,9 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &tmux_router::Registry) -> V
             label: label.to_string(),
             pane: entry.pane.clone(),
             tmux_session: tmux.pane_session(&entry.pane).unwrap_or_default(),
-            window_id: tmux.pane_window(&entry.pane).unwrap_or_default(),
-            window_name: pane_window_name(tmux, &entry.pane).unwrap_or_default(),
+            window_id: agent_doc_tmux_io::target_window_id(tmux, &entry.pane).unwrap_or_default(),
+            window_name: agent_doc_tmux_io::target_window_name(tmux, &entry.pane)
+                .unwrap_or_default(),
         });
     }
 
@@ -720,40 +654,6 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &tmux_router::Registry) -> V
     }
 
     issues
-}
-
-/// Get the window name for a pane.
-fn pane_window_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
-    let output = tmux
-        .cmd()
-        .args(["display-message", "-t", pane_id, "-p", "#{window_name}"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if name.is_empty() { None } else { Some(name) }
-}
-
-/// Get the current command running in a tmux pane.
-fn pane_current_command(tmux: &Tmux, pane_id: &str) -> Option<String> {
-    let output = tmux
-        .cmd()
-        .args([
-            "display-message",
-            "-t",
-            pane_id,
-            "-p",
-            "#{pane_current_command}",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let cmd = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if cmd.is_empty() { None } else { Some(cmd) }
 }
 
 fn registered_pane_still_owns_file(tmux: &Tmux, key: &str, file: &str, pane: &str) -> bool {
@@ -827,26 +727,12 @@ pub fn close_superseded_session(tmux: &Tmux, old_session: &str) -> Result<bool> 
     Ok(true)
 }
 
-/// Query the tmux session name hosting a pane, if it is alive.
-fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
-    let output = tmux
-        .cmd()
-        .args(["display-message", "-t", pane_id, "-p", "#{session_name}"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!name.is_empty()).then_some(name)
-}
-
 /// Distinct tmux sessions hosting alive registered panes — the auto-resync
 /// drift candidate set. Order is first-seen for determinism.
 pub fn registered_pane_sessions(tmux: &Tmux, registry: &tmux_router::Registry) -> Vec<String> {
     let mut sessions = Vec::new();
     for entry in registry.values() {
-        if let Some(session) = pane_session_name(tmux, &entry.pane)
+        if let Some(session) = agent_doc_tmux_io::target_session_name(tmux, &entry.pane)
             && !sessions.contains(&session)
         {
             sessions.push(session);
@@ -880,7 +766,9 @@ pub fn canonical_session_for_document(
         }
         // Only a pane running a live agent-doc supervisor is canonical.
         match classify_pane_process(tmux, &entry.pane) {
-            TmuxPaneProcessKind::Agent(_) => pane_session_name(tmux, &entry.pane),
+            TmuxPaneProcessKind::Agent(_) => {
+                agent_doc_tmux_io::target_session_name(tmux, &entry.pane)
+            }
             _ => None,
         }
     })
@@ -935,8 +823,8 @@ fn refresh_target_no_live_owner_registry_entry(
         return false;
     };
     entry.pane = pane.to_string();
-    entry.pid = sessions::pane_pid_with_mux(tmux, pane).unwrap_or_else(|_| std::process::id());
-    entry.window = sessions::pane_window_with_mux(tmux, pane).unwrap_or_default();
+    entry.pid = agent_doc_tmux_io::pane_pid(tmux, pane).unwrap_or_else(std::process::id);
+    entry.window = agent_doc_tmux_io::target_window_id(tmux, pane).unwrap_or_default();
     entry.cwd = scope.base_dir.to_string_lossy().to_string();
     if entry.file.is_empty() {
         entry.file = matcher.registry_file_for_target();
@@ -959,10 +847,10 @@ fn refresh_registry_runtime_for_pane(
         return false;
     };
     entry.pane = pane.to_string();
-    if let Ok(pid) = sessions::pane_pid_with_mux(tmux, pane) {
+    if let Some(pid) = agent_doc_tmux_io::pane_pid(tmux, pane) {
         entry.pid = pid;
     }
-    if let Ok(window) = sessions::pane_window_with_mux(tmux, pane) {
+    if let Some(window) = agent_doc_tmux_io::target_window_id(tmux, pane) {
         entry.window = window;
     }
     true
@@ -988,9 +876,9 @@ fn apply_fixes_with_base(
             &cwd
         }
     };
-    let registry_path = sessions::registry_path_in(effective_base);
+    let registry_path = agent_doc_session_registry_io::registry_path_in(effective_base);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
-    let mut registry = sessions::load_in(effective_base)?;
+    let mut registry = agent_doc_session_registry_io::load_in(effective_base)?;
     let target_scope = target_file.map(|target| TargetFixScope {
         target,
         base_dir: effective_base,
@@ -999,7 +887,7 @@ fn apply_fixes_with_base(
         apply_fixes_to_registry(tmux, issues, &mut registry, relocate_session, target_scope);
 
     if fixed > 0 {
-        sessions::save_in(effective_base, &registry)?;
+        agent_doc_session_registry_io::save_in(effective_base, &registry)?;
     }
     Ok(fixed)
 }
@@ -1338,7 +1226,10 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
         let removed = prune_targeted_in(&tmux, &target, &base_dir)?;
 
         if removed.is_empty() {
-            let scoped = filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
+            let scoped = filter_registry_for_target(
+                &agent_doc_session_registry_io::load_in(&base_dir)?,
+                &target,
+            );
             if scoped.is_empty() {
                 eprintln!("No registered sessions found for {}.", target.display());
             } else {
@@ -1364,7 +1255,10 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
             let _ = recover_target_document_pane_in(&tmux, &target, &base_dir)?;
         }
 
-        let scoped_registry = filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
+        let scoped_registry = filter_registry_for_target(
+            &agent_doc_session_registry_io::load_in(&base_dir)?,
+            &target,
+        );
         let issues = detect_issues_in_registry(&tmux, &scoped_registry);
         if !issues.is_empty() {
             if fix {
@@ -1398,7 +1292,10 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
             );
         }
 
-        let scoped_registry = filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
+        let scoped_registry = filter_registry_for_target(
+            &agent_doc_session_registry_io::load_in(&base_dir)?,
+            &target,
+        );
         if !scoped_registry.is_empty() {
             eprintln!("\nActive matching sessions:");
             for (key, entry) in &scoped_registry {
@@ -1414,17 +1311,17 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
         return Ok(());
     }
 
-    let registry_path = sessions::registry_path();
+    let registry_path = agent_doc_session_registry_io::registry_path();
 
     // Show what's being removed (verbose)
-    let registry_before = sessions::load()?;
+    let registry_before = agent_doc_session_registry_io::load()?;
     let before = registry_before.len();
 
     let removed = tmux_router::prune(&registry_path, &tmux)?;
 
     if removed > 0 {
         // Show which entries were removed by diffing before/after
-        let registry_after = sessions::load()?;
+        let registry_after = agent_doc_session_registry_io::load()?;
         eprintln!("Removed {} stale session(s):", removed);
         for (key, entry) in &registry_before {
             if !registry_after.contains_key(key) {
@@ -1472,7 +1369,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
     }
 
     // Show current state
-    let registry = sessions::load()?;
+    let registry = agent_doc_session_registry_io::load()?;
     if !registry.is_empty() {
         eprintln!("\nActive sessions:");
         for (key, entry) in &registry {
@@ -1497,24 +1394,19 @@ fn apply_stash_ttl_prune(tmux: &Tmux) {
         return;
     }
 
-    let registry = sessions::load().unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
     let registered_panes: std::collections::HashSet<&str> =
         registry.values().map(|e| e.pane.as_str()).collect();
 
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&project_root);
+    let live_supervisors = agent_doc_supervisor_io::ipc::active_supervisor_pids(&project_root);
 
-    let window_output = tmux
-        .cmd()
-        .args([
-            "list-windows",
-            "-a",
-            "-F",
-            "#{window_id}\t#{window_name}\t#{window_activity}",
-        ])
-        .output();
+    let window_output = agent_doc_tmux_io::list_windows_all(
+        tmux,
+        "#{window_id}\t#{window_name}\t#{window_activity}",
+    );
     let window_output = match window_output {
-        Ok(o) if o.status.success() => o,
+        Ok(output) => output,
         _ => return,
     };
 
@@ -1525,7 +1417,7 @@ fn apply_stash_ttl_prune(tmux: &Tmux) {
 
     let mut candidates: Vec<StashTtlCandidate> = Vec::new();
 
-    for line in String::from_utf8_lossy(&window_output.stdout).lines() {
+    for line in window_output.lines() {
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
         if parts.len() < 3 {
             continue;
@@ -1581,7 +1473,7 @@ fn apply_stash_ttl_prune(tmux: &Tmux) {
         );
 
         if config.stash_session_ttl_prune_enabled {
-            let _ = tmux.cmd().args(["kill-pane", "-t", pane_id]).output();
+            let _ = agent_doc_tmux_io::kill_pane(tmux, pane_id);
             eprintln!(
                 "stash-ttl-prune: killed idle stash pane {} (exceeded {}s TTL)",
                 pane_id, ttl_secs
@@ -1639,7 +1531,7 @@ mod th {
     pub(crate) fn wait_for_shell(iso: &IsolatedTmux, pane: &str, timeout_ms: u64) -> bool {
         let start = std::time::Instant::now();
         loop {
-            if let Some(cmd) = pane_current_command(iso, pane)
+            if let Some(cmd) = agent_doc_tmux_io::target_current_command(iso, pane)
                 && matches!(
                     pane_process_kind_from_current_command(&cmd),
                     TmuxPaneProcessKind::IdleShell(_)
@@ -1690,7 +1582,7 @@ mod th {
     ) -> String {
         let start = std::time::Instant::now();
         loop {
-            let content = sessions::capture_pane(tmux, pane).unwrap_or_default();
+            let content = agent_doc_tmux_io::capture_pane(tmux, pane).unwrap_or_default();
             if content.contains(needle) || start.elapsed() >= timeout {
                 return content;
             }
@@ -1705,7 +1597,7 @@ mod th {
     ) -> bool {
         let start = std::time::Instant::now();
         while start.elapsed() < timeout {
-            if pane_current_command(tmux, pane).as_deref() == Some(expected) {
+            if agent_doc_tmux_io::target_current_command(tmux, pane).as_deref() == Some(expected) {
                 return true;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -1849,11 +1741,11 @@ mod th {
         let poll = std::time::Duration::from_millis(300);
         let mut content = String::new();
         while start.elapsed() < timeout {
-            content = sessions::capture_pane(tmux, pane).unwrap_or_default();
+            content = agent_doc_tmux_io::capture_pane(tmux, pane).unwrap_or_default();
             if mock_agent_prompt_visible(&content) {
                 break;
             }
-            if let Some(cmd) = pane_current_command(tmux, pane)
+            if let Some(cmd) = agent_doc_tmux_io::target_current_command(tmux, pane)
                 && matches!(
                     pane_process_kind_from_current_command(&cmd),
                     TmuxPaneProcessKind::IdleShell(_)
@@ -2561,7 +2453,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         // Verify pane is running node (an AGENT_PROCESS)
-        let cmd = pane_current_command(&iso, &agent_pane);
+        let cmd = agent_doc_tmux_io::target_current_command(&iso, &agent_pane);
         if cmd.as_deref() != Some("node") {
             eprintln!("skipping: pane running {:?} instead of node", cmd);
             return;
@@ -2754,7 +2646,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         std::process::Command::new("git")
             .current_dir(root)
             .args(["add", "-A"])
@@ -2795,7 +2687,7 @@ mod tests {
         let doc = root.join("doc.md");
         let content = "---\nagent_doc_session: test\n---\n\nplain body\n";
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         // No pending/cycle state → no-op, no error, content unchanged.
         finish_unfinished_turn(&doc).unwrap();

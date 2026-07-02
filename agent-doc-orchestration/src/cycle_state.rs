@@ -277,7 +277,7 @@ impl CycleState {
     pub fn to_pipeline(&self) -> agent_doc_frontmatter::frontmatter::AgentDocPipeline {
         agent_doc_frontmatter::frontmatter::AgentDocPipeline {
             run_id: Some(self.cycle_id.clone()),
-            step: Some(cycle_phase_label(self.phase).to_string()),
+            step: Some(self.phase.as_str().to_string()),
             turn_id: self.turn_id.clone(),
             queue_task_id: self.queue_task_id.clone(),
         }
@@ -1220,14 +1220,15 @@ fn append_phase_event_to_session_log(file: &Path, state: &CycleState) {
 
     let mut event = format!(
         "document_cycle phase={} cycle={} event={}",
-        cycle_phase_label(state.phase),
+        state.phase.as_str(),
         state.cycle_id,
         state.last_event
     );
     if let Some(capture_id) = state.capture_id.as_deref() {
         event.push_str(&format!(" capture_id={capture_id}"));
     }
-    let _ = crate::startup_miss::append_session_log_event(file, session_id, &event);
+    let _ =
+        agent_doc_supervisor_io::startup_miss::append_session_log_event(file, session_id, &event);
 }
 
 fn save(file: &Path, state: &CycleState) -> Result<()> {
@@ -1309,16 +1310,6 @@ fn synthetic_state_with_id(
         active_free_text_queue_heads: Vec::new(),
         pending_semantic_merge_acks: Vec::new(),
         blocked_closeout: None,
-    }
-}
-
-pub fn cycle_phase_label(phase: CyclePhase) -> &'static str {
-    match phase {
-        CyclePhase::PreflightStarted => "preflight_started",
-        CyclePhase::ResponseCaptured => "response_captured",
-        CyclePhase::WriteApplied => "write_applied",
-        CyclePhase::Committed => "committed",
-        CyclePhase::Abandoned => "abandoned",
     }
 }
 

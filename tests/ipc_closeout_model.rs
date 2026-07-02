@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const TEST_EDITOR_ID: &str = "jetbrains-test-editor";
+const FILE_IPC_WATCHER_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn agent_doc() -> Command {
     cargo_bin_cmd!("agent-doc")
@@ -315,9 +316,7 @@ fn apply_payload_to_file(payload: &Value, file: &Path) -> Option<String> {
         .get("unmatched")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let after =
-        agent_doc_orchestration::template_io::apply_patches(&before, &patches, unmatched, file)
-            .ok()?;
+    let after = agent_doc_template_io::apply_patches(&before, &patches, unmatched, file).ok()?;
     fs::write(file, &after).ok()?;
     Some(after)
 }
@@ -514,7 +513,7 @@ fn file_ipc_bad_ack_content_fails_closed_before_commit() {
 
     let watcher = std::thread::spawn(move || {
         let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(3) {
+        while started.elapsed() < FILE_IPC_WATCHER_TIMEOUT {
             let Ok(entries) = fs::read_dir(&patches_dir) else {
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
@@ -589,7 +588,7 @@ fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
     let doc_for_watcher = doc.clone();
     let watcher = std::thread::spawn(move || {
         let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(3) {
+        while started.elapsed() < FILE_IPC_WATCHER_TIMEOUT {
             let Ok(entries) = fs::read_dir(&patches_dir) else {
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
@@ -677,7 +676,7 @@ fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
     let listener_root = root.to_path_buf();
     let ack_dir = agent_doc_dir.join("ack-content");
     let server = std::thread::spawn(move || {
-        agent_doc_orchestration::ipc_socket::start_listener(&listener_root, move |msg| {
+        agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
             let payload: Value = serde_json::from_str(msg).ok()?;
             let Some(id) = patch_id(&payload) else {
                 return Some(serde_json::json!({"type": "ack"}).to_string());
@@ -702,13 +701,13 @@ fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
         .ok();
     });
     for _ in 0..100 {
-        if agent_doc_orchestration::ipc_socket::is_listener_active(root) {
+        if agent_doc_ipc_io::is_listener_active(root) {
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(
-        agent_doc_orchestration::ipc_socket::is_listener_active(root),
+        agent_doc_ipc_io::is_listener_active(root),
         "fake socket listener did not start"
     );
 
@@ -720,7 +719,7 @@ fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
         0,
     );
 
-    let _ = fs::remove_file(agent_doc_orchestration::ipc_socket::socket_path(root));
+    let _ = fs::remove_file(agent_doc_ipc_io::socket_path(root));
     drop(server);
 
     let payload = seen_payload

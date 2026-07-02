@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 use agent_doc_controller::operator_clear::OperatorClearGuardOutcome;
-use agent_doc_controller::operator_clear::OperatorClearInputState;
+use agent_doc_controller::operator_clear::{OperatorClearInputState, clear_guard_event};
 #[cfg(test)]
 use agent_doc_sqlite::state_store::SupervisorLeaseStatus;
 use agent_doc_sqlite::state_store::{
@@ -347,7 +347,7 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
     let window = tmux
         .pane_window(&pane_id)
         .with_context(|| format!("failed to read window for pane {pane_id}"))?;
-    let pid = agent_doc_orchestration::sessions::pane_pid(&pane_id)
+    let pid = agent_doc_tmux_io::pane_pid(&tmux, &pane_id)
         .with_context(|| format!("failed to read pane PID for {pane_id}"))?;
     agent_doc_orchestration::project_controller::attach_pane(
         &ctx.base_dir,
@@ -420,7 +420,7 @@ pub fn stop_agent(file: &Path, reason: Option<String>) -> Result<()> {
         "session_stop_agent",
     )?;
     ensure_supervisor_socket(&ctx)?;
-    let response = agent_doc_orchestration::supervisor::ipc::send_command(
+    let response = agent_doc_supervisor_io::ipc::send_command(
         &ctx.supervisor_socket,
         &IpcMethod::StopAgent { reason },
     )
@@ -610,7 +610,7 @@ pub fn clear(file: &Path) -> Result<()> {
 /// stale open cycle; a cycle that already captured a response is protected and
 /// left intact. Reclaim failures are non-fatal — the clear itself already
 /// delivered — and surface as a warning.
-fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_orchestration::repair::CancelOutcome {
+fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_turn::repair::CancelOutcome {
     match agent_doc_orchestration::repair::cancel_preflight_cycle(file) {
         Ok(outcome) => {
             agent_doc_orchestration::ops_log::log_op(
@@ -627,7 +627,7 @@ fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_orchestration::repa
                 "[clear] warning: failed to reclaim orphaned cycle for {}: {err:#}",
                 file.display()
             );
-            agent_doc_orchestration::repair::CancelOutcome::NoOpenCycle
+            agent_doc_turn::repair::CancelOutcome::NoOpenCycle
         }
     }
 }
@@ -649,7 +649,7 @@ fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<SupervisorClearDeli
     // session whose managed-capability proof failed without `kill -9`
     // (#codex-capability-proof-unrecoverable). `Inject` would be refused by the
     // dispatch gate.
-    let response = agent_doc_orchestration::supervisor::ipc::send_command(
+    let response = agent_doc_supervisor_io::ipc::send_command(
         &ctx.supervisor_socket,
         &IpcMethod::Clear {
             bytes: agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
@@ -771,9 +771,10 @@ fn reconcile_idle_projection_before_clear(
         clean_exit_prompt,
         busy_reason.is_some(),
     );
-    agent_doc_orchestration::flow::operator_clear::log_clear_guard_event(
+    agent_doc_flow_io::log_flow_event(
         &ctx.canonical_file,
-        clear_state,
+        clear_guard_event(clear_state),
+        agent_doc_orchestration::ops_log::log_op,
     );
 
     match clear_state {
@@ -1106,8 +1107,8 @@ fn protected_clear_input_reason(
     evidence: &LivePaneEvidence,
 ) -> Option<String> {
     let pane = evidence.pane_id.as_deref()?;
-    let captured = agent_doc_orchestration::sessions::capture_pane_with_ansi(tmux, pane)
-        .or_else(|_| agent_doc_orchestration::sessions::capture_pane(tmux, pane))
+    let captured = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
         .ok()?;
     let harness = harness_for_evidence(ctx, evidence);
     harness.protected_prompt_input_reason(&captured)
@@ -1121,7 +1122,7 @@ fn pane_shows_clean_exit_prompt(
     let Some(pane) = evidence.pane_id.as_deref() else {
         return false;
     };
-    let Ok(captured) = agent_doc_orchestration::sessions::capture_pane(tmux, pane) else {
+    let Ok(captured) = agent_doc_tmux_io::capture_pane(tmux, pane) else {
         return false;
     };
     let harness = harness_for_evidence(ctx, evidence);
@@ -1134,8 +1135,8 @@ fn operator_clear_busy_reason(
     evidence: &LivePaneEvidence,
 ) -> Option<String> {
     let pane = evidence.pane_id.as_deref()?;
-    let captured = agent_doc_orchestration::sessions::capture_pane_with_ansi(tmux, pane)
-        .or_else(|_| agent_doc_orchestration::sessions::capture_pane(tmux, pane))
+    let captured = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
         .ok()?;
     let harness = harness_for_evidence(ctx, evidence);
     let reason = harness.dispatch_blocker_reason(&captured)?;
@@ -1559,9 +1560,9 @@ fn force_close_actor_record(ctx: &SessionContext) -> bool {
 }
 
 fn force_remove_registry_projection(ctx: &SessionContext) -> Result<bool> {
-    let registry_path = agent_doc_orchestration::sessions::registry_path_in(&ctx.base_dir);
+    let registry_path = agent_doc_session_registry_io::registry_path_in(&ctx.base_dir);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
-    let mut registry = agent_doc_orchestration::sessions::load_in(&ctx.base_dir)?;
+    let mut registry = agent_doc_session_registry_io::load_in(&ctx.base_dir)?;
     let canonical = ctx.canonical_file.to_string_lossy().to_string();
     let mut session_ids = BTreeSet::new();
     session_ids.insert(ctx.session_id.clone());
@@ -1583,7 +1584,7 @@ fn force_remove_registry_projection(ctx: &SessionContext) -> Result<bool> {
         registry.remove(&key);
     }
     if removed {
-        agent_doc_orchestration::sessions::save_in(&ctx.base_dir, &registry)?;
+        agent_doc_session_registry_io::save_in(&ctx.base_dir, &registry)?;
     }
     Ok(removed)
 }
@@ -1713,8 +1714,16 @@ fn harness_clear_command(harness: &str) -> &'static str {
 
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
     let command = harness_clear_command(harness);
-    agent_doc_orchestration::sessions::send_submitted_text_for_harness(
-        tmux, pane, command, harness,
+    agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+        tmux,
+        pane,
+        command,
+        harness,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(
+            None,
+            agent_doc_orchestration::ops_log::log_op,
+        ),
+        "sessions.send_submitted_text_for_harness",
     )
     .with_context(|| {
         format!(
@@ -1769,8 +1778,16 @@ fn verify_context_clear_submit_after_delivery(
             "clear_resubmit_submit_key",
             submit_key,
         );
-        if let Err(err) = agent_doc_orchestration::sessions::send_submitted_text_for_harness(
-            tmux, pane, "", harness,
+        if let Err(err) = agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+            tmux,
+            pane,
+            "",
+            harness,
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                None,
+                agent_doc_orchestration::ops_log::log_op,
+            ),
+            "sessions.send_submitted_text_for_harness",
         ) {
             eprintln!(
                 "[clear] warning: {harness} clear resubmit {submit_key} failed for pane {pane}: {err}"
@@ -1821,7 +1838,7 @@ fn poll_context_clear_submit_acceptance(
     let mut last_capture: Option<(bool, usize, String)> = None;
     let mut capture_failed = false;
     while start.elapsed() < CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT {
-        match agent_doc_orchestration::sessions::capture_pane(tmux, pane) {
+        match agent_doc_tmux_io::capture_pane(tmux, pane) {
             Ok(content) => {
                 let command_visible =
                     context_clear_command_visible_in_active_input(&content, command, |line| {
@@ -1978,8 +1995,8 @@ fn codex_pane_in_shell_search_state(
     if harness.binary != "codex" {
         return false;
     }
-    let Ok(captured) = agent_doc_orchestration::sessions::capture_pane_with_ansi(tmux, pane)
-        .or_else(|_| agent_doc_orchestration::sessions::capture_pane(tmux, pane))
+    let Ok(captured) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
     else {
         return false;
     };
@@ -2237,8 +2254,8 @@ fn busy_proof_for_pane(
     evidence: &LivePaneEvidence,
 ) -> Option<String> {
     let pane = evidence.pane_id.as_deref()?;
-    let captured = agent_doc_orchestration::sessions::capture_pane_with_ansi(tmux, pane)
-        .or_else(|_| agent_doc_orchestration::sessions::capture_pane(tmux, pane))
+    let captured = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
         .ok()?;
     harness_for_evidence(ctx, evidence).busy_proof_line(&captured)
 }
@@ -2370,39 +2387,7 @@ pub fn doctor(file: &Path, repair: bool) -> Result<()> {
         agent_doc_orchestration::resync::run_fix(Some(file), None)?;
         println!("Applied repair path for {}.", file.display());
         if closeout.repaired() {
-            println!(
-                "closeout_repair: {}",
-                match closeout {
-                    agent_doc_orchestration::repair::RepairOutcome::ReplayedResponse => {
-                        "replayed a captured response through the normal closeout path"
-                    }
-                    agent_doc_orchestration::repair::RepairOutcome::AlreadyApplied => {
-                        "completed a pending commit boundary for an already-applied response"
-                    }
-                    agent_doc_orchestration::repair::RepairOutcome::ManualTailRemovalRespected => {
-                        "respected a manual assistant-tail removal while closing the cycle"
-                    }
-                    agent_doc_orchestration::repair::RepairOutcome::StaleCaptureRetired => {
-                        "retired a wedged write-applied capture and rebuilt sidecars from the current document"
-                    }
-                    agent_doc_orchestration::repair::RepairOutcome::StalePreflightLockRepaired => {
-                        "closed a stale preflight-started cycle"
-                    }
-                    agent_doc_orchestration::repair::RepairOutcome::StalePreflightCycleAbandoned => {
-                        "abandoned a stale empty preflight-started cycle"
-                    }
-                    agent_doc_orchestration::repair::RepairOutcome::CommitBoundaryRecovered => {
-                        "recovered a missing commit boundary"
-                    }
-                    agent_doc_orchestration::repair::RepairOutcome::TemplateNormalized => {
-                        "normalized template drift before closeout"
-                    }
-                    agent_doc_orchestration::repair::RepairOutcome::CompletedBacklogReaped => {
-                        "reaped a stale completed backlog item during recovery"
-                    }
-                    agent_doc_orchestration::repair::RepairOutcome::Noop => unreachable!(),
-                }
-            );
+            println!("closeout_repair: {}", closeout.doctor_message());
         }
         for note in repair_notes {
             println!("{note}");
@@ -2489,11 +2474,10 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         &canonical_file,
     )?;
     let registry_entry = lookup_registry_entry(&base_dir, &session_id, &canonical_file)?;
-    let startup_miss = agent_doc_orchestration::startup_miss::load(&canonical_file)?;
+    let startup_miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(&canonical_file)?;
     let log_status =
-        agent_doc_orchestration::startup_miss::session_log_status(&canonical_file, &session_id)?;
-    let supervisor_socket =
-        agent_doc_orchestration::supervisor::ipc::socket_path(&base_dir, &session_id);
+        agent_doc_supervisor_io::startup_miss::session_log_status(&canonical_file, &session_id)?;
+    let supervisor_socket = agent_doc_supervisor_io::ipc::socket_path(&base_dir, &session_id);
     let supervisor_runtime = query_supervisor_runtime(&supervisor_socket);
     let operator_status = reconcile_controller_lease_with_supervisor_runtime(
         &base_dir,
@@ -2523,7 +2507,7 @@ fn lookup_registry_entry(
     session_id: &str,
     canonical_file: &Path,
 ) -> Result<Option<SessionEntry>> {
-    let registry = agent_doc_orchestration::sessions::load_in(base_dir)?;
+    let registry = agent_doc_session_registry_io::load_in(base_dir)?;
     Ok(find_registry_entry(
         base_dir,
         &registry,
@@ -2599,9 +2583,12 @@ fn path_text_matches_file(base_dir: &Path, raw: &str, canonical_file: &Path) -> 
 fn resolve_attach_pane(pane: Option<&str>) -> Result<String> {
     match pane {
         Some(pane_id) => Ok(pane_id.to_string()),
-        None => agent_doc_orchestration::sessions::current_pane().context(
-            "attach requires --pane when no tmux pane is active in the current environment",
-        ),
+        None => {
+            let tmux = Tmux::default_server();
+            agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux).context(
+                "attach requires --pane when no tmux pane is active in the current environment",
+            )
+        }
     }
 }
 
@@ -2755,7 +2742,7 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
             cwd_source: None,
         };
     }
-    match agent_doc_orchestration::supervisor::ipc::send_command(socket, &IpcMethod::State) {
+    match agent_doc_supervisor_io::ipc::send_command(socket, &IpcMethod::State) {
         Ok(response) if response.ok => {
             let data = response.data.unwrap_or_default();
             let running = data
@@ -2877,8 +2864,7 @@ fn live_pane_evidence_for_pane(
     }
 
     let harness = agent_doc_harness::HarnessConfig::from_agent_name(&ctx.harness);
-    let captured =
-        agent_doc_orchestration::sessions::capture_pane(tmux, &pane_id).unwrap_or_default();
+    let captured = agent_doc_tmux_io::capture_pane(tmux, &pane_id).unwrap_or_default();
     let prompt_ready = live_pane_prompt_ready(&harness, &captured);
     LivePaneEvidence {
         pane_id: Some(pane_id.clone()),
@@ -3287,14 +3273,14 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
     };
     let proven_prefix = format!("{}_capability_proof status=proven", ctx.harness);
     let proven_result = if let Some(contract) = expected_writable_contract.as_deref() {
-        agent_doc_orchestration::startup_miss::session_log_has_event_after_latest_start_containing(
+        agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start_containing(
             &ctx.canonical_file,
             &ctx.session_id,
             &proven_prefix,
             &format!("writable_root_contract={contract}"),
         )
     } else {
-        agent_doc_orchestration::startup_miss::session_log_has_event_after_latest_start(
+        agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
             &ctx.canonical_file,
             &ctx.session_id,
             &proven_prefix,
@@ -3310,7 +3296,7 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
         if status == "proven" && expected_writable_contract.is_some() {
             continue;
         }
-        match agent_doc_orchestration::startup_miss::session_log_has_event_after_latest_start(
+        match agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
             &ctx.canonical_file,
             &ctx.session_id,
             &format!("{}_capability_proof status={}", ctx.harness, status),
@@ -4517,10 +4503,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         )
         .unwrap();
 
-        let sock = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(
-            dir.path(),
-            "session-status",
-            {
+        let sock =
+            agent_doc_supervisor_io::ipc::SupervisorIpc::start(dir.path(), "session-status", {
                 move |method| match method {
                     IpcMethod::State => IpcResponse::ok(serde_json::json!({
                         "running": true,
@@ -4537,9 +4521,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                     })),
                     _ => IpcResponse::ok_empty(),
                 }
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
 
         let ctx = build_context(&doc).unwrap();
         let lease = ctx.operator_status.supervisor_lease.unwrap();
@@ -4664,10 +4647,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         .unwrap();
         let captured = Arc::new(Mutex::new(Vec::<String>::new()));
         let captured_for_ipc = captured.clone();
-        let sock = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(
-            dir.path(),
-            "session-clear",
-            {
+        let sock =
+            agent_doc_supervisor_io::ipc::SupervisorIpc::start(dir.path(), "session-clear", {
                 move |method| match method {
                     IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                         captured_for_ipc.lock().unwrap().push(bytes);
@@ -4681,9 +4662,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                     })),
                     _ => IpcResponse::ok_empty(),
                 }
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let pane_window = iso.pane_window(&pane).unwrap();
         agent_doc_orchestration::sessions::register("session-clear", &pane, &doc.to_string_lossy())
@@ -4857,7 +4837,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         // is not wedged by a stale open cycle.
         assert_eq!(
             reclaim_orphaned_cycle_on_clear(&doc),
-            agent_doc_orchestration::repair::CancelOutcome::Abandoned
+            agent_doc_turn::repair::CancelOutcome::Abandoned
         );
         let state = agent_doc_orchestration::cycle_state::load(&doc)
             .unwrap()
@@ -4880,7 +4860,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         // A cycle that owns a captured response must not be discarded by clear.
         assert_eq!(
             reclaim_orphaned_cycle_on_clear(&doc),
-            agent_doc_orchestration::repair::CancelOutcome::Protected
+            agent_doc_turn::repair::CancelOutcome::Protected
         );
         assert!(
             agent_doc_orchestration::cycle_state::load(&doc)
@@ -4896,7 +4876,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let (_dir, doc) = clear_reclaim_project();
         assert_eq!(
             reclaim_orphaned_cycle_on_clear(&doc),
-            agent_doc_orchestration::repair::CancelOutcome::NoOpenCycle
+            agent_doc_turn::repair::CancelOutcome::NoOpenCycle
         );
     }
 }

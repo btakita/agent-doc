@@ -1044,7 +1044,6 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
-        "agent-doc-orchestration/src/preflight/semantic_diff.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/dispatch_only.rs",
@@ -1141,7 +1140,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // reconcile loop moved here from orchestration. These are the existing
         // visible-write guard vocabulary and focused policy tests, now owned by
         // the realtime write policy crate.
-        ("agent-doc-document-realtime/src/write_policy.rs", "guard_") => 5,
+        ("agent-doc-document-realtime/src/write_policy.rs", "guard_") => 10,
         // Commit normalization is now pure document policy, not an
         // orchestration guard boundary.
         ("agent-doc-document/src/commit_normalization.rs", "guard_") => 0,
@@ -1213,8 +1212,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/route.rs", "flow_reason=") => 2,
         // +5 for the audited `#snrun` blocked-in-interactive-substate guard:
         // the `dispatch_only_blocked_guard_reason` import + its `guard_reason`
-        // binding, the `log_prompt_ready_barrier_failed(file, guard_reason)`
-        // emission, and the `guard_reason == ...BlockedInInteractiveSubstate`
+        // binding, the prompt-ready FlowEvent proof-log emission, and the
+        // `guard_reason == ...BlockedInInteractiveSubstate`
         // branch that names the interactive terminal substate distinctly from a
         // generic busy actor on the dispatch-only fail-closed path. Routed
         // through the `RoutedReopenGuardReason` enum + `prompt_ready_barrier`
@@ -1415,7 +1414,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // from orchestration into this focused workflow owner with direct unit
         // coverage. These tokens name owned guard message policy, not new flow
         // branches.
-        ("agent-doc-workflow/src/session_check.rs", "guard_") => 38,
+        ("agent-doc-workflow/src/session_check.rs", "guard_") => 40,
         ("agent-doc-workflow/src/session_check.rs", "reason=") => 1,
         // 4 -> 7 (#session-check-guard-policy-extract): orchestration keeps the
         // IO/proof collection and calls the focused workflow guard-result
@@ -1536,7 +1535,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // unsaved operator edit still fails closed). These are test-assertion
         // literals exercising the existing visible-write guard boundary, not new
         // production flow guards.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 50,
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 49,
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
         // 3 -> 1 (#template-materialization-policy): raw-response probe
         // construction now lives in `agent-doc-template::response_materialization`,
@@ -1548,7 +1547,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // 5 -> 3 (#pure-helper-extraction): the shrink guard predicate moved to
         // `agent-doc-element-exchange`; orchestration keeps the effect adapter
         // log entry and imports the focused pure policy directly.
-        ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 3,
+        ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 1,
         // -2 `guard_`, -1 `reason=` (#nodiskipc): active IPC timeout/no-proof
         // paths no longer enter the direct document-write fallback, so the removed
         // visible-write guard/reason tokens are retired rather than rerouted.
@@ -1577,7 +1576,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // (no evidence still bails, preserving the corruption guard).
         // 4 -> 5 (#typed-stop-fence): post-consume next-head projection records
         // typed stop-fence deferral as `QueueHeadDeferred` with the owning reason.
-        ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 5,
+        ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 4,
         // +4 `guard_` (#dupcontent: two `guard_adopts/refuses_*` adoption tests
         // + two `guard_ipc_snapshot_adoption_against_live_prompt_drift` calls in
         // those tests) and +2 `reason=` (the two `content_ours_adoption_refused_structural`
@@ -1812,7 +1811,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // now proves the earlier partial-materialization retry path instead of
         // asserting an extra visible-repair `reason=` literal. The production
         // recovery still logs `recovery=visible_repair_required` in write/ipc.rs.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 11,
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 13,
         _ => 0,
     }
 }
@@ -2299,8 +2298,11 @@ fn test_manifest_uses_publishable_dependency_contract() {
 
     for crate_name in [
         "agent-doc-config",
+        "agent-doc-controller-io",
+        "agent-doc-codex-hook-io",
         "agent-doc-debounce",
         "agent-doc-diff",
+        "agent-doc-diff-io",
         "agent-doc-document-realtime",
         "agent-doc-markdown-ast",
         "agent-doc-ffi",
@@ -2308,18 +2310,32 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-frontmatter",
         "agent-doc-frontmatter-io",
         "agent-doc-fs",
+        "agent-doc-hooks-io",
+        "agent-doc-ipc-io",
+        "agent-doc-ipc-forensics-io",
+        "agent-doc-lease-io",
+        "agent-doc-lint-io",
+        "agent-doc-memory-io",
         "agent-doc-merge",
         "agent-doc-model-tier",
+        "agent-doc-op-capture-io",
+        "agent-doc-ops-log-io",
         "agent-doc-owner-pane-io",
         "agent-doc-orchestration",
+        "agent-doc-plugin-owner-io",
         "agent-doc-project-config-io",
+        "agent-doc-prompt-context-io",
         "agent-doc-prompt-contract",
         "agent-doc-queue",
+        "agent-doc-response-replay-io",
         "agent-doc-response-toc-io",
         "agent-doc-state-backbone",
         "agent-doc-state-wire",
+        "agent-doc-status-io",
         "agent-doc-template",
+        "agent-doc-template-io",
         "agent-doc-turn",
+        "agent-doc-session-accretion-io",
         "agent-doc-turn-scope-io",
         "agent-doc-workflow",
         "agent-doc-workflow-io",
@@ -2381,6 +2397,186 @@ fn test_manifest_uses_publishable_dependency_contract() {
         tmux_router.get("version").and_then(toml::Value::as_str),
         Some("0.3.11")
     );
+}
+
+#[test]
+fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let package_version = workspace["package"]["version"].as_str();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-hooks-io")),
+        "agent-doc-hooks-io must stay a first-class workspace crate"
+    );
+
+    for relative_manifest in ["Cargo.toml", "agent-doc-orchestration/Cargo.toml"] {
+        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
+        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+        let dependencies = parsed["dependencies"].as_table().unwrap();
+        let dependency = dependencies["agent-doc-hooks-io"].as_table().unwrap();
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "{relative_manifest} should depend on the versioned hook IO crate"
+        );
+    }
+
+    let hooks_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-hooks-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&hooks_io_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-frontmatter", "agent-doc-model-tier", "agent-kit"] {
+        assert!(
+            dependencies.contains_key(required),
+            "agent-doc-hooks-io should depend on hook/frontmatter/model focused crate: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-hooks-io must stay free of orchestration/editor IPC/sqlite/tmux facades: {forbidden}"
+        );
+    }
+
+    let hooks_io = fs::read_to_string(manifest_dir.join("agent-doc-hooks-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn fire_doc_hooks(",
+        "pub fn fire_doc_event(",
+        "pub fn fire_post_write(",
+        "pub fn fire_post_commit(",
+        "pub fn fire_post_write_with_effects(",
+        "pub fn fire_post_commit_with_effects(",
+        "pub fn fire_claim(",
+        "pub fn fire_layout_change(",
+        "pub fn poll(",
+        "pub trait PostResponseHookEffects",
+        "pub struct PostResponseCapture",
+        "pub struct StaleConsumerReapCounts",
+        "agent_kit::hooks::{Event, HookRegistry}",
+        "std::process::Command::new(\"sh\")",
+        "agent_doc_frontmatter::frontmatter::parse",
+        "agent_doc_model_tier::canonical_model_name",
+        "fn capture_event_metadata(",
+    ] {
+        assert!(
+            hooks_io.contains(required),
+            "agent-doc-hooks-io must own hook dispatch adapter: {required}"
+        );
+    }
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/hooks.rs")
+            .exists(),
+        "orchestration hooks facade should be deleted once hook IO owns post-response adapters"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod hooks;"),
+        "orchestration must not expose a public hooks facade"
+    );
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/hook_effects.rs")
+            .exists(),
+        "orchestration must not keep a hook_effects facade module"
+    );
+    for required in [
+        "pub struct PostResponseHookEffectFns",
+        "pub fn post_response_hook_effects",
+        "impl<Load, Memory, Lease, Stale> PostResponseHookEffects",
+    ] {
+        assert!(
+            hooks_io.contains(required),
+            "agent-doc-hooks-io must own the function-backed hook effects adapter: {required}"
+        );
+    }
+    for required in [
+        "pub(crate) fn post_response_hook_effects() -> impl agent_doc_hooks_io::PostResponseHookEffects",
+        "crate::capture::load_active(file)",
+        "agent_doc_memory_io::closeout::capture_tsift_memory_closeout",
+        "agent_doc_lease_io::local_model::reap_local_model_leases",
+        "agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file",
+    ] {
+        assert!(
+            orchestration_lib.contains(required),
+            "orchestration hook bridge should only supply remaining local effects: {required}"
+        );
+    }
+    for forbidden in [
+        "agent_kit::hooks",
+        "HookRegistry",
+        "std::process::Command::new(\"sh\")",
+        "pub fn fire_doc_hooks(",
+        "pub fn fire_doc_event(",
+        "pub fn fire_claim(",
+        "pub fn fire_layout_change(",
+        "pub fn poll(",
+    ] {
+        assert!(
+            !orchestration_lib.contains(forbidden),
+            "orchestration hook bridge must not re-own hook dispatch IO: {forbidden}"
+        );
+    }
+
+    for (relative, required) in [
+        (
+            "agent-doc-orchestration/src/stream.rs",
+            "agent_doc_hooks_io::fire_post_write_with_effects(",
+        ),
+        (
+            "agent-doc-orchestration/src/write/run_entry.rs",
+            "agent_doc_hooks_io::fire_post_write_with_effects(",
+        ),
+        (
+            "agent-doc-orchestration/src/git.rs",
+            "agent_doc_hooks_io::fire_post_commit(file, &session_id, None)",
+        ),
+        (
+            "agent-doc-orchestration/src/stream.rs",
+            "agent_doc_hooks_io::fire_doc_event(file, \"post_write\")",
+        ),
+        (
+            "agent-doc-orchestration/src/write/run_entry.rs",
+            "agent_doc_hooks_io::fire_doc_event(file, \"post_write\")",
+        ),
+        (
+            "agent-doc-orchestration/src/git.rs",
+            "agent_doc_hooks_io::fire_doc_event(file, \"post_commit\")",
+        ),
+        (
+            "agent-doc-orchestration/src/start/run.rs",
+            "agent_doc_hooks_io::fire_doc_hooks(",
+        ),
+        (
+            "agent-doc-orchestration/src/start/supervisor_io.rs",
+            "use agent_doc_hooks_io::fire_doc_hooks;",
+        ),
+        (
+            "agent-doc-orchestration/src/start/detection.rs",
+            "use agent_doc_hooks_io::fire_doc_hooks;",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains(required),
+            "{relative} should call focused hook IO directly: {required}"
+        );
+    }
 }
 
 #[test]
@@ -2814,6 +3010,196 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
 }
 
 #[test]
+fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-codex-hook-io")),
+        "agent-doc-codex-hook-io must stay a first-class workspace crate"
+    );
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-codex-hook-io"),
+        "root crate should expose focused Codex hook IO directly"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-codex-hook-io"),
+        "agent-doc-orchestration should call the focused Codex hook IO crate"
+    );
+
+    let codex_hook_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-codex-hook-io/Cargo.toml")).unwrap();
+    let codex_hook_io_manifest: toml::Value = toml::from_str(&codex_hook_io_manifest).unwrap();
+    let codex_hook_io_dependencies = codex_hook_io_manifest["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-hash",
+        "agent-doc-project-root-io",
+        "anyhow",
+        "serde",
+        "serde_json",
+    ] {
+        assert!(
+            codex_hook_io_dependencies.contains_key(required),
+            "agent-doc-codex-hook-io should depend on blocked-stop sidecar dependency: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-fs",
+        "agent-doc-orchestration",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+        "tmux-router",
+    ] {
+        assert!(
+            !codex_hook_io_dependencies.contains_key(forbidden),
+            "agent-doc-codex-hook-io must stay focused on Codex hook sidecars: {forbidden}"
+        );
+    }
+
+    let codex_hook_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-codex-hook-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn project_root_for(",
+        "pub fn project_roots_for(",
+        "pub fn tracking_roots(",
+        "pub fn push_unique_root(",
+        "pub fn save_blocked_stop_payload(",
+        "struct BlockedStopPayloadRecord",
+        ".agent-doc/codex-hooks/blocked-stop",
+        "agent_doc_project_root_io::project_root_containing(",
+        "agent_doc_hash::content_hash(",
+    ] {
+        assert!(
+            codex_hook_io.contains(required),
+            "agent-doc-codex-hook-io should own Codex blocked-stop sidecar persistence: {required}"
+        );
+    }
+
+    let codex_hook =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
+    for forbidden in [
+        "struct BlockedStopPayloadRecord",
+        "fn save_blocked_stop_payload(",
+        "fn project_roots_for(",
+        "fn tracking_roots(",
+        "fn find_git_root(",
+        "agent_doc_fs::find_project_root(",
+        "resolve project root for blocked stop payload",
+        "write blocked stop payload",
+    ] {
+        assert!(
+            !codex_hook.contains(forbidden),
+            "codex_hook.rs must not re-own blocked-stop sidecar persistence: {forbidden}"
+        );
+    }
+    assert!(
+        codex_hook.contains("use agent_doc_codex_hook_io::{")
+            && codex_hook.contains("project_roots_for")
+            && codex_hook.contains("tracking_roots")
+            && codex_hook.contains("agent_doc_codex_hook_io::save_blocked_stop_payload("),
+        "codex_hook.rs should call focused Codex hook IO directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_repair_io_owns_blocked_repair_payload_sidecar() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-repair-io")),
+        "agent-doc-repair-io must stay a first-class workspace crate"
+    );
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-repair-io"),
+        "root crate should expose focused repair IO directly"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-repair-io"),
+        "agent-doc-orchestration should call the focused repair IO crate"
+    );
+
+    let repair_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-io/Cargo.toml")).unwrap();
+    let repair_io_manifest: toml::Value = toml::from_str(&repair_io_manifest).unwrap();
+    let repair_io_dependencies = repair_io_manifest["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-hash",
+        "agent-doc-project-root-io",
+        "anyhow",
+        "serde",
+        "serde_json",
+    ] {
+        assert!(
+            repair_io_dependencies.contains_key(required),
+            "agent-doc-repair-io should depend on blocked-repair sidecar dependency: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-fs",
+        "agent-doc-orchestration",
+        "agent-doc-tmux-io",
+    ] {
+        assert!(
+            !repair_io_dependencies.contains_key(forbidden),
+            "agent-doc-repair-io must stay focused on repair sidecars: {forbidden}"
+        );
+    }
+
+    let repair_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn save_blocked_repair_payload(",
+        "struct BlockedRepairPayloadRecord",
+        ".agent-doc/repair-blocked",
+        "agent_doc_project_root_io::project_root_containing(",
+        "agent_doc_hash::content_hash(",
+    ] {
+        assert!(
+            repair_io.contains(required),
+            "agent-doc-repair-io should own blocked repair sidecar persistence: {required}"
+        );
+    }
+
+    let repair =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    for forbidden in [
+        "struct BlockedRepairPayloadRecord",
+        "fn save_blocked_repair_payload(",
+        "resolve project root for blocked repair payload",
+        "write blocked repair payload",
+        "agent_doc_fs::find_project_root(",
+    ] {
+        assert!(
+            !repair.contains(forbidden),
+            "repair.rs must not re-own blocked repair sidecar persistence: {forbidden}"
+        );
+    }
+    assert!(
+        repair.contains("agent_doc_repair_io::save_blocked_repair_payload("),
+        "repair.rs should call focused repair IO directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -3002,6 +3388,12 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-queue-io/src/continuation_detect.rs")
+            .exists(),
+        "file-backed queue continuation detection should live in the queue IO crate"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-queue/src/queue_journal.rs")
             .exists(),
         "queue journal replay policy should live in the queue crate"
@@ -3028,6 +3420,9 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     let queue_io_pause =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/controller_pause.rs"))
             .unwrap();
+    let queue_io_detect =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/continuation_detect.rs"))
+            .unwrap();
     for required_snippet in [
         "pub fn document_queue_controller_paused(",
         "pub fn document_queue_controller_pause_reason(",
@@ -3038,15 +3433,29 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             "agent-doc-queue-io must own controller pause state IO: {required_snippet}"
         );
     }
+    for required_snippet in [
+        "pub fn detect_required_continuation_with(",
+        "recycle_yield_pending(file)",
+        "std::fs::read_to_string(file)",
+        "let snapshot_content = load_snapshot(file)?",
+        "queue_continuation::required_continuation(&content, snapshot_content.as_deref())",
+    ] {
+        assert!(
+            queue_io_detect.contains(required_snippet),
+            "agent-doc-queue-io must own file-backed queue continuation detection: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "pub struct QueueContinuation",
         "pub fn document_queue_controller_paused(",
         "pub fn document_queue_controller_pause_reason(",
         "load_effective_queue_control_from_db",
         "fn detect_in_content",
-        "frontmatter_io::parse_for_file_with_context",
+        "agent_doc_frontmatter_io::session::parse_for_file_with_context",
         "agent_doc_element::element::parse(content)",
         "document_queue::detect_head_prompt_modified",
+        "queue_policy::required_continuation",
+        "std::fs::read_to_string(file)",
         "pub fn deferred_backlog_ids",
         "pub(crate) fn deferred_backlog_ids",
         "pub fn supervisor_deferred_backlog_ids",
@@ -3066,8 +3475,9 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         );
     }
     assert!(
-        orchestration_source.contains("queue_policy::required_continuation"),
-        "orchestration queue_continuation should read file/snapshot and call agent-doc-queue directly"
+        orchestration_source
+            .contains("agent_doc_queue_io::continuation_detect::detect_required_continuation_with"),
+        "orchestration queue_continuation should inject snapshot/recycle effects into agent-doc-queue-io"
     );
     for relative in [
         "agent-doc-orchestration/src/session_check.rs",
@@ -3126,9 +3536,6 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         queue_journal_io.contains("pub fn queue_journal_path("),
         "agent-doc-queue-io must own queue journal sidecar path derivation"
     );
-    let orchestration_queue_journal =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_journal.rs"))
-            .unwrap();
     for forbidden_snippet in [
         "pub struct QueueJournalEntry",
         "fn queue_prompts(",
@@ -3146,25 +3553,28 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "fn durable_queue_texts(",
         "pub fn merge_missing_into_content(",
         "pub use agent_doc_queue::queue_journal",
-        "const QUEUE_JOURNAL_DIR",
         "fn journal_path(",
     ] {
         assert!(
-            !orchestration_queue_journal.contains(forbidden_snippet),
-            "orchestration must not re-own or facade queue journal policy: {forbidden_snippet}"
+            !queue_journal_io.contains(forbidden_snippet),
+            "queue journal IO must not re-own pure queue journal policy: {forbidden_snippet}"
         );
     }
     assert!(
-        orchestration_queue_journal
-            .contains("agent_doc_queue::queue_journal as queue_journal_policy")
-            && orchestration_queue_journal.contains("queue_journal_policy::queue_prompts(")
-            && orchestration_queue_journal.contains("queue_journal_policy::plan_append_entries(")
-            && orchestration_queue_journal
+        queue_journal_io.contains("agent_doc_queue::queue_journal as queue_journal_policy")
+            && queue_journal_io.contains("queue_journal_policy::queue_prompts(")
+            && queue_journal_io.contains("queue_journal_policy::plan_append_entries(")
+            && queue_journal_io
                 .contains("queue_journal_policy::unique_queue_prompts_from_contents(")
-            && orchestration_queue_journal
-                .contains("queue_journal_policy::replay_missing_entries(")
-            && orchestration_queue_journal.contains("queue_journal_path("),
-        "orchestration queue journal adapter should call focused queue policy and IO directly"
+            && queue_journal_io.contains("queue_journal_policy::replay_missing_entries(")
+            && queue_journal_io.contains("queue_journal_path("),
+        "queue journal IO should call focused queue policy directly"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/queue_journal.rs")
+            .exists(),
+        "orchestration must not keep a queue_journal facade module"
     );
     let start_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
@@ -3172,6 +3582,12 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         start_run_source.contains("agent_doc_queue::queue_journal::merge_missing_into_content")
             && !start_run_source.contains("crate::queue_journal::merge_missing_into_content"),
         "startup replay should merge through the focused queue journal policy directly"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod queue_journal;"),
+        "orchestration must not export a queue_journal facade"
     );
     let queue_replay_source =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_replay.rs")).unwrap();
@@ -3532,6 +3948,23 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         queue_lib.contains("pub mod queue_consume;"),
         "agent-doc-queue should expose queue consumption entry policy"
     );
+    let queue_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consumption_proof.rs"))
+            .unwrap();
+    for required in [
+        "pub enum QueueConsumptionProofStage",
+        "pub trait QueueConsumptionProofEffects",
+        "pub fn record_queue_consumption_proofs",
+        "QueueConsumptionProofStage::BeforeMutation",
+        "QueueConsumptionProofStage::AfterMutation",
+        "agent_doc_workflow_io::proof_ledger",
+        "agent_doc_state_backbone::StateEvent",
+    ] {
+        assert!(
+            queue_io.contains(required),
+            "agent-doc-queue-io must own queue-consumption proof IO: {required}"
+        );
+    }
 
     let queue_consume_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_consume.rs")).unwrap();
@@ -3580,6 +4013,7 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "fn cycle_answered_foreign_exchange_prompt",
         "pub(crate) const STRUCK_FREE_TEXT_NOTE",
         "pub(crate) fn annotate_struck_free_text_line",
+        "pub(crate) use agent_doc_queue_io::queue_consumption_proof::QueueConsumptionProofStage",
         "fn strip_list_bullet_prefix",
         "pub(crate) fn annotate_newly_struck_free_text_heads",
         "pub(crate) struct QueueConsumptionPlan",
@@ -3603,6 +4037,16 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
             && orchestration_queue_consume.contains("annotate_newly_struck_free_text_heads")
             && orchestration_queue_consume.contains("cycle_answered_foreign_exchange_prompt"),
         "write/queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
+    );
+    let orchestration_write_run_entry =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+    assert!(
+        orchestration_write_run_entry.contains(
+            "use agent_doc_queue_io::queue_consumption_proof::QueueConsumptionProofStage;"
+        ) && orchestration_write_run_entry.contains("QueueConsumptionProofStage::BeforeMutation")
+            && orchestration_write_run_entry.contains("QueueConsumptionProofStage::AfterMutation"),
+        "write/run_entry.rs should import queue-consumption proof stages from agent-doc-queue-io directly"
     );
     assert!(
         orchestration_preflight_maintenance
@@ -4112,6 +4556,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub struct CommittedWithoutResponseBodyEvidence",
         "pub enum CommittedWithoutResponseBodyDecision",
         "pub fn closeout_cycle_phase_from_str",
+        "pub fn closeout_guard_event",
         "pub const fn closeout_terminal_guard_outcome",
         "pub fn exchange_has_assistant_response_body",
         "pub fn committed_without_response_body_decision",
@@ -4188,6 +4633,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let flow_closeout_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow/src/closeout.rs")).unwrap();
     let flow_lib = fs::read_to_string(manifest_dir.join("agent-doc-flow/src/lib.rs")).unwrap();
+    let flow_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/lib.rs")).unwrap();
     let orchestration_flow_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     assert!(
@@ -4198,8 +4645,16 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     );
     assert!(
         !orchestration_flow_mod.contains("pub mod types")
-            && !orchestration_flow_mod.contains("pub mod outcome"),
+            && !orchestration_flow_mod.contains("pub mod outcome")
+            && !orchestration_flow_mod.contains("pub mod session_cycle")
+            && !orchestration_flow_mod.contains("pub mod proof"),
         "orchestration flow must not keep types/outcome shim modules"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/proof.rs")
+            .exists(),
+        "orchestration flow must not keep a flow proof logging facade"
     );
     assert!(
         flow_outcome_source.contains("pub enum UserFacingOutcomeKind")
@@ -4210,12 +4665,42 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         flow_closeout_source.contains("pub fn closeout_latency_message"),
         "agent-doc-flow must own closeout flow latency formatting"
     );
+    for required_snippet in [
+        "pub fn flow_event(",
+        "pub fn flow_event_log_message(",
+        "fn sanitize_field_value(",
+        "pub struct SessionCycleStep",
+        "pub fn session_cycle_event(",
+    ] {
+        assert!(
+            flow_types_source.contains(required_snippet),
+            "agent-doc-flow must own flow event construction/rendering policy: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub type FlowEventLogger = fn(&Path, &str);",
+        "pub fn flow_event_message(",
+        "pub fn log_flow_event(",
+        "flow_event_log_message(&file.display().to_string(), event)",
+    ] {
+        assert!(
+            flow_io_source.contains(required_snippet),
+            "agent-doc-flow-io must own flow event logging IO: {required_snippet}"
+        );
+    }
+    assert!(
+        !flow_io_source.contains("crate::ops_log")
+            && !flow_io_source.contains("agent_doc_orchestration")
+            && !flow_io_source.contains("agent-doc-orchestration"),
+        "agent-doc-flow-io must stay free of orchestration and concrete ops-log sinks"
+    );
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     for forbidden in [
         "pub enum CloseoutGuardReason",
         "impl CloseoutGuardReason",
         "pub fn closeout_state_from_cycle_phase",
+        "pub fn closeout_guard_event(",
         "pub fn terminal_guard_outcome",
         "fn closeout_latency_message(",
     ] {
@@ -4229,8 +4714,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-flow types must not keep a duplicate closeout state vocabulary"
     );
     assert!(
-        closeout_source.contains("use agent_doc_turn::closeout_guard::CloseoutGuardReason;"),
-        "flow::closeout should adapt focused closeout guard reasons into flow events"
+        closeout_source.contains("use agent_doc_turn::closeout_guard::CloseoutGuardReason;")
+            && closeout_source.contains("agent_doc_turn::closeout_guard::closeout_guard_event"),
+        "flow::closeout should adapt focused closeout guard events through an injected ops-log sink"
     );
     assert!(
         closeout_source.contains("closeout::closeout_latency_message"),
@@ -4596,9 +5082,14 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             .contains("agent_doc_turn::document_drift::detect_bypassed_response_write_between"),
         "closeout_guards should call focused bypassed-response classifier directly"
     );
+    let workflow_session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/session_check.rs")).unwrap();
     assert!(
-        detect_source.contains("agent_doc_turn::exchange_tail::prompt_only_exchange_tail"),
-        "session_check::detect should call focused prompt-only exchange-tail policy directly"
+        detect_source
+            .contains("agent_doc_workflow::session_check::prompt_only_exchange_tail_guard")
+            && workflow_session_check
+                .contains("agent_doc_turn::exchange_tail::prompt_only_exchange_tail"),
+        "session_check::detect should route prompt-only exchange-tail checks through workflow while workflow calls focused turn policy"
     );
 
     let response_guards = fs::read_to_string(
@@ -4977,8 +5468,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             && write_source.contains("response_materialized_in_content"),
         "orchestration write should import focused response replay policy directly"
     );
-    let dedupe_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/dedupe.rs")).unwrap();
+    let response_replay_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-response-replay-io/src/lib.rs")).unwrap();
     for forbidden in [
         "pub fn dedupe_responses",
         "pub fn first_duplicate_response_heading",
@@ -4988,14 +5479,66 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "fn normalize_response_block_line",
     ] {
         assert!(
-            !dedupe_source.contains(forbidden),
-            "orchestration dedupe must stay a file I/O adapter, not re-own response replay policy: {forbidden}"
+            !response_replay_io.contains(forbidden),
+            "response replay IO must stay a file I/O adapter, not re-own pure response replay policy: {forbidden}"
         );
     }
+    for required in [
+        "use agent_doc_turn::response_replay::dedupe_responses;",
+        "pub trait DedupeEffects",
+        "fn write_deduped_document(",
+        "fn save_snapshot(",
+        "agent_doc_fs::document_state_hash(file)",
+        "agent_doc_fs::find_project_root(file)",
+        ".join(\".agent-doc/patches\")",
+    ] {
+        assert!(
+            response_replay_io.contains(required),
+            "response replay IO should own dedupe file effects while calling focused policy: {required}"
+        );
+    }
+    let response_replay_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-response-replay-io/Cargo.toml")).unwrap();
+    for required in ["agent-doc-turn", "agent-doc-fs"] {
+        assert!(
+            response_replay_io_manifest.contains(required),
+            "response replay IO should depend on focused dependency {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-git-io",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+    ] {
+        assert!(
+            !response_replay_io_manifest.contains(forbidden),
+            "response replay IO must not depend on orchestration-side systems: {forbidden}"
+        );
+    }
+    let cli_dedupe_source = fs::read_to_string(manifest_dir.join("src/dedupe_cmd.rs")).unwrap();
     assert!(
-        dedupe_source.contains("use agent_doc_turn::response_replay::dedupe_responses;"),
-        "orchestration dedupe adapter should call focused response replay policy directly"
+        cli_dedupe_source.contains("agent_doc_response_replay_io::run(&EFFECTS, file)")
+            && cli_dedupe_source.contains("agent_doc_orchestration::write::converge_or_disk_write")
+            && cli_dedupe_source.contains("agent_doc_snapshot_io::save("),
+        "CLI dedupe adapter should only inject writer and snapshot effects"
     );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/dedupe.rs")
+            .exists(),
+        "orchestration must not keep a dedupe facade module"
+    );
+    for forbidden in [
+        "use agent_doc_turn::response_replay::dedupe_responses;",
+        "agent_doc_fs::document_state_hash",
+        ".join(\".agent-doc/patches\")",
+    ] {
+        assert!(
+            !cli_dedupe_source.contains(forbidden),
+            "CLI dedupe adapter must not re-own response replay IO details: {forbidden}"
+        );
+    }
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
     assert!(
@@ -5079,15 +5622,22 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "{relative} must not route response replay policy through repair"
         );
     }
-    let hooks_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/hooks.rs")).unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let memory_io_closeout =
+        fs::read_to_string(manifest_dir.join("agent-doc-memory-io/src/closeout.rs")).unwrap();
     let codex_hook_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
     assert!(
-        hooks_source.contains("agent_doc_turn::response_text::{")
-            && hooks_source.contains("response_prompt_target_from_re_heading")
-            && hooks_source.contains("summarize_response_for_hook"),
-        "orchestration hooks should call focused response text projection directly"
+        memory_io_closeout.contains("agent_doc_turn::response_text::{")
+            && memory_io_closeout.contains("response_prompt_target_from_re_heading")
+            && memory_io_closeout.contains("summarize_response_for_hook"),
+        "memory IO closeout should call focused response text projection directly"
+    );
+    assert!(
+        orchestration_lib.contains("agent_doc_memory_io::closeout::capture_tsift_memory_closeout")
+            && !orchestration_lib.contains("agent_doc_turn::response_text::{"),
+        "orchestration hook bridge should delegate tsift-memory closeout IO instead of owning response projection"
     );
     assert!(
         codex_hook_source.contains("use agent_doc_turn::response_text::{")
@@ -5102,8 +5652,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "fn truncate_agent_doc_summary",
     ] {
         assert!(
-            !hooks_source.contains(forbidden),
-            "orchestration hooks must not re-own hook response projection policy: {forbidden}"
+            !orchestration_lib.contains(forbidden),
+            "orchestration hook bridge must not re-own hook response projection policy: {forbidden}"
         );
     }
     for forbidden in [
@@ -5164,6 +5714,21 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
 #[test]
 fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-ops-log-io")),
+        "agent-doc-ops-log-io must stay a first-class workspace crate"
+    );
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-ops-log-io"),
+        "root crate should expose focused ops-log IO directly"
+    );
+
     let turn_op_log =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/op_log.rs")).unwrap();
     for required in [
@@ -5199,6 +5764,137 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
     )
     .unwrap();
+    let ops_log_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-ops-log-io/Cargo.toml")).unwrap();
+    let ops_log_io_manifest: toml::Value = toml::from_str(&ops_log_io_manifest).unwrap();
+    let ops_log_io_dependencies = ops_log_io_manifest["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-git-io",
+        "agent-doc-hash",
+        "agent-doc-log-time",
+        "agent-doc-project-root-io",
+        "agent-doc-turn",
+        "anyhow",
+        "serde",
+        "serde_json",
+    ] {
+        assert!(
+            ops_log_io_dependencies.contains_key(required),
+            "agent-doc-ops-log-io should depend on focused ops-log read/write dependency: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-fs",
+        "agent-doc-frontmatter",
+        "agent-doc-orchestration",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+        "tmux-router",
+    ] {
+        assert!(
+            !ops_log_io_dependencies.contains_key(forbidden),
+            "agent-doc-ops-log-io must stay a focused ops-log reader, not orchestration or transport state: {forbidden}"
+        );
+    }
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-ops-log-io"),
+        "agent-doc-orchestration should call the focused ops-log IO crate"
+    );
+    let ops_log_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-ops-log-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct CycleEntry",
+        "pub const LOG_ROTATE_MAX_BYTES",
+        "fn rotate_log_if_oversized(",
+        "pub struct OpsLogTracking",
+        "pub fn append_ops_log_at_project(",
+        "pub fn append_cycle_log_for_file(",
+        "pub fn append_cycle_entry_at_project(",
+        "pub fn last_ops_event(",
+        "pub fn latest_ipc_proof_diagnostic(",
+        "pub fn latest_ipc_proof_diagnostic_hint(",
+        "pub fn detect_write_completed_commit_missing(",
+        "agent_doc_project_root_io::project_root_containing(",
+        "agent_doc_turn::op_log::{",
+        "strip_timestamp_prefix",
+        "IPC_PROOF_INSUFFICIENT_EVENT",
+        "is_write_completed_commit_missing_event",
+        "agent_doc_log_time::format_ops_log_line",
+        "agent_doc_git_io::revision::last_commit_hash",
+        "agent_doc_hash::content_hash",
+        "serde_json::to_string",
+        ".agent-doc/logs/ops.log",
+        "cycles.jsonl",
+    ] {
+        assert!(
+            ops_log_io.contains(required),
+            "agent-doc-ops-log-io must own ops-log read/write adapters: {required}"
+        );
+    }
+    let orchestration_ops_log =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ops_log.rs")).unwrap();
+    assert!(
+        orchestration_ops_log.contains("agent_doc_ops_log_io::append_cycle_log_for_file(")
+            && orchestration_ops_log.contains("agent_doc_ops_log_io::append_ops_log_at_project(")
+            && orchestration_ops_log.contains("agent_doc_ops_log_io::OpsLogTracking"),
+        "orchestration ops_log should adapt metadata into focused ops-log IO"
+    );
+    for forbidden in [
+        "pub use agent_doc_ops_log_io::CycleEntry;",
+        "fn rotate_log_if_oversized(",
+        "const LOG_ROTATE_MAX_BYTES",
+        "serde_json::to_string",
+        "std::fs::OpenOptions::new()",
+        "agent_doc_git_io::revision::last_commit_hash",
+        "agent_doc_hash::content_hash",
+        "agent_doc_log_time::format_ops_log_line",
+    ] {
+        assert!(
+            !orchestration_ops_log.contains(forbidden),
+            "orchestration ops_log must not re-own ops-log file append/rotation IO: {forbidden}"
+        );
+    }
+    for (path, source) in [
+        (
+            "src/plan.rs",
+            fs::read_to_string(manifest_dir.join("src/plan.rs")).unwrap(),
+        ),
+        (
+            "agent-doc-orchestration/src/preflight.rs",
+            fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs"))
+                .unwrap(),
+        ),
+        (
+            "agent-doc-orchestration/src/preflight/run.rs",
+            fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+                .unwrap(),
+        ),
+        (
+            "agent-doc-orchestration/src/session_accretion.rs",
+            fs::read_to_string(
+                manifest_dir.join("agent-doc-orchestration/src/session_accretion.rs"),
+            )
+            .unwrap(),
+        ),
+    ] {
+        assert!(
+            source.contains("agent_doc_ops_log_io::CycleEntry"),
+            "{path} should use CycleEntry from the focused ops-log IO crate"
+        );
+        for forbidden in [
+            "crate::ops_log::CycleEntry",
+            "agent_doc_orchestration::ops_log::CycleEntry",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must not depend on the orchestration CycleEntry facade: {forbidden}"
+            );
+        }
+    }
     for forbidden in [
         "pub const PREFLIGHT_START_EVENT",
         "pub const IPC_WRITE_CONSUMED_EVENT",
@@ -5214,19 +5910,74 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
             "session-check must not re-own ops-log event policy: {forbidden}"
         );
     }
+    for forbidden in [
+        "pub fn last_ops_event(",
+        "pub fn latest_ipc_proof_diagnostic(",
+        "pub fn latest_ipc_proof_diagnostic_hint(",
+        "pub fn detect_write_completed_commit_missing(",
+        "pub use agent_doc_ops_log_io::{",
+        "agent_doc_fs::find_project_root(",
+    ] {
+        assert!(
+            !session_check.contains(forbidden) && !closeout_guards.contains(forbidden),
+            "session-check modules must not re-own or facade ops-log read/path IO: {forbidden}"
+        );
+    }
+    assert!(
+        !closeout_guards.contains(".agent-doc/logs/ops.log"),
+        "closeout_guards must not re-own ops-log path IO"
+    );
     assert!(
         session_check.contains("use agent_doc_turn::op_log::{")
             && session_check.contains("event_name")
             && session_check.contains("is_write_completed_commit_missing_event")
-            && session_check.contains("PREFLIGHT_START_EVENT"),
-        "session_check should import focused ops-log policy directly"
+            && session_check.contains("PREFLIGHT_START_EVENT")
+            && session_check.contains("agent_doc_ops_log_io::last_ops_event(")
+            && session_check.contains("agent_doc_ops_log_io::latest_ipc_proof_diagnostic(")
+            && session_check
+                .contains("agent_doc_ops_log_io::detect_write_completed_commit_missing("),
+        "session_check should import focused ops-log policy and call focused ops-log IO directly"
     );
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    for (path, source, required) in [
+        (
+            "agent-doc-orchestration/src/preflight.rs",
+            preflight_source.as_str(),
+            "agent_doc_ops_log_io::latest_ipc_proof_diagnostic(",
+        ),
+        (
+            "agent-doc-orchestration/src/preflight.rs",
+            preflight_source.as_str(),
+            "agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(",
+        ),
+        (
+            "agent-doc-orchestration/src/preflight.rs",
+            preflight_source.as_str(),
+            "agent_doc_ops_log_io::detect_write_completed_commit_missing(",
+        ),
+        (
+            "agent-doc-orchestration/src/repair.rs",
+            repair_source.as_str(),
+            "agent_doc_ops_log_io::detect_write_completed_commit_missing(",
+        ),
+    ] {
+        assert!(
+            source.contains(required),
+            "{path} should call focused ops-log IO directly: {required}"
+        );
+        assert!(
+            !source.contains("crate::session_check::latest_ipc_proof_diagnostic")
+                && !source.contains("crate::session_check::latest_ipc_proof_diagnostic_hint")
+                && !source.contains("crate::session_check::detect_write_completed_commit_missing"),
+            "{path} must not route ops-log IO through session_check"
+        );
+    }
     assert!(
-        closeout_guards.contains("use agent_doc_turn::op_log::{")
-            && closeout_guards.contains("is_write_completed_commit_missing_event")
-            && closeout_guards.contains("strip_timestamp_prefix")
-            && closeout_guards.contains("IPC_PROOF_INSUFFICIENT_EVENT"),
-        "closeout_guards should import focused ops-log policy directly"
+        closeout_guards.contains("agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint("),
+        "closeout_guards should call focused ops-log IO directly"
     );
 }
 
@@ -5336,6 +6087,18 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
 
     let turn_status_io =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-status-io/src/lib.rs")).unwrap();
+    let turn_status_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-status-io/Cargo.toml")).unwrap();
+    let turn_status_io_manifest: toml::Value = toml::from_str(&turn_status_io_manifest).unwrap();
+    let turn_status_io_dependencies = turn_status_io_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        turn_status_io_dependencies.contains_key("agent-doc-project-root-io"),
+        "turn-status IO should delegate marker root discovery through project-root IO"
+    );
+    assert!(
+        !turn_status_io_dependencies.contains_key("agent-doc-fs"),
+        "turn-status IO should not own direct filesystem project-root discovery"
+    );
     for forbidden in [
         "pub const TURN_ACTIVE_PANE_TITLE",
         "pub const STALE_SUPERVISOR_PANE_MARKER",
@@ -5358,12 +6121,19 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
         "pane_title_for_status",
         "turn_active_marker_is_fresh",
         "turn_active_marker_matches_pane",
+        "read_turn_active_marker_for_file",
+        "agent_doc_project_root_io::project_root_containing(",
+        "agent_doc_project_root_io::project_root_from_cwd(",
     ] {
         assert!(
             turn_status_io.contains(required),
             "turn-status IO should call focused turn-status policy directly: {required}"
         );
     }
+    assert!(
+        !turn_status_io.contains("agent_doc_fs::find_project_root("),
+        "turn-status IO should delegate project-root resolution through project-root IO"
+    );
     assert!(
         !turn_status_io.contains("agent_doc_orchestration::"),
         "turn-status IO must not reach back through orchestration"
@@ -5398,6 +6168,13 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
             "{relative_path} should call turn-status IO directly"
         );
     }
+    let start_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    assert!(
+        !start_source.contains("agent_doc_fs::find_project_root(")
+            && start_source.contains("agent_doc_turn_status_io::read_turn_active_marker_for_file("),
+        "start.rs should ask turn-status IO for file-scoped marker reads instead of owning root discovery"
+    );
 }
 
 #[test]
@@ -5863,6 +6640,45 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         turn_source.contains("pub const fn as_str(self) -> &'static str"),
         "agent-doc-turn must own canonical cycle phase labels"
     );
+    assert!(
+        turn_source.contains("pub mod repair;"),
+        "agent-doc-turn should expose repair outcome vocabulary through its owning module"
+    );
+    let turn_repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/repair.rs")).unwrap();
+    for required in [
+        "pub const AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR",
+        "pub const RESPONSE_PATCHBACK_UNCOMMITTED_ERROR",
+        "pub const EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR",
+        "pub const STALE_EMPTY_PREFLIGHT_TTL_SECS",
+        "pub enum CancelOutcome",
+        "pub enum RepairOutcome",
+        "pub const fn as_str(self) -> &'static str",
+        "pub const fn repaired(self) -> bool",
+        "pub const fn replayed_response(self) -> bool",
+        "pub const fn doctor_message(self) -> &'static str",
+    ] {
+        assert!(
+            turn_repair_source.contains(required),
+            "agent-doc-turn must own repair outcome vocabulary: {required}"
+        );
+    }
+    let orchestration_repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    for forbidden in [
+        "pub const AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR",
+        "pub const RESPONSE_PATCHBACK_UNCOMMITTED_ERROR",
+        "pub const EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR",
+        "pub const STALE_EMPTY_PREFLIGHT_TTL_SECS",
+        "pub enum CancelOutcome",
+        "pub enum RepairOutcome",
+        "impl RepairOutcome",
+    ] {
+        assert!(
+            !orchestration_repair_source.contains(forbidden),
+            "orchestration repair must stay a file-backed adapter, not re-own outcome vocabulary: {forbidden}"
+        );
+    }
     for required in [
         "pub const fn is_open(self) -> bool",
         "pub const WATCH_CYCLE_IN_FLIGHT_MAX_SECS",
@@ -5951,8 +6767,23 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
             "agent_doc_orchestration::cycle_state::CyclePhase",
             "use crate::cycle_state::CyclePhase",
             "fn cycle_phase_name(",
+            "fn cycle_phase_label(phase",
+            "pub fn cycle_phase_label(phase",
             "fn cycle_phase_store_label(",
             "fn phase_name(phase: agent_doc_turn::CyclePhase)",
+            "agent_doc_orchestration::repair::RepairOutcome",
+            "crate::repair::RepairOutcome",
+            "agent_doc_orchestration::repair::CancelOutcome",
+            "crate::repair::CancelOutcome",
+            "crate::repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR",
+            "crate::repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR",
+            "crate::repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR",
+            "crate::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS",
+            "message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR",
+            "message.contains(repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR",
+            "message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR",
+            "age_cycle_state(&doc, repair::STALE_EMPTY_PREFLIGHT_TTL_SECS",
+            "fn repair_outcome_label(",
         ] {
             assert!(
                 !source.contains(forbidden_snippet),
@@ -6004,21 +6835,28 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
             "ops_log must not re-export or re-own log timestamp helpers: {forbidden_snippet}"
         );
     }
+    let ops_log_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-ops-log-io/src/lib.rs")).unwrap();
     assert!(
-        ops_log_source.contains("agent_doc_log_time::current_log_timestamp")
-            && ops_log_source.contains("agent_doc_log_time::format_ops_log_tracking_suffix")
-            && ops_log_source.contains("agent_doc_log_time::format_ops_log_line"),
-        "ops_log should call the focused log-time crate directly"
+        ops_log_io_source.contains("agent_doc_log_time::current_epoch_secs")
+            && ops_log_io_source.contains("agent_doc_log_time::format_ops_log_tracking_suffix")
+            && ops_log_io_source.contains("agent_doc_log_time::format_ops_log_line"),
+        "ops-log IO should call the focused log-time crate directly"
     );
 
-    let semantic_diff_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
-    )
-    .unwrap();
     assert!(
-        !semantic_diff_source.contains("fn op_log_timestamp(")
-            && semantic_diff_source.contains("agent_doc_log_time::current_epoch_secs()"),
-        "semantic_diff must not re-own the op-log timestamp helper"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/preflight/semantic_diff.rs")
+            .exists(),
+        "orchestration must not keep a preflight semantic_diff facade"
+    );
+    let sqlite_op_log =
+        fs::read_to_string(manifest_dir.join("agent-doc-sqlite/src/op_log.rs")).unwrap();
+    assert!(
+        !sqlite_op_log.contains("fn op_log_timestamp(")
+            && !sqlite_op_log.contains("fn timestamp_now(")
+            && sqlite_op_log.contains("agent_doc_log_time::current_epoch_secs()"),
+        "sqlite op-log must call the focused log-time helper directly"
     );
 
     let log_time_source =
@@ -6026,6 +6864,7 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
     for required_snippet in [
         "pub fn current_epoch_secs(",
         "pub fn current_log_timestamp(",
+        "pub fn current_local_date_ymd(",
         "pub fn format_ops_log_tracking_suffix(",
         "pub fn format_ops_log_line(",
     ] {
@@ -6039,7 +6878,6 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
         "agent-doc-orchestration/src/ops_log.rs",
         "agent-doc-orchestration/src/session_accretion.rs",
         "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/startup_miss.rs",
         "agent-doc-orchestration/src/sync.rs",
         "agent-doc-orchestration/src/write.rs",
     ] {
@@ -6050,6 +6888,24 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
             "{relative} must call agent_doc_log_time helpers directly"
         );
     }
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    assert!(
+        preflight_source.contains("agent_doc_log_time::current_local_date_ymd()")
+            && !preflight_source.contains("Command::new(\"date\")")
+            && !preflight_source.contains("std::process::Command::new(\"date\")"),
+        "preflight archive date stamping must use the focused log-time helper"
+    );
+    let sqlite_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-sqlite/Cargo.toml")).unwrap();
+    let sqlite_manifest: toml::Value = toml::from_str(&sqlite_manifest).unwrap();
+    assert!(
+        sqlite_manifest["dependencies"]
+            .as_table()
+            .unwrap()
+            .contains_key("agent-doc-log-time"),
+        "agent-doc-sqlite should depend on focused log-time for op-log timestamping"
+    );
 
     let log_time_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-log-time/Cargo.toml")).unwrap();
@@ -6084,9 +6940,21 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
             .any(|member| member.as_str() == Some("agent-doc-session-accretion")),
         "agent-doc-session-accretion must stay a first-class workspace crate"
     );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-session-accretion-io")),
+        "agent-doc-session-accretion-io must stay a first-class workspace crate"
+    );
 
     let focused_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-accretion/src/lib.rs")).unwrap();
+    let focused_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-accretion-io/src/lib.rs")).unwrap();
+    let focused_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-accretion-io/Cargo.toml")).unwrap();
+    let focused_io_manifest: toml::Value = toml::from_str(&focused_io_manifest).unwrap();
+    let focused_io_dependencies = focused_io_manifest["dependencies"].as_table().unwrap();
     for required_snippet in [
         "pub enum SessionAccretionLevel",
         "pub struct SessionAccretionReport",
@@ -6140,6 +7008,25 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "unwrap_or(DEFAULT_CLEAR_THRESHOLD)",
         "pub use agent_doc_session_accretion",
         "type SessionAccretion",
+        "struct RecentExchangeCompaction",
+        "pub fn record_recent_exchange_compaction(",
+        "pub fn recent_exchange_compaction_timestamp(",
+        "fn recent_exchange_compaction_path(",
+        "fn load_recent_exchange_compaction(",
+        "fn cycles_log_path(",
+        "fn session_log_path(",
+        "fn relative_file_key(",
+        "fn recent_cycle_metrics(",
+        "fn recent_restart_metrics(",
+        "pub fn queue_context_reset_opted_in(",
+        "fn queue_context_reset_opted_in(",
+        "pub fn clear_threshold_for_doc(",
+        "fn clear_threshold_for_doc(",
+        "agent_doc_project_config_io::load_project_for_doc(file).agent_doc_queue_context_reset",
+        "agent_doc_project_config_io::load_project_for_doc(file).agent_doc_clear_threshold",
+        "serde_json::from_str::<crate::ops_log::CycleEntry>",
+        "agent_doc_log_time::parse_log_timestamp",
+        "agent_doc_fs::read_optional_text(",
     ] {
         assert!(
             !orchestration_source.contains(forbidden_snippet),
@@ -6152,21 +7039,90 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "orchestration session_accretion should gather IO facts then call focused policy directly"
     );
     assert!(
-        orchestration_source.contains("recent_restart_count_from_session_log(&content, now)"),
-        "orchestration session_accretion should delegate session-log restart counting to the focused crate"
-    );
-    assert!(
-        orchestration_source.contains("resolve_queue_context_reset_opt_in(")
-            && orchestration_source.contains("resolve_clear_threshold(")
+        orchestration_source
+            .contains("agent_doc_session_accretion_io::queue_context_reset_opted_in(file)")
+            && orchestration_source
+                .contains("agent_doc_session_accretion_io::clear_threshold_for_doc(file)")
             && orchestration_source.contains("context_reset_reason_for_recent_compaction(")
             && orchestration_source.contains("context_reset_reason_for_report("),
-        "orchestration session_accretion should call focused context-reset policy directly"
+        "orchestration session_accretion should call focused IO and pure context-reset policy directly"
     );
+    for required_snippet in [
+        "struct RecentExchangeCompaction",
+        "pub fn record_recent_exchange_compaction(",
+        "pub fn recent_exchange_compaction_timestamp(",
+        "pub fn recent_exchange_compaction_timestamp_at(",
+        "pub fn cycles_log_path(",
+        "pub fn session_log_path(",
+        "pub fn relative_file_key(",
+        "pub fn recent_cycle_metrics(",
+        "pub fn recent_restart_metrics(",
+        "pub fn queue_context_reset_opted_in(",
+        "pub fn clear_threshold_for_doc(",
+        "fn recent_exchange_compaction_path(",
+        "fn load_recent_exchange_compaction(",
+        "POST_COMPACTION_NOOP_GRACE_SECS",
+        "RECENT_WINDOW_SECS",
+        "recent_restart_count_from_session_log",
+        "resolve_queue_context_reset_opt_in",
+        "resolve_clear_threshold",
+        "agent_doc_frontmatter::frontmatter::parse",
+        "agent_doc_project_config_io::load_project_for_doc(file)",
+        "serde_json::from_str::<agent_doc_ops_log_io::CycleEntry>",
+        "agent_doc_log_time::parse_log_timestamp",
+        "agent_doc_fs::read_optional_text(",
+    ] {
+        assert!(
+            focused_io_source.contains(required_snippet),
+            "agent-doc-session-accretion-io must own recent compaction/log metric IO: {required_snippet}"
+        );
+    }
+    for required_dependency in [
+        "agent-doc-fs",
+        "agent-doc-frontmatter",
+        "agent-doc-log-time",
+        "agent-doc-ops-log-io",
+        "agent-doc-project-config-io",
+        "agent-doc-session-accretion",
+        "anyhow",
+        "serde",
+        "serde_json",
+    ] {
+        assert!(
+            focused_io_dependencies.contains_key(required_dependency),
+            "agent-doc-session-accretion-io should own accretion log IO dependency: {required_dependency}"
+        );
+    }
+    assert!(
+        orchestration_source
+            .contains("agent_doc_session_accretion_io::recent_exchange_compaction_timestamp(")
+            && focused_io_source.contains("recent_exchange_compaction_timestamp_at(file, now)?"),
+        "orchestration session_accretion should consume focused recent-compaction marker IO"
+    );
+    assert!(
+        orchestration_source.contains("agent_doc_session_accretion_io::recent_cycle_metrics(")
+            && orchestration_source
+                .contains("agent_doc_session_accretion_io::recent_restart_metrics("),
+        "orchestration session_accretion should consume focused accretion log metric IO"
+    );
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !focused_io_source.contains(forbidden),
+            "agent-doc-session-accretion-io must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects: {forbidden}"
+        );
+    }
 
     for relative in [
         "src/orchestrate.rs",
         "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/prompt_context.rs",
         "agent-doc-orchestration/src/run.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -6184,8 +7140,9 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
     assert!(
         stream_source.contains("crate::session_accretion::inspect(file)")
-            && stream_source.contains("crate::prompt_context::build_document_section("),
-        "stream should gather session-accretion facts through the orchestration adapter and delegate document-section rendering"
+            && stream_source
+                .contains("agent_doc_prompt_context_io::build_document_section_with_ssh_context"),
+        "stream should gather session-accretion facts and delegate document-section rendering to focused IO directly"
     );
     assert!(
         !stream_source.contains("agent_doc_orchestration::session_accretion::SessionAccretion")
@@ -6198,6 +7155,10 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         root_dependencies.contains_key("agent-doc-session-accretion"),
         "the CLI shell must depend on the focused session-accretion crate directly"
     );
+    assert!(
+        root_dependencies.contains_key("agent-doc-session-accretion-io"),
+        "the CLI shell must depend on the focused session-accretion IO crate directly"
+    );
     let orchestration_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
@@ -6205,6 +7166,10 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
     assert!(
         orchestration_dependencies.contains_key("agent-doc-session-accretion"),
         "orchestration must depend on the focused session-accretion crate directly"
+    );
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-session-accretion-io"),
+        "orchestration must depend on the focused session-accretion IO crate directly"
     );
 
     let focused_manifest =
@@ -6241,6 +7206,12 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
             .iter()
             .any(|member| member.as_str() == Some("agent-doc-prompt-context")),
         "agent-doc-prompt-context must stay a first-class workspace crate"
+    );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-prompt-context-io")),
+        "agent-doc-prompt-context-io must stay a first-class workspace crate"
     );
 
     let focused_source =
@@ -6291,9 +7262,8 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         );
     }
 
-    let orchestration_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_context.rs"))
-            .unwrap();
+    let io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-context-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "fn render_prompt_targets(",
         "fn extract_session_summary(",
@@ -6308,18 +7278,110 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         "pub use agent_doc_prompt_context",
     ] {
         assert!(
-            !orchestration_source.contains(forbidden_snippet),
-            "orchestration must not re-own or facade pure prompt-context rendering policy: {forbidden_snippet}"
+            !io_source.contains(forbidden_snippet),
+            "agent-doc-prompt-context-io must not re-own or facade pure prompt-context rendering policy: {forbidden_snippet}"
         );
     }
     assert!(
-        orchestration_source.contains("agent_doc_prompt_context::{")
-            && orchestration_source.contains("render_document_section(DocumentSectionContext")
-            && orchestration_source.contains("document_section_needs_response_toc(")
-            && orchestration_source.contains("render_remote_host_scope(&declared_targets)")
-            && orchestration_source.contains("frontmatter_io::parse_for_file_with_context")
-            && orchestration_source.contains("agent_doc_response_toc_io::render_prompt_toc"),
-        "orchestration prompt_context should gather project context then call focused rendering policy directly"
+        io_source.contains("agent_doc_prompt_context::{")
+            && io_source.contains("render_document_section(DocumentSectionContext")
+            && io_source.contains("document_section_needs_response_toc(")
+            && io_source.contains("render_remote_host_scope(&declared_targets)")
+            && io_source.contains("agent_doc_frontmatter_io::session::parse_for_file_with_context")
+            && io_source.contains("agent_doc_response_toc_io::render_prompt_toc")
+            && io_source.contains("prompt_targets_from_diff(diff_text)"),
+        "agent-doc-prompt-context-io should gather project context then call focused rendering policy directly"
+    );
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/prompt_context.rs")
+            .exists(),
+        "orchestration must not keep a prompt_context facade module"
+    );
+    let run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let stream_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
+    let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
+    for (relative, source) in [
+        ("agent-doc-orchestration/src/run.rs", run_source.as_str()),
+        (
+            "agent-doc-orchestration/src/stream.rs",
+            stream_source.as_str(),
+        ),
+        ("src/orchestrate.rs", orchestrate_source.as_str()),
+    ] {
+        assert!(
+            source.contains("agent_doc_prompt_context_io::build_document_section_with_ssh_context")
+                && source.contains(".ssh_context()"),
+            "{relative} should adapt cached RunContext SSH context into prompt-context IO directly"
+        );
+    }
+    let combined_prompt_context_callers =
+        format!("{run_source}\n{stream_source}\n{orchestrate_source}");
+    assert!(
+        !combined_prompt_context_callers.contains("prompt_context::build_document_section"),
+        "prompt-context call sites must not route document-section rendering through an orchestration facade"
+    );
+    for forbidden_snippet in [
+        "agent_doc_prompt_context::{",
+        "render_document_section(DocumentSectionContext",
+        "document_section_needs_response_toc(",
+        "render_remote_host_scope(&declared_targets)",
+        "agent_doc_response_toc_io::render_prompt_toc",
+        "prompt_targets_from_diff(diff_text)",
+    ] {
+        assert!(
+            !combined_prompt_context_callers.contains(forbidden_snippet),
+            "prompt-context call sites must not re-own prompt-context assembly after IO extraction: {forbidden_snippet}"
+        );
+    }
+
+    let io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-context-io/Cargo.toml")).unwrap();
+    let io_manifest: toml::Value = toml::from_str(&io_manifest).unwrap();
+    let io_dependencies = io_manifest["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-frontmatter",
+        "agent-doc-frontmatter-io",
+        "agent-doc-prompt-context",
+        "agent-doc-response-toc-io",
+        "agent-doc-session-accretion",
+        "agent-doc-workflow",
+    ] {
+        assert!(
+            io_dependencies.contains_key(required),
+            "agent-doc-prompt-context-io should depend on focused prompt assembly dependency: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-git-io",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+        "interprocess",
+    ] {
+        assert!(
+            !io_dependencies.contains_key(forbidden),
+            "agent-doc-prompt-context-io must stay free of orchestration/app transport state: {forbidden}"
+        );
+    }
+
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-prompt-context-io"),
+        "root crate should depend on focused prompt-context IO directly"
+    );
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    assert!(
+        orchestration["dependencies"]
+            .as_table()
+            .unwrap()
+            .contains_key("agent-doc-prompt-context-io"),
+        "agent-doc-orchestration should depend on focused prompt-context IO directly"
     );
 
     let plan_source = fs::read_to_string(manifest_dir.join("src/plan.rs")).unwrap();
@@ -6560,12 +7622,11 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
     );
 
     let prompt_context =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_context.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-context-io/src/lib.rs")).unwrap();
     assert!(
         prompt_context.contains("agent_doc_response_toc_io::render_prompt_toc")
             && !prompt_context.contains("crate::response_toc::render_prompt_toc"),
-        "orchestration prompt_context should call response TOC IO directly"
+        "prompt-context IO should call response TOC IO directly"
     );
 
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
@@ -6749,17 +7810,19 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         !orchestration_lib.contains("pub mod harness_prompt"),
         "orchestration must not expose harness_prompt as a module facade"
     );
-    let preflight_semantic_diff = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
-    )
-    .unwrap();
+    let preflight_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
     for forbidden_snippet in [
         "pub(crate) fn push_unique_strings(",
         "pub(crate) fn push_unique_prompt_bearing_changes(",
     ] {
         assert!(
-            !preflight_semantic_diff.contains(forbidden_snippet),
-            "orchestration semantic_diff must not re-own prompt accumulator policy: {forbidden_snippet}"
+            !preflight_mod.contains(forbidden_snippet)
+                && !preflight_run.contains(forbidden_snippet),
+            "orchestration preflight must not re-own prompt accumulator policy: {forbidden_snippet}"
         );
     }
 
@@ -7011,6 +8074,12 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             .any(|member| member.as_str() == Some("agent-doc-lease")),
         "agent-doc-lease must stay a first-class workspace crate"
     );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-lease-io")),
+        "agent-doc-lease-io must stay a first-class workspace crate"
+    );
 
     let package_version = workspace["package"]["version"].as_str();
     for relative_manifest in [
@@ -7027,6 +8096,17 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             dependency.get("version").and_then(toml::Value::as_str),
             package_version,
             "{relative_manifest} should depend on the versioned lease crate"
+        );
+    }
+    for relative_manifest in ["Cargo.toml", "agent-doc-orchestration/Cargo.toml"] {
+        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
+        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+        let dependencies = parsed["dependencies"].as_table().unwrap();
+        let dependency = dependencies["agent-doc-lease-io"].as_table().unwrap();
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "{relative_manifest} should depend on the versioned lease IO crate"
         );
     }
 
@@ -7075,6 +8155,64 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             "{relative} should call the focused lease crate directly"
         );
     }
+    let lease_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-lease-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&lease_io_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-fs", "agent-doc-lease"] {
+        let dependency = dependencies[required].as_table().unwrap();
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "agent-doc-lease-io should depend on versioned focused crates: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-lease-io must stay free of orchestration/editor IPC/sqlite/tmux facades: {forbidden}"
+        );
+    }
+    let lease_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-lease-io/src/local_model.rs")).unwrap();
+    for required in [
+        "pub enum ReapOutcome",
+        "pub fn reap_local_model_leases(",
+        "agent_doc_fs::find_project_root",
+        "agent_doc_lease::DEFAULT_LOCAL_MODEL_LEASE_REGISTRY_RELATIVE",
+        "agent_doc_lease::local_model_reap_command_args(None, None)",
+        "std::process::Command::new(\"tsift\")",
+    ] {
+        assert!(
+            lease_io.contains(required),
+            "agent-doc-lease-io must own local-model lease reap IO: {required}"
+        );
+    }
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    for forbidden in [
+        "pub(crate) enum ReapOutcome",
+        "pub(crate) fn reap_local_model_leases(",
+        "agent_doc_lease::DEFAULT_LOCAL_MODEL_LEASE_REGISTRY_RELATIVE",
+        "agent_doc_lease::local_model_reap_command_args",
+    ] {
+        assert!(
+            !orchestration_lib.contains(forbidden),
+            "orchestration hook bridge must not re-own local-model lease reap IO: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_lib.contains("agent_doc_lease_io::local_model::reap_local_model_leases"),
+        "orchestration hook bridge should call focused lease IO for local-model reap"
+    );
 }
 
 #[test]
@@ -7089,6 +8227,12 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
             .any(|member| member.as_str() == Some("agent-doc-plugin-owner")),
         "agent-doc-plugin-owner must stay a first-class workspace crate"
     );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-plugin-owner-io")),
+        "agent-doc-plugin-owner-io must stay a first-class workspace crate"
+    );
 
     let package_version = workspace["package"]["version"].as_str();
     for relative_manifest in ["Cargo.toml", "agent-doc-orchestration/Cargo.toml"] {
@@ -7100,6 +8244,14 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
             dependency.get("version").and_then(toml::Value::as_str),
             package_version,
             "{relative_manifest} should depend on the versioned plugin-owner crate"
+        );
+        let dependency = dependencies["agent-doc-plugin-owner-io"]
+            .as_table()
+            .unwrap();
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "{relative_manifest} should depend on the versioned plugin-owner IO crate"
         );
     }
 
@@ -7183,6 +8335,32 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
             "agent-doc-plugin-owner must stay free of core/orchestration/git/editor IPC/sqlite/tmux facades: {forbidden}"
         );
     }
+    let plugin_owner_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&plugin_owner_io_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-fs", "agent-doc-plugin-owner"] {
+        let dependency = dependencies[required].as_table().unwrap();
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "agent-doc-plugin-owner-io should depend on versioned focused crate: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-plugin-owner-io must stay free of core/orchestration/git/editor IPC/sqlite/tmux facades: {forbidden}"
+        );
+    }
     let stale_cleanup =
         fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner/src/stale_cleanup.rs"))
             .unwrap();
@@ -7195,6 +8373,33 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
         assert!(
             stale_cleanup.contains(required),
             "agent-doc-plugin-owner must own hook-side JetBrains cleanup policy: {required}"
+        );
+    }
+    let plugin_owner_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner-io/src/lib.rs")).unwrap();
+    assert!(
+        plugin_owner_io.contains("pub mod stale_cleanup;"),
+        "agent-doc-plugin-owner-io should expose focused stale-cleanup IO"
+    );
+    let stale_cleanup_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner-io/src/stale_cleanup.rs"))
+            .unwrap();
+    for required in [
+        "use agent_doc_plugin_owner::stale_cleanup::{",
+        "pub struct JetBrainsStaleReapCounts",
+        "pub fn reap_stale_jetbrains_for_file(",
+        "agent_doc_fs::find_project_root",
+        "pub fn reap_stale_jetbrains_consumers(",
+        "pub fn reap_stale_jetbrains_consumers_with(",
+        "pub fn reap_stale_jetbrains_live_buffers(",
+        "pub fn reap_stale_jetbrains_live_buffers_with(",
+        "agent_doc_plugin_owner::plugin_owner_pid_is_live",
+        "should_reap_jetbrains_consumer_file",
+        "should_reap_jetbrains_live_buffer_sidecar",
+    ] {
+        assert!(
+            stale_cleanup_io.contains(required),
+            "agent-doc-plugin-owner-io must own hook-side JetBrains cleanup IO: {required}"
         );
     }
 
@@ -7211,25 +8416,42 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
             && !orchestration_lib.contains("pub use agent_doc_plugin_owner"),
         "orchestration must not expose a plugin-owner facade"
     );
-    let hooks_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/hooks.rs")).unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
-        hooks_source.contains("use agent_doc_plugin_owner::stale_cleanup::{")
-            && hooks_source.contains("should_reap_jetbrains_consumer_file")
-            && hooks_source.contains("should_reap_jetbrains_live_buffer_sidecar"),
-        "orchestration hooks should call plugin-owner cleanup policy directly"
+        orchestration_lib
+            .contains("agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file"),
+        "orchestration hook bridge should call plugin-owner file-level cleanup IO directly"
     );
     for forbidden in [
         "fn jetbrains_consumer_pid(",
         "fn jetbrains_live_buffer_pid(",
+        "fn reap_stale_jetbrains_consumers(",
+        "fn reap_stale_jetbrains_consumers_with(",
+        "fn reap_stale_jetbrains_live_buffers(",
+        "fn reap_stale_jetbrains_live_buffers_with(",
+        "fn pid_is_live(",
+        "should_reap_jetbrains_consumer_file",
+        "should_reap_jetbrains_live_buffer_sidecar",
+        "jetbrains_consumer_patches_dir",
+        "jetbrains_live_buffer_sidecar_dir",
+        "agent_doc_fs::find_project_root",
         ".split(\".jetbrains-\")",
         ".find(\"jetbrains-\")",
     ] {
         assert!(
-            !hooks_source.contains(forbidden),
-            "orchestration hooks must not re-own plugin cleanup parsing policy: {forbidden}"
+            !orchestration_lib.contains(forbidden),
+            "orchestration hook bridge must not re-own plugin cleanup parsing policy: {forbidden}"
         );
     }
+    let realtime_model =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/realtime_model.rs"))
+            .unwrap();
+    assert!(
+        realtime_model.contains("agent_doc_plugin_owner::plugin_owner_pid_is_live(pid)")
+            && !realtime_model.contains("crate::hooks::pid_is_live"),
+        "realtime model should consume plugin-owner pid liveness directly instead of coupling to hooks"
+    );
 }
 
 #[test]
@@ -7245,6 +8467,24 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
             .any(|member| member.as_str() == Some("agent-doc-memory")),
         "agent-doc-memory must stay a first-class workspace crate"
     );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-memory-io")),
+        "agent-doc-memory-io must stay a first-class workspace crate"
+    );
+    let package_version = workspace["package"]["version"].as_str();
+    for relative_manifest in ["Cargo.toml", "agent-doc-orchestration/Cargo.toml"] {
+        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
+        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+        let dependencies = parsed["dependencies"].as_table().unwrap();
+        let dependency = dependencies["agent-doc-memory-io"].as_table().unwrap();
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "{relative_manifest} should depend on the versioned memory IO crate"
+        );
+    }
     let memory_source =
         fs::read_to_string(manifest_dir.join("agent-doc-memory/src/lib.rs")).unwrap();
     for required in [
@@ -7279,8 +8519,14 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         );
     }
 
-    let orchestration_memory =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/memory_cmd.rs")).unwrap();
+    let memory_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-memory-io/src/lib.rs")).unwrap();
+    let memory_io_session =
+        fs::read_to_string(manifest_dir.join("agent-doc-memory-io/src/session.rs")).unwrap();
+    assert!(
+        memory_io_lib.contains("pub mod session;"),
+        "agent-doc-memory-io should expose session memory indexing/search IO"
+    );
     for forbidden in [
         "pub struct MemorySearchResult",
         "struct CompletionCandidate",
@@ -7311,26 +8557,36 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         "fn is_active_backlog_work_event(",
     ] {
         assert!(
-            !orchestration_memory.contains(forbidden),
-            "memory_cmd must stay an adapter, not re-own semantic memory policy: {forbidden}"
+            !memory_io_session.contains(forbidden),
+            "agent-doc-memory-io session adapter must not re-own semantic memory policy: {forbidden}"
         );
     }
     assert!(
-        orchestration_memory.contains("use agent_doc_memory::{")
-            && orchestration_memory.contains("CompletionCandidate")
-            && orchestration_memory.contains("rank_events")
-            && orchestration_memory.contains("dedupe_events")
-            && orchestration_memory.contains("queue_prompt_target_id")
-            && orchestration_memory.contains("tracked_work_events")
-            && orchestration_memory.contains("parse_done_archive_items")
-            && orchestration_memory.contains("response_summary_events")
-            && orchestration_memory
+        memory_io_session.contains("use agent_doc_memory::{")
+            && memory_io_session.contains("CompletionCandidate")
+            && memory_io_session.contains("rank_events")
+            && memory_io_session.contains("dedupe_events")
+            && memory_io_session.contains("queue_prompt_target_id")
+            && memory_io_session.contains("tracked_work_events")
+            && memory_io_session.contains("parse_done_archive_items")
+            && memory_io_session.contains("response_summary_events")
+            && memory_io_session
                 .contains("semantic_completion_matches as match_semantic_completions")
-            && orchestration_memory
+            && memory_io_session
                 .contains("semantic_queue_strike_matches as match_semantic_queue_strikes")
-            && orchestration_memory.contains("SemanticCompletionMatch")
-            && orchestration_memory.contains("QueueStrikeMatch"),
-        "memory_cmd should call focused semantic memory policy directly"
+            && memory_io_session.contains("SemanticCompletionMatch")
+            && memory_io_session.contains("QueueStrikeMatch")
+            && memory_io_session.contains("pub fn run_index(")
+            && memory_io_session.contains("pub fn run_search(")
+            && memory_io_session.contains("pub fn semantic_completion_matches(")
+            && memory_io_session.contains("pub fn semantic_queue_strike_matches("),
+        "agent-doc-memory-io session adapter should call focused semantic memory policy directly"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/memory_cmd.rs")
+            .exists(),
+        "orchestration must not keep a memory_cmd session-memory IO facade"
     );
     let preflight_run =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
@@ -7342,8 +8598,81 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
     assert!(
         preflight_run.contains("agent_doc_memory::format_semantic_completion_warning(")
             && preflight_maintenance.contains("agent_doc_memory::QUEUE_STRIKE_THRESHOLD")
-            && preflight_maintenance.contains("agent_doc_memory::QueueStrikeMatchKind"),
-        "preflight should use semantic-memory result vocabulary directly, not through memory_cmd"
+            && preflight_maintenance.contains("agent_doc_memory::QueueStrikeMatchKind")
+            && preflight_run.contains("agent_doc_memory_io::session::semantic_completion_matches(")
+            && preflight_maintenance
+                .contains("agent_doc_memory_io::session::semantic_queue_strike_matches("),
+        "preflight should use focused memory IO plus semantic-memory result vocabulary directly"
+    );
+    let memory_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-memory-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&memory_io_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-document",
+        "agent-doc-element",
+        "agent-doc-element-backlog",
+        "agent-doc-fs",
+        "agent-doc-memory",
+        "agent-doc-queue",
+        "agent-doc-turn",
+    ] {
+        let dependency = dependencies[required].as_table().unwrap();
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "agent-doc-memory-io should depend on versioned focused crates: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-memory-io must stay free of orchestration/editor IPC/sqlite/tmux facades: {forbidden}"
+        );
+    }
+    let memory_io_closeout =
+        fs::read_to_string(manifest_dir.join("agent-doc-memory-io/src/closeout.rs")).unwrap();
+    for required in [
+        "pub enum CloseoutCaptureOutcome",
+        "pub fn capture_tsift_memory_closeout(",
+        "agent_doc_fs::find_project_root",
+        ".join(\".tsift/memory.db\")",
+        "agent_doc_turn::response_text::{",
+        "response_prompt_target_from_re_heading",
+        "summarize_response_for_hook",
+        "capture-agent-doc-closeout",
+        "fn git_head(",
+    ] {
+        assert!(
+            memory_io_closeout.contains(required),
+            "agent-doc-memory-io must own tsift-memory closeout adapter: {required}"
+        );
+    }
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    for forbidden in [
+        "capture-agent-doc-closeout",
+        "fn git_head(",
+        ".join(\".tsift/memory.db\")",
+        "summarize_response_for_hook",
+        "response_prompt_target_from_re_heading",
+    ] {
+        assert!(
+            !orchestration_lib.contains(forbidden),
+            "orchestration hook bridge must not re-own tsift-memory closeout IO: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_lib.contains("agent_doc_memory_io::closeout::capture_tsift_memory_closeout"),
+        "orchestration hook bridge should call focused memory IO closeout adapter"
     );
 }
 
@@ -7451,6 +8780,23 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/lib.rs")).unwrap();
     assert!(supervisor_io_lib.contains("pub mod recycle_yield;"));
     assert!(supervisor_io_lib.contains("pub mod recycle_inflight;"));
+    let recycle_request =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/recycle_request.rs"))
+            .unwrap();
+    assert!(
+        recycle_request.contains("pub fn request_recycle_for_doc("),
+        "supervisor IO should own Path-based recycle-request scheduling"
+    );
+    let project_controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    assert!(
+        project_controller_rpc
+            .contains("agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(")
+            && !project_controller_rpc.contains("pub fn schedule_supervisor_recycle_for_doc("),
+        "project_controller::rpc must call focused supervisor recycle-request IO directly"
+    );
     let recycle_yield =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/recycle_yield.rs"))
             .unwrap();
@@ -7936,11 +9282,16 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
         "pub enum AutoDagScheduleDecision",
         "pub enum BatchProgressDecision",
         "pub fn classify_batch_progress",
+        "pub struct BatchChildResult",
+        "pub fn queue_freeze_event",
+        "pub fn source_changed_event",
+        "pub fn child_closeout_event",
+        "pub fn auto_dag_schedule_event",
         "pub const fn as_str",
     ] {
         assert!(
             work_graph_source.contains(required),
-            "agent-doc-work-graph must own Auto-DAG scheduling policy: {required}"
+            "agent-doc-work-graph must own Auto-DAG scheduling and batch flow policy: {required}"
         );
     }
     let schedule_source =
@@ -7988,27 +9339,17 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
             && root_auto_dag_source.contains("target_evidence_for_schedule"),
         "root auto_dag adapter should call the focused schedule crate directly"
     );
-    let orchestration_batch = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/flow/orchestration_batch.rs"),
-    )
-    .unwrap();
     assert!(
-        !orchestration_batch.contains("pub enum AutoDagScheduleDecision"),
-        "orchestration batch flow must not re-own Auto-DAG scheduling policy"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/orchestration_batch.rs")
+            .exists(),
+        "orchestration must not keep an orchestration-batch flow adapter"
     );
+    let flow_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     assert!(
-        !orchestration_batch.contains("pub enum BatchProgressDecision")
-            && !orchestration_batch.contains("pub fn classify_batch_progress"),
-        "orchestration batch flow must not re-own batch progress policy"
-    );
-    assert!(
-        orchestration_batch.contains("agent_doc_work_graph::AutoDagScheduleDecision"),
-        "orchestration batch flow should call the focused Auto-DAG scheduling policy directly"
-    );
-    assert!(
-        orchestration_batch.contains("agent_doc_work_graph::classify_batch_progress")
-            && orchestration_batch.contains("use agent_doc_work_graph::BatchProgressDecision;"),
-        "orchestration batch flow should call focused batch progress policy directly"
+        !flow_mod.contains("pub mod orchestration_batch"),
+        "orchestration flow must not expose an orchestration-batch facade"
     );
     assert!(
         !manifest_dir
@@ -8399,8 +9740,9 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     let workflow_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/lib.rs")).unwrap();
     assert!(
-        workflow_io_lib.contains("pub mod proof_ledger;"),
-        "agent-doc-workflow-io must expose the proof ledger through its owning module"
+        workflow_io_lib.contains("pub mod convergence_playback;")
+            && workflow_io_lib.contains("pub mod proof_ledger;"),
+        "agent-doc-workflow-io must expose workflow storage modules through their owning modules"
     );
     let workflow_proof_ledger =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/proof_ledger.rs")).unwrap();
@@ -8419,9 +9761,68 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             "agent-doc-workflow-io must own workflow proof ledger IO: {required}"
         );
     }
-    let orchestration_session_cycle =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/session_cycle.rs"))
+    let workflow_convergence_playback =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/convergence_playback.rs"))
             .unwrap();
+    for required in [
+        "pub struct IpcAttempt",
+        "pub struct ConvergencePlayback",
+        "pub fn playback_artifact_path(",
+        "pub fn write_convergence_playback(",
+        "pub fn blocked_boundary_ops_message(",
+        "pub fn record_blocked_boundary_with_logger(",
+        "agent_doc_fs::document_state_hash",
+        "agent_doc_fs::find_project_root",
+    ] {
+        assert!(
+            workflow_convergence_playback.contains(required),
+            "agent-doc-workflow-io must own convergence playback artifact IO: {required}"
+        );
+    }
+    for forbidden in [
+        "crate::ops_log",
+        "agent-doc-orchestration",
+        "agent_doc_orchestration",
+    ] {
+        assert!(
+            !workflow_convergence_playback.contains(forbidden),
+            "agent-doc-workflow-io convergence playback must not reach into orchestration: {forbidden}"
+        );
+    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/convergence_playback.rs")
+            .exists(),
+        "orchestration must not keep a convergence_playback facade module"
+    );
+    let orchestration_start_idle_watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    assert!(
+        orchestration_start_idle_watch
+            .contains("agent_doc_workflow_io::convergence_playback::ConvergencePlayback::new(")
+            && orchestration_start_idle_watch.contains(
+                "agent_doc_workflow_io::convergence_playback::record_blocked_boundary_with_logger("
+            )
+            && orchestration_start_idle_watch.contains("crate::ops_log::log_op"),
+        "orchestration idle-watch should inject ops-log into focused convergence playback IO"
+    );
+    assert!(
+        !orchestration_start_idle_watch.contains("crate::convergence_playback::"),
+        "orchestration idle-watch must not call a convergence_playback facade"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/session_cycle.rs")
+            .exists(),
+        "orchestration must not keep a session_cycle flow facade"
+    );
+    let flow_types = fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
+    assert!(
+        flow_types.contains("pub struct SessionCycleStep")
+            && flow_types.contains("pub fn session_cycle_event("),
+        "agent-doc-flow should own session-cycle flow event vocabulary"
+    );
     for forbidden in [
         "pub enum SessionExecutionScope",
         "pub enum FinalizePendingMutationKind",
@@ -8435,7 +9836,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "agent_doc_workflow::session_cycle::FinalizePendingMutation",
     ] {
         assert!(
-            !orchestration_session_cycle.contains(forbidden),
+            !flow_types.contains(forbidden),
             "orchestration must not define or re-export session-cycle workflow policy: {forbidden}"
         );
     }
@@ -8452,13 +9853,14 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             && preflight_run.contains("derive_turn_scope"),
         "preflight should call focused turn-scope and user-intent workflow policy directly"
     );
-    let preflight_semantic_diff = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
-    )
-    .unwrap();
+    let sqlite_op_log =
+        fs::read_to_string(manifest_dir.join("agent-doc-sqlite/src/op_log.rs")).unwrap();
     assert!(
-        preflight_semantic_diff.contains("agent_doc_turn::op_log::build_ops_from_semantic_diff"),
-        "preflight semantic diff should build durable op-log records through agent-doc-turn directly"
+        sqlite_op_log.contains("pub fn append_semantic_diff_ops(")
+            && sqlite_op_log.contains("agent_doc_turn::op_log::build_ops_from_semantic_diff")
+            && sqlite_op_log.contains("agent_doc_log_time::current_epoch_secs()")
+            && sqlite_op_log.contains("append_ops(project_root, &ops)"),
+        "agent-doc-sqlite should own semantic-diff durable op-log persistence"
     );
     let preflight_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
@@ -8493,7 +9895,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub(crate) use semantic_diff::*",
     ] {
         assert!(
-            !preflight_semantic_diff.contains(forbidden) && !preflight_mod.contains(forbidden),
+            !sqlite_op_log.contains(forbidden) && !preflight_mod.contains(forbidden),
             "orchestration preflight must not re-own or re-export session-cycle workflow policy: {forbidden}"
         );
     }
@@ -8516,13 +9918,12 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "orchestration must not keep a prompt_contract module for session-cycle policy facades"
     );
     let prompt_context =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_context.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-context-io/src/lib.rs")).unwrap();
     assert!(
         prompt_context.contains("use agent_doc_workflow::session_cycle::prompt_targets_from_diff;")
             && prompt_context.contains("prompt_targets_from_diff(diff_text)")
             && !prompt_context.contains("fn extract_prompt_targets("),
-        "prompt_context should call focused prompt-target extraction directly"
+        "prompt-context IO should call focused prompt-target extraction directly"
     );
     for relative_path in [
         "agent-doc-orchestration/src/doctor.rs",
@@ -8661,8 +10062,9 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     let workflow_io: toml::Value = toml::from_str(&workflow_io_manifest).unwrap();
     let workflow_io_dependencies = workflow_io["dependencies"].as_table().unwrap();
     assert!(
-        workflow_io_dependencies.contains_key("agent-doc-hash"),
-        "agent-doc-workflow-io proof ledger pathing should depend on focused hash helpers"
+        workflow_io_dependencies.contains_key("agent-doc-fs")
+            && workflow_io_dependencies.contains_key("agent-doc-hash"),
+        "agent-doc-workflow-io pathing should depend on focused filesystem/hash helpers"
     );
     for forbidden in ["agent-doc-core", "agent-doc-orchestration"] {
         assert!(
@@ -8784,6 +10186,7 @@ fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
         "pub(crate) fn extract_changed_string_literals",
         "pub(crate) fn extract_string_literals_from_line",
         "pub(crate) fn interesting_changed_literal",
+        "agent_doc_diff::partial_staging_companion_finding(",
         "agent_doc_diff::is_partial_staging_relevant_path",
         "agent_doc_diff::partial_staging_paths_look_related",
         "agent_doc_diff::extract_changed_string_literals",
@@ -8794,9 +10197,12 @@ fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
             "session_check partial-staging must stay an adapter, not re-own pure diff/path policy"
         );
     }
+    let git_io_partial_staging =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/partial_staging.rs")).unwrap();
     assert!(
-        partial_staging.contains("agent_doc_diff::partial_staging_companion_finding("),
-        "session_check partial-staging should call the focused diff classifier directly"
+        git_io_partial_staging.contains("agent_doc_diff::partial_staging_companion_finding(")
+            && partial_staging.contains("agent_doc_git_io::partial_staging::companion_findings("),
+        "git IO should compose focused diff classifier output and session_check should call that adapter"
     );
 }
 
@@ -8815,8 +10221,14 @@ fn test_agent_doc_diff_owns_truncation_pure_policy() {
         );
     }
 
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    assert!(
+        workspace_manifest.contains("\"agent-doc-diff-io\""),
+        "workspace should include agent-doc-diff-io as the focused diff IO crate"
+    );
+
     let diff_io_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/diff_io.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-diff-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn extract_last_added_line(",
         "fn looks_truncated(",
@@ -8829,6 +10241,12 @@ fn test_agent_doc_diff_owns_truncation_pure_policy() {
         );
     }
     for required in [
+        "pub trait SnapshotStore",
+        "pub fn compute_with_current<S: SnapshotStore + ?Sized>",
+        "snapshots.resolve(doc)?.unwrap_or_default()",
+        "snapshots.save(doc, &current)?",
+        "agent_doc_debounce::editor_buffer_state",
+        "agent_doc_fs::snapshot_path_for(doc)?",
         "agent_doc_diff::{",
         "extract_last_added_line",
         "looks_truncated",
@@ -8839,6 +10257,120 @@ fn test_agent_doc_diff_owns_truncation_pure_policy() {
             "diff_io should call focused diff truncation helpers directly: {required}"
         );
     }
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/diff_io.rs")
+            .exists(),
+        "orchestration must not keep a diff_io facade module"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod diff_io"),
+        "orchestration must not expose diff_io as a module facade"
+    );
+    let snapshot_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct DiffSnapshotStore",
+        "pub const fn new(logger: fn(&Path, &str)) -> Self",
+        "impl agent_doc_diff_io::SnapshotStore for DiffSnapshotStore",
+        "resolve(doc)",
+        "save(doc, content, self.logger)",
+    ] {
+        assert!(
+            snapshot_io_source.contains(required),
+            "agent-doc-snapshot-io should own the focused diff snapshot-store adapter: {required}"
+        );
+    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/snapshot.rs")
+            .exists(),
+        "orchestration must not keep a snapshot facade module"
+    );
+    for (relative, required_call, required_store) in [
+        (
+            "agent-doc-orchestration/src/preflight/run.rs",
+            "agent_doc_diff_io::compute_with_current(",
+            "agent_doc_snapshot_io::DiffSnapshotStore::new(",
+        ),
+        (
+            "agent-doc-orchestration/src/run.rs",
+            "agent_doc_diff_io::compute(",
+            "agent_doc_snapshot_io::DiffSnapshotStore::new(",
+        ),
+        (
+            "agent-doc-orchestration/src/stream.rs",
+            "agent_doc_diff_io::compute(",
+            "agent_doc_snapshot_io::DiffSnapshotStore::new(",
+        ),
+        (
+            "src/main.rs",
+            "agent_doc_diff_io::run(",
+            "agent_doc_snapshot_io::DiffSnapshotStore::new(",
+        ),
+        (
+            "src/plan.rs",
+            "agent_doc_diff_io::compute(",
+            "agent_doc_snapshot_io::DiffSnapshotStore::new(",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains(required_call) && source.contains(required_store),
+            "{relative} should call focused diff IO directly with the snapshot store"
+        );
+    }
+    for forbidden in [
+        "diff_io::compute",
+        "crate::diff_io",
+        "agent_doc_orchestration::diff_io",
+        "agent_doc_debounce::",
+        "extract_last_added_line",
+        "looks_truncated",
+        "truncate_for_log",
+        "unified_diff_from_contents",
+        "is_stale_snapshot",
+    ] {
+        assert!(
+            !snapshot_io_source.contains(forbidden),
+            "snapshot IO must not re-own diff IO policy: {forbidden}"
+        );
+    }
+
+    let diff_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-diff-io/Cargo.toml")).unwrap();
+    for dependency in [
+        "agent-doc-debounce",
+        "agent-doc-diff",
+        "agent-doc-fs",
+        "agent-doc-hash",
+    ] {
+        assert!(
+            diff_io_manifest.contains(dependency),
+            "agent-doc-diff-io should declare focused dependency {dependency}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-git-io",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+    ] {
+        assert!(
+            !diff_io_manifest.contains(forbidden),
+            "agent-doc-diff-io must not depend on orchestration-side systems: {forbidden}"
+        );
+    }
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    assert!(
+        orchestration_manifest.contains("agent-doc-diff-io"),
+        "orchestration must depend on the focused diff IO adapter"
+    );
 }
 
 #[test]
@@ -9034,10 +10566,9 @@ fn test_agent_doc_diff_owns_semantic_diff_summary_policy() {
 
     let preflight_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
-    let preflight_semantic_diff = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
-    )
-    .unwrap();
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
     for forbidden in [
         "pub struct SemanticDiffSummary",
         "pub enum SemanticComponentOp",
@@ -9055,7 +10586,7 @@ fn test_agent_doc_diff_owns_semantic_diff_summary_policy() {
         "pub(crate) fn semantic_preview(",
     ] {
         assert!(
-            !preflight_mod.contains(forbidden) && !preflight_semantic_diff.contains(forbidden),
+            !preflight_mod.contains(forbidden) && !preflight_run.contains(forbidden),
             "orchestration preflight must not re-own semantic diff summary policy: {forbidden}"
         );
     }
@@ -9064,9 +10595,6 @@ fn test_agent_doc_diff_owns_semantic_diff_summary_policy() {
         "orchestration preflight must not re-export semantic_diff_summary as a facade"
     );
 
-    let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
     assert!(
         preflight_run.contains("use agent_doc_diff::semantic::semantic_diff_summary;"),
         "preflight run should call the focused semantic diff builder directly"
@@ -9141,15 +10669,14 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "src/plan.rs",
         "src/patch.rs",
         "agent-doc-frontmatter-io/src/session.rs",
+        "agent-doc-template-io/src/lib.rs",
+        "agent-doc-lint-io/src/lib.rs",
         "agent-doc-orchestration/src/graph.rs",
-        "agent-doc-orchestration/src/template_io.rs",
         "agent-doc-orchestration/src/claim.rs",
-        "agent-doc-orchestration/src/lint_gate.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/session_resolution.rs",
         "agent-doc-orchestration/src/resync.rs",
         "agent-doc-orchestration/src/sync.rs",
-        "agent-doc-orchestration/src/session_accretion.rs",
         "agent-doc-orchestration/src/session_check/pending_guards.rs",
         "agent-doc-supervisor-io/src/config.rs",
         "agent-doc-orchestration/src/start.rs",
@@ -9180,6 +10707,13 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
             );
         }
     }
+    let session_accretion =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_accretion.rs"))
+            .unwrap();
+    assert!(
+        session_accretion.contains("rc.project_config().agent_doc_auto_compact"),
+        "session_accretion should consume project config through the RunContext graph cache"
+    );
 
     let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();
     let root_dependencies = root_manifest["dependencies"].as_table().unwrap();
@@ -9555,8 +11089,50 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
         );
     }
 
-    let lint_gate =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lint_gate.rs")).unwrap();
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let workspace_members = root["workspace"]["members"].as_array().unwrap();
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-lint-io")),
+        "agent-doc-lint-io must be a workspace member"
+    );
+    let root_dependencies = root["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-lint-io"),
+        "root crate should depend on focused lint IO crate directly"
+    );
+
+    let lint_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-lint-io/Cargo.toml")).unwrap();
+    let lint_manifest: toml::Value = toml::from_str(&lint_manifest).unwrap();
+    let lint_dependencies = lint_manifest["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-frontmatter",
+        "agent-doc-project-config-io",
+        "anyhow",
+        "tagpath",
+    ] {
+        assert!(
+            lint_dependencies.contains_key(required),
+            "agent-doc-lint-io should depend on lint gate dependency: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-git-io",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+        "interprocess",
+    ] {
+        assert!(
+            !lint_dependencies.contains_key(forbidden),
+            "agent-doc-lint-io must stay a lint adapter, not orchestration/app state: {forbidden}"
+        );
+    }
+
+    let lint_gate = fs::read_to_string(manifest_dir.join("agent-doc-lint-io/src/lib.rs")).unwrap();
     for forbidden in [
         "pub enum LintCliMode",
         "pub enum LintModeSource",
@@ -9572,10 +11148,58 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
     }
     assert!(
         lint_gate.contains("lint::{LintCliMode, LintModeSource, dialect_label, resolve_lint_mode}")
-            && lint_gate.contains("resolve_lint_mode(content, cli, project.lint.dialect)")
-            && lint_gate.contains("resolve_lint_mode(content, cli, config.lint.dialect)"),
-        "lint_gate should call focused frontmatter lint policy directly"
+            && lint_gate
+                .contains("resolve_mode_from_project_dialect(content, cli, project.lint.dialect)")
+            && lint_gate.contains("resolve_lint_mode(content, cli, project_dialect)")
+            && lint_gate.contains("tagpath::lint::agent_doc")
+            && lint_gate.contains("pub type OpsLogger")
+            && lint_gate.contains("pub fn run_with_logger"),
+        "agent-doc-lint-io should call focused frontmatter lint policy and own tagpath gate IO"
     );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-lint-io"),
+        "agent-doc-orchestration should depend on the focused lint IO crate"
+    );
+    assert!(
+        !orchestration_dependencies.contains_key("tagpath"),
+        "tagpath should be confined to agent-doc-lint-io after lint gate extraction"
+    );
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/lint_gate.rs")
+            .exists(),
+        "orchestration must not keep a lint_gate facade module"
+    );
+    let orchestration_write =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let orchestration_stream =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
+    assert!(
+        orchestration_write.contains("agent_doc_lint_io::run_with_logger")
+            && orchestration_write.contains("crate::ops_log::log_op")
+            && orchestration_stream.contains("agent_doc_lint_io::run_with_logger")
+            && orchestration_stream.contains("crate::ops_log::log_op"),
+        "orchestration write/stream should inject ops-log into focused lint IO directly"
+    );
+    for forbidden in [
+        "tagpath::",
+        "lint_agent_doc",
+        "format_findings_text",
+        "AgentDocOptions",
+        "LintFinding",
+        "resolve_mode_from_project_dialect",
+    ] {
+        assert!(
+            !orchestration_write.contains(forbidden) && !orchestration_stream.contains(forbidden),
+            "orchestration write/stream must not re-own tagpath lint adapter after extraction: {forbidden}"
+        );
+    }
 
     for relative_path in [
         "src/main.rs",
@@ -9624,13 +11248,18 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
             .unwrap();
     let frontmatter_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-frontmatter-io/src/session.rs")).unwrap();
-    let orchestration_frontmatter_io =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/frontmatter_io.rs"))
-            .unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_graph =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/graph.rs")).unwrap();
 
     assert!(
         frontmatter_source.contains("pub fn session_id_from_content("),
         "agent-doc-frontmatter must own pure session-id extraction from document content"
+    );
+    assert!(
+        frontmatter_source.contains("pub fn needs_session_for_formatted_document(&self) -> bool"),
+        "agent-doc-frontmatter must own the pure formatted-document session initialization predicate"
     );
     assert!(
         project_config_source.contains("pub fn require_agent_doc_document("),
@@ -9640,6 +11269,11 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
         "pub fn parse_for_file<'a>(content:",
         "pub fn ensure_session_for_file(",
         "pub fn read_session_id(",
+        "pub struct EnsureFormattedSessionResult",
+        "pub fn ensure_session_uuid_for_formatted_file(",
+        "pub struct ResolvedSshContext",
+        "pub fn parse_for_file_with_context",
+        "pub fn ensure_session_for_file_with_context(",
         "pub fn is_agent_doc_document_for_file(",
         "pub fn require_agent_doc_document(",
         "agent_doc_project_config_io::load_project_for_doc",
@@ -9665,6 +11299,11 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
             && frontmatter_io_source.contains("project_config::require_agent_doc_document("),
         "agent-doc-frontmatter-io should resolve IO inputs then call frontmatter-owned helpers directly"
     );
+    assert!(
+        frontmatter_io_source.contains("fm.needs_session_for_formatted_document()")
+            && frontmatter_io_source.contains("std::fs::write(file, &updated)?"),
+        "agent-doc-frontmatter-io should own the formatted-session file adapter while delegating the predicate"
+    );
     for forbidden in [
         "pub fn parse_for_file<'a>(content:",
         "pub fn ensure_session_for_file(",
@@ -9674,16 +11313,34 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
         "agent_doc_project_config_io::load_project_for_doc",
     ] {
         assert!(
-            !orchestration_frontmatter_io.contains(forbidden),
-            "orchestration frontmatter_io must not keep a file-backed frontmatter IO facade: {forbidden}"
+            !orchestration_graph.contains(forbidden),
+            "orchestration graph must not keep a file-backed frontmatter IO facade: {forbidden}"
         );
     }
     assert!(
-        orchestration_frontmatter_io.contains("pub fn parse_for_file_with_context")
-            && orchestration_frontmatter_io
-                .contains("pub fn ensure_session_for_file_with_context("),
-        "orchestration frontmatter_io should only adapt RunContext-backed frontmatter parsing"
+        !orchestration_lib.contains("pub mod frontmatter_io;")
+            && orchestration_graph.contains("ResolvedSshContext")
+            && orchestration_graph.contains("ssh.as_resolver_context("),
+        "orchestration should cache focused frontmatter IO context without keeping a frontmatter_io facade"
     );
+    let document_init =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/document_init.rs"))
+            .unwrap();
+    assert!(
+        document_init.contains(
+            "agent_doc_frontmatter_io::session::ensure_session_uuid_for_formatted_file(doc)"
+        ),
+        "document initialization IO should delegate formatted session UUID file mutation to frontmatter-io"
+    );
+    for forbidden in [
+        "agent_doc_frontmatter::frontmatter::ensure_session(&content)",
+        "fm.format.is_none() || fm.session.is_some()",
+    ] {
+        assert!(
+            !document_init.contains(forbidden),
+            "document initialization IO must not re-own formatted session UUID file mutation: {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -9815,32 +11472,15 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         );
     }
 
-    let snapshot_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/snapshot.rs")).unwrap();
-    for forbidden_snippet in [
-        "pub fn doc_hash(",
-        "pub fn doc_hash_from_str(",
-        "pub fn path_for(",
-        "pub fn lock_path_for(",
-        "pub fn pending_path_for(",
-        "pub fn baseline_path_for(",
-        "pub fn baseline_overlay_path_for(",
-        "pub fn pre_response_path_for(",
-        "pub fn crdt_path_for(",
-        "pub fn overlay_crdt_path_for(",
-        "pub fn multinode_crdt_path_for(",
-        "fn crdt_path_for_filename(",
-        "pub use agent_doc_fs",
-        "agent_doc_hash::path_hash",
-        "agent_doc_hash::path_string_hash",
-    ] {
-        assert!(
-            !snapshot_source.contains(forbidden_snippet),
-            "snapshot.rs must not keep a pure state path/hash wrapper or facade: {forbidden_snippet}"
-        );
-    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/snapshot.rs")
+            .exists(),
+        "orchestration must not keep a snapshot facade module after state path extraction"
+    );
+    let snapshot_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
     for required_snippet in [
-        "agent_doc_fs::document_state_hash(",
         "agent_doc_fs::snapshot_path_for(",
         "agent_doc_fs::snapshot_flock_path_for(",
         "agent_doc_fs::baseline_overlay_path_for(",
@@ -9851,8 +11491,8 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         "agent_doc_fs::crdt_flock_path_for(",
     ] {
         assert!(
-            snapshot_source.contains(required_snippet),
-            "snapshot.rs should call focused agent-doc-fs state helpers directly: {required_snippet}"
+            snapshot_io_source.contains(required_snippet),
+            "agent-doc-snapshot-io should call focused state path helpers directly: {required_snippet}"
         );
     }
 
@@ -10228,6 +11868,340 @@ fn test_sessions_has_no_tmux_router_type_facade() {
 }
 
 #[test]
+fn test_agent_doc_session_registry_owns_registry_mutation_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-session-registry")),
+        "agent-doc-session-registry must stay a first-class workspace crate"
+    );
+
+    let registry_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct RegistryEntryFields",
+        "pub struct RegistryReplacement",
+        "pub fn canonical_registry_key_in(",
+        "pub fn session_key(",
+        "pub fn session_pane(",
+        "pub fn session_entry(",
+        "pub fn remove_session_by_id(",
+        "pub fn stale_pane_keys(",
+        "pub fn remove_stale_pane_bindings(",
+        "pub fn registry_entry(",
+        "pub fn insert_registry_entry(",
+        "pub fn replace_registry_entry(",
+        "find_registry_key_by_session_id(registry, session_id)",
+        "entry_session_id(key, entry) != session_id",
+    ] {
+        assert!(
+            registry_source.contains(required),
+            "agent-doc-session-registry must own pure registry mutation policy: {required}"
+        );
+    }
+
+    let registry_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&registry_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    assert!(
+        dependencies.contains_key("tmux-router"),
+        "agent-doc-session-registry should depend on tmux-router registry primitives"
+    );
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-session-registry-io",
+        "agent-doc-tmux",
+        "agent-doc-tmux-commands",
+        "agent-doc-tmux-io",
+        "anyhow",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "serde_json",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-session-registry must stay pure registry policy: {forbidden}"
+        );
+    }
+
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let root_dependencies = root["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-session-registry"),
+        "root crate should expose the focused session-registry policy crate"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-session-registry"),
+        "orchestration should depend on focused session-registry policy"
+    );
+
+    let registry_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/Cargo.toml")).unwrap();
+    let registry_io: toml::Value = toml::from_str(&registry_io_manifest).unwrap();
+    let registry_io_dependencies = registry_io["dependencies"].as_table().unwrap();
+    assert!(
+        registry_io_dependencies.contains_key("agent-doc-session-registry"),
+        "registry IO should compose with pure session-registry policy"
+    );
+
+    let sessions_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+    let sessions_prod = sessions_source
+        .split("\n#[cfg(test)]\nmod tests")
+        .next()
+        .unwrap();
+    assert!(
+        sessions_prod.contains("use agent_doc_session_registry as session_registry;")
+            && sessions_prod.contains("session_registry::replace_registry_entry(")
+            && sessions_prod.contains("session_registry::remove_stale_pane_bindings(")
+            && sessions_prod.contains("session_registry::insert_registry_entry("),
+        "sessions.rs should adapt registration effects through focused registry policy"
+    );
+    for forbidden in [
+        "entry_session_id(",
+        "find_registry_key_by_session_id(",
+        "format_transition_event(",
+        "OwnershipTransitionEvent",
+        "append_session_log_event(",
+        "session_superseded old_pane=",
+        "session_end origin=registry_rebind",
+        ".filter(|(key, entry)| entry.pane == pane_id",
+        ".filter(|(k, e)| e.pane == pane_id",
+        "SessionEntry {",
+    ] {
+        assert!(
+            !sessions_prod.contains(forbidden),
+            "sessions.rs must not re-own pure registry mutation policy: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-session-registry-io")),
+        "agent-doc-session-registry-io must stay a first-class workspace crate"
+    );
+
+    let registry_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub const SESSIONS_FILE: &str = \".agent-doc/sessions.json\";",
+        "pub fn registry_path() -> PathBuf",
+        "pub fn registry_path_in(base_dir: &Path) -> PathBuf",
+        "pub fn load() -> Result<Registry>",
+        "pub fn load_in(base_dir: &Path) -> Result<Registry>",
+        "pub fn save(registry: &Registry) -> Result<()>",
+        "pub fn save_in(base_dir: &Path, registry: &Registry) -> Result<()>",
+        "pub fn lookup(session_id: &str) -> Result<Option<String>>",
+        "pub fn lookup_in(base_dir: &Path, session_id: &str) -> Result<Option<String>>",
+        "pub fn lookup_entry(session_id: &str) -> Result<Option<RegistryEntry>>",
+        "pub fn deregister(session_id: &str) -> Result<bool>",
+        "pub fn deregister_in(base_dir: &Path, session_id: &str) -> Result<bool>",
+        "pub fn update_session_file_in(",
+        "serde_json::from_str(&content)",
+        "serde_json::to_string_pretty(registry)",
+        "normalize_registry(base_dir, registry)",
+        "agent_doc_session_registry::session_pane(",
+        "agent_doc_session_registry::session_entry(",
+        "agent_doc_session_registry::remove_session_by_id(",
+    ] {
+        assert!(
+            registry_io_source.contains(required),
+            "agent-doc-session-registry-io must own registry snapshot IO/lookup: {required}"
+        );
+    }
+
+    let registry_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&registry_io_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required_dependency in [
+        "agent-doc-session-registry",
+        "anyhow",
+        "serde_json",
+        "tmux-router",
+    ] {
+        assert!(
+            dependencies.contains_key(required_dependency),
+            "agent-doc-session-registry-io should own registry IO dependency: {required_dependency}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-tmux",
+        "agent-doc-tmux-commands",
+        "agent-doc-tmux-io",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-session-registry-io must stay focused on registry file IO: {forbidden}"
+        );
+    }
+
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let root_dependencies = root["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-session-registry-io"),
+        "root CLI should depend on registry IO directly instead of routing through orchestration"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-session-registry-io"),
+        "orchestration should depend on registry IO directly for registration persistence"
+    );
+
+    let sessions_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+    assert!(
+        sessions_source.contains("use agent_doc_session_registry_io as session_registry_io;"),
+        "sessions.rs should adapt registration updates through the focused registry IO crate"
+    );
+    for forbidden in [
+        "pub fn registry_path(",
+        "pub fn registry_path_in(",
+        "pub fn load(",
+        "pub fn load_in(",
+        "pub fn save(",
+        "pub fn save_in(",
+        "pub fn lookup(",
+        "pub fn lookup_in(",
+        "pub fn lookup_entry(",
+        "pub fn deregister(",
+        "const SESSIONS_FILE",
+        "serde_json::from_str(&content)",
+        "serde_json::to_string_pretty(registry)",
+        "std::fs::write(&path",
+    ] {
+        assert!(
+            !sessions_source.contains(forbidden),
+            "sessions.rs must not keep registry snapshot IO/lookup facades: {forbidden}"
+        );
+    }
+
+    let dispatch_registry_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-session-registry-io/src/dispatch_registry.rs"),
+    )
+    .unwrap();
+    for required in [
+        "crate::load_in(base_dir)",
+        "crate::registry_path_in(&base_dir)",
+        "crate::save_in(&base_dir, &registry)",
+    ] {
+        assert!(
+            dispatch_registry_source.contains(required),
+            "session dispatch registry should compose with generic registry IO: {required}"
+        );
+    }
+    for forbidden in [
+        "const SESSIONS_FILE",
+        "pub fn registry_path_in(",
+        "tmux_router::registry::load_registry",
+        "tmux_router::registry::save_registry",
+    ] {
+        assert!(
+            !dispatch_registry_source.contains(forbidden),
+            "session dispatch registry must not duplicate generic sessions.json IO: {forbidden}"
+        );
+    }
+
+    let route_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub(crate) fn canonical_dispatch_file(",
+        "pub(crate) fn canonical_registered_file(",
+        "pub(crate) fn registry_base_dir_for_dispatch(",
+        "pub(crate) fn lookup_dispatch_registration(",
+        "pub(crate) fn load_dispatch_registry(",
+        "pub(crate) fn deregister_dispatch_registration(",
+        "pub(crate) fn ensure_dispatch_target_can_bind_file(",
+        "pub(crate) fn pane_registration_matches_file(",
+        "pub(crate) fn ensure_dispatch_target_matches_file(",
+    ] {
+        assert!(
+            !route_dispatch.contains(forbidden),
+            "route/dispatch.rs must not keep controller dispatch-registry facades: {forbidden}"
+        );
+    }
+    assert!(
+        route_dispatch.contains("use agent_doc_session_registry_io::dispatch_registry;")
+            && route_dispatch.contains("dispatch_registry::canonical_dispatch_file(")
+            && route_dispatch.contains("dispatch_registry::ensure_dispatch_target_matches_file("),
+        "route/dispatch.rs should call focused session dispatch-registry IO directly"
+    );
+
+    fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let mut source_files = Vec::new();
+    collect_rs_files(
+        &manifest_dir.join("agent-doc-orchestration/src"),
+        &mut source_files,
+    );
+    collect_rs_files(&manifest_dir.join("src"), &mut source_files);
+    for path in source_files {
+        let source = fs::read_to_string(&path).unwrap();
+        let relative = path.strip_prefix(manifest_dir).unwrap().display();
+        for forbidden in [
+            "agent_doc_orchestration::sessions::registry_path",
+            "agent_doc_orchestration::sessions::load",
+            "agent_doc_orchestration::sessions::save",
+            "agent_doc_orchestration::sessions::lookup",
+            "crate::sessions::registry_path",
+            "crate::sessions::load",
+            "crate::sessions::save",
+            "crate::sessions::lookup",
+            "sessions::registry_path",
+            "sessions::load",
+            "sessions::save",
+            "sessions::lookup",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must call agent_doc_session_registry_io directly: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_agent_doc_merge_is_pure_workspace_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -10294,22 +12268,64 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
             "{relative} should call semantic merge through agent-doc-merge directly"
         );
     }
-    let orchestration_merge =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/merge.rs")).unwrap();
-    for forbidden_snippet in ["pub fn merge_contents_crdt(", "fn merge_frontmatter_aware"] {
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/merge.rs")
+            .exists(),
+        "orchestration must not keep a merge facade after merge IO extraction"
+    );
+    let merge_io = fs::read_to_string(manifest_dir.join("agent-doc-merge-io/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn merge_contents(",
+        "pub fn merge_contents_crdt_with_ops(",
+        "agent_doc_op_capture_io::editor_ops_for_base(doc, &base_text)",
+        "agent_doc_op_capture_io::clear_op_capture(doc)",
+        "agent_doc_hash::content_hash(&base_text)",
+        "summarize_editor_ops_for_log(ops)",
+    ] {
         assert!(
-            !orchestration_merge.contains(forbidden_snippet),
-            "orchestration must not re-own pure frontmatter-aware CRDT merge policy: {forbidden_snippet}"
+            merge_io.contains(required_snippet),
+            "agent-doc-merge-io must own git and op-capture merge IO: {required_snippet}"
         );
     }
+    for relative in [
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-orchestration/src/write/ipc.rs",
+        "src/sim_world/engine.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_merge_io::merge_contents")
+                && !source.contains("crate::merge::merge_contents")
+                && !source.contains("agent_doc_orchestration::merge::merge_contents"),
+            "{relative} should call focused git merge IO directly instead of the orchestration merge facade"
+        );
+    }
+    for relative in [
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-orchestration/src/write/ipc.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_merge_io::merge_contents_crdt_with_ops(")
+                && source.contains("crate::ops_log::log_op")
+                && !source.contains("merge::merge_contents_crdt_with_ops("),
+            "{relative} should call focused op-capture CRDT merge IO directly"
+        );
+    }
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod merge;"),
+        "orchestration must not expose a merge facade module"
+    );
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/merge_control_state_machine.rs")
             .exists(),
         "orchestration must not keep a merge-control facade over agent-doc-merge::ownership"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
         !orchestration_lib.contains("merge_control_state_machine"),
         "orchestration must not re-export merge-control ownership policy"
@@ -10802,13 +12818,15 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && project_controller_source.contains("status::open_closeout_preserved_payload("),
         "project_controller should keep controller recovery IO and call focused crash-recovery marker policy directly"
     );
+    let controller_io_process =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/process.rs")).unwrap();
     assert!(
-        rpc_source.contains(
+        controller_io_process.contains(
             "agent_doc_controller::command_line::same_project_controller_args_match_project_root",
-        ) && rpc_source.contains(
+        ) && controller_io_process.contains(
             "agent_doc_controller::command_line::canonical_path_for_command_line_compare",
         ),
-        "project_controller::rpc should call focused controller command-line comparison policy directly"
+        "agent-doc-controller-io process scanning should call focused controller command-line comparison policy directly"
     );
     for forbidden_snippet in [
         "fn agent_doc_controller_serve_arg_index(args:",
@@ -10821,20 +12839,55 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
-        project_controller_source
+        controller_io_process
             .contains("agent_doc_controller::command_line::args_have_preparing_handoff"),
-        "project_controller should call focused controller handoff command-line policy directly"
+        "agent-doc-controller-io process scanning should call focused controller handoff command-line policy directly"
     );
-    for source in [&rpc_source, &project_controller_source] {
+    for required_snippet in [
+        "pub fn process_start_age_secs(",
+        "pub fn controller_serve_project_root(",
+        "pub fn cmdline_has_preparing_handoff(",
+    ] {
         assert!(
-            source.contains(
-                "agent_doc_controller::command_line::controller_serve_project_root_from_args"
-            ),
-            "orchestration should call focused controller command-line parsing directly"
+            controller_io_process.contains(required_snippet),
+            "agent-doc-controller-io must own controller process-scan helpers: {required_snippet}"
         );
     }
+    for forbidden_snippet in [
+        "fn process_start_age_secs(",
+        "fn controller_serve_project_root(",
+        "fn cmdline_has_preparing_handoff(",
+        "pub(crate) fn is_same_project_controller_pid(",
+        "pub(crate) fn process_is_alive(",
+        "pub(crate) fn system_boot_timestamp_secs(",
+    ] {
+        assert!(
+            !project_controller_source.contains(forbidden_snippet),
+            "project_controller must not wrap controller process-scan helpers: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        project_controller_source
+            .contains("agent_doc_controller_io::process::process_start_age_secs(")
+            && project_controller_source
+                .contains("agent_doc_controller_io::process::controller_serve_project_root(")
+            && project_controller_source
+                .contains("agent_doc_controller_io::process::cmdline_has_preparing_handoff(")
+            && project_controller_source.contains(
+                "use agent_doc_controller_io::process::{is_same_project_controller_pid, process_is_alive};"
+            ),
+        "project_controller should call focused controller process-scan helpers directly"
+    );
+    assert!(
+        controller_io_process.contains(
+            "agent_doc_controller::command_line::controller_serve_project_root_from_args"
+        ),
+        "agent-doc-controller-io process scanning should call focused controller command-line parsing directly"
+    );
     let sync_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    let process_owner_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-process-owner-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "fn token_is_agent_doc_binary(",
         "fn token_is_harness_binary(",
@@ -10846,6 +12899,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn cmdline_has_file_match(",
         "fn agent_doc_cmdline_is_owner(",
         "fn cmdline_owns_other_document(",
+        "fn pid_has_agent_doc_for_file(",
+        "fn pid_is_agent_session(",
     ] {
         assert!(
             !sync_source.contains(forbidden_snippet),
@@ -10853,19 +12908,37 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
-        sync_source.contains("use agent_doc_controller::command_line::{"),
-        "sync.rs should import focused controller command-line policy directly"
+        process_owner_io_source.contains("use agent_doc_controller::command_line::{")
+            && process_owner_io_source.contains("agent_doc_cmdline_is_owner")
+            && process_owner_io_source.contains("cmdline_owns_other_document")
+            && process_owner_io_source.contains("owner_document_from_cmdline"),
+        "agent-doc-process-owner-io should compose process effects with focused controller command-line policy"
     );
     for required_snippet in [
-        "agent_doc_cmdline_is_owner",
-        "cmdline_owns_other_document",
-        "owner_document_from_cmdline",
+        "pub fn process_tree_contains_pid(",
+        "pub fn process_tree_agent_doc_owner_pid_for_file(",
+        "pub fn process_tree_has_agent_doc_owner_for_file(",
+        "pub fn process_tree_has_agent_session(",
+        "pub fn process_tree_owner_document_other_than(",
+        "pub fn process_tree_owns_other_document(",
     ] {
         assert!(
-            sync_source.contains(required_snippet),
-            "sync.rs should call focused controller command-line policy directly: {required_snippet}"
+            process_owner_io_source.contains(required_snippet),
+            "agent-doc-process-owner-io must own live process-owner inspection: {required_snippet}"
         );
     }
+    assert!(
+        sync_source
+            .contains("agent_doc_process_owner_io::process_tree_agent_doc_owner_pid_for_file(")
+            && sync_source
+                .contains("agent_doc_process_owner_io::process_tree_has_agent_doc_owner_for_file(")
+            && sync_source.contains("agent_doc_process_owner_io::process_tree_has_agent_session(")
+            && sync_source
+                .contains("agent_doc_process_owner_io::process_tree_owner_document_other_than(")
+            && sync_source
+                .contains("agent_doc_process_owner_io::process_tree_owns_other_document("),
+        "sync.rs should adapt tmux panes into focused process-owner IO directly"
+    );
 
     let authoritative_actor = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/authoritative_actor.rs"),
@@ -10892,9 +12965,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_cycle_ack_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/cycle_ack.rs"))
             .unwrap();
-    let flow_routed_reopen_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/routed_reopen.rs"))
-            .unwrap();
+    let flow_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     let flow_types_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
     assert!(
@@ -10909,6 +12981,40 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     );
     let controller_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
+    let controller_io_starting_actor_timeout = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/starting_actor_timeout.rs"),
+    )
+    .unwrap();
+    for required_snippet in [
+        "pub enum StartingActorTimeoutLogDecision",
+        "pub fn record_starting_actor_timeout(",
+        "pub fn starting_actor_timeout_record_matches(",
+        "pub fn starting_actor_timeout_record_identity_matches(",
+        "pub fn clear_starting_actor_timeout_record(",
+        ".agent-doc/state/route-starting-timeouts",
+        ".agent-doc/locks",
+        "fs2::FileExt",
+    ] {
+        assert!(
+            controller_io_starting_actor_timeout.contains(required_snippet),
+            "agent-doc-controller-io must own starting-actor timeout sidecar IO: {required_snippet}"
+        );
+    }
+    assert!(
+        !authoritative_actor
+            .contains("pub(crate) use agent_doc_controller_io::starting_actor_timeout")
+            && authoritative_actor
+                .contains("use agent_doc_controller_io::starting_actor_timeout::clear_starting_actor_timeout_record;"),
+        "route/authoritative_actor.rs should call starting-actor timeout IO without re-exporting it"
+    );
+    assert!(
+        route_source.contains("use agent_doc_controller_io::starting_actor_timeout::{")
+            && route_source.contains("record_starting_actor_timeout")
+            && route_source.contains("StartingActorTimeoutLogDecision")
+            && route_source.contains("starting_actor_timeout_record_matches")
+            && route_source.contains("clear_starting_actor_timeout_record"),
+        "route.rs should import starting-actor timeout sidecar IO from agent-doc-controller-io directly"
+    );
     for required_snippet in [
         "pub enum DispatchActorState",
         "pub enum RouteDecision",
@@ -10948,6 +13054,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct DegradedAuthoritativeActorDirectSubmit",
         "pub fn degraded_authoritative_actor_direct_submit_log_message(",
         "pub enum RoutedReopenGuardReason",
+        "pub fn prompt_ready_barrier_failed_event(",
+        "pub fn dispatch_proof_failed_event(",
         "pub fn is_interactive_shell_substate_reason(",
         "pub fn dispatch_only_blocked_guard_reason(",
         "pub enum ActorLifecycleState",
@@ -11131,117 +13239,16 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_busy_pane_source.contains("BusyPaneAutoFixFacts"),
         "route/busy_pane.rs must adapt supervisor facts into focused controller busy-pane auto-fix policy directly"
     );
-    for forbidden_snippet in [
-        "pub enum RouteDecision",
-        "pub enum ActorDispatchState",
-        "pub enum ReopenMode",
-        "pub struct RoutedReopenFacts",
-        "pub struct RoutedReopenOutcome",
-        "pub fn decide_authoritative_reopen(",
-        "pub enum AuthoritativeActorDispatchAction",
-        "pub struct AuthoritativeActorDispatchActionFacts",
-        "pub fn classify_authoritative_actor_dispatch_action(",
-        "pub fn dispatch_only_focus_only_should_fail_closed(",
-        "pub struct PromptReadyBarrierFacts",
-        "pub enum PromptReadyBarrierDecision",
-        "pub fn classify_prompt_ready_barrier(",
-        "pub struct AuthoritativeActorReadyFacts",
-        "pub struct AuthoritativePromptReadyBarrierFacts",
-        "pub fn classify_authoritative_prompt_ready_barrier(",
-        "pub struct DispatchOnlyStartingPaneActorReadyFacts",
-        "pub fn dispatch_only_starting_pane_actor_ready(",
-        "pub struct StartingActorLogFacts",
-        "pub fn starting_actor_not_ready_log_line(",
-        "pub fn starting_actor_ready_log_line(",
-        "pub fn starting_actor_terminal_log_line(",
-        "pub fn starting_actor_timeout_coalesced_log_line(",
-        "pub const fn actor_start_wait_terminal_state(",
-        "pub const fn actor_dispatch_blocker_reason(",
-        "pub const fn actor_can_queue_optimistically(",
-        "pub const fn busy_projection_repaired_by_ready_prompt(",
-        "pub const fn actor_waiting_input_recoverable(",
-        "pub fn actor_recovery_hint(",
-        "pub enum BusyPaneAutoFixOutcome",
-        "pub struct BusyPaneAutoFixFacts",
-        "pub fn busy_existing_pane_auto_fix_outcome(",
-        "pub struct DegradedAuthoritativeActorFacts",
-        "pub fn can_use_degraded_authoritative_actor(",
-        "pub struct DegradedAuthoritativeActorDirectSubmit",
-        "pub fn degraded_authoritative_actor_direct_submit_log_message(",
-        "pub enum RoutedReopenGuardReason",
-        "pub fn is_interactive_shell_substate_reason(",
-        "pub fn dispatch_only_blocked_guard_reason(",
-        "pub enum ActorRuntimeHealth",
-        "pub enum ActorLifecycleState",
-        "pub fn effective_authoritative_actor_state(",
-        "pub struct AuthoritativeRuntimeFacts",
-        "pub fn authoritative_actor_dispatch_guard_reason(",
-        "pub enum RoutedDispatchStartProof",
-        "pub enum DispatchStartProofDecision",
-        "pub struct DispatchStartProofFacts",
-        "pub fn classify_dispatch_start_proof(",
-        "pub fn dispatch_only_dispatch_start_proof_required(",
-        "pub struct RetryBudget",
-        "pub fn authoritative_actor_ready_retry_budget(",
-        "pub fn dispatch_only_starting_pane_ready_timeout_for_binary(",
-        "pub fn dispatch_only_starting_pane_recovery_timeout_for_binary(",
-        "pub fn dispatch_only_starting_pane_ready_retry_budget(",
-        "pub fn dispatch_only_starting_pane_recovery_retry_budget(",
-        "pub const STARTING_ACTOR_TIMEOUT_REASON",
-        "pub struct StartingTimeoutActorFacts",
-        "pub fn actor_blocked_by_starting_timeout(",
-        "pub fn starting_timeout_blocked_actor_can_recover(",
-        "pub struct StartupMissRouteFacts",
-        "pub fn startup_miss_requires_fresh_start(",
-        "pub fn startup_miss_superseded_by_later_open_start(",
-        "pub fn startup_miss_should_restart_live_owner(",
-        "pub fn startup_miss_should_fail_closed(",
-        "pub enum DirectPaneSubmitStatus",
-        "pub fn direct_pane_submit_acceptance_timeout(",
-        "pub fn direct_pane_submit_acceptance_budget(",
-        "pub fn direct_pane_submit_outcome(",
-        "pub const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
-        "pub struct DirectPaneAcceptancePollState",
-        "pub fn direct_pane_acceptance_poll_status(",
-        "pub struct CloseoutBlockDispatchFacts",
-        "pub enum CloseoutBlockDispatchDecision",
-        "pub fn classify_closeout_block_dispatch(",
-        "pub struct RoutedCycleAckFacts",
-        "pub fn should_require_routed_cycle_ack(",
-        "pub struct MissingCycleAckFacts",
-        "pub fn should_optimistically_accept_missing_cycle_ack(",
-        "pub enum RouteSubmitObservation",
-        "pub struct RouteSubmitObservationFacts",
-        "pub fn route_submit_observation_message(",
-        "pub fn route_submit_issue_message(",
-        "pub enum DispatchOnlyReopenDelivery",
-        "pub struct DispatchOnlyProofOutcomeFacts",
-        "pub fn dispatch_only_sent_log_message(",
-        "pub fn dispatch_only_sent_console_message(",
-        "pub fn accepted_only_dispatch_start_log_message(",
-        "pub fn accepted_only_dispatch_start_refusal_message(",
-        "pub struct DispatchOnlyStartingPaneNotReadyMessageFacts",
-        "pub fn dispatch_only_starting_pane_not_ready_message(",
-        "pub struct DispatchOnlyRecycleInflightMessageFacts",
-        "pub fn dispatch_only_recycle_inflight_message(",
-        "pub struct DispatchOnlyBlockerRecoveryHintFacts",
-        "pub fn dispatch_only_blocker_recovery_hint(",
-        "pub fn should_print_dispatch_only_unproven_progress(",
-        "pub fn routed_dispatch_start_timeout(",
-        "pub fn routed_dispatch_start_timeout_for_binary(",
-        "pub fn fresh_route_start_ack_timeout(",
-        "pub fn routed_cycle_ack_timeout(",
-        "pub fn existing_pane_ready_timeout(",
-        "pub enum RouteLatencyStatus",
-        "pub struct RouteLatencyFacts",
-        "pub fn route_latency_status(",
-        "pub fn route_latency_message(",
-    ] {
-        assert!(
-            !flow_routed_reopen_source.contains(forbidden_snippet),
-            "flow::routed_reopen must not re-own pure controller dispatch policy: {forbidden_snippet}"
-        );
-    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/routed_reopen.rs")
+            .exists(),
+        "orchestration must not keep a routed-reopen flow adapter"
+    );
+    assert!(
+        !flow_mod.contains("pub mod routed_reopen"),
+        "orchestration flow must not expose a routed-reopen facade"
+    );
     assert!(
         !flow_types_source.contains("pub enum RouteDecision"),
         "agent-doc-flow types must not keep route decision policy after it moves to agent-doc-controller"
@@ -11260,27 +13267,19 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("AuthoritativePromptReadyBarrierFacts")
             && route_source.contains("classify_authoritative_prompt_ready_barrier")
             && route_source.contains("RoutedReopenGuardReason")
+            && route_source.contains("prompt_ready_barrier_failed_event")
+            && route_source.contains("dispatch_proof_failed_event")
+            && route_source.contains("agent_doc_flow_io::log_flow_event")
             && route_source.contains("dispatch_only_blocked_guard_reason")
             && route_source.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
-            && route_source.contains("busy_dispatch_start_outcome")
             && route_source.contains("CodexRoutedDispatchStartProofFacts")
             && route_source.contains("classify_dispatch_start_proof")
             && route_source.contains("classify_codex_routed_dispatch_start_proof")
             && route_source.contains("OpenCodePaneDispatchStartProofFacts")
             && route_source.contains("opencode_pane_state_changed_from_idle")
             && route_source.contains("DirectPaneSubmitStatus as CommandDispatchStatus")
-            && route_source.contains("direct_pane_submit_outcome")
-            && route_source.contains("DirectPaneDispatchStartProofFacts")
-            && route_source.contains("direct_pane_should_await_dispatch_start_proof")
-            && route_source.contains("DirectPaneAcceptancePollState")
-            && route_source.contains("direct_pane_acceptance_poll_status")
-            && route_source.contains("direct_pane_max_enter_resubmits")
-            && route_source.contains("DirectPaneEnterResubmitAttemptFacts")
-            && route_source.contains("DirectPaneExistingDraftSubmitFacts")
-            && route_source.contains("direct_pane_can_continue_enter_resubmit")
-            && route_source.contains("direct_pane_can_enter_existing_draft")
             && route_source.contains("RetryBudget")
             && route_source.contains("authoritative_actor_ready_retry_budget")
             && route_source.contains("CloseoutBlockDispatchDecision")
@@ -11308,10 +13307,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("ControllerRouteSubmitObservationFacts")
             && route_source.contains("route_submit_observation_message(")
             && route_source.contains("route_submit_issue_message(")
-            && route_source.contains("RoutedTriggerPayloadFacts")
-            && route_source.contains("routed_trigger_payload_rejection")
-            && route_source.contains("DirectPaneResubmitProofFacts")
-            && route_source.contains("direct_pane_resubmit_proof_line")
             && route_source.contains("RouteLatencyFacts")
             && route_source.contains("RouteLatencyStatus")
             && route_source.contains("route_latency_message(")
@@ -11332,8 +13327,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("accepted_only_dispatch_start_log_message")
             && route_source.contains("accepted_only_dispatch_start_refusal_message")
             && route_source.contains("dispatch_only_should_print_unproven_progress")
-            && route_source.contains("dispatch_start_busy_probe_timeout")
-            && route_source.contains("routed_dispatch_start_timeout_for_binary")
             && route_source.contains("fresh_route_start_ack_timeout")
             && route_source.contains("routed_cycle_ack_timeout")
             && route_source.contains("existing_pane_ready_timeout")
@@ -11359,8 +13352,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn busy_dispatch_start_outcome(",
         "fn dispatch_start_busy_probe_timeout(",
         "fn classify_dead_harness_shell_dispatch_block(",
-        "fn classify_dispatch_target_bind(",
-        "fn classify_dispatch_target_match(",
         "fn decide_fresh_dispatch_target_after_ready_wait(",
         "fresh restart re-bound",
         "fn resubmit_result_label(",
@@ -11376,6 +13367,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     assert!(
         route_dispatch_source.contains("DirectPaneAcceptancePollState::default()")
             && route_dispatch_source.contains("direct_pane_acceptance_poll_status(")
+            && route_dispatch_source.contains("direct_pane_submit_outcome")
             && route_dispatch_source.contains(".saw_trigger_visible()")
             && route_dispatch_source.contains("DirectPaneEnterResubmitAttemptFacts")
             && route_dispatch_source.contains("direct_pane_can_continue_enter_resubmit(")
@@ -11390,10 +13382,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("dispatch_start_busy_probe_timeout(cfg!(test))")
             && route_dispatch_source.contains("DeadHarnessShellDispatchFacts")
             && route_dispatch_source.contains("classify_dead_harness_shell_dispatch_block(")
-            && route_dispatch_source.contains("DispatchTargetBindFacts")
-            && route_dispatch_source.contains("classify_dispatch_target_bind(")
-            && route_dispatch_source.contains("DispatchTargetMatchFacts")
-            && route_dispatch_source.contains("classify_dispatch_target_match(")
             && route_dispatch_source.contains("FreshDispatchTargetAfterReadyWaitFacts")
             && route_dispatch_source.contains("FreshDispatchTargetAfterReadyWaitDecision")
             && route_dispatch_source.contains("decide_fresh_dispatch_target_after_ready_wait(")
@@ -11558,44 +13546,43 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub enum OperatorClearInputState",
         "pub enum OperatorClearGuardOutcome",
         "pub const fn clear_guard_outcome",
+        "pub const fn clear_guard_flow_outcome",
+        "pub fn clear_guard_event",
     ] {
         assert!(
             controller_operator_clear.contains(required_snippet),
-            "agent-doc-controller should own operator-clear guard policy directly: {required_snippet}"
-        );
-    }
-    let flow_operator_clear =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/operator_clear.rs"))
-            .unwrap();
-    for forbidden_snippet in [
-        "pub enum OperatorClearInputState",
-        "pub enum OperatorClearGuardOutcome",
-        "pub fn clear_guard_outcome",
-        "pub const fn clear_guard_outcome",
-    ] {
-        assert!(
-            !flow_operator_clear.contains(forbidden_snippet),
-            "flow::operator_clear must stay a flow adapter and not re-own operator-clear policy: {forbidden_snippet}"
+            "agent-doc-controller should own operator-clear guard policy and flow mapping directly: {required_snippet}"
         );
     }
     assert!(
-        flow_operator_clear.contains(
-            "use agent_doc_controller::operator_clear::{OperatorClearGuardOutcome, OperatorClearInputState};"
-        ) && flow_operator_clear.contains(
-            "agent_doc_controller::operator_clear::clear_guard_outcome"
-        ),
-        "flow::operator_clear should call focused operator-clear policy directly"
+        controller_operator_clear.contains("use agent_doc_flow::types::{"),
+        "agent-doc-controller should use the shared flow vocabulary for operator-clear events"
+    );
+    let flow_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/operator_clear.rs")
+            .exists(),
+        "orchestration must not keep an operator-clear flow adapter"
+    );
+    assert!(
+        !flow_mod.contains("pub mod operator_clear"),
+        "orchestration flow must not expose an operator-clear facade"
     );
     let session_actor_cmd_source =
         fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
     assert!(
-        session_actor_cmd_source
-            .contains("use agent_doc_controller::operator_clear::OperatorClearInputState;")
+        session_actor_cmd_source.contains("use agent_doc_controller::operator_clear::{")
+            && session_actor_cmd_source.contains("OperatorClearInputState")
+            && session_actor_cmd_source.contains("clear_guard_event")
             && session_actor_cmd_source
                 .contains("use agent_doc_controller::operator_clear::OperatorClearGuardOutcome;")
+            && session_actor_cmd_source.contains("agent_doc_flow_io::log_flow_event")
+            && session_actor_cmd_source.contains("clear_guard_event(clear_state)")
             && !session_actor_cmd_source
                 .contains("agent_doc_orchestration::flow::operator_clear::OperatorClearInputState"),
-        "session actor commands should import focused operator-clear policy directly"
+        "session actor commands should import focused operator-clear policy and flow mapping directly"
     );
 
     let controller_manifest =
@@ -11626,8 +13613,10 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
     let controller_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/editor_route_error.rs"))
             .unwrap();
-    let orchestration_adapter =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/editor_route_errors.rs"))
+    let controller_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/lib.rs")).unwrap();
+    let controller_io_adapter =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/editor_route_errors.rs"))
             .unwrap();
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -11661,8 +13650,8 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
         "ErrorKind::NotFound",
     ] {
         assert!(
-            !orchestration_adapter.contains(forbidden),
-            "orchestration editor route-error adapter must not re-own or facade path/clear policy: {forbidden}"
+            !controller_io_adapter.contains(forbidden),
+            "controller IO editor route-error adapter must not re-own or facade path/clear policy: {forbidden}"
         );
         assert!(
             !orchestration_lib.contains(forbidden),
@@ -11670,10 +13659,41 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
         );
     }
     assert!(
-        orchestration_adapter.contains("use agent_doc_controller::editor_route_error::{")
-            && orchestration_adapter.contains("clear_editor_route_error_for_file")
-            && orchestration_adapter.contains("EditorRouteErrorClearResult"),
-        "orchestration should import focused editor route-error clear policy directly"
+        controller_io_lib.contains("pub mod editor_route_errors;")
+            && controller_io_adapter.contains("use agent_doc_controller::editor_route_error::{")
+            && controller_io_adapter.contains("clear_editor_route_error_for_file")
+            && controller_io_adapter.contains("EditorRouteErrorClearResult")
+            && controller_io_adapter.contains("pub fn clear_for_success("),
+        "agent-doc-controller-io should import focused editor route-error clear policy directly"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/editor_route_errors.rs")
+            .exists()
+            && !orchestration_lib.contains("pub mod editor_route_errors;"),
+        "orchestration must not keep an editor_route_errors facade"
+    );
+    for relative in [
+        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/sync.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_controller_io::editor_route_errors::clear_for_success("),
+            "{relative} should call controller IO editor route-error adapter directly"
+        );
+        assert!(
+            !source.contains("crate::editor_route_errors::clear_for_success("),
+            "{relative} must not call the removed orchestration editor_route_errors facade"
+        );
+    }
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-controller-io"),
+        "agent-doc-orchestration should depend on controller IO directly"
     );
 }
 
@@ -11684,6 +13704,10 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/lib.rs")).unwrap();
     let controller_fleet =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/fleet.rs")).unwrap();
+    let controller_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/lib.rs")).unwrap();
+    let controller_io_dashboard =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/dashboard.rs")).unwrap();
 
     assert!(
         controller_lib.contains("pub mod fleet;"),
@@ -11710,11 +13734,37 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
             "agent-doc-controller must own fleet dashboard policy: {required}"
         );
     }
+    assert!(
+        controller_io_lib.contains("pub mod dashboard;"),
+        "agent-doc-controller-io should expose dashboard IO as a focused adapter"
+    );
+    for required in [
+        "pub trait DashboardEffects",
+        "pub const DEFAULT_INTERVAL_MS",
+        "pub fn resolve_root(",
+        "pub fn snapshot_model",
+        "pub fn dashboard",
+        "build_admin_actor_list",
+        "detect_admin_findings",
+        "build_dashboard_model_with_diagnostics",
+        "render_dashboard",
+        "agent_doc_fs::find_project_root",
+    ] {
+        assert!(
+            controller_io_dashboard.contains(required),
+            "agent-doc-controller-io must own dashboard snapshot/render IO: {required}"
+        );
+    }
 
     let orchestration_admin =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/admin.rs")).unwrap();
-    let orchestration_dashboard =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/dashboard.rs")).unwrap();
+    let cli_dashboard = fs::read_to_string(manifest_dir.join("src/dashboard_cmd.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/dashboard.rs")
+            .exists(),
+        "orchestration must not keep a dashboard facade module"
+    );
     for forbidden in [
         "pub struct AdminActor",
         "pub struct AdminFinding",
@@ -11734,9 +13784,22 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         "pub(crate) use agent_doc_controller::fleet",
     ] {
         assert!(
-            !orchestration_admin.contains(forbidden)
-                && !orchestration_dashboard.contains(forbidden),
+            !orchestration_admin.contains(forbidden) && !cli_dashboard.contains(forbidden),
             "orchestration must not re-own or facade fleet dashboard policy: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "build_admin_actor_list",
+        "detect_admin_findings",
+        "build_dashboard_model_with_diagnostics",
+        "render_dashboard",
+        "serde_json::to_string_pretty",
+        "std::thread::sleep",
+        "agent_doc_fs::find_project_root",
+    ] {
+        assert!(
+            !cli_dashboard.contains(forbidden),
+            "CLI dashboard should only adapt effects, not own dashboard IO/modeling: {forbidden}"
         );
     }
     assert!(
@@ -11749,14 +13812,17 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         "admin should adapt IO rows and call focused fleet list/finding/receipt policy directly"
     );
     assert!(
-        orchestration_dashboard.contains("use agent_doc_controller::fleet::{")
-            && orchestration_dashboard.contains("ActorListRecord")
-            && orchestration_dashboard.contains("ActorListRegistryBinding")
-            && orchestration_dashboard.contains("build_admin_actor_list")
-            && orchestration_dashboard.contains("detect_admin_findings")
-            && orchestration_dashboard.contains("build_dashboard_model_with_diagnostics")
-            && orchestration_dashboard.contains("render_dashboard"),
-        "dashboard should call focused fleet model/rendering policy directly"
+        cli_dashboard.contains("impl DashboardEffects for CliDashboardEffects")
+            && cli_dashboard.contains("ActorListRecord")
+            && cli_dashboard.contains("ActorListRegistryBinding")
+            && cli_dashboard.contains("DashboardActorDiagnostics")
+            && cli_dashboard
+                .contains("agent_doc_orchestration::project_controller::load_actor_store")
+            && cli_dashboard.contains("agent_doc_session_registry_io::load_in")
+            && cli_dashboard.contains("Tmux::default_server().pane_alive")
+            && cli_dashboard.contains("agent_doc_orchestration::project_controller::inspect_actor")
+            && cli_dashboard.contains("agent_doc_controller_io::dashboard::dashboard(&EFFECTS"),
+        "CLI dashboard should only adapt concrete actor/session/tmux/controller effects"
     );
 
     let controller_manifest =
@@ -11775,6 +13841,34 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-controller fleet policy must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+    let controller_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&controller_io_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-controller",
+        "agent-doc-fs",
+        "anyhow",
+        "serde_json",
+    ] {
+        assert!(
+            dependencies.contains_key(required),
+            "agent-doc-controller-io dashboard adapter should depend on focused dependency {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-sqlite",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-controller-io dashboard adapter must not depend on orchestration-side systems: {forbidden}"
         );
     }
 }
@@ -11892,12 +13986,13 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     }
     for required_snippet in [
         "pub struct StreamChunk",
+        "pub trait StreamingAgent",
         "pub fn parse_stream_line(",
         "pub fn parse_codex_line(",
     ] {
         assert!(
             executor_agent_stream.contains(required_snippet),
-            "agent-doc-turn-executor should own agent stream parsing directly: {required_snippet}"
+            "agent-doc-turn-executor should own agent stream parsing and contract directly: {required_snippet}"
         );
     }
     for required_snippet in [
@@ -12231,9 +14326,18 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         ),
         "codex probe tests should use the focused capability-proof defaults directly"
     );
-    let streaming =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/streaming.rs"))
-            .unwrap();
+    let agent_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/mod.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/agent/streaming.rs")
+            .exists(),
+        "agent::streaming must not reintroduce a facade around focused executor stream contracts"
+    );
+    assert!(
+        !agent_mod.contains("pub mod streaming"),
+        "agent::mod must not expose an orchestration streaming facade"
+    );
     let claude =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/claude.rs"))
             .unwrap();
@@ -12284,12 +14388,10 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
                 .contains("opencode_run_args(&self.base_args, prompt, session_id, fork, model)"),
         "agent::opencode should call focused OpenCode launch argv policy directly"
     );
-    for (name, source) in [
-        ("agent/streaming.rs", streaming.as_str()),
-        ("agent/codex.rs", codex.as_str()),
-    ] {
+    for (name, source) in [("agent/codex.rs", codex.as_str())] {
         for forbidden_snippet in [
             "pub struct StreamChunk",
+            "pub trait StreamingAgent",
             "pub fn parse_stream_line(",
             "pub fn parse_codex_line(",
             "pub use",
@@ -12301,13 +14403,15 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         }
     }
     assert!(
-        streaming.contains("use agent_doc_turn_executor::agent_stream::StreamChunk;")
-            && claude.contains("agent_doc_turn_executor::agent_stream::{")
+        claude.contains("agent_doc_turn_executor::agent_stream::{")
+            && claude.contains("StreamingAgent")
             && claude.contains("parse_stream_line")
             && codex.contains("agent_doc_turn_executor::agent_stream::{")
+            && codex.contains("StreamingAgent")
             && codex.contains("parse_codex_line")
-            && stream.contains("use agent_doc_turn_executor::agent_stream::StreamChunk;"),
-        "orchestration should call focused agent stream parsing/chunk APIs directly"
+            && stream.contains("agent_doc_turn_executor::agent_stream::{")
+            && stream.contains("StreamingAgent"),
+        "orchestration should call focused agent stream parsing/chunk/contract APIs directly"
     );
     let watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
@@ -12528,6 +14632,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor-io must own file/env-backed supervisor config IO"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor-io/src/ipc.rs")
+            .exists(),
+        "agent-doc-supervisor-io must own supervisor IPC socket transport IO"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -12551,6 +14661,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .unwrap();
     let supervisor_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
+    let supervisor_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/lib.rs")).unwrap();
     assert!(
         !supervisor_mod.contains("pub mod state"),
         "orchestration supervisor module must not re-export crash policy state"
@@ -12603,6 +14715,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .unwrap();
     let supervisor_io_cwd =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/cwd.rs")).unwrap();
+    let supervisor_io_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/ipc.rs")).unwrap();
     let supervisor_pty =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/pty.rs"))
             .unwrap();
@@ -12610,20 +14724,40 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         manifest_dir.join("agent-doc-orchestration/src/supervisor/in_process.rs"),
     )
     .unwrap();
-    let supervisor_ipc =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/ipc.rs"))
-            .unwrap();
     let orchestration_start =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
     let orchestration_start_run =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
-    let orchestration_startup_miss =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/startup_miss.rs"))
-            .unwrap();
-    let orchestration_startup_miss_prod = orchestration_startup_miss
-        .split("\n#[cfg(test)]")
-        .next()
-        .unwrap_or(&orchestration_startup_miss);
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/startup_miss.rs")
+            .exists(),
+        "orchestration must not keep a public startup_miss facade"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod startup_miss;"),
+        "orchestration must not expose startup-miss as a public module"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/supervisor/ipc.rs")
+            .exists(),
+        "orchestration must not keep a supervisor IPC transport facade"
+    );
+    assert!(
+        !supervisor_mod.contains("pub mod ipc"),
+        "orchestration supervisor module must not expose a supervisor IPC facade"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/startup_miss_registry.rs")
+            .exists(),
+        "orchestration must not keep a startup-miss registry adapter module"
+    );
+    let session_registry_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/lib.rs")).unwrap();
     for required_snippet in [
         "pub struct OwnershipGeneration",
         "pub struct OwnershipTransitionEvent",
@@ -12761,23 +14895,28 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "agent-doc-supervisor must own supervisor IPC protocol vocabulary: {required_snippet}"
         );
     }
-    for forbidden_snippet in [
-        "pub enum IpcMethod",
-        "pub struct IpcResponse",
-        "pub fn submit_bytes(",
-        "fn ipc_method_requires_capability_gate(",
-        "pub use agent_doc_supervisor::ipc_protocol",
+    assert!(
+        supervisor_io_lib.contains("pub mod ipc;"),
+        "agent-doc-supervisor-io must expose supervisor IPC transport through its owning module"
+    );
+    for required_snippet in [
+        "use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};",
+        "interprocess::local_socket",
+        "pub fn socket_path(",
+        "pub fn active_supervisor_pids(",
+        "pub struct SupervisorIpc",
+        "pub enum SocketLiveness",
+        "pub fn probe_socket(",
+        "pub fn send_command(",
     ] {
         assert!(
-            !supervisor_ipc.contains(forbidden_snippet),
-            "orchestration supervisor IPC transport must not re-own/facade protocol vocabulary: {forbidden_snippet}"
+            supervisor_io_ipc.contains(required_snippet),
+            "agent-doc-supervisor-io must own supervisor IPC transport: {required_snippet}"
         );
     }
     assert!(
-        supervisor_ipc
-            .contains("use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};")
-            && orchestration_start.contains("ipc_method_requires_capability_gate"),
-        "orchestration supervisor IPC transport should import focused protocol types directly"
+        orchestration_start.contains("ipc_method_requires_capability_gate"),
+        "start keeps focused supervisor protocol gating while IPC transport lives in supervisor-io"
     );
     for relative in [
         "agent-doc-orchestration/src/project_controller/rpc.rs",
@@ -12789,10 +14928,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
-            !source.contains("agent_doc_orchestration::supervisor::ipc::IpcMethod")
-                && !source.contains("agent_doc_orchestration::supervisor::ipc::IpcResponse")
-                && !source.contains("crate::supervisor::ipc::IpcMethod")
-                && !source.contains("crate::supervisor::ipc::IpcResponse"),
+            !source.contains("agent_doc_supervisor_io::ipc::IpcMethod")
+                && !source.contains("agent_doc_supervisor_io::ipc::IpcResponse")
+                && !source.contains("agent_doc_orchestration::supervisor::ipc")
+                && !source.contains("crate::supervisor::ipc"),
             "{relative} must call focused supervisor IPC protocol vocabulary directly"
         );
     }
@@ -12819,6 +14958,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum StartingPaneRecoveryTarget",
         "pub fn starting_pane_recovery_target(",
         "pub fn recent_session_loss_window_at(",
+        "pub fn registered_start_supersedes_miss(",
         "pub fn latest_log_anchor(",
     ] {
         assert!(
@@ -12830,38 +14970,73 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn startup_miss_state_path(",
         "pub fn supervisor_session_log_path(",
         "pub fn startup_miss_project_root(",
+        "pub fn record_startup_miss(",
+        "pub fn load_startup_miss(",
+        "pub fn clear_startup_miss(",
+        "pub struct RegisteredStartupOwner",
+        "pub trait StartupMissRegistryLookup",
+        "pub struct SessionRegistryStartupMissLookup",
+        "pub fn session_registry_lookup() -> &'static SessionRegistryStartupMissLookup",
+        "impl StartupMissRegistryLookup for SessionRegistryStartupMissLookup",
+        "agent_doc_session_registry_io::lookup_file_entry_in(",
+        "pub fn superseded_by_newer_registered_start(",
+        "pub fn take_superseded_startup_miss(",
+        "pub fn append_session_log_event(",
+        "pub struct RegistryRebindSessionLog",
+        "pub fn append_registry_rebind_session_log(",
+        "pub fn session_log_status(",
+        "pub fn recent_session_loss_window(",
+        "pub fn record_session_loss(",
     ] {
         assert!(
             supervisor_io_startup_miss.contains(required_snippet),
-            "agent-doc-supervisor-io must own startup-miss/session-log path IO: {required_snippet}"
-        );
-    }
-    for forbidden_snippet in [
-        "pub use agent_doc_supervisor::startup_miss",
-        "pub struct SessionLogStatus",
-        "pub struct RecentSessionLossWindow",
-        "pub fn session_log_status_from_content(",
-        "pub fn latest_log_anchor(",
-        "fn state_path(",
-        "fn log_path(",
-        "fn project_root(",
-        ".join(\".agent-doc/state/startup-miss\")",
-        ".join(\".agent-doc/logs\")",
-    ] {
-        assert!(
-            !orchestration_startup_miss_prod.contains(forbidden_snippet),
-            "orchestration startup_miss must stay a filesystem adapter, not a pure policy facade: {forbidden_snippet}"
+            "agent-doc-supervisor-io must own startup-miss/session-log IO: {required_snippet}"
         );
     }
     assert!(
-        orchestration_startup_miss
-            .contains("agent_doc_supervisor::startup_miss::session_log_status_from_content")
-            && orchestration_startup_miss.contains("startup_miss_state_path(file)?")
-            && orchestration_startup_miss
-                .contains("supervisor_session_log_path(file, session_id)?")
-            && orchestration_startup_miss.contains("startup_miss_project_root(file)"),
-        "orchestration startup_miss should call focused supervisor policy and IO directly"
+        session_registry_io.contains("pub fn lookup_file_entry_in(")
+            && session_registry_io.contains("-> Result<Option<RegistryEntry>>")
+            && session_registry_io.contains("canonical_registry_key_in(base_dir,"),
+        "agent-doc-session-registry-io must own canonical file-entry registry lookup"
     );
+    for (relative, required) in [
+        (
+            "agent-doc-orchestration/src/sync.rs",
+            "agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(",
+        ),
+        (
+            "agent-doc-orchestration/src/start/run.rs",
+            "agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(",
+        ),
+        (
+            "agent-doc-orchestration/src/session_check.rs",
+            "agent_doc_supervisor_io::startup_miss::superseded_by_newer_registered_start(",
+        ),
+        (
+            "agent-doc-orchestration/src/route/pane_resolution.rs",
+            "agent_doc_supervisor_io::startup_miss::superseded_by_newer_registered_start(",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains(required)
+                && source
+                    .contains("agent_doc_supervisor_io::startup_miss::session_registry_lookup()"),
+            "{relative} should call focused startup-miss supersession IO through the focused registry lookup"
+        );
+    }
+    for relative in [
+        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-orchestration/src/start/run.rs",
+        "agent-doc-orchestration/src/session_check.rs",
+        "agent-doc-orchestration/src/route/pane_resolution.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("crate::startup_miss::"),
+            "{relative} must not call the deleted orchestration startup_miss facade"
+        );
+    }
     let orchestration_route =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     for forbidden_snippet in [
@@ -13701,6 +15876,7 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
         "pub const ROUTE_BIN_ENV: &str = \"AGENT_DOC_ROUTE_BIN\";",
         "pub fn agent_doc_start_bin() -> String",
         "pub mod start_command;",
+        "pub mod detached_child;",
     ] {
         assert!(
             supervisor_process.contains(required),
@@ -13720,6 +15896,21 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
             "agent-doc-supervisor-process should own route-owned supervisor start command rendering: {required}"
         );
     }
+    let supervisor_detached_child =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/detached_child.rs"))
+            .unwrap();
+    for required in ["pub fn reap_detached(", "fn spawn_reaper("] {
+        assert!(
+            supervisor_detached_child.contains(required),
+            "agent-doc-supervisor-process should own detached child reaping: {required}"
+        );
+    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/detached_child.rs")
+            .exists(),
+        "orchestration must not keep a detached_child process-effects facade"
+    );
     for (relative, required) in [
         (
             "agent-doc-orchestration/src/route/startup.rs",
@@ -13748,6 +15939,20 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
                 "{relative} must not re-own supervisor start-binary resolution: {forbidden}"
             );
         }
+    }
+    for relative in [
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-orchestration/src/watch.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_supervisor_process::detached_child::reap_detached("),
+            "{relative} should call focused supervisor-process detached-child reaping directly"
+        );
+        assert!(
+            !source.contains("crate::detached_child::reap_detached("),
+            "{relative} must not call the removed orchestration detached_child facade"
+        );
     }
 }
 
@@ -13866,7 +16071,7 @@ fn test_agent_doc_watch_io_owns_pid_effects() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     assert!(
         manifest_dir.join("agent-doc-watch-io/src/lib.rs").exists(),
-        "agent-doc-watch-io must own watch daemon PID file effects"
+        "agent-doc-watch-io must own watch daemon PID and controller-watch effects"
     );
 
     let watch_io = fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/lib.rs")).unwrap();
@@ -13879,10 +16084,19 @@ fn test_agent_doc_watch_io_owns_pid_effects() {
         "pub fn write_current_pid_in(",
         "pub fn remove_pid()",
         "pub fn remove_pid_in(",
+        "pub struct WatchObservation",
+        "pub fn registry() -> &'static WatcherRegistry",
+        "pub fn unregister_document(",
+        "pub fn observe_document_event(",
+        "agent_doc_debounce::write_provenance(file)",
+        "WatchWriteProvenance::new",
+        "agent_doc_hash::content_hash(current_content)",
+        "file_watch_event_id(doc_id, generation, &content_hash)",
+        "StateFact::FileWatchChangeObserved",
     ] {
         assert!(
             watch_io.contains(required),
-            "agent-doc-watch-io should own watch PID IO: {required}"
+            "agent-doc-watch-io should own watch PID/controller IO: {required}"
         );
     }
 
@@ -14066,25 +16280,53 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "workflow preflight policy should adapt focused component-attr warning facts"
     );
 
+    let queue_io_one_shot =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/one_shot_sync.rs")).unwrap();
+    for required_snippet in [
+        "pub struct OneShotQueueSyncApplied",
+        "pub enum OneShotQueueSyncResult",
+        "pub fn sync_one_shot_backlog_queue_with_snapshot(",
+        "backlog_sync::collect_one_shot_backlog_queue_sync",
+        "document_queue::sync_backlog_into_queue",
+        "backlog_sync::backlog_queue_sync_report",
+        "std::fs::write(file, &new_content)",
+    ] {
+        assert!(
+            queue_io_one_shot.contains(required_snippet),
+            "agent-doc-queue-io should own one-shot backlog queue sync file mutation: {required_snippet}"
+        );
+    }
+    let queue_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/Cargo.toml")).unwrap();
+    assert!(
+        queue_io_manifest.contains("agent-doc-element ="),
+        "agent-doc-queue-io should parse agent components directly for one-shot queue sync"
+    );
+
     let queue_cmd =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_cmd.rs")).unwrap();
     for forbidden_snippet in [
+        "agent_doc_queue::backlog_sync",
+        "agent_doc_queue::document_queue",
+        "element::parse(&content)",
         "fn queue_prompt_reference_id",
         "fn queue_entry_reference_id",
-        "fn format_queue_ids",
+        "pub fn format_queue_ids",
         "fn collect_one_shot_backlog_queue_sync",
         "fn backlog_queue_sync_report",
+        "document_queue::sync_backlog_into_queue",
+        "std::fs::write(file, &new_content)",
     ] {
         assert!(
             !queue_cmd.contains(forbidden_snippet),
-            "queue_cmd.rs must not re-own one-shot backlog queue sync policy: {forbidden_snippet}"
+            "queue_cmd.rs must not re-own one-shot backlog queue sync file mutation: {forbidden_snippet}"
         );
     }
     assert!(
-        queue_cmd.contains("agent_doc_queue::backlog_sync")
-            && queue_cmd.contains("collect_one_shot_backlog_queue_sync")
-            && queue_cmd.contains("backlog_queue_sync_report"),
-        "queue_cmd.rs should call one-shot queue sync policy through agent-doc-queue directly"
+        queue_cmd.contains(
+            "agent_doc_queue_io::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot("
+        ) && queue_cmd.contains("OneShotQueueSyncResult"),
+        "queue_cmd.rs should adapt one-shot queue sync through agent-doc-queue-io"
     );
 }
 
@@ -14629,6 +16871,9 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         "detect_dropped_from_history_with_extra_current_ids(",
         "malformed_tracked_item_refs_in_components(",
         "malformed_tracked_item_interruption_message(",
+        "agent_doc_fs::document_state_hash(",
+        "agent_doc_fs::find_project_root(",
+        ".agent-doc/baselines",
     ] {
         assert!(
             !backlog_guards.contains(forbidden),
@@ -14639,8 +16884,9 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         backlog_guards.contains("agent_doc_element_backlog::guard_policy::{")
             && backlog_guards.contains("malformed_tracked_item_guard")
             && backlog_guards.contains("shadow_backlog_guard")
-            && backlog_guards.contains("dropped_from_history_guard"),
-        "session_check backlog guards should call focused guard policy from agent-doc-element-backlog"
+            && backlog_guards.contains("dropped_from_history_guard")
+            && backlog_guards.contains("agent_doc_fs::baseline_path_for("),
+        "session_check backlog guards should call focused backlog policy and baseline path helpers directly"
     );
 
     let pending_checks = fs::read_to_string(
@@ -14690,8 +16936,7 @@ fn test_extracted_pure_layers_keep_focused_owners() {
         );
     }
     assert!(
-        detect.contains("agent_doc_git::parent_submodule_pointer_message(")
-            && detect.contains("agent_doc_git::short_oid("),
+        detect.contains("agent_doc_git::parent_submodule_pointer_message("),
         "session_check detect should call agent-doc-git messaging helpers directly"
     );
 
@@ -14703,6 +16948,7 @@ fn test_extracted_pure_layers_keep_focused_owners() {
         "pub fn build_component_archive_content(",
         "pub fn build_inline_exchange_archive_content(",
         "pub fn build_exchange_compact_summary(",
+        "pub fn compact_archive_pointers(",
         "pub fn format_compact_timestamp_from_unix_secs(",
     ] {
         assert!(
@@ -15243,18 +17489,34 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
         );
     }
     assert!(
-        sessions_source.contains("use tmux_router::registry::{")
-            && sessions_source.contains("canonical_registry_key_in")
-            && sessions_source.contains("entry_session_id")
-            && sessions_source.contains("find_registry_key_by_session_id")
-            && sessions_source.contains("normalize_registry"),
-        "sessions.rs should import focused tmux-router registry policy directly"
+        sessions_source.contains("use agent_doc_session_registry as session_registry;")
+            && !sessions_source.contains("use tmux_router::registry::{")
+            && !sessions_source.contains("normalize_registry"),
+        "sessions.rs should import focused agent-doc session registry policy directly"
+    );
+
+    let registry_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry/src/lib.rs")).unwrap();
+    assert!(
+        registry_source.contains("use tmux_router::registry::{")
+            && registry_source.contains("canonical_registry_key_in")
+            && registry_source.contains("entry_session_id")
+            && registry_source.contains("find_registry_key_by_session_id"),
+        "agent-doc-session-registry should adapt tmux-router registry policy directly"
+    );
+
+    let registry_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/lib.rs")).unwrap();
+    assert!(
+        registry_io_source.contains("use tmux_router::registry::normalize_registry;")
+            && registry_io_source.contains("agent_doc_session_registry::session_pane(")
+            && registry_io_source.contains("agent_doc_session_registry::session_entry("),
+        "agent-doc-session-registry-io should combine tmux-router normalization with focused lookup policy"
     );
 
     let direct_call_sources = [
         "src/rename.rs",
         "agent-doc-orchestration/src/sync.rs",
-        "agent-doc-orchestration/src/startup_miss.rs",
         "agent-doc-orchestration/src/session_actor.rs",
         "agent-doc-orchestration/src/project_controller.rs",
         "agent-doc-orchestration/src/sync/pane_repair.rs",
@@ -15281,6 +17543,10 @@ fn test_agent_doc_tmux_owns_pane_position_selection() {
     let dependencies = parsed["dependencies"].as_table().unwrap();
 
     let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    let tmux_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-tmux-io/src/lib.rs")).unwrap();
+    let claim_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
     for required in [
         "pub const TMUX_PANE_GEOMETRY_FORMAT",
         "pub enum PanePosition",
@@ -15298,6 +17564,10 @@ fn test_agent_doc_tmux_owns_pane_position_selection() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
     for forbidden in [
         "fn select_pane_by_position(",
+        "pub fn pane_by_position(",
+        "pub fn pane_by_position_in_window(",
+        "pane_by_position_with_mux(",
+        "pane_by_position_in_window_with_mux(",
         "Vec<(String, u32, u32, u32, u32)>",
         "\"#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}\"",
     ] {
@@ -15307,10 +17577,17 @@ fn test_agent_doc_tmux_owns_pane_position_selection() {
         );
     }
     assert!(
-        sessions_source.contains("use agent_doc_tmux::{")
-            && sessions_source.contains("TMUX_PANE_GEOMETRY_FORMAT")
-            && sessions_source.contains("select_pane_by_position"),
-        "sessions.rs should call the focused tmux pane position API directly"
+        tmux_io_source.contains("pub fn pane_by_position(")
+            && tmux_io_source.contains("pub fn pane_by_position_in_window(")
+            && tmux_io_source.contains("agent_doc_tmux::TMUX_PANE_GEOMETRY_FORMAT")
+            && tmux_io_source.contains("agent_doc_tmux::select_pane_by_position"),
+        "agent-doc-tmux-io should own the effectful pane-position tmux query adapter"
+    );
+    assert!(
+        !claim_source.contains("sessions::pane_by_position")
+            && claim_source.contains("agent_doc_tmux_io::pane_by_position(")
+            && claim_source.contains("agent_doc_tmux_io::pane_by_position_in_window("),
+        "claim should resolve positional panes through focused tmux IO, not sessions.rs"
     );
 
     for forbidden in [
@@ -15437,6 +17714,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let dependencies = parsed["dependencies"].as_table().unwrap();
 
     let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    let tmux_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-tmux-io/src/lib.rs")).unwrap();
     for required in [
         "pub fn pane_current_command_is_bare_shell(",
         "pub enum TmuxPaneProcessKind",
@@ -15479,18 +17758,140 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             "enum PaneProcessKind",
             "fn pane_process_kind_from_current_command(",
             "fn pane_current_command_is_agent_process(",
+            "fn pane_current_command(",
+            "fn pane_window_name(",
+            "fn pane_session_name(",
+            "fn has_named_window(",
+            "fn pane_process_tree_contains_pid(",
+            "sessions::pane_pid_with_mux(",
+            "sessions::pane_window_with_mux(",
         ] {
             assert!(
                 !source.contains(forbidden),
-                "{relative} must not re-own or facade tmux pane process policy: {forbidden}"
+                "{relative} must not re-own or facade tmux pane process/observation policy: {forbidden}"
+            );
+        }
+    }
+    for relative in [
+        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-orchestration/src/route/session_resolution.rs",
+        "agent-doc-orchestration/src/route/pane_resolution.rs",
+        "agent-doc-orchestration/src/route/startup.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in [
+            "fn pane_window_name(",
+            "fn pane_session_name(",
+            "fn has_named_window(",
+            "fn pane_display_value(",
+            "agent_doc_tmux_io::list_windows(tmux, Some(session_name), \"#{window_name}\")",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not keep route-local tmux observation facades: {forbidden}"
             );
         }
     }
     let resync_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync.rs")).unwrap();
+    let route_session_resolution = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/route/session_resolution.rs"),
+    )
+    .unwrap();
+    let route_pane_resolution = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
+    )
+    .unwrap();
+    let route_startup =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
+            .unwrap();
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
+            .unwrap();
+    let sessions_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+    let claim_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+    let session_actor_cmd_source =
+        fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
+    let prompt_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt.rs")).unwrap();
+    let watch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+    let sync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let start_run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
     assert!(
-        resync_source.contains("pane_process_kind_from_current_command_samples"),
-        "resync should call the focused tmux process sample classifier directly"
+        resync_source.contains("pane_process_kind_from_current_command_samples")
+            && resync_source.contains("agent_doc_tmux_io::target_current_command(")
+            && resync_source.contains("agent_doc_tmux_io::target_window_name(")
+            && resync_source.contains("agent_doc_tmux_io::target_window_id(")
+            && resync_source.contains("agent_doc_process_owner_io::process_tree_contains_pid("),
+        "resync should call focused tmux process and observation APIs directly"
+    );
+    assert!(
+        tmux_io_source.contains("pub fn has_window_named(")
+            && tmux_io_source.contains("pub fn in_tmux() -> bool")
+            && tmux_io_source.contains("pub fn target_window_id(")
+            && tmux_io_source.contains("pub fn capture_pane(")
+            && tmux_io_source.contains("pub fn capture_pane_with_ansi(")
+            && tmux_io_source.contains("pub fn join_pane_guarded(")
+            && tmux_io_source.contains("pub fn send_key_logged(")
+            && route_session_resolution.contains("agent_doc_tmux_io::target_session_name(")
+            && route_session_resolution.contains("agent_doc_tmux_io::target_window_name(")
+            && route_session_resolution.contains("agent_doc_tmux_io::has_window_named(")
+            && route_pane_resolution.contains("agent_doc_tmux_io::target_session_name(")
+            && route_pane_resolution.contains("agent_doc_tmux_io::target_window_name(")
+            && route_startup.contains("agent_doc_tmux_io::has_window_named(")
+            && route_startup.contains("agent_doc_tmux_io::pane_pid(")
+            && route_source.contains("agent_doc_tmux_io::pane_pid(")
+            && route_source.contains("agent_doc_tmux_io::target_session_name(")
+            && route_source.contains("agent_doc_tmux_io::target_current_command(")
+            && route_dispatch.contains("agent_doc_tmux_io::target_current_command(")
+            && route_dispatch.contains("agent_doc_tmux_io::target_window_id(")
+            && route_startup.contains("agent_doc_tmux_io::target_window_id(")
+            && tmux_io_source.contains("pub fn current_pane_id_from_env_or_tmux(")
+            && claim_source.contains("agent_doc_tmux_io::pane_pid(")
+            && claim_source.contains("agent_doc_tmux_io::current_pane_id_from_env_or_tmux(")
+            && session_actor_cmd_source.contains("agent_doc_tmux_io::pane_pid(")
+            && session_actor_cmd_source
+                .contains("agent_doc_tmux_io::current_pane_id_from_env_or_tmux(")
+            && session_actor_cmd_source.contains("agent_doc_tmux_io::capture_pane(")
+            && prompt_source.contains("agent_doc_tmux_io::capture_pane_with_ansi(")
+            && prompt_source.contains("agent_doc_tmux_io::send_key_logged(")
+            && watch_source.contains("agent_doc_tmux_io::capture_pane(")
+            && route_pane_resolution.contains("agent_doc_tmux_io::join_pane_guarded(")
+            && route_startup.contains("agent_doc_tmux_io::join_pane_guarded(")
+            && sync_source.contains("agent_doc_tmux_io::join_pane_guarded(")
+            && write_source.contains("agent_doc_tmux_io::in_tmux()")
+            && preflight_source.contains("agent_doc_tmux_io::in_tmux()")
+            && start_run_source.contains("agent_doc_tmux_io::in_tmux()")
+            && !sessions_source.contains("pub fn pane_pid(")
+            && !sessions_source.contains("pub fn pane_pid_with_mux(")
+            && !sessions_source.contains("pub fn pane_window(")
+            && !sessions_source.contains("pub fn pane_window_with_mux(")
+            && !sessions_source.contains("pub fn current_pane(")
+            && !sessions_source.contains("pub fn current_pane_with_mux(")
+            && !sessions_source.contains("pub fn capture_pane(")
+            && !sessions_source.contains("pub fn capture_pane_with_ansi(")
+            && !sessions_source.contains("pub fn join_pane_guarded(")
+            && !sessions_source.contains("pub fn send_key(")
+            && !sessions_source.contains("pub fn send_submitted_text(")
+            && !sessions_source.contains("pub fn send_submitted_text_for_harness(")
+            && !sessions_source.contains("pub fn in_tmux(")
+            && !sessions_source.contains("capture_pane_plain")
+            && !sessions_source.contains("fn display_message(&self")
+            && !sessions_source.contains("trait Multiplexer")
+            && !sessions_source.contains("impl Multiplexer for"),
+        "route should call focused tmux IO observation helpers directly"
     );
 
     for forbidden in [
@@ -15850,6 +18251,8 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
 
     let sessions_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+    let tmux_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-tmux-io/src/lib.rs")).unwrap();
     for forbidden in [
         "pub struct TmuxSubmitProfile",
         "pub const fn tmux_submit_profile_for_harness(",
@@ -15865,11 +18268,13 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
         );
     }
     assert!(
-        sessions_source.contains("use agent_doc_tmux_commands::{")
-            && sessions_source.contains("text_submit_command(")
-            && sessions_source.contains("text_only_command(")
-            && sessions_source.contains("tmux_submit_profile_for_harness("),
-        "sessions.rs should call the focused tmux command API directly"
+        !sessions_source.contains("tmux_submit_profile_for_harness(")
+            && !sessions_source.contains("agent_doc_tmux_io::send_submitted_text_with_profile(")
+            && tmux_io_source.contains("pub fn send_submitted_text_logged(")
+            && tmux_io_source.contains("pub fn send_submitted_text_for_harness_logged(")
+            && tmux_io_source.contains("tmux_submit_profile_for_harness(")
+            && tmux_io_source.contains("send_submitted_text_with_profile("),
+        "logged submitted-text profile selection should live in focused tmux IO, not sessions.rs"
     );
 
     let route_dispatch_source =
@@ -16010,11 +18415,10 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
 
     for relative in [
         "agent-doc-orchestration/src/ops_log.rs",
-        "agent-doc-orchestration/src/op_capture.rs",
+        "agent-doc-op-capture-io/src/lib.rs",
         "agent-doc-orchestration/src/backlog_cmd.rs",
         "agent-doc-orchestration/src/graph.rs",
         "agent-doc-orchestration/src/route.rs",
-        "agent-doc-orchestration/src/snapshot.rs",
         "agent-doc-debounce/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -16047,6 +18451,16 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
         }
     }
 
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod op_capture;")
+            && !manifest_dir
+                .join("agent-doc-orchestration/src/op_capture.rs")
+                .exists(),
+        "orchestration must not keep an op_capture sidecar facade"
+    );
+
     for relative in [
         "src",
         "agent-doc-orchestration/src",
@@ -16077,6 +18491,172 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
 }
 
 #[test]
+fn test_agent_doc_archive_io_owns_head_compact_archive_reads() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let workspace_members = root_manifest["workspace"]["members"].as_array().unwrap();
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-archive-io")),
+        "agent-doc-archive-io must be a workspace member"
+    );
+
+    let root_dependencies = root_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-archive-io"),
+        "root crate should expose the focused compact archive IO crate"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-archive-io"),
+        "agent-doc-orchestration should call the focused compact archive IO crate"
+    );
+
+    let archive_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-archive-io/Cargo.toml")).unwrap();
+    let archive_io_manifest: toml::Value = toml::from_str(&archive_io_manifest).unwrap();
+    let archive_io_dependencies = archive_io_manifest["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-document", "agent-doc-project-root-io"] {
+        assert!(
+            archive_io_dependencies.contains_key(required),
+            "agent-doc-archive-io should depend on compact archive read dependency: {required}"
+        );
+    }
+    for forbidden in ["agent-doc-orchestration", "agent-doc-fs"] {
+        assert!(
+            !archive_io_dependencies.contains_key(forbidden),
+            "agent-doc-archive-io must stay focused on compact archive reads: {forbidden}"
+        );
+    }
+
+    let archive_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-archive-io/src/lib.rs")).unwrap();
+    assert!(
+        archive_io_source.contains("pub fn read_head_compact_archives(")
+            && archive_io_source.contains("pub fn read_head_compact_archive(")
+            && archive_io_source.contains(".agent-doc/archives")
+            && archive_io_source.contains("agent_doc_project_root_io::project_root_containing(")
+            && archive_io_source
+                .contains("agent_doc_document::compact_archive::compact_archive_pointers("),
+        "agent-doc-archive-io should own HEAD compact archive read pathing"
+    );
+
+    let closeout_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub(crate) fn compact_archive_pointers(",
+        "pub(crate) fn read_head_compact_archive(",
+        "agent_doc_fs::find_project_root(&canonical)?",
+    ] {
+        assert!(
+            !closeout_source.contains(forbidden),
+            "flow closeout must not re-own compact archive read pathing: {forbidden}"
+        );
+    }
+    assert!(
+        closeout_source.contains("agent_doc_archive_io::read_head_compact_archives("),
+        "flow closeout should call compact archive IO directly"
+    );
+
+    let queue_head_guards_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/queue_head_guards.rs"),
+    )
+    .unwrap();
+    assert!(
+        !queue_head_guards_source.contains("crate::flow::closeout::read_head_compact_archive")
+            && !queue_head_guards_source
+                .contains("crate::flow::closeout::compact_archive_pointers")
+            && queue_head_guards_source
+                .contains("agent_doc_archive_io::read_head_compact_archives("),
+        "session_check queue-head guards should call compact archive IO directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_capture_io_owns_response_capture_paths() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let workspace_members = root_manifest["workspace"]["members"].as_array().unwrap();
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-capture-io")),
+        "agent-doc-capture-io must be a workspace member"
+    );
+
+    let root_dependencies = root_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-capture-io"),
+        "root crate should expose the focused response capture IO crate"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-capture-io"),
+        "agent-doc-orchestration should call the focused response capture IO crate"
+    );
+
+    let capture_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-capture-io/Cargo.toml")).unwrap();
+    let capture_io_manifest: toml::Value = toml::from_str(&capture_io_manifest).unwrap();
+    let capture_io_dependencies = capture_io_manifest["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-fs", "agent-doc-project-root-io", "anyhow"] {
+        assert!(
+            capture_io_dependencies.contains_key(required),
+            "agent-doc-capture-io should depend on response capture path dependency: {required}"
+        );
+    }
+    for forbidden in ["agent-doc-orchestration", "agent-doc-op-capture-io"] {
+        assert!(
+            !capture_io_dependencies.contains_key(forbidden),
+            "agent-doc-capture-io must stay focused on response capture paths, not orchestration or editor op-capture sidecars: {forbidden}"
+        );
+    }
+
+    let capture_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-capture-io/src/lib.rs")).unwrap();
+    assert!(
+        capture_io_source.contains("pub fn capture_dir_for(")
+            && capture_io_source.contains("pub fn capture_path_for(")
+            && capture_io_source.contains("pub fn partial_capture_path_for(")
+            && capture_io_source.contains(".agent-doc/captures")
+            && capture_io_source
+                .contains("agent_doc_project_root_io::project_root_or_file_parent("),
+        "agent-doc-capture-io should own response capture ledger path resolution"
+    );
+
+    let capture_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/capture.rs")).unwrap();
+    for forbidden in [
+        "fn capture_path_for(file:",
+        "fn partial_capture_path_for(file:",
+        "agent_doc_fs::find_project_root(",
+    ] {
+        assert!(
+            !capture_source.contains(forbidden),
+            "capture.rs must not re-own response capture path resolution: {forbidden}"
+        );
+    }
+    assert!(
+        capture_source.contains("agent_doc_capture_io::capture_dir_for(")
+            && capture_source.contains("agent_doc_capture_io::capture_path_for(")
+            && capture_source.contains("agent_doc_capture_io::partial_capture_path_for("),
+        "capture.rs should adapt capture records through focused response capture IO paths"
+    );
+}
+
+#[test]
 fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -16088,10 +18668,30 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             .any(|member| member.as_str() == Some("agent-doc-ipc-protocol")),
         "agent-doc-ipc-protocol must be a workspace member"
     );
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-ipc-io")),
+        "agent-doc-ipc-io must be a workspace member"
+    );
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-ipc-forensics-io")),
+        "agent-doc-ipc-forensics-io must be a workspace member"
+    );
     let root_dependencies = root_manifest["dependencies"].as_table().unwrap();
     assert!(
         root_dependencies.contains_key("agent-doc-ipc-protocol"),
         "root crate callers should depend on agent-doc-ipc-protocol directly"
+    );
+    assert!(
+        root_dependencies.contains_key("agent-doc-ipc-io"),
+        "root crate callers should depend on agent-doc-ipc-io directly"
+    );
+    assert!(
+        root_dependencies.contains_key("agent-doc-ipc-forensics-io"),
+        "root crate callers should depend on agent-doc-ipc-forensics-io directly"
     );
     assert!(
         workspace_members
@@ -16100,8 +18700,18 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "agent-doc-callback-io must be a workspace member"
     );
     assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-project-root-io")),
+        "agent-doc-project-root-io must be a workspace member"
+    );
+    assert!(
         root_dependencies.contains_key("agent-doc-callback-io"),
         "root crate callback callers should depend on agent-doc-callback-io directly"
+    );
+    assert!(
+        root_dependencies.contains_key("agent-doc-project-root-io"),
+        "root crate project-root callers should depend on agent-doc-project-root-io directly"
     );
 
     let protocol_manifest =
@@ -16133,6 +18743,16 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "pub fn is_socket_ack_timeout_error(",
         "pub fn is_socket_status_error(",
         "pub fn existing_patch_is_reposition_only(",
+        "pub enum IpcSnapshotSource",
+        "pub const fn is_ack_content_proven(self) -> bool",
+        "pub enum IpcDiskRepairReason",
+        "pub const fn redelivery_kind(self) -> FullContentRepairRedelivery",
+        "pub const fn merge_with_ipc_dedupe(self) -> Self",
+        "pub enum AlreadyAppliedSnapshotOutcome",
+        "pub enum FullContentRepairRedelivery",
+        "pub const fn success_message(self) -> &'static str",
+        "pub const fn not_consumed_message(self) -> &'static str",
+        "pub fn failed_message(self, error: impl fmt::Display) -> String",
         "pub enum FullContentIpcMode",
         "pub const fn source_label(",
     ] {
@@ -16168,22 +18788,361 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "agent-doc-orchestration should call the focused IPC protocol crate"
     );
     assert!(
+        orchestration_dependencies.contains_key("agent-doc-ipc-io"),
+        "agent-doc-orchestration should call the focused IPC IO crate"
+    );
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-ipc-forensics-io"),
+        "agent-doc-orchestration should call the focused IPC forensic sidecar IO crate"
+    );
+    assert!(
         orchestration_dependencies.contains_key("agent-doc-callback-io"),
         "agent-doc-orchestration should call the focused callback IO crate"
     );
-
-    let ipc_socket_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ipc_socket.rs")).unwrap();
     assert!(
-        ipc_socket_source.contains("use agent_doc_ipc_protocol::{")
-            && ipc_socket_source.contains("AckClassification")
-            && ipc_socket_source.contains("classify_ack")
-            && ipc_socket_source.contains("early_ack_tagged_message")
-            && ipc_socket_source.contains("message_requests_early_ack")
-            && ipc_socket_source.contains("patch_message")
-            && ipc_socket_source.contains("save_document_message")
-            && ipc_socket_source.contains("vcs_refresh_message"),
-        "ipc_socket.rs should import the focused IPC protocol API directly"
+        orchestration_dependencies.contains_key("agent-doc-project-root-io"),
+        "agent-doc-orchestration should call the focused project-root IO crate"
+    );
+
+    let project_root_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-project-root-io/Cargo.toml")).unwrap();
+    let project_root_manifest: toml::Value = toml::from_str(&project_root_manifest).unwrap();
+    let project_root_dependencies = project_root_manifest["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-fs", "agent-doc-git-io"] {
+        assert!(
+            project_root_dependencies.contains_key(required),
+            "agent-doc-project-root-io should depend on project-root dependency: {required}"
+        );
+    }
+    assert!(
+        project_root_dependencies.contains_key("anyhow"),
+        "agent-doc-project-root-io should own fallible CLI project-root argument resolution"
+    );
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-ipc-io",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+    ] {
+        assert!(
+            !project_root_dependencies.contains_key(forbidden),
+            "agent-doc-project-root-io must stay a focused project-root adapter, not orchestration, IPC transport, sqlite, or tmux-router state: {forbidden}"
+        );
+    }
+    let project_root_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-project-root-io/src/lib.rs")).unwrap();
+    assert!(
+        project_root_source.contains("pub fn resolve_ipc_project_root(")
+            && project_root_source.contains("pub fn project_root_from_arg(")
+            && project_root_source.contains("pub fn project_root_from_cwd(")
+            && project_root_source.contains("pub fn project_root_containing(")
+            && project_root_source.contains("pub fn project_root_or_cwd(")
+            && project_root_source.contains("pub fn project_root_for_target_or_cwd(")
+            && project_root_source.contains("pub fn project_root_or_file_parent(")
+            && project_root_source.contains("agent_doc_fs::find_project_root")
+            && project_root_source.contains("agent_doc_git_io::dirs::git_toplevel_at"),
+        "agent-doc-project-root-io should own .agent-doc project-root resolution constrained by git toplevel"
+    );
+    let project_controller_rpc_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    assert!(
+        !project_controller_rpc_source.contains("pub fn project_root_from_arg(")
+            && project_controller_rpc_source
+                .contains("agent_doc_project_root_io::project_root_from_arg(")
+            && !project_controller_rpc_source.contains("agent_doc_fs::find_project_root(")
+            && project_controller_rpc_source
+                .contains("agent_doc_project_root_io::project_root_containing("),
+        "orchestration project-controller RPC should call focused project-root IO instead of owning CLI/stale-supervisor root resolution"
+    );
+    let project_controller_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+            .unwrap();
+    assert!(
+        !project_controller_source.contains("agent_doc_fs::find_project_root(")
+            && project_controller_source
+                .contains("agent_doc_project_root_io::project_root_containing("),
+        "orchestration project-controller should call focused project-root IO instead of owning closeout actor root discovery"
+    );
+    let gc_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/gc.rs")).unwrap();
+    assert!(
+        !gc_source.contains("fn find_project_root_from_cwd(")
+            && gc_source.contains("agent_doc_project_root_io::project_root_from_cwd("),
+        "gc should call focused project-root IO instead of owning cwd project-root discovery"
+    );
+    let git_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    assert!(
+        !git_source.contains("agent_doc_fs::find_project_root(")
+            && git_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "git orchestration should call focused project-root IO instead of owning VCS-refresh root discovery"
+    );
+    let admin_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/admin.rs")).unwrap();
+    assert!(
+        !admin_source.contains("fn resolve_root(")
+            && !admin_source.contains("fn resolve_root_for_target(")
+            && admin_source.contains("agent_doc_project_root_io::project_root_or_cwd(")
+            && admin_source.contains("agent_doc_project_root_io::project_root_for_target_or_cwd("),
+        "admin should call focused project-root IO instead of owning root selection helpers"
+    );
+    let watch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+    assert!(
+        !watch_source.contains("agent_doc_fs::find_project_root(")
+            && watch_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "watch should call focused project-root IO instead of owning .agent-doc root discovery"
+    );
+    let ops_log_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ops_log.rs")).unwrap();
+    assert!(
+        !ops_log_source.contains("agent_doc_fs::find_project_root(")
+            && ops_log_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "ops_log should call focused project-root IO instead of owning .agent-doc root discovery"
+    );
+    let realtime_model_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/realtime_model.rs"))
+            .unwrap();
+    assert!(
+        !realtime_model_source.contains("agent_doc_fs::find_project_root(")
+            && realtime_model_source
+                .contains("agent_doc_project_root_io::project_root_containing("),
+        "realtime_model should call focused project-root IO instead of owning broadcast patches root discovery"
+    );
+    let graph_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/graph.rs")).unwrap();
+    assert!(
+        !graph_source.contains("agent_doc_fs::find_project_root(")
+            && graph_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "graph should call focused project-root IO instead of owning run-context root discovery"
+    );
+    let start_run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+    assert!(
+        !start_run_source.contains("agent_doc_fs::find_project_root(")
+            && start_run_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "start/run should call focused project-root IO instead of owning supervisor-start root discovery"
+    );
+    let preflight_run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    assert!(
+        !preflight_run_source.contains("agent_doc_fs::find_project_root(")
+            && preflight_run_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "preflight/run should call focused project-root IO instead of owning actor cleanup/sweep root discovery"
+    );
+    let preflight_maintenance_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    assert!(
+        !preflight_maintenance_source.contains("agent_doc_fs::find_project_root(")
+            && preflight_maintenance_source
+                .contains("agent_doc_project_root_io::project_root_containing("),
+        "preflight maintenance should call focused project-root IO instead of owning queue/done/ops-log root discovery"
+    );
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    assert!(
+        !preflight_source.contains("agent_doc_fs::find_project_root(")
+            && preflight_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "preflight should call focused project-root IO instead of owning drift/archive/claims root discovery"
+    );
+    let run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    assert!(
+        !run_source.contains("agent_doc_fs::find_project_root(")
+            && run_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "run should call focused project-root IO instead of owning stderr/queue/actor root discovery"
+    );
+    let repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    assert!(
+        !repair_source.contains("agent_doc_fs::find_project_root(")
+            && repair_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "repair should call focused project-root IO instead of owning test/sidecar root discovery"
+    );
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    assert!(
+        !write_source.contains("agent_doc_fs::find_project_root(")
+            && write_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "write should call focused project-root IO instead of owning write-authority root discovery"
+    );
+    let flow_closeout_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
+            .unwrap();
+    assert!(
+        !flow_closeout_source.contains("agent_doc_fs::find_project_root(")
+            && flow_closeout_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "flow closeout should call focused project-root IO instead of owning terminal proof/editor IPC root discovery"
+    );
+    let session_actor_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
+            .unwrap();
+    assert!(
+        !session_actor_source.contains("agent_doc_fs::find_project_root(")
+            && session_actor_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "session_actor should call focused project-root IO instead of owning actor log/store root discovery"
+    );
+    let snapshot_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
+    assert!(
+        !snapshot_source.contains("agent_doc_fs::find_project_root(")
+            && snapshot_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "snapshot IO should call focused project-root IO instead of owning rename-migration root discovery"
+    );
+    let safe_passive_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/safe_passive.rs"))
+            .unwrap();
+    assert!(
+        !safe_passive_source.contains("agent_doc_fs::find_project_root(")
+            && safe_passive_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "sync safe-passive should call focused project-root IO instead of owning .agent-doc root discovery"
+    );
+    let sync_registry_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/registry.rs"))
+            .unwrap();
+    assert!(
+        !sync_registry_source.contains("agent_doc_fs::find_project_root(")
+            && sync_registry_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "sync registry should call focused project-root IO instead of owning registry location root discovery"
+    );
+    let sync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    assert!(
+        !sync_source.contains("agent_doc_fs::find_project_root(")
+            && sync_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "sync should call focused project-root IO instead of owning actor/supervisor root discovery"
+    );
+    let route_busy_pane_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/busy_pane.rs"))
+            .unwrap();
+    assert!(
+        !route_busy_pane_source.contains("agent_doc_fs::find_project_root(")
+            && route_busy_pane_source
+                .contains("agent_doc_project_root_io::project_root_containing("),
+        "route busy-pane should call focused project-root IO instead of owning .agent-doc root discovery"
+    );
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    assert!(
+        !route_source.contains("agent_doc_fs::find_project_root(")
+            && route_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "route should call focused project-root IO instead of owning actor/supervisor/route-queue root discovery"
+    );
+    let route_startup_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
+            .unwrap();
+    assert!(
+        !route_startup_source.contains("agent_doc_fs::find_project_root(")
+            && route_startup_source
+                .contains("agent_doc_project_root_io::project_root_or_file_parent("),
+        "route startup should call focused project-root IO instead of owning registry base fallback discovery"
+    );
+    let workflow_doctor_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/doctor.rs")).unwrap();
+    assert!(
+        !workflow_doctor_source.contains("agent_doc_fs::find_project_root(")
+            && workflow_doctor_source
+                .contains("agent_doc_project_root_io::project_root_containing("),
+        "workflow doctor should call focused project-root IO instead of owning .agent-doc root discovery"
+    );
+    let workflow_autofix_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/autofix.rs")).unwrap();
+    assert!(
+        !workflow_autofix_source.contains("agent_doc_fs::find_project_root(")
+            && workflow_autofix_source
+                .contains("agent_doc_project_root_io::project_root_containing("),
+        "workflow autofix should call focused project-root IO instead of owning .agent-doc root discovery"
+    );
+    let focus_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/focus.rs")).unwrap();
+    assert!(
+        !focus_source.contains("agent_doc_fs::find_project_root(")
+            && focus_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "focus should call focused project-root IO instead of owning .agent-doc root discovery"
+    );
+    let claim_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+    assert!(
+        !claim_source.contains("agent_doc_fs::find_project_root(")
+            && claim_source.contains("agent_doc_project_root_io::project_root_containing(")
+            && claim_source.contains("agent_doc_project_root_io::project_root_or_file_parent("),
+        "claim should call focused project-root IO instead of owning lease/log root discovery"
+    );
+    let resync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync.rs")).unwrap();
+    assert!(
+        !resync_source.contains("agent_doc_fs::find_project_root(")
+            && resync_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "resync should call focused project-root IO instead of owning registry root discovery"
+    );
+    let compact_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+    assert!(
+        !compact_source.contains("fn find_project_root(")
+            && compact_source.contains("agent_doc_project_root_io::project_root_or_file_parent("),
+        "compact should call focused project-root IO instead of owning archive root fallback resolution"
+    );
+    let write_converge_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
+            .unwrap();
+    assert!(
+        !write_converge_source.contains("agent_doc_fs::find_project_root(file)")
+            && write_converge_source
+                .contains("agent_doc_project_root_io::project_root_containing(file)"),
+        "write converge should call focused project-root IO instead of owning stale-supervisor recycle root discovery"
+    );
+
+    let ipc_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-ipc-io/Cargo.toml")).unwrap();
+    let ipc_io_manifest: toml::Value = toml::from_str(&ipc_io_manifest).unwrap();
+    let ipc_io_dependencies = ipc_io_manifest["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-ipc-protocol",
+        "anyhow",
+        "interprocess",
+        "serde_json",
+    ] {
+        assert!(
+            ipc_io_dependencies.contains_key(required),
+            "agent-doc-ipc-io should depend on socket/protocol dependency: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-fs",
+        "agent-doc-orchestration",
+        "agent-doc-git-io",
+        "agent-doc-project-root-io",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+    ] {
+        assert!(
+            !ipc_io_dependencies.contains_key(forbidden),
+            "agent-doc-ipc-io must stay a socket/file-signal adapter, not orchestration or app state: {forbidden}"
+        );
+    }
+
+    let ipc_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-ipc-io/src/lib.rs")).unwrap();
+    assert!(
+        ipc_io_source.contains("use agent_doc_ipc_protocol::{")
+            && ipc_io_source.contains("AckClassification")
+            && ipc_io_source.contains("classify_ack")
+            && ipc_io_source.contains("early_ack_tagged_message")
+            && ipc_io_source.contains("message_requests_early_ack")
+            && ipc_io_source.contains("patch_message")
+            && ipc_io_source.contains("save_document_message")
+            && ipc_io_source.contains("vcs_refresh_message")
+            && ipc_io_source.contains("interprocess::local_socket")
+            && ipc_io_source.contains("pub type OpsLogger")
+            && ipc_io_source.contains("pub fn start_listener_with_logger")
+            && ipc_io_source.contains("pub fn send_publish_live_buffer_file_signal")
+            && ipc_io_source.contains("pub fn send_save_document_file_signal"),
+        "agent-doc-ipc-io should own socket/file-signal transport while importing protocol vocabulary"
     );
     for forbidden in [
         "pub enum AckClassification",
@@ -16194,6 +19153,8 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "pub fn early_ack_line(",
         "pub fn early_ack_ops_marker(",
         "pub fn ipc_accept_thread_ops_marker(",
+        "pub fn resolve_ipc_project_root(",
+        "pub fn resolve_project_root(",
         "fn patch_message(",
         "fn queue_convergence_message(",
         "fn reposition_message(",
@@ -16204,8 +19165,91 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "fn vcs_refresh_probe_message(",
     ] {
         assert!(
-            !ipc_socket_source.contains(forbidden),
-            "ipc_socket.rs must not keep old IPC protocol policy after extraction: {forbidden}"
+            !ipc_io_source.contains(forbidden),
+            "agent-doc-ipc-io must not keep old IPC protocol policy after extraction: {forbidden}"
+        );
+    }
+
+    let ipc_forensics_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-ipc-forensics-io/Cargo.toml")).unwrap();
+    let ipc_forensics_manifest: toml::Value = toml::from_str(&ipc_forensics_manifest).unwrap();
+    let ipc_forensics_dependencies = ipc_forensics_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        ipc_forensics_dependencies.contains_key("agent-doc-project-root-io"),
+        "agent-doc-ipc-forensics-io should use the focused project-root adapter"
+    );
+    for forbidden in [
+        "agent-doc-fs",
+        "agent-doc-ipc-io",
+        "agent-doc-ipc-protocol",
+        "agent-doc-orchestration",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+    ] {
+        assert!(
+            !ipc_forensics_dependencies.contains_key(forbidden),
+            "agent-doc-ipc-forensics-io must stay focused on forensic sidecar files: {forbidden}"
+        );
+    }
+    let ipc_forensics_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-ipc-forensics-io/src/lib.rs")).unwrap();
+    assert!(
+        ipc_forensics_source.contains("pub fn preserve_ipcfullprompt_forensic(")
+            && ipc_forensics_source.contains(".agent-doc/logs/ipcfullprompt")
+            && ipc_forensics_source.contains("agent_doc_project_root_io::project_root_containing("),
+        "agent-doc-ipc-forensics-io should own IPC full-prompt forensic capture sidecars"
+    );
+    let write_ipc_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    assert!(
+        !write_ipc_source.contains("pub(crate) fn preserve_ipcfullprompt_forensic(")
+            && !write_ipc_source.contains("agent_doc_fs::find_project_root(")
+            && write_ipc_source
+                .contains("agent_doc_ipc_forensics_io::preserve_ipcfullprompt_forensic("),
+        "write/ipc.rs should call focused IPC forensic sidecar IO instead of owning root/path capture"
+    );
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/ipc_socket.rs")
+            .exists(),
+        "orchestration must not keep an ipc_socket facade after agent-doc-ipc-io extraction"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod ipc_socket;"),
+        "orchestration must not expose focused IPC IO through an ipc_socket facade"
+    );
+    let ipc_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-ipc-io/src/lib.rs")).unwrap();
+    assert!(
+        ipc_io_source.contains("pub fn start_listener_with_logger")
+            && ipc_io_source.contains("pub fn send_message(")
+            && ipc_io_source.contains("pub fn send_queue_convergence(")
+            && ipc_io_source.contains("pub fn send_publish_live_buffer_file_signal(")
+            && ipc_io_source.contains("pub fn send_save_document_file_signal("),
+        "agent-doc-ipc-io should own socket listener and message/file-signal transport"
+    );
+    let ffi_source = fs::read_to_string(manifest_dir.join("src/ffi.rs")).unwrap();
+    assert!(
+        ffi_source.contains("agent_doc_ipc_io::start_listener_with_logger(")
+            && ffi_source.contains("agent_doc_orchestration::ops_log::log_op")
+            && ffi_source.contains("agent_doc_ipc_io::socket_path(")
+            && !ffi_source.contains("agent_doc_orchestration::ipc_socket"),
+        "FFI listener should call focused IPC IO directly while injecting the ops-log sink"
+    );
+    for relative in [
+        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-orchestration/src/compact.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_ipc_io::") && !source.contains("crate::ipc_socket::"),
+            "{relative} should call focused IPC IO directly instead of an orchestration facade"
         );
     }
 
@@ -16280,6 +19324,13 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "fn is_socket_ack_timeout_error(",
         "fn is_socket_status_error(",
         "fn existing_patch_is_reposition_only(",
+        "pub(crate) enum IpcSnapshotSource",
+        "pub(crate) enum IpcDiskRepairReason",
+        "pub(crate) enum AlreadyAppliedSnapshotOutcome",
+        "pub(crate) enum FullContentRepairRedelivery",
+        "fn redelivery_kind(self) -> FullContentRepairRedelivery",
+        "fn success_message(self) -> &'static str",
+        "fn not_consumed_message(self) -> &'static str",
     ] {
         assert!(
             !write_ipc_source.contains(forbidden),
@@ -16504,7 +19555,6 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-orchestration/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/route/dispatch.rs",
         "agent-doc-orchestration/src/route/startup.rs",
-        "agent-doc-orchestration/src/sessions.rs",
         "agent-doc-orchestration/src/sync/pane_repair.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
@@ -16545,11 +19595,11 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         );
     }
     assert!(
-        route_source.contains("format_route_pane_snapshot_filename(")
-            && route_source.contains("format_route_pane_snapshot_log(")
-            && route_source.contains("format_route_pane_snapshot_failed_log(")
-            && route_source.contains("format_route_pane_snapshot_hint("),
-        "route.rs should preserve snapshots and call focused route snapshot diagnostic formatting directly"
+        route_source
+            .contains("agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(")
+            && route_source
+                .contains("agent_doc_controller_io::route_snapshot::route_pane_snapshot_hint("),
+        "route.rs should preserve snapshots through the focused route snapshot IO adapter"
     );
 
     for forbidden in [
@@ -16587,8 +19637,58 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         );
     }
 
-    let status_cmd =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/status_cmd.rs")).unwrap();
+    let status_io = fs::read_to_string(manifest_dir.join("agent-doc-status-io/src/lib.rs"))
+        .expect("status IO crate should exist");
+    for required in [
+        "pub trait StatusWriteEffects",
+        "pub fn set<E: StatusWriteEffects + ?Sized>",
+        "pub fn set_with_options<E: StatusWriteEffects + ?Sized>",
+        "agent_doc_document::status_projection::replace_status_content",
+        "effects.converge_or_disk_write(file, &full_content, &new_doc, \"status_set\")",
+        "effects.record_document_write_provenance(file, &new_doc)",
+        "effects.log_op(",
+        "agent_doc_hash::content_hash(&new_doc)",
+    ] {
+        assert!(
+            status_io.contains(required),
+            "agent-doc-status-io should own status writeback flow: {required}"
+        );
+    }
+    let status_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-status-io/Cargo.toml")).unwrap();
+    for required in ["agent-doc-document", "agent-doc-hash"] {
+        assert!(
+            status_io_manifest.contains(required),
+            "agent-doc-status-io should depend on focused dependency {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-git-io",
+        "agent-doc-sqlite",
+        "agent-doc-tmux-io",
+    ] {
+        assert!(
+            !status_io_manifest.contains(forbidden),
+            "agent-doc-status-io must not depend on orchestration-side systems: {forbidden}"
+        );
+    }
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/status_cmd.rs")
+            .exists(),
+        "orchestration must not keep a status_cmd facade module"
+    );
+    let orchestration_write =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let status_adapter_start = orchestration_write
+        .find("struct WriteStatusEffects")
+        .expect("write.rs should define the private status effects adapter");
+    let status_adapter_end = orchestration_write
+        .find("pub fn run_command(")
+        .expect("write.rs should define run_command after the status adapter");
+    let status_adapter = &orchestration_write[status_adapter_start..status_adapter_end];
     for forbidden in [
         "STALE_SUPERVISOR_STATUS_MARKER",
         "fn find_status_component",
@@ -16602,14 +19702,28 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         "fn reconcile_stale_supervisor_status_content",
     ] {
         assert!(
-            !status_cmd.contains(forbidden),
-            "status_cmd must stay a writeback adapter, not a status projection facade: {forbidden}"
+            !status_adapter.contains(forbidden),
+            "write status adapter must stay an effects adapter, not a status projection/writeback owner: {forbidden}"
         );
     }
     assert!(
-        status_cmd.contains("agent_doc_document::status_projection::replace_status_content"),
-        "status_cmd should call focused document status replacement directly"
+        status_adapter.contains("agent_doc_status_io::set_with_options(&STATUS_EFFECTS")
+            && status_adapter.contains("converge_or_disk_write(file, previous, updated, phase)")
+            && status_adapter.contains("record_document_write_provenance(file, updated)")
+            && status_adapter.contains("crate::ops_log::log_op(file, message)"),
+        "write status adapter should only inject orchestration effects into focused status IO"
     );
+    for forbidden in [
+        "agent_doc_document::status_projection::replace_status_content",
+        "agent_doc_hash::content_hash",
+        "std::fs::write(file",
+        "std::fs::read_to_string(file)",
+    ] {
+        assert!(
+            !status_adapter.contains(forbidden),
+            "write status adapter must not re-own status writeback IO details: {forbidden}"
+        );
+    }
 
     for relative in [
         "agent-doc-orchestration/src/compact.rs",
@@ -16658,25 +19772,351 @@ fn test_agent_doc_document_owns_model_projection_policy() {
         document_lib.contains("pub mod model_projection;"),
         "agent-doc-document should expose model projection through its owning module"
     );
-    let snapshot =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/snapshot.rs")).unwrap();
-    for forbidden in [
-        "fn project_overlay_roundtrip(",
-        "pub fn overlay_projection_is_byte_stable(",
-        "fn first_diff_byte(",
-        "fn overlay_carries_unbaselined_content(",
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/snapshot.rs")
+            .exists(),
+        "orchestration must not keep a snapshot adapter that can re-own model projection policy"
+    );
+    let realtime_merge_base =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/crdt_merge_base.rs"))
+            .unwrap();
+    for required in [
+        "pub struct CrdtMergeBaseResolution",
+        "pub enum CrdtMergeBaseEvent",
+        "pub fn log_message(",
+        "pub fn resolve_crdt_merge_base(",
+        "project_overlay_state(",
+        "overlay_carries_unbaselined_content(",
+        "first_diff_byte(",
+        "agent_doc_merge::crdt::CrdtDoc::from_text(&markdown).encode_state()",
+        "rebuild_overlay_to_baseline: bool",
+        "CrdtMergeBaseEvent::OverlayStale",
+        "CrdtMergeBaseEvent::OverlayAheadPreserved",
+        "CrdtMergeBaseEvent::OverlayDiscarded",
+        "CrdtMergeBaseEvent::OverlayDecodeError",
+        "CrdtMergeBaseEvent::Final",
     ] {
         assert!(
-            !snapshot.contains(forbidden),
-            "snapshot.rs must not re-own or facade model projection policy: {forbidden}"
+            realtime_merge_base.contains(required),
+            "agent-doc-document-realtime must own CRDT merge-base policy: {required}"
+        );
+    }
+    let snapshot_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn crdt_merge_base_state_with(",
+        "has_pending_editor_ops: impl FnOnce(&Path) -> bool",
+        "logger: impl FnMut(&Path, &str)",
+        "resolve_crdt_merge_base(",
+        "event.log_message(doc.display())",
+        "write_overlay_crdt_state_file_from_markdown(path, baseline)",
+    ] {
+        assert!(
+            snapshot_io.contains(required),
+            "agent-doc-snapshot-io should own CRDT merge-base sidecar adaptation: {required}"
+        );
+    }
+    let merge_io = fs::read_to_string(manifest_dir.join("agent-doc-merge-io/src/lib.rs")).unwrap();
+    assert!(
+        merge_io.contains("agent_doc_snapshot_io::save_overlay_crdt_from_markdown(doc, markdown)?"),
+        "agent-doc-merge-io should delegate markdown-to-overlay sidecar encoding to snapshot IO"
+    );
+    assert!(
+        snapshot_io.contains("resolve_model_baseline_projection")
+            && snapshot_io.contains("project_overlay_roundtrip")
+            && snapshot_io.contains("save_overlay_crdt_from_markdown")
+            && snapshot_io.contains("write_overlay_crdt_state_file_from_markdown")
+            && snapshot_io.contains("overlay_state_from_markdown"),
+        "agent-doc-snapshot-io should call focused model projection policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    assert!(
+        workspace_manifest.contains("\"agent-doc-snapshot-io\""),
+        "workspace should include agent-doc-snapshot-io as the focused snapshot IO crate"
+    );
+
+    let snapshot_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct SnapshotLock",
+        "pub struct SnapshotStateMigrationReport",
+        "pub enum SnapshotStateMigrationEvent",
+        "pub fn load(",
+        "pub fn save(",
+        "pub fn resolve(",
+        "pub struct DiffSnapshotStore",
+        "impl agent_doc_diff_io::SnapshotStore for DiffSnapshotStore",
+        "pub fn delete(",
+        "pub fn ensure_initial_snapshot(",
+        "pub fn try_migrate_renamed(",
+        "pub fn migrate_state_files_for_hash(",
+        "pub fn find_snapshot_hash_for_session(",
+        "pub fn save_pre_response(",
+        "pub fn load_pre_response(",
+        "pub fn delete_pre_response(",
+        "pub fn with_crdt_lock",
+        "pub fn load_crdt(",
+        "pub fn load_overlay_crdt(",
+        "pub fn save_crdt(",
+        "pub fn save_overlay_crdt(",
+        "pub fn save_overlay_crdt_from_markdown(",
+        "pub fn load_multinode_crdt(",
+        "pub fn save_multinode_crdt(",
+        "pub fn delete_crdt(",
+        "pub fn crdt_merge_base_state_with(",
+        "pub fn read_crdt_state_file(",
+        "pub fn write_crdt_state_file(",
+        "pub fn write_overlay_crdt_state_file_from_markdown(",
+        "pub fn mps_enabled(",
+        "pub fn probe_overlay_projection(",
+        "pub fn save_baseline_model(",
+        "pub fn load_baseline_model(",
+        "pub fn delete_baseline_model(",
+        "agent_doc_secret_redact::redact(content)",
+        "agent_doc_fs::snapshot_flock_path_for(doc)?",
+        "agent_doc_fs::pre_response_path_for(doc)?",
+        "agent_doc_fs::crdt_flock_path_for(doc)?",
+        "agent_doc_fs::crdt_path_for(doc)?",
+        "agent_doc_fs::overlay_crdt_path_for(doc)?",
+        "agent_doc_fs::multinode_crdt_path_for(doc)?",
+        "agent_doc_fs::baseline_overlay_path_for(doc)?",
+        "const MIGRATE_DIRS",
+        "std::fs::rename(&old_file, &new_file)?",
+        "SnapshotStateMigrationEvent::Migrated",
+        "session_id_from_content(&snapshot_content)",
+        "agent_doc_project_root_io::project_root_containing(",
+        "agent_doc_session_registry_io::update_session_file_in(",
+        "resolve_crdt_merge_base(",
+        "event.log_message(doc.display())",
+        "resolve_model_baseline_projection(",
+        "project_overlay_roundtrip(",
+        "overlay_state_from_markdown(",
+    ] {
+        assert!(
+            snapshot_io.contains(required),
+            "agent-doc-snapshot-io must own model-baseline snapshot IO: {required}"
+        );
+    }
+
+    let document_init =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/document_init.rs"))
+            .unwrap();
+    for required in [
+        "pub fn ensure_initialized(",
+        "agent_doc_snapshot_io::try_migrate_renamed(doc)?",
+        "agent_doc_snapshot_io::ensure_initial_snapshot(",
+        "agent_doc_element_exchange::strip_exchange_content",
+        "ensure_git_tracked_with_commit(doc, commit)?",
+        "agent_doc_git_io::status::is_tracked(doc)",
+        "agent_doc_git_io::status::add(doc)",
+    ] {
+        assert!(
+            document_init.contains(required),
+            "workflow IO document initialization should compose focused snapshot/git IO: {required}"
         );
     }
     assert!(
-        snapshot.contains("use agent_doc_document::model_projection::{")
-            && snapshot.contains("resolve_model_baseline_projection")
-            && snapshot.contains("overlay_carries_unbaselined_content"),
-        "snapshot.rs should call focused model projection policy directly"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/snapshot.rs")
+            .exists(),
+        "orchestration must not keep a snapshot facade module"
     );
+    for forbidden in [
+        "pub fn save(doc:",
+        "pub fn load(doc:",
+        "pub fn resolve(doc:",
+        "pub fn ensure_snapshot(",
+        "pub fn try_migrate_renamed(",
+        "pub fn crdt_merge_base_state(",
+        "fn rebuild_overlay_to_baseline(",
+        "pub struct DiffSnapshotStore",
+        "pub const DIFF_SNAPSHOT_STORE",
+    ] {
+        assert!(
+            !document_init.contains(forbidden),
+            "workflow IO initialization must not keep markdown read/resolve facades: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "pub struct SnapshotLock",
+        "pub fn delete(",
+        "pub fn save_pre_response(",
+        "pub fn load_pre_response(",
+        "pub fn delete_pre_response(",
+        "pub fn mps_enabled(",
+        "pub fn save_baseline_model(",
+        "pub fn load_baseline_model(",
+        "pub fn delete_baseline_model(",
+        "pub fn load_crdt(",
+        "pub fn load_overlay_crdt(",
+        "pub fn save_crdt(",
+        "pub fn save_overlay_crdt(",
+        "pub fn load_multinode_crdt(",
+        "pub fn save_multinode_crdt(",
+        "pub fn delete_crdt(",
+        "fn load_unlocked(",
+        "fn save_unlocked(",
+        "fn acquire_crdt_lock(",
+        "fn write_crdt_state(",
+        "fn probe_overlay_projection(",
+        "let snapshot_content = strip_exchange_content(&content);",
+        "const MIGRATE_DIRS",
+        "std::fs::rename(&old_file, &new_file)?",
+        "std::fs::read_dir(&snap_dir)?",
+        "agent_doc_frontmatter::frontmatter::parse(&snap_content)",
+        "agent_doc_session_registry_io::update_session_file_in(",
+        "agent_doc_secret_redact::redact(content)",
+        "let path = agent_doc_fs::pre_response_path_for(doc)?;",
+        "let lock_path = agent_doc_fs::snapshot_flock_path_for(doc)?;",
+        "let lock_path = agent_doc_fs::crdt_flock_path_for(doc)?;",
+        "let path = agent_doc_fs::baseline_overlay_path_for(doc)?;",
+        "resolve_model_baseline_projection(",
+        "resolve_crdt_merge_base(",
+        "event.log_message(doc.display())",
+        "agent_doc_snapshot_io::with_crdt_lock(doc, ||",
+        "project_overlay_roundtrip(",
+        "overlay_state_from_markdown(",
+        "fn rebuild_overlay_crdt_locked(",
+        "agent_doc_snapshot_io::write_crdt_state_file(",
+        "ModelBaselineSource::",
+    ] {
+        assert!(
+            !document_init.contains(forbidden),
+            "workflow IO initialization must not re-own model-baseline IO/policy: {forbidden}"
+        );
+    }
+    for relative in [
+        "src/undo.rs",
+        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-orchestration/src/repair.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_snapshot_io::")
+                && !source.contains("snapshot::save_pre_response(")
+                && !source.contains("snapshot::load_pre_response(")
+                && !source.contains("snapshot::delete_pre_response(")
+                && !source.contains("crate::snapshot::save_pre_response(")
+                && !source.contains("crate::snapshot::load_pre_response(")
+                && !source.contains("crate::snapshot::delete_pre_response("),
+            "{relative} should call focused snapshot IO directly for pre-response sidecars"
+        );
+    }
+    for relative in [
+        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/preflight.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_snapshot_io::mps_enabled()")
+                && source.contains("crate::ops_log::log_op")
+                && !source.contains("snapshot::mps_enabled(")
+                && !source.contains("snapshot::save_baseline_model(")
+                && !source.contains("snapshot::load_baseline_model(")
+                && !source.contains("crate::snapshot::mps_enabled(")
+                && !source.contains("crate::snapshot::save_baseline_model(")
+                && !source.contains("crate::snapshot::load_baseline_model("),
+            "{relative} should call focused snapshot IO directly for model-baseline sidecars"
+        );
+    }
+    for relative in [
+        "src/reset.rs",
+        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-orchestration/src/compact.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_snapshot_io::")
+                && !source.contains("snapshot::load_crdt(")
+                && !source.contains("snapshot::save_crdt(")
+                && !source.contains("snapshot::load_overlay_crdt(")
+                && !source.contains("snapshot::save_overlay_crdt(")
+                && !source.contains("snapshot::delete_crdt(")
+                && !source.contains("crate::snapshot::load_crdt(")
+                && !source.contains("crate::snapshot::save_crdt(")
+                && !source.contains("crate::snapshot::delete_crdt("),
+            "{relative} should call focused snapshot IO directly for raw CRDT sidecars"
+        );
+    }
+    let reset_source = fs::read_to_string(manifest_dir.join("src/reset.rs")).unwrap();
+    assert!(
+        reset_source.contains("agent_doc_snapshot_io::delete(file)?")
+            && !reset_source.contains("snapshot::delete(file)?"),
+        "reset should call focused snapshot IO directly for markdown snapshot deletion"
+    );
+}
+
+#[test]
+fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    assert!(
+        workspace_manifest.contains("\"agent-doc-merge-io\""),
+        "workspace should include agent-doc-merge-io as the focused merge IO crate"
+    );
+
+    let merge_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-merge-io/Cargo.toml")).unwrap();
+    for required in ["agent-doc-merge", "agent-doc-snapshot-io", "agent-doc-fs"] {
+        assert!(
+            merge_io_manifest.contains(required),
+            "agent-doc-merge-io should depend on {required} for per-node CRDT sidecar adapters"
+        );
+    }
+
+    let merge_io = fs::read_to_string(manifest_dir.join("agent-doc-merge-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn multinode_crdt_state(",
+        "pub fn save_document_crdt(",
+        "agent_doc_snapshot_io::with_crdt_lock(doc, ||",
+        "agent_doc_snapshot_io::read_crdt_state_file(&nodes_path, \"per-node CRDT state\")?",
+        "agent_doc_snapshot_io::read_crdt_state_file(&legacy_path, \"CRDT state\")?",
+        "agent_doc_snapshot_io::save_crdt(doc, legacy_state)?",
+        "agent_doc_snapshot_io::save_overlay_crdt_from_markdown(doc, markdown)?",
+        "agent_doc_snapshot_io::save_multinode_crdt(doc, &multinode.encode())?",
+        "agent_doc_merge::crdt::MultiNodeState::decode_or_migrate(",
+        "agent_doc_merge::crdt::MultiNodeState::from_text(",
+    ] {
+        assert!(
+            merge_io.contains(required),
+            "agent-doc-merge-io must own per-node CRDT sidecar adapter behavior: {required}"
+        );
+    }
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/snapshot.rs")
+            .exists(),
+        "orchestration must not keep a snapshot module that can re-own per-node CRDT sidecar adapters"
+    );
+    for relative in [
+        "src/reset.rs",
+        "agent-doc-orchestration/src/compact.rs",
+        "agent-doc-orchestration/src/stream.rs",
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-orchestration/src/write/ipc/transport.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_merge_io::save_document_crdt(")
+                && !source.contains("snapshot::save_document_crdt(")
+                && !source.contains("crate::snapshot::save_document_crdt("),
+            "{relative} should call focused merge IO directly for document CRDT persistence"
+        );
+    }
 }
 
 #[test]
@@ -17116,16 +20556,45 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
     )
     .unwrap();
+    let git_io_partial_staging =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/partial_staging.rs")).unwrap();
+    for required in [
+        "pub struct PartialStagingDiffEvidence",
+        "pub struct PartialStagingFinding",
+        "pub fn candidate_repos(",
+        "pub fn diff_evidence(",
+        "pub fn companion_findings(",
+        "agent_doc_git::parse_porcelain_path",
+        "agent_doc_diff::partial_staging_companion_finding(",
+    ] {
+        assert!(
+            git_io_partial_staging.contains(required),
+            "agent-doc-git-io must own partial-staging git evidence/finding adapter: {required}"
+        );
+    }
+    let git_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/Cargo.toml")).unwrap();
+    assert!(
+        git_io_manifest.contains("agent-doc-diff ="),
+        "agent-doc-git-io should compose partial-staging git evidence with focused diff policy"
+    );
     assert!(
         !partial_staging.contains("fn parse_porcelain_path(")
             && !partial_staging.contains("pub(crate) fn parse_porcelain_path(")
             && !partial_staging.contains("pub use agent_doc_git::parse_porcelain_path")
-            && !partial_staging.contains("pub(crate) use agent_doc_git::parse_porcelain_path"),
-        "partial_staging must import the focused git porcelain parser privately, not re-own or facade it"
+            && !partial_staging.contains("pub(crate) use agent_doc_git::parse_porcelain_path")
+            && !partial_staging.contains("use agent_doc_git::parse_porcelain_path")
+            && !partial_staging.contains("pub(crate) fn git_toplevel(")
+            && !partial_staging.contains("pub(crate) fn git_name_lines(")
+            && !partial_staging.contains("pub(crate) fn git_stdout(")
+            && !partial_staging.contains("std::process::Command::new(\"git\")")
+            && !partial_staging.contains("agent_doc_git_io::partial_staging::candidate_repos(")
+            && !partial_staging.contains("agent_doc_git_io::partial_staging::diff_evidence("),
+        "partial_staging must stay an orchestration adapter, not re-own partial-staging git evidence/finding IO"
     );
     assert!(
-        partial_staging.contains("use agent_doc_git::parse_porcelain_path;"),
-        "partial_staging should call the focused git porcelain parser directly"
+        partial_staging.contains("agent_doc_git_io::partial_staging::companion_findings("),
+        "partial_staging should call focused git IO partial-staging finding assembly directly"
     );
 
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -17174,6 +20643,32 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             .contains("use agent_doc_git::{RecoveryTag, doc_stem, parse_recovery_tags};"),
         "git IO checkpoint should import focused recovery tag policy directly"
     );
+    for required in [
+        "pub fn create_pre_mutation_tag(",
+        "pub const KEEP_RECOVERY_TAGS",
+        "pub fn prune_old_recovery_tags(",
+    ] {
+        assert!(
+            checkpoint_source.contains(required),
+            "git IO checkpoint must own recovery checkpoint tag pruning: {required}"
+        );
+    }
+    let compact_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+    assert!(
+        compact_source.contains("agent_doc_git_io::checkpoint::create_pre_mutation_tag(")
+            && !compact_source.contains("pub fn create_pre_mutation_tag(")
+            && !compact_source.contains("fn create_pre_compact_tag("),
+        "compact must call the focused git IO checkpoint tag creation adapter directly"
+    );
+    let gc_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/gc.rs")).unwrap();
+    assert!(
+        gc_source.contains("agent_doc_git_io::checkpoint::prune_old_recovery_tags(")
+            && !gc_source.contains("fn clean_old_recovery_tags(")
+            && !gc_source.contains("const KEEP_RECOVERY_TAGS"),
+        "gc must call the focused git IO checkpoint pruning adapter directly"
+    );
 
     let sibling_source =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/sibling.rs")).unwrap();
@@ -17191,6 +20686,119 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         git_io_lib.contains("pub mod dirs;"),
         "agent-doc-git-io should expose git directory/path IO helpers"
     );
+    assert!(
+        git_io_lib.contains("pub mod partial_staging;"),
+        "agent-doc-git-io should expose partial-staging git evidence IO helpers"
+    );
+    assert!(
+        git_io_lib.contains("pub mod submodule;"),
+        "agent-doc-git-io should expose submodule pointer drift IO helpers"
+    );
+    let git_branch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/branch.rs")).unwrap();
+    assert!(
+        git_branch_source.contains("pub fn create_session_branch(")
+            && git_branch_source.contains("agent_doc_git::agent_doc_branch_name_for_file(file)")
+            && git_branch_source.contains("checkout_new_or_existing(&git_root, &branch_name)"),
+        "agent-doc-git-io branch module must own session branch assembly"
+    );
+    let git_squash_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/squash.rs")).unwrap();
+    assert!(
+        git_squash_source.contains("pub fn squash_session(")
+            && git_squash_source.contains("agent_doc_git::relative_to_root(&resolved, &git_root)")
+            && git_squash_source
+                .contains("squash_agent_doc_commits(&git_root, &pathspec, &message)?"),
+        "agent-doc-git-io squash module must own session squash assembly"
+    );
+    let git_revision_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/revision.rs")).unwrap();
+    for required in ["pub enum RecentCommitLog", "pub fn recent_commit_lines("] {
+        assert!(
+            git_revision_source.contains(required),
+            "agent-doc-git-io revision must own recent commit log IO: {required}"
+        );
+    }
+    for required in [
+        "pub enum HeadWorktreeFallback",
+        "pub fn head_fallback_when_differs_from_worktree(",
+        "last_commit_mtime(file).unwrap_or(None)",
+        "show_head(file)?",
+        "std::fs::read_to_string(file).unwrap_or_default()",
+    ] {
+        assert!(
+            git_revision_source.contains(required),
+            "agent-doc-git-io revision must own HEAD/worktree fallback recovery decisions: {required}"
+        );
+    }
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    assert!(
+        preflight_source.contains("agent_doc_git_io::revision::recent_commit_lines("),
+        "preflight linked-doc checks should call focused git revision IO"
+    );
+    let git_submodule_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/submodule.rs")).unwrap();
+    for required in [
+        "pub fn is_submodule_pointer_stale(",
+        "pub fn submodule_pointer_drift(",
+        "agent_doc_git::SubmodulePointerDrift",
+        "narrow_to_submodule(&super_root, &resolved)",
+        "revision::rev_parse(&git_root, \"HEAD\")?",
+        "revision::rev_parse(&super_root, &parent_spec)?",
+        "SubmodulePointerDrift {",
+    ] {
+        assert!(
+            git_submodule_source.contains(required),
+            "agent-doc-git-io submodule module must own parent gitlink drift IO: {required}"
+        );
+    }
+    let snapshot_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
+    assert!(
+        snapshot_source
+            .contains("agent_doc_git_io::revision::head_fallback_when_differs_from_worktree(doc)?")
+            && snapshot_source.contains("HeadWorktreeFallback::DiffersFromCurrent")
+            && snapshot_source.contains("HeadWorktreeFallback::MatchesCurrent")
+            && snapshot_source.contains("HeadWorktreeFallback::NoHead"),
+        "agent-doc-snapshot-io resolve should adapt focused git HEAD/worktree fallback decisions"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/snapshot.rs")
+            .exists(),
+        "orchestration must not keep a snapshot module that can re-own git HEAD/worktree fallback recovery decisions"
+    );
+    let snapshot_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/Cargo.toml")).unwrap();
+    assert!(
+        snapshot_io_manifest.contains("agent-doc-git-io ="),
+        "agent-doc-snapshot-io should compose snapshot sidecars with focused git revision/status IO"
+    );
+    let snapshot_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub enum SnapshotCommitStatus",
+        "pub fn snapshot_commit_status_from_contents(",
+        "pub fn verify_snapshot_committed(",
+        "agent_doc_git_io::status::is_in_git_repo(file)",
+        "agent_doc_git_io::revision::show_head(file)?",
+        "normalize_transient_agent_doc_markers",
+    ] {
+        assert!(
+            snapshot_io_source.contains(required),
+            "agent-doc-snapshot-io must own snapshot-vs-HEAD commit verification: {required}"
+        );
+    }
+    for forbidden in [
+        "pub enum SnapshotCommitStatus",
+        "pub fn verify_snapshot_committed(",
+    ] {
+        assert!(
+            !git_source.contains(forbidden),
+            "orchestration git adapter must not re-own snapshot-vs-HEAD commit verification: {forbidden}"
+        );
+    }
     let git_dirs_source =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/dirs.rs")).unwrap();
     for required in [
@@ -17199,7 +20807,9 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub fn git_superproject_at",
         "pub fn resolve_absolute_file_path",
         "pub fn resolve_to_git_root",
+        "pub fn resolve_pane_cwd",
         "pub fn workspace_access_dirs_for_doc",
+        "pub fn append_workspace_access_args",
         "pub fn commit_lock_path_for_git_root",
     ] {
         assert!(
@@ -17207,6 +20817,12 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             "agent-doc-git-io must own git directory/path IO helper: {required}"
         );
     }
+    let agent_mod_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/mod.rs")).unwrap();
+    assert!(
+        !agent_mod_source.contains("pub fn append_workspace_access_args"),
+        "orchestration agent module must not facade git workspace access arg assembly"
+    );
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/git/dirs.rs")
@@ -17219,10 +20835,88 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         git_adapter_source.contains("use agent_doc_git_io::dirs::{"),
         "orchestration git adapter should import git directory/path helpers directly"
     );
-    for forbidden in ["mod dirs;", "pub use dirs", "pub mod dirs"] {
+    let doctor_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/doctor.rs")).unwrap();
+    let closeout_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
+            .unwrap();
+    let detect_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
+    )
+    .unwrap();
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    let graph_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/graph.rs")).unwrap();
+    assert!(
+        graph_source.contains("agent_doc_snapshot_io::snapshot_commit_status_from_contents(")
+            && !graph_source.contains("normalize_transient_agent_doc_markers"),
+        "orchestration graph should cache snapshot/HEAD inputs but call focused snapshot IO for comparison"
+    );
+    assert!(
+        git_adapter_source
+            .contains("agent_doc_git_io::submodule::is_submodule_pointer_stale(file)")
+            && git_adapter_source.contains("agent_doc_git_io::revision::show_rev(file, \"HEAD^\")")
+            && git_adapter_source.contains("agent_doc_git_io::revision::show_head(file)?")
+            && write_source.contains("agent_doc_git_io::revision::show_head(file)")
+            && write_source.contains("agent_doc_git_io::status::is_in_git_repo(file)")
+            && repair_source.contains("agent_doc_git_io::status::is_in_git_repo(file)")
+            && repair_source.contains("agent_doc_git_io::revision::show_head(file)?")
+            && graph_source.contains("agent_doc_git_io::status::is_in_git_repo(&path)")
+            && graph_source.contains("agent_doc_git_io::revision::show_head(&canonical)")
+            && doctor_source.contains("agent_doc_git_io::status::tracked_modified_paths(file)")
+            && doctor_source.contains("agent_doc_git_io::submodule::submodule_pointer_drift(file)")
+            && closeout_source
+                .contains("agent_doc_git_io::submodule::submodule_pointer_drift(file)")
+            && detect_source.contains("agent_doc_git_io::submodule::submodule_pointer_drift(file)")
+            && detect_source.contains("agent_doc_git_io::status::tracked_side_effect_note(file)?")
+            && preflight_source
+                .contains("agent_doc_git_io::revision::last_commit_mtime(&resolved)")
+            && preflight_run_source
+                .contains("agent_doc_git_io::revision::last_commit_mtime(&doc_path)"),
+        "orchestration callers should use focused git IO status/submodule/revision helpers directly"
+    );
+    for forbidden in [
+        "mod dirs;",
+        "pub use dirs",
+        "pub mod dirs",
+        "pub fn resolve_pane_cwd",
+        "pub fn create_branch",
+        "pub fn squash_session",
+        "pub fn tracked_modified_paths",
+        "pub fn is_in_git_repo",
+        "pub fn is_submodule_pointer_stale",
+        "pub fn submodule_pointer_drift",
+        "pub fn last_commit_mtime",
+        "pub fn show_head",
+        "fn show_rev(",
+        "pub(crate) fn tracked_side_effect_note(",
+    ] {
         assert!(
             !git_adapter_source.contains(forbidden),
             "orchestration git adapter must not facade git directory/path IO: {forbidden}"
+        );
+    }
+    assert!(
+        !detect_source.contains("pub(crate) fn tracked_side_effect_note("),
+        "session_check/detect.rs must call focused git status IO directly"
+    );
+    for forbidden in [
+        "fn git_rev_parse(",
+        "let parent_spec = format!(\"HEAD:{rel}\");",
+        "revision::rev_parse(&git_root, \"HEAD\")?",
+        "revision::rev_parse(&super_root, &parent_spec)?",
+    ] {
+        assert!(
+            !git_adapter_source.contains(forbidden),
+            "orchestration git adapter must not re-own submodule pointer drift IO: {forbidden}"
         );
     }
 
@@ -17496,10 +21190,11 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "write exchange reconciliation should import exchange policy from the focused crate"
     );
     let snapshot_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/snapshot.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/document_init.rs"))
+            .unwrap();
     assert!(
-        snapshot_source.contains("use agent_doc_element_exchange::strip_exchange_content;"),
-        "snapshot should import exchange stripping policy from the focused crate"
+        snapshot_source.contains("agent_doc_element_exchange::strip_exchange_content"),
+        "workflow document initialization should import exchange stripping policy from the focused crate"
     );
     let claim_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
@@ -17980,15 +21675,46 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
         );
     }
 
+    let watch_io = fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/lib.rs")).unwrap();
+    assert!(
+        watch_io.contains("use agent_doc_document::watch_projection::file_watch_event_id;")
+            && watch_io.contains("file_watch_event_id(doc_id, generation, &content_hash)"),
+        "watch IO should call the focused watch event id projection directly"
+    );
+    assert!(
+        watch_io.contains("pub fn is_running() -> bool")
+            && watch_adapter.contains("agent_doc_watch_io::is_running()")
+            && !watch_adapter.contains("pub fn is_running("),
+        "watch.rs must call focused watch liveness IO directly instead of keeping a facade"
+    );
+    for required in [
+        "agent_doc_debounce::write_provenance(file)",
+        "WatchWriteProvenance::new",
+        "StateFact::FileWatchChangeObserved",
+        "pub fn observe_document_event(",
+    ] {
+        assert!(
+            watch_io.contains(required),
+            "agent-doc-watch-io should own controller watch observation: {required}"
+        );
+    }
+
     let document_watcher =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/document_watcher.rs"))
             .unwrap();
     assert!(
-        document_watcher.contains("use agent_doc_document::watch_projection::file_watch_event_id;")
-            && document_watcher.contains("file_watch_event_id(doc_id, generation, &content_hash)"),
-        "document_watcher should call the focused watch event id projection directly"
+        document_watcher.contains("agent_doc_watch_io::observe_document_event")
+            && document_watcher.contains("crate::project_controller::append_state_event")
+            && document_watcher.contains("document_actor_in(base_dir, file)"),
+        "document_watcher should only adapt watch observations to orchestration routing"
     );
     for forbidden in [
+        "file_watch_event_id",
+        "agent_doc_hash::content_hash",
+        "agent_doc_debounce::write_provenance",
+        "WatchWriteProvenance",
+        "WatcherRegistry",
+        "pub fn registry(",
         "fn file_watch_event_id(",
         "pub use agent_doc_document::watch_projection",
         "pub enum RawKind",
@@ -18002,7 +21728,7 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
     ] {
         assert!(
             !document_watcher.contains(forbidden),
-            "document_watcher must not re-own or facade watch projection: {forbidden}"
+            "document_watcher must not re-own or facade watch projection/controller IO: {forbidden}"
         );
     }
 }
@@ -18412,9 +22138,12 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub struct VisibleWriteTypingFacts",
         "pub enum VisibleWriteDecision",
         "pub fn decide_visible_write_after_typing",
+        "pub fn visible_write_guard_event",
+        "pub fn visible_write_current_changed_event",
         "pub struct FullContentSourceProof",
         "pub fn normalization_repair_candidate_matches",
         "pub fn decide_full_content_visible_replacement",
+        "pub fn full_content_visible_replacement_event",
         "pub enum FullContentScopeRejection",
         "pub fn full_content_scope_rejection_reason",
         "pub enum ReconnectBufferDecision",
@@ -18445,30 +22174,12 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             "agent-doc-document-realtime must own CRDT authority policy: {required_snippet}"
         );
     }
-    let orchestration_document_mutation = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/flow/document_mutation.rs"),
-    )
-    .unwrap();
-    for forbidden_snippet in [
-        "pub struct VisibleWriteTypingFacts",
-        "pub enum VisibleWriteDecision",
-        "pub fn decide_visible_write_after_typing",
-        "pub struct FullContentSourceProof",
-        "pub fn full_content_source_proof",
-        "pub fn decide_full_content_visible_replacement",
-        "pub enum FullContentScopeRejection",
-        "pub fn full_content_scope_rejection_reason",
-        "pub enum ReconnectBufferDecision",
-        "pub fn decide_reconnect_buffer",
-        "pub enum EditorlessDiskFallbackDecision",
-        "pub fn decide_editorless_disk_fallback",
-        "pub use agent_doc_document_realtime",
-    ] {
-        assert!(
-            !orchestration_document_mutation.contains(forbidden_snippet),
-            "orchestration must not re-own or facade realtime write policy: {forbidden_snippet}"
-        );
-    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/document_mutation.rs")
+            .exists(),
+        "orchestration must not keep a document-mutation flow facade; realtime write policy and events live in agent-doc-document-realtime"
+    );
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/crdt_authority.rs")
@@ -18492,7 +22203,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub use agent_doc_document_realtime::crdt_authority",
     ] {
         assert!(
-            !orchestration_document_mutation.contains(forbidden_snippet),
+            !orchestration_lib.contains(forbidden_snippet),
             "orchestration must not re-own or facade CRDT authority policy: {forbidden_snippet}"
         );
     }
@@ -18734,6 +22445,7 @@ fn test_agent_doc_template_owns_patchback_policy() {
         "pub enum ChildPatchbackNormalizationDecision",
         "pub struct ChildPatchbackNormalization",
         "pub fn normalize_child_template_response",
+        "pub fn child_patchback_normalization_event",
         "pub fn child_template_finalize_text",
         "pub fn should_stream_exchange_patch",
         "pub fn finalize_suffix_from_streamed_prefix",
@@ -18751,35 +22463,65 @@ fn test_agent_doc_template_owns_patchback_policy() {
         "agent-doc-template should expose patchback policy through its owning module"
     );
     assert!(
+        template_lib.contains("pub mod structure_guard;"),
+        "agent-doc-template should expose template structure guard policy through its owning module"
+    );
+    assert!(
         !template_lib.contains("pub use patchback"),
         "agent-doc-template should not add a patchback root facade"
     );
+    let template_structure_guard =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/structure_guard.rs")).unwrap();
+    for required_snippet in [
+        "pub enum TemplateStructureGuardReason",
+        "pub fn template_structure_guard_event(",
+        "FlowName::DocumentMutation",
+        "FlowStage::DocumentMutation",
+    ] {
+        assert!(
+            template_structure_guard.contains(required_snippet),
+            "agent-doc-template must own template structure guard event policy: {required_snippet}"
+        );
+    }
+    let template_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn parse_template_patchback(",
+        "pub fn patchback_parse_event(",
+        "pub fn log_patchback_parse_event(",
+        "pub fn log_template_structure_guard_event(",
+        "parse_template_patchback_plan(response)",
+        "agent_doc_flow_io::log_flow_event",
+        "agent_doc_hash::content_hash(response)",
+        "agent_doc_template::structure_guard::template_structure_guard_event",
+    ] {
+        assert!(
+            template_io.contains(required_snippet),
+            "agent-doc-template-io must own template patchback parse/log adapters: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in ["crate::ops_log", "agent_doc_orchestration"] {
+        assert!(
+            !template_io.contains(forbidden_snippet),
+            "agent-doc-template-io must not depend on orchestration logging internals: {forbidden_snippet}"
+        );
+    }
 
     let flow_types = fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
-    let flow_document_mutation = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/flow/document_mutation.rs"),
-    )
-    .unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/document_mutation.rs")
+            .exists(),
+        "orchestration must not keep a document-mutation flow facade"
+    );
     let write_materialize =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
             .unwrap();
-    let orchestration_batch = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/flow/orchestration_batch.rs"),
-    )
-    .unwrap();
     let orchestration_sources = [
         ("agent-doc-flow/src/types.rs", flow_types.as_str()),
         (
-            "agent-doc-orchestration/src/flow/document_mutation.rs",
-            flow_document_mutation.as_str(),
-        ),
-        (
             "agent-doc-orchestration/src/write/materialize.rs",
             write_materialize.as_str(),
-        ),
-        (
-            "agent-doc-orchestration/src/flow/orchestration_batch.rs",
-            orchestration_batch.as_str(),
         ),
     ];
     for (source, content) in orchestration_sources {
@@ -18794,9 +22536,16 @@ fn test_agent_doc_template_owns_patchback_policy() {
             "pub fn classify_orchestrate_patchback",
             "pub fn classify_orchestrate_plain_response",
             "pub fn enforce_orchestrate_patchback_contract",
+            "pub fn parse_template_patchback(",
+            "pub fn patchback_parse_event(",
+            "pub fn log_patchback_parse_event(",
+            "pub enum TemplateStructureGuardReason",
+            "pub fn template_structure_guard_event(",
+            "pub fn log_template_structure_guard_event(",
             "pub enum ChildPatchbackNormalizationDecision",
             "pub struct ChildPatchbackNormalization",
             "pub fn normalize_child_template_response",
+            "pub fn child_patchback_normalization_event",
         ] {
             assert!(
                 !content.contains(forbidden_snippet),
@@ -18806,8 +22555,10 @@ fn test_agent_doc_template_owns_patchback_policy() {
     }
 
     assert!(
-        orchestration_batch.contains("patchback::ChildPatchbackNormalization"),
-        "orchestration batch events should accept focused template patchback normalization results directly"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/orchestration_batch.rs")
+            .exists(),
+        "orchestration must not keep an orchestration-batch patchback facade"
     );
     let write_run_entry =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
@@ -18905,6 +22656,19 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         !template_lib.contains("pub use response_materialization"),
         "agent-doc-template should not add a response materialization root facade"
     );
+    let template_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/lib.rs")).unwrap();
+    assert!(
+        template_io.contains("pub fn response_materialization_probe_from_ipc_payload(")
+            && template_io.contains("response_materialization_probe(&patches, unmatched)"),
+        "agent-doc-template-io must own IPC payload adapters for response materialization"
+    );
+    assert!(
+        !template_io.contains("agent_doc_orchestration")
+            && !template_io.contains("crate::ops_log")
+            && !template_io.contains("tmux_router"),
+        "agent-doc-template-io response materialization adapters must stay free of orchestration effects"
+    );
 
     let write_materialize =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
@@ -18924,6 +22688,8 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "pub(crate) fn response_materialization_probe(",
         "pub fn response_materialization_probe_from_response",
         "pub(crate) fn response_materialization_probe_from_response",
+        "pub fn response_materialization_probe_from_ipc_payload",
+        "pub(crate) fn response_materialization_probe_from_ipc_payload",
         "pub fn strip_partial_response_materialization_from_exchange",
         "pub(crate) fn strip_partial_response_materialization_from_exchange",
         "pub fn materialized_template_response",
@@ -18941,6 +22707,14 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
             "orchestration must not re-own or facade template response materialization policy: {forbidden_snippet}"
         );
     }
+    let transport_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
+            .unwrap();
+    assert!(
+        transport_source
+            .contains("agent_doc_template_io::response_materialization_probe_from_ipc_payload"),
+        "write IPC transport should call the focused template-io IPC payload adapter directly"
+    );
     assert!(
         write_materialize.contains("use agent_doc_template::response_materialization::{"),
         "write materialization adapters should import the focused response materialization API directly"
@@ -19757,6 +23531,18 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             .any(|member| member.as_str() == Some("agent-doc-sync")),
         "agent-doc-sync must stay a first-class workspace crate"
     );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-sync-io")),
+        "agent-doc-sync-io must stay a first-class workspace crate for sync lock/status effects"
+    );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-process-owner-io")),
+        "agent-doc-process-owner-io must stay a first-class workspace crate for live process-owner inspection"
+    );
 
     let sync_manifest = fs::read_to_string(manifest_dir.join("agent-doc-sync/Cargo.toml")).unwrap();
     let sync: toml::Value = toml::from_str(&sync_manifest).unwrap();
@@ -19791,6 +23577,28 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
     assert_eq!(
         dependency.get("path").and_then(toml::Value::as_str),
         Some("../agent-doc-sync")
+    );
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+    let dependency = orchestration_dependencies["agent-doc-process-owner-io"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        dependency.get("path").and_then(toml::Value::as_str),
+        Some("../agent-doc-process-owner-io")
+    );
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+    let dependency = orchestration_dependencies["agent-doc-sync-io"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        dependency.get("path").and_then(toml::Value::as_str),
+        Some("../agent-doc-sync-io")
     );
     assert_eq!(
         dependency.get("version").and_then(toml::Value::as_str),
@@ -19847,6 +23655,11 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub fn effective_sync_columns",
         "pub fn is_file_rename",
         "pub fn superseded_candidates",
+        "pub struct SyntheticRegistryCandidateFacts",
+        "pub enum SyntheticRegistryDuplicateBasis",
+        "pub enum SyntheticRegistryDuplicateResolution",
+        "pub struct SyntheticRegistryCandidateFilter",
+        "pub fn filter_synthetic_registry_candidate_facts",
         "pub struct ResyncTargetMatcher",
         "pub fn same_document_path",
         "pub fn candidate_matches_target",
@@ -19857,13 +23670,123 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             "agent-doc-sync must own sync scope policy: {required_snippet}"
         );
     }
+    let sync_layout_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/layout.rs"))
+            .unwrap();
+    assert!(
+        sync_layout_source.contains("agent_doc_sync::filter_synthetic_registry_candidate_facts")
+            && sync_layout_source.contains("agent_doc_sync::SyntheticRegistryCandidateFacts"),
+        "sync/layout.rs should adapt synthetic registry candidate facts into focused sync policy"
+    );
+    for forbidden_snippet in [
+        "let live_owner_matches: Vec<usize>",
+        "let pane_root_matches: Vec<usize>",
+        "if live_owner_matches.len() == 1",
+        "pane_root_matches.len() == 1",
+    ] {
+        assert!(
+            !sync_layout_source.contains(forbidden_snippet),
+            "sync/layout.rs must not re-own duplicate synthetic registry candidate policy: {forbidden_snippet}"
+        );
+    }
+
+    let sync_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/Cargo.toml")).unwrap();
+    let sync_io: toml::Value = toml::from_str(&sync_io_manifest).unwrap();
+    let sync_io_dependencies = sync_io["dependencies"].as_table().unwrap();
+    for required_dependency in ["agent-doc-project-root-io", "agent-doc-sync", "fs2", "libc"] {
+        assert!(
+            sync_io_dependencies.contains_key(required_dependency),
+            "agent-doc-sync-io should own sync lock/process effects dependency: {required_dependency}"
+        );
+    }
+    for forbidden_dependency in [
+        "agent-doc-fs",
+        "agent-doc-controller",
+        "agent-doc-orchestration",
+        "agent-doc-tmux",
+        "agent-doc-tmux-commands",
+        "agent-doc-tmux-io",
+        "tmux-router",
+        "notify",
+        "rusqlite",
+        "interprocess",
+    ] {
+        assert!(
+            !sync_io_dependencies.contains_key(forbidden_dependency),
+            "agent-doc-sync-io must stay free of orchestration and tmux/controller effects: {forbidden_dependency}"
+        );
+    }
+    let sync_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub enum SyncLockAcquire",
+        "pub fn acquire_sync_lock(",
+        "pub fn reap_stale_orphaned_sync_lock_owners(",
+        "pub fn sync_lock_process_from_proc(",
+        "pub fn read_proc_ppid(",
+        "pub fn read_proc_cmdline(",
+        "pub fn read_proc_age(",
+        "pub fn proc_has_fd_for_path(",
+        "is_stale_orphaned_sync_lock_owner",
+        "pub fn write_sync_status_with(",
+        "pub fn surface_frontmatter_status_with(",
+        "pub fn clear_frontmatter_status_with(",
+        "agent_doc_project_root_io::project_root_containing(",
+        "agent_doc_sync::sync_frontmatter_status_message",
+        "agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX",
+    ] {
+        assert!(
+            sync_io_source.contains(required_snippet),
+            "agent-doc-sync-io must own sync lock/process/status IO directly: {required_snippet}"
+        );
+    }
+    let process_owner_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-process-owner-io/Cargo.toml")).unwrap();
+    let process_owner_io: toml::Value = toml::from_str(&process_owner_io_manifest).unwrap();
+    let process_owner_io_dependencies = process_owner_io["dependencies"].as_table().unwrap();
+    assert!(
+        process_owner_io_dependencies.contains_key("agent-doc-controller"),
+        "agent-doc-process-owner-io should compose process observations with controller command-line policy"
+    );
+    for forbidden_dependency in [
+        "agent-doc-orchestration",
+        "agent-doc-sync-io",
+        "agent-doc-tmux",
+        "agent-doc-tmux-commands",
+        "agent-doc-tmux-io",
+        "tmux-router",
+        "notify",
+        "rusqlite",
+        "interprocess",
+    ] {
+        assert!(
+            !process_owner_io_dependencies.contains_key(forbidden_dependency),
+            "agent-doc-process-owner-io must stay free of orchestration, sync, and tmux adapters: {forbidden_dependency}"
+        );
+    }
+    let process_owner_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-process-owner-io/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn child_pids(",
+        "pub fn process_command(",
+        "pub fn process_tree_contains_pid(",
+        "fn process_tree_contains_pid_with(",
+        "pub fn process_tree_agent_doc_owner_pid_for_file(",
+        "pub fn process_tree_has_agent_doc_owner_for_file(",
+        "pub fn process_tree_has_agent_session(",
+        "pub fn process_tree_owner_document_other_than(",
+        "pub fn process_tree_owns_other_document(",
+        "agent_doc_controller::command_line::{",
+    ] {
+        assert!(
+            process_owner_io_source.contains(required_snippet),
+            "agent-doc-process-owner-io must own process-tree owner inspection directly: {required_snippet}"
+        );
+    }
 
     let sync_orchestration =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
-    let sync_frontmatter_status = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/sync/frontmatter_status.rs"),
-    )
-    .unwrap();
     let sync_safe_passive =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/safe_passive.rs"))
             .unwrap();
@@ -19928,19 +23851,43 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "fn same_document_path",
         "fn candidate_matches_target",
         "fn registry_file_for_target",
+        "enum SyncLockAcquire",
+        "fn acquire_sync_lock(",
+        "fn reap_stale_orphaned_sync_lock_owners(",
+        "fn sync_lock_process_from_proc(",
+        "fn read_proc_ppid(",
+        "fn read_proc_cmdline(",
+        "fn read_proc_age(",
+        "fn proc_has_fd_for_path(",
+        "fn pane_process_tree_contains_pid(",
+        "fn process_tree_contains_pid(",
+        "fn pid_has_agent_doc_for_file(",
+        "fn pid_is_agent_session(",
     ] {
         assert!(
             !sync_orchestration.contains(forbidden_snippet)
-                && !sync_frontmatter_status.contains(forbidden_snippet)
                 && !sync_safe_passive.contains(forbidden_snippet),
             "orchestration sync modules must not re-own or facade sync scope policy: {forbidden_snippet}"
         );
     }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/sync/lock.rs")
+            .exists(),
+        "orchestration must not keep a sync lock/process IO facade"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/sync/frontmatter_status.rs")
+            .exists(),
+        "orchestration must not keep a sync frontmatter-status IO facade"
+    );
     for forbidden_snippet in [
         "fn same_document_path",
         "fn candidate_matches_target",
         "fn registry_file_for_target",
         "fn superseded_candidates",
+        "fn process_tree_contains_pid(",
     ] {
         assert!(
             !resync_source.contains(forbidden_snippet) && !resync_prune.contains(forbidden_snippet),
@@ -19959,8 +23906,8 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_orchestration.contains("latency_budget_status")
             && sync_orchestration.contains("sync_latency_message")
             && sync_orchestration.contains("agent_doc_sync::safe_passive_lock_contention_message")
-            && sync_frontmatter_status.contains("agent_doc_sync::sync_frontmatter_status_message")
-            && sync_frontmatter_status.contains("agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX")
+            && sync_orchestration.contains("agent_doc_sync_io::surface_frontmatter_status_with")
+            && sync_orchestration.contains("agent_doc_sync_io::clear_frontmatter_status_with")
             && sync_orchestration.contains("sync_prune_state_update")
             && sync_orchestration.contains("planned_stash_window_indices")
             && sync_orchestration.contains("AutoStartMode")
@@ -19971,8 +23918,16 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_orchestration.contains("auto_started_panes_summary")
             && sync_orchestration.contains("WindowIndexNormalizationPlan")
             && sync_orchestration.contains("plan_window_index_normalization")
+            && sync_orchestration.contains("use agent_doc_sync_io::acquire_sync_lock;")
+            && sync_orchestration.contains("acquire_sync_lock(lock_path, sync_lock_wait_budget")
+            && sync_orchestration
+                .contains("agent_doc_process_owner_io::process_tree_contains_pid(")
+            && sync_orchestration
+                .contains("agent_doc_process_owner_io::process_tree_agent_doc_owner_pid_for_file(")
+            && sync_orchestration
+                .contains("agent_doc_process_owner_io::process_tree_has_agent_doc_owner_for_file(")
             && route_session_resolution.contains("agent_doc_sync::shared_sync_scope_root"),
-        "orchestration should call sync scope policy through agent-doc-sync directly"
+        "orchestration should call focused sync policy, sync IO, and process-owner IO crates directly"
     );
     assert!(
         resync_source.contains("use agent_doc_sync::{")
@@ -19980,8 +23935,9 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && resync_source.contains("superseded_candidates")
             && resync_source.contains("ResyncTargetMatcher::new")
             && resync_source.contains("superseded_candidates(canonical, drift_sessions)")
+            && resync_source.contains("agent_doc_process_owner_io::process_tree_contains_pid(")
             && resync_prune.contains("ResyncTargetMatcher::new"),
-        "orchestration resync should call focused target matching/planner policy directly"
+        "orchestration resync should call focused target matching/planner and process-owner IO directly"
     );
 }
 

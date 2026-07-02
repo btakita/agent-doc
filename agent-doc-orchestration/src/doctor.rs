@@ -62,7 +62,7 @@ fn gather_facts(
     let canonical = file
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let project_root = agent_doc_fs::find_project_root(&canonical);
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical);
     let document_hash = agent_doc_fs::document_state_hash(&canonical).ok();
     let preflight = read_preflight_facts(options.preflight_json.as_deref())?;
     let mut session_check = read_session_check_json_facts(options.session_check_json.as_deref())?;
@@ -239,21 +239,21 @@ fn read_actor_facts(
 }
 
 fn read_git_facts(file: &Path, warnings: &mut Vec<String>) -> GitDoctorFacts {
-    let snapshot_status = match crate::git::verify_snapshot_committed(file) {
+    let snapshot_status = match agent_doc_snapshot_io::verify_snapshot_committed(file) {
         Ok(status) => Some(format!("{status:?}")),
         Err(err) => {
             warnings.push(format!("snapshot git verification unavailable: {err}"));
             None
         }
     };
-    let tracked_modified_paths = match crate::git::tracked_modified_paths(file) {
+    let tracked_modified_paths = match agent_doc_git_io::status::tracked_modified_paths(file) {
         Ok(paths) => paths,
         Err(err) => {
             warnings.push(format!("tracked git status unavailable: {err}"));
             Vec::new()
         }
     };
-    let drift = match crate::git::submodule_pointer_drift(file) {
+    let drift = match agent_doc_git_io::submodule::submodule_pointer_drift(file) {
         Ok(drift) => drift,
         Err(err) => {
             warnings.push(format!("parent gitlink inspection unavailable: {err}"));

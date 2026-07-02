@@ -5,12 +5,12 @@
 //!   into a single commit to keep the repository history readable.
 //! - `--archive` creates a tag `archive/pre-squash-<timestamp>` before squashing, preserving
 //!   the full history for later inspection.
-//! - Delegates all git logic to `git::squash_session(file)`.
+//! - Delegates all git logic to `agent_doc_git_io::squash::squash_session(file)`.
 //! - Fails fast with a clear error if the target file does not exist on disk.
 //!
 //! ## Agentic Contracts
 //! - `run(file, archive) -> Result<()>` — errors if `file` does not exist; optionally tags
-//!   pre-squash state, then delegates to `git::squash_session`.
+//!   pre-squash state, then delegates to `agent_doc_git_io::squash::squash_session`.
 //!
 //! ## Evals
 //! - file_not_found: non-existent path → `Err` containing "file not found"
@@ -21,8 +21,6 @@ use anyhow::Result;
 use std::path::Path;
 use std::process::Command;
 use std::time::SystemTime;
-
-use agent_doc_orchestration::git;
 
 pub fn run(file: &Path, archive: bool) -> Result<()> {
     if !file.exists() {
@@ -41,5 +39,5 @@ pub fn run(file: &Path, archive: bool) -> Result<()> {
             anyhow::bail!("failed to create archive tag: {}", tag);
         }
     }
-    git::squash_session(file)
+    agent_doc_git_io::squash::squash_session(file)
 }

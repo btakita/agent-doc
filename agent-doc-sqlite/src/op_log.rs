@@ -162,7 +162,7 @@ pub fn append_ops(project_root: &Path, ops: &[DocumentOp]) -> Result<usize> {
         let recorded_at = op
             .recorded_at
             .clone()
-            .unwrap_or_else(|| timestamp_now().to_string());
+            .unwrap_or_else(|| agent_doc_log_time::current_epoch_secs().to_string());
         tx.execute(
             "INSERT INTO op_log (
                  document_path, component, node_key, item_id, op_kind, actor,
@@ -186,6 +186,29 @@ pub fn append_ops(project_root: &Path, ops: &[DocumentOp]) -> Result<usize> {
     }
     tx.commit()?;
     Ok(written)
+}
+
+/// Build and append durable document ops from a semantic diff summary.
+///
+/// The sqlite op-log owns the timestamp used for durable persistence so callers
+/// do not reimplement low-level clock formatting at orchestration boundaries.
+pub fn append_semantic_diff_ops(
+    project_root: &Path,
+    document_path: &str,
+    origin_session: Option<&str>,
+    summary: &agent_doc_diff::semantic::SemanticDiffSummary,
+) -> Result<usize> {
+    if summary.node_events.is_empty() {
+        return Ok(0);
+    }
+    let recorded_at = agent_doc_log_time::current_epoch_secs().to_string();
+    let ops = agent_doc_turn::op_log::build_ops_from_semantic_diff(
+        document_path,
+        origin_session,
+        &recorded_at,
+        summary,
+    );
+    append_ops(project_root, &ops)
 }
 
 /// Read persisted ops for a document in Lamport order (most recent last),
@@ -216,14 +239,6 @@ pub fn read_ops(project_root: &Path, document_path: &str, limit: usize) -> Resul
         ops.push(row_to_op(row)?);
     }
     Ok(ops)
-}
-
-fn timestamp_now() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -333,5 +348,25 @@ mod tests {
     fn read_ops_returns_empty_without_db() {
         let dir = project_with_agent_doc();
         assert!(read_ops(dir.path(), "missing.md", 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn append_semantic_diff_ops_builds_and_persists_user_ops() {
+        let dir = project_with_agent_doc();
+        let summary = agent_doc_diff::semantic::semantic_diff_summary(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            &[],
+        )
+        .unwrap();
+
+        let written =
+            append_semantic_diff_ops(dir.path(), "plan.md", Some("sess-1"), &summary).unwrap();
+
+        assert_eq!(written, 1);
+        let ops = read_ops(dir.path(), "plan.md", 0).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].clock.origin_session.as_deref(), Some("sess-1"));
+        assert!(ops[0].recorded_at.is_some());
     }
 }

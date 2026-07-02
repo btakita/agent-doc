@@ -11,6 +11,7 @@ name = "agent_doc_controller"
 
 [dependencies]
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.67" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }

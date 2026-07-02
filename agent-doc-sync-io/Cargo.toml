@@ -1,0 +1,22 @@
+[package]
+name = "agent-doc-sync-io"
+version = "0.34.67"
+edition = "2024"
+description = "Sync lock and process-effect adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_sync_io"
+
+[dependencies]
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.67" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+agent-doc-sync = { path = "../agent-doc-sync", version = "0.34.67" }
+anyhow = "1"
+fs2 = "0.4"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

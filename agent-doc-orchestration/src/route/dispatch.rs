@@ -4,16 +4,26 @@ use super::*;
 
 use agent_doc_controller::dispatch::{
     AutoStartDispatchBlock, AutoStartDispatchReadyFacts, DeadHarnessShellDispatchFacts,
-    DirectPaneFullResendFacts, DirectPaneNotDispatchedFacts, DispatchInjectLogFacts,
-    DispatchTargetBindFacts, DispatchTargetMatchFacts, FreshDispatchTargetAfterReadyWaitDecision,
-    FreshDispatchTargetAfterReadyWaitFacts, classify_auto_start_dispatch_ready_block,
-    classify_dead_harness_shell_dispatch_block, classify_dispatch_target_bind,
-    classify_dispatch_target_match, decide_fresh_dispatch_target_after_ready_wait,
+    DirectPaneAcceptancePollState, DirectPaneDispatchStartProofFacts,
+    DirectPaneEnterResubmitAttemptFacts, DirectPaneExistingDraftSubmitFacts,
+    DirectPaneFullResendFacts, DirectPaneNotDispatchedFacts, DirectPaneResubmitProofFacts,
+    DirectPaneSubmitStatus as CommandDispatchStatus, DispatchInjectLogFacts,
+    FreshDispatchTargetAfterReadyWaitDecision, FreshDispatchTargetAfterReadyWaitFacts,
+    RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
+    classify_auto_start_dispatch_ready_block, classify_dead_harness_shell_dispatch_block,
+    decide_fresh_dispatch_target_after_ready_wait, direct_pane_acceptance_poll_status,
+    direct_pane_can_continue_enter_resubmit, direct_pane_can_enter_existing_draft,
     direct_pane_can_full_resend_not_landed, direct_pane_fast_accept_on_processing,
-    direct_pane_not_dispatched, dispatch_inject_log_line, recent_lines_contain_trigger,
-    route_trigger_visible_in_current_draft,
+    direct_pane_max_enter_resubmits, direct_pane_not_dispatched, direct_pane_resubmit_proof_line,
+    direct_pane_should_await_dispatch_start_proof, direct_pane_submit_acceptance_budget,
+    direct_pane_submit_acceptance_timeout, direct_pane_submit_outcome, dispatch_inject_log_line,
+    dispatch_start_busy_probe_timeout, recent_lines_contain_trigger,
+    route_trigger_visible_in_current_draft, routed_dispatch_start_timeout_for_binary,
+    routed_trigger_payload_rejection,
 };
 use agent_doc_harness::{pane_idle_dispatch_ready, protected_prompt_draft_preview};
+use agent_doc_hash::short_content_hash;
+use agent_doc_session_registry_io::dispatch_registry;
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
 use agent_doc_tmux::pane_current_command_is_bare_shell;
 
@@ -84,7 +94,7 @@ pub(crate) fn poll_direct_pane_acceptance(
     let mut poll_state = DirectPaneAcceptancePollState::default();
     let mut capture_failed = false;
     while start.elapsed() < timeout {
-        match sessions::capture_pane(tmux, pane) {
+        match agent_doc_tmux_io::capture_pane(tmux, pane) {
             Ok(content) => {
                 let elapsed = start.elapsed();
                 let cmd_still_in_input = recent_lines_contain_trigger(&content, trigger);
@@ -253,9 +263,14 @@ fn send_direct_pane_enter_resubmit(
         "routed_resubmit_submit_key",
         submit_key,
     );
-    if let Err(e) =
-        crate::sessions::send_submitted_text_for_harness(tmux, pane, "", &harness.binary)
-    {
+    if let Err(e) = agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+        tmux,
+        pane,
+        "",
+        &harness.binary,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        "sessions.send_submitted_text_for_harness",
+    ) {
         eprintln!(
             "[route] warning: {} resubmit {} failed for pane {}: {}",
             harness.binary, submit_key, pane, e
@@ -352,11 +367,11 @@ pub(crate) fn dead_harness_shell_dispatch_block(
     pane: &str,
     harness: &HarnessConfig,
 ) -> Option<String> {
-    let bare_shell_command = super::pane_display_value(tmux, pane, "#{pane_current_command}")
+    let bare_shell_command = agent_doc_tmux_io::target_current_command(tmux, pane)
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty())
         .filter(|cmd| pane_current_command_is_bare_shell(cmd))?;
-    let pane_shows_harness_prompt = sessions::capture_pane(tmux, pane)
+    let pane_shows_harness_prompt = agent_doc_tmux_io::capture_pane(tmux, pane)
         .ok()
         .and_then(|content| harness.last_prompt_candidate(&content))
         .map(|line| harness.is_dispatch_ready_prompt_line(&line))
@@ -382,11 +397,11 @@ pub(crate) fn auto_start_dispatch_ready_block(
     pane: &str,
     harness: &HarnessConfig,
 ) -> Option<AutoStartDispatchBlock> {
-    let pane_shows_dispatch_ready_prompt = sessions::capture_pane(tmux, pane)
+    let pane_shows_dispatch_ready_prompt = agent_doc_tmux_io::capture_pane(tmux, pane)
         .ok()
         .and_then(|content| agent_doc_harness::ready_prompt_candidate(&content, harness))
         .is_some();
-    let bare_shell_command = super::pane_display_value(tmux, pane, "#{pane_current_command}")
+    let bare_shell_command = agent_doc_tmux_io::target_current_command(tmux, pane)
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty())
         .filter(|cmd| pane_current_command_is_bare_shell(cmd));
@@ -525,7 +540,7 @@ pub(crate) fn send_command_unchecked(
     }
     let mut existing_draft_diagnostic_path = None;
     let mut protected_prompt_input = None;
-    let existing_draft_visible = match sessions::capture_pane(tmux, pane) {
+    let existing_draft_visible = match agent_doc_tmux_io::capture_pane(tmux, pane) {
         Ok(content) => {
             let visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
                 harness.is_prompt_line(line)
@@ -759,11 +774,7 @@ pub(crate) fn send_command_once_unchecked(
         anyhow::bail!("{rejection}");
     }
     let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
-    if let Err(e) = tmux
-        .cmd()
-        .args(["display-message", "-t", pane, "-d", "2000", &flash_msg])
-        .status()
-    {
+    if let Err(e) = agent_doc_tmux_io::show_message(tmux, pane, "2000", &flash_msg) {
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
@@ -782,7 +793,14 @@ pub(crate) fn send_command_once_unchecked(
         submit_key,
     );
     log_dispatch_inject(Path::new(file_path), pane, harness, "direct_pane");
-    crate::sessions::send_submitted_text_for_harness(tmux, pane, &payload, &harness.binary)?;
+    agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+        tmux,
+        pane,
+        &payload,
+        &harness.binary,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        "sessions.send_submitted_text_for_harness",
+    )?;
     if let Err(e) = tmux.select_pane(pane) {
         eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
     }
@@ -810,7 +828,7 @@ fn short_circuit_dispatch_start_when_pane_busy(
     harness: &HarnessConfig,
     tracker: &RoutedDispatchStartTracker,
 ) -> Result<Option<RoutedDispatchStartProof>> {
-    let content = match sessions::capture_pane(tmux, pane) {
+    let content = match agent_doc_tmux_io::capture_pane(tmux, pane) {
         Ok(content) => content,
         Err(err) => {
             eprintln!(
@@ -880,11 +898,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
         anyhow::bail!("{rejection}");
     }
     let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
-    if let Err(e) = tmux
-        .cmd()
-        .args(["display-message", "-t", pane, "-d", "2000", &flash_msg])
-        .status()
-    {
+    if let Err(e) = agent_doc_tmux_io::show_message(tmux, pane, "2000", &flash_msg) {
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
@@ -910,12 +924,13 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
     );
     log_dispatch_inject(file, pane, harness, "supervisor_ipc");
     let submit_start = Instant::now();
-    let response = crate::supervisor::ipc::send_command(&sock, &method).with_context(|| {
-        format!(
-            "failed to dispatch authoritative actor trigger for {} via supervisor IPC",
-            file.display()
-        )
-    })?;
+    let response =
+        agent_doc_supervisor_io::ipc::send_command(&sock, &method).with_context(|| {
+            format!(
+                "failed to dispatch authoritative actor trigger for {} via supervisor IPC",
+                file.display()
+            )
+        })?;
     log_route_latency(
         file,
         "supervisor_ipc_submit",
@@ -1021,7 +1036,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
             timeout.as_secs()
         ),
     );
-    let diagnostic_path = match sessions::capture_pane(tmux, pane) {
+    let diagnostic_path = match agent_doc_tmux_io::capture_pane(tmux, pane) {
         Ok(content) => {
             let snapshot = preserve_route_pane_snapshot(
                 file,
@@ -1124,70 +1139,25 @@ pub(crate) fn authoritative_actor_dispatch_can_queue_optimistically(
     agent_doc_controller::dispatch::actor_can_queue_optimistically(actor_dispatch_state(state))
 }
 
-pub(crate) fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
-    let resolved = agent_doc_git_io::dirs::resolve_absolute_file_path(path);
-    std::fs::canonicalize(&resolved).unwrap_or(resolved)
-}
-
-pub(crate) fn canonical_registered_file(entry: &tmux_router::RegistryEntry) -> std::path::PathBuf {
-    let path = std::path::Path::new(&entry.file);
-    let resolved = if path.is_absolute() || entry.cwd.is_empty() {
-        path.to_path_buf()
-    } else {
-        std::path::Path::new(&entry.cwd).join(path)
-    };
-    std::fs::canonicalize(&resolved).unwrap_or(resolved)
-}
-
-pub(crate) fn registry_base_dir_for_dispatch(file_path: &str) -> std::path::PathBuf {
-    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
-    agent_doc_fs::find_project_root(&requested)
-        .or_else(|| requested.parent().map(std::path::Path::to_path_buf))
-        .unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-        })
-}
-
-pub(crate) fn lookup_dispatch_registration(
-    file_path: &str,
-    session_id: &str,
-) -> Result<Option<String>> {
-    let base_dir = registry_base_dir_for_dispatch(file_path);
-    sessions::lookup_in(&base_dir, session_id)
-}
-
-pub(crate) fn load_dispatch_registry(file_path: &str) -> Result<tmux_router::Registry> {
-    let base_dir = registry_base_dir_for_dispatch(file_path);
-    sessions::load_in(&base_dir)
-}
-
-pub(crate) fn deregister_dispatch_registration(file_path: &str, session_id: &str) -> Result<bool> {
-    let base_dir = registry_base_dir_for_dispatch(file_path);
-    let registry_path = sessions::registry_path_in(&base_dir);
-    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
-    let mut registry = sessions::load_in(&base_dir)?;
-    let removed_key = registry.iter().find_map(|(key, entry)| {
-        ((entry.session_id == session_id) || (entry.session_id.is_empty() && key == session_id))
-            .then(|| key.clone())
-    });
-    let removed = removed_key.and_then(|key| registry.remove(&key)).is_some();
-    if removed {
-        sessions::save_in(&base_dir, &registry)?;
-    }
-    Ok(removed)
-}
-
 pub(crate) fn register_dispatch_target(
     tmux: &Tmux,
     session_id: &str,
     pane_id: &str,
     file_path: &str,
 ) -> Result<()> {
-    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    let requested = dispatch_registry::canonical_dispatch_file(std::path::Path::new(file_path));
     let requested_str = requested.to_string_lossy().to_string();
-    let base_dir = registry_base_dir_for_dispatch(&requested_str);
-    ensure_dispatch_target_can_bind_file(tmux, &base_dir, pane_id, &requested_str)?;
-    let window = sessions::pane_window(pane_id).unwrap_or_default();
+    let base_dir = dispatch_registry::registry_base_dir_for_dispatch(&requested_str);
+    dispatch_registry::ensure_dispatch_target_can_bind_file(
+        &base_dir,
+        pane_id,
+        &requested_str,
+        |entry, registered| {
+            crate::sync::find_normal_path_owner_pane(tmux, registered, &entry.session_id).as_deref()
+                == Some(pane_id)
+        },
+    )?;
+    let window = agent_doc_tmux_io::target_window_id(tmux, pane_id).unwrap_or_default();
     let cwd = base_dir.to_string_lossy().to_string();
     sessions::register_full_with_cwd_in(
         &base_dir,
@@ -1200,86 +1170,6 @@ pub(crate) fn register_dispatch_target(
     )
 }
 
-pub(crate) fn ensure_dispatch_target_can_bind_file(
-    tmux: &Tmux,
-    base_dir: &Path,
-    pane: &str,
-    file_path: &str,
-) -> Result<()> {
-    let registry = sessions::load_in(base_dir).with_context(|| {
-        format!(
-            "failed to load route registry before dispatch registration from {}",
-            base_dir.display()
-        )
-    })?;
-    let pane_matches_file = pane_registration_matches_file(&registry, pane, file_path);
-    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
-    let requested_display = requested.display().to_string();
-    let registered_entry = registry.values().find(|entry| entry.pane == pane);
-    let registered = registered_entry.map(canonical_registered_file);
-    let registered_display = registered.as_ref().map(|path| path.display().to_string());
-    let registered_is_live_owner = match (registered_entry, registered.as_ref()) {
-        (Some(entry), Some(registered)) => {
-            !entry.session_id.is_empty()
-                && crate::sync::find_normal_path_owner_pane(tmux, registered, &entry.session_id)
-                    .as_deref()
-                    == Some(pane)
-        }
-        _ => false,
-    };
-    if let Some(refusal) = classify_dispatch_target_bind(DispatchTargetBindFacts {
-        pane,
-        pane_matches_file,
-        registered_file_display: registered_display.as_deref(),
-        requested_file_display: &requested_display,
-        registered_is_live_owner,
-    }) {
-        anyhow::bail!(refusal);
-    }
-
-    Ok(())
-}
-
-pub(crate) fn pane_registration_matches_file(
-    registry: &tmux_router::Registry,
-    pane: &str,
-    file_path: &str,
-) -> bool {
-    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
-    registry
-        .values()
-        .find(|entry| entry.pane == pane)
-        .map(|entry| canonical_registered_file(entry) == requested)
-        .unwrap_or(false)
-}
-
-pub(crate) fn ensure_dispatch_target_matches_file(pane: &str, file_path: &str) -> Result<()> {
-    let registry_base_dir = registry_base_dir_for_dispatch(file_path);
-    let registry = sessions::load_in(&registry_base_dir).with_context(|| {
-        format!(
-            "failed to load route registry before dispatch validation from {}",
-            registry_base_dir.display()
-        )
-    })?;
-    let pane_matches_file = pane_registration_matches_file(&registry, pane, file_path);
-    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
-    let requested_display = requested.display().to_string();
-    let registered_display = registry
-        .values()
-        .find(|entry| entry.pane == pane)
-        .map(canonical_registered_file)
-        .map(|path| path.display().to_string());
-    if let Some(refusal) = classify_dispatch_target_match(DispatchTargetMatchFacts {
-        pane,
-        pane_matches_file,
-        registered_file_display: registered_display.as_deref(),
-        requested_file_display: &requested_display,
-    }) {
-        anyhow::bail!(refusal);
-    }
-    Ok(())
-}
-
 pub(crate) fn resolve_fresh_dispatch_target_after_ready_wait(
     tmux: &Tmux,
     session_id: &str,
@@ -1287,29 +1177,31 @@ pub(crate) fn resolve_fresh_dispatch_target_after_ready_wait(
     file_path: &str,
     _startup_miss_handoff_blocked_pane: Option<&str>,
 ) -> Result<String> {
-    let registry_base_dir = registry_base_dir_for_dispatch(file_path);
-    let registry = sessions::load_in(&registry_base_dir).with_context(|| {
-        format!(
-            "failed to load route registry before fresh-dispatch validation from {}",
-            registry_base_dir.display()
-        )
-    })?;
-    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    let registry_base_dir = dispatch_registry::registry_base_dir_for_dispatch(file_path);
+    let registry =
+        agent_doc_session_registry_io::load_in(&registry_base_dir).with_context(|| {
+            format!(
+                "failed to load route registry before fresh-dispatch validation from {}",
+                registry_base_dir.display()
+            )
+        })?;
+    let requested = dispatch_registry::canonical_dispatch_file(std::path::Path::new(file_path));
     let requested_display = requested.display().to_string();
-    let pane_matches_file = pane_registration_matches_file(&registry, pane, file_path);
+    let pane_matches_file =
+        dispatch_registry::pane_registration_matches_file(&registry, pane, file_path);
     let handoff_target = registry
         .values()
         .find(|entry| {
             entry.session_id == session_id
                 && !entry.pane.is_empty()
                 && entry.pane != pane
-                && canonical_registered_file(entry) == requested
+                && dispatch_registry::canonical_registered_file(entry) == requested
         })
         .map(|entry| entry.pane.as_str());
     let registered_display = registry
         .values()
         .find(|entry| entry.pane == pane)
-        .map(canonical_registered_file)
+        .map(dispatch_registry::canonical_registered_file)
         .map(|path| path.display().to_string());
     match decide_fresh_dispatch_target_after_ready_wait(FreshDispatchTargetAfterReadyWaitFacts {
         requested_pane: pane,
@@ -1344,7 +1236,7 @@ pub(crate) fn send_command_checked(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<CommandDispatchResult> {
-    ensure_dispatch_target_matches_file(pane, file_path)?;
+    dispatch_registry::ensure_dispatch_target_matches_file(pane, file_path)?;
     send_command_unchecked(tmux, pane, file_path, harness)
 }
 
@@ -1358,7 +1250,7 @@ fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
     timeout: Duration,
 ) -> Result<Option<RoutedDispatchStartProof>> {
     let trigger = harness.trigger_command(file_path);
-    let visible = match sessions::capture_pane(tmux, pane) {
+    let visible = match agent_doc_tmux_io::capture_pane(tmux, pane) {
         Ok(content) => {
             let visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
                 harness.is_prompt_line(line)
@@ -1654,7 +1546,7 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
                     timeout.as_secs()
                 ),
             );
-            let diagnostic_path = match sessions::capture_pane(tmux, pane) {
+            let diagnostic_path = match agent_doc_tmux_io::capture_pane(tmux, pane) {
                 Ok(content) => {
                     let snapshot = preserve_route_pane_snapshot(
                         file,
@@ -1756,9 +1648,9 @@ pub(crate) struct DirectPaneDispatchOptions {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
+    use agent_doc_supervisor_io::ipc::SupervisorIpc;
 
     #[test]
     fn authoritative_actor_starting_hint_names_reroute_and_restart() {

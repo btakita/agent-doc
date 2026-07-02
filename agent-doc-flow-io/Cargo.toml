@@ -1,0 +1,13 @@
+[package]
+name = "agent-doc-flow-io"
+version = "0.34.67"
+edition = "2024"
+description = "Flow event logging adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_flow_io"
+
+[dependencies]
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }

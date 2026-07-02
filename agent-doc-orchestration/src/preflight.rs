@@ -33,7 +33,7 @@
 //!   (stripping script/style/nav/footer/noscript/svg), caches in
 //!   `.agent-doc/links_cache/<sha256(url)>.txt`, and reports changes by
 //!   comparing against the cached content.
-//! - Step 4 — diff: calls `diff_io::compute(file)` to compare the current
+//! - Step 4 - diff: calls `agent_doc_diff_io::compute(...)` to compare the current
 //!   document against the last snapshot; `no_changes=true` when they match.
 //! - Also emits a bounded `session_accretion` advisory when local exchange/log
 //!   heuristics detect churn-heavy growth or restart-heavy reopen patterns.
@@ -104,14 +104,13 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use agent_doc_frontmatter::frontmatter;
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
 
-use crate::{diff_io, git, repair, resync, sessions, snapshot, sync};
+use crate::{git, repair, resync, sync};
 use agent_doc_document::write_normalization::editor_buffer_preserved_head_exchange;
 use agent_doc_element::element::{
     is_backlog_component, is_review_component, is_tracked_work_component,
@@ -438,8 +437,9 @@ pub struct PreflightOutput {
     pub semantic_merge_acks: Vec<crate::cycle_state::PendingSemanticMergeAck>,
 }
 
-mod semantic_diff;
-pub(crate) use semantic_diff::{is_zero_usize, persist_op_log};
+pub(crate) fn is_zero_usize(n: &usize) -> bool {
+    *n == 0
+}
 
 fn relocate_out_of_exchange_prompt_before_diff(
     file: &Path,
@@ -456,7 +456,7 @@ fn relocate_out_of_exchange_prompt_before_diff(
         return Ok(None);
     };
 
-    if let Some(snapshot_content) = snapshot::load(file)? {
+    if let Some(snapshot_content) = agent_doc_snapshot_io::load(file)? {
         repaired = crate::write::normalize_user_prompts_in_exchange_safe(
             &repaired,
             &repaired,
@@ -496,7 +496,7 @@ fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
     rc: &crate::graph::RunContext,
 ) -> Result<bool> {
     let current = std::fs::read_to_string(file)?;
-    let snapshot_doc = crate::snapshot::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     let head_doc = rc.head_content();
     let mut preserve_docs = Vec::new();
     preserve_docs.push(current.as_str());
@@ -731,7 +731,7 @@ fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) 
     let Ok(canonical) = file.canonicalize() else {
         return;
     };
-    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         return;
     };
     let state_dir = project_root.join(".agent-doc/state");
@@ -790,7 +790,7 @@ fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) 
 /// live agent or an unmanaged user window.
 fn close_superseded_drift_sessions(file: &std::path::Path) {
     let tmux = tmux_router::Tmux::default_server();
-    let registry = match sessions::load() {
+    let registry = match agent_doc_session_registry_io::load() {
         Ok(registry) => registry,
         Err(e) => {
             eprintln!(
@@ -825,7 +825,7 @@ fn clear_base_index_repair_counter(file: &std::path::Path) {
     let Ok(canonical) = file.canonicalize() else {
         return;
     };
-    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         return;
     };
     let counter_path = project_root.join(".agent-doc/state/base-index-repair.count");
@@ -854,7 +854,7 @@ fn maybe_auto_repair_base_index(file: &std::path::Path, layout_issues: &[String]
     // repair immediately.
     clear_base_index_repair_counter(file);
 
-    if !sessions::in_tmux() {
+    if !agent_doc_tmux_io::in_tmux() {
         eprintln!(
             "[preflight] window index 0 missing but no tmux context is available; run `agent-doc session doctor {} --repair` from the target tmux session",
             file.display()
@@ -895,7 +895,7 @@ fn maybe_auto_repair_base_index(file: &std::path::Path, layout_issues: &[String]
 ///
 /// If not running inside tmux, returns an empty vec silently.
 pub fn check_layout() -> Vec<String> {
-    if !sessions::in_tmux() {
+    if !agent_doc_tmux_io::in_tmux() {
         return vec![];
     }
 
@@ -912,18 +912,14 @@ pub fn check_layout() -> Vec<String> {
     }
 
     // List windows: index, name, pane count.
-    let window_output = match Command::new("tmux")
-        .args([
-            "list-windows",
-            "-t",
-            &format!("{}:", session_name),
-            "-F",
-            "#{window_index}\t#{window_name}\t#{window_panes}",
-        ])
-        .output()
-    {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
-        _ => return issues,
+    let tmux_runner = agent_doc_tmux_io::ProcessTmuxRunner::default_binary();
+    let window_output = match agent_doc_tmux_io::list_windows(
+        &tmux_runner,
+        Some(&format!("{}:", session_name)),
+        "#{window_index}\t#{window_name}\t#{window_panes}",
+    ) {
+        Ok(output) => output,
+        Err(_) => return issues,
     };
 
     let windows: Vec<u32> = window_output
@@ -945,7 +941,7 @@ pub fn check_layout() -> Vec<String> {
 
     // Check 3: Session-drift — registered panes spanning multiple tmux sessions.
     // Check 4: Duplicate claims — multiple sessions claiming the same document file.
-    let registry_path = sessions::registry_path();
+    let registry_path = agent_doc_session_registry_io::registry_path();
     let registry: Option<tmux_router::Registry> = std::fs::read_to_string(&registry_path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok());
@@ -954,14 +950,7 @@ pub fn check_layout() -> Vec<String> {
         for entry in registry.values() {
             let pane = &entry.pane;
             // Only check alive panes.
-            let pane_sess = Command::new("tmux")
-                .args(["display-message", "-t", pane, "-p", "#{session_name}"])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                .unwrap_or_default();
-            if !pane_sess.is_empty() {
+            if let Some(pane_sess) = agent_doc_tmux_io::target_session_name(&tmux_runner, pane) {
                 pane_sessions.insert(pane_sess);
             }
         }
@@ -1038,7 +1027,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
     let missing_commit_event = if state.as_ref().map(|state| state.is_open()).unwrap_or(false) {
         None
     } else {
-        crate::session_check::detect_write_completed_commit_missing(file)?
+        agent_doc_ops_log_io::detect_write_completed_commit_missing(file)?
     };
     if let Some(event) = missing_commit_event.as_deref() {
         eprintln!(
@@ -1066,9 +1055,12 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             Ok(outcome) => outcome.repaired(),
             Err(e) => {
                 let message = e.to_string();
-                if message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
-                    || message.contains(repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR)
-                    || message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
+                if message
+                    .contains(agent_doc_turn::repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                    || message
+                        .contains(agent_doc_turn::repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR)
+                    || message
+                        .contains(agent_doc_turn::repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
                 {
                     anyhow::bail!("{}", e);
                 }
@@ -1115,7 +1107,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         return Ok((false, false));
     }
 
-    let ipc_hint = crate::session_check::latest_ipc_proof_diagnostic_hint(file)?
+    let ipc_hint = agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(file)?
         .map(|hint| format!("; {hint}"))
         .unwrap_or_default();
     eprintln!(
@@ -1156,9 +1148,10 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         Ok(outcome) => outcome.repaired(),
         Err(e) => {
             let message = e.to_string();
-            if message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
-                || message.contains(repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR)
-                || message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
+            if message.contains(agent_doc_turn::repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                || message.contains(agent_doc_turn::repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR)
+                || message
+                    .contains(agent_doc_turn::repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
             {
                 anyhow::bail!("{}", e);
             }
@@ -1196,7 +1189,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         } else {
             String::new()
         };
-        let ipc_hint = crate::session_check::latest_ipc_proof_diagnostic_hint(file)?
+        let ipc_hint = agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(file)?
             .map(|hint| format!("; {hint}"))
             .unwrap_or_default();
         anyhow::bail!(
@@ -1226,7 +1219,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
 }
 
 fn append_latest_ipc_dogfood_note(file: &Path) -> Result<bool> {
-    let Some(diagnostic) = crate::session_check::latest_ipc_proof_diagnostic(file)? else {
+    let Some(diagnostic) = agent_doc_ops_log_io::latest_ipc_proof_diagnostic(file)? else {
         return Ok(false);
     };
     append_ipc_dogfood_note_for_diagnostic(file, &diagnostic)
@@ -1293,7 +1286,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
             file.display()
         );
         crate::write::atomic_write_pub(file, &replay.deduped_content)?;
-        crate::snapshot::save(file, &replay.deduped_content)?;
+        agent_doc_snapshot_io::save(file, &replay.deduped_content, crate::ops_log::log_op)?;
         return Ok(());
     }
 
@@ -1318,7 +1311,11 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
             file.display()
         );
         crate::write::atomic_write_pub(file, &overapplication.remediated_content)?;
-        crate::snapshot::save(file, &overapplication.remediated_content)?;
+        agent_doc_snapshot_io::save(
+            file,
+            &overapplication.remediated_content,
+            crate::ops_log::log_op,
+        )?;
         return Ok(());
     }
 
@@ -1423,7 +1420,7 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
     // Only the snapshot-vs-HEAD divergence shape that bails today.
     if !matches!(
         rc.snapshot_commit_status(),
-        crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+        agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
     ) {
         return Ok(false);
     }
@@ -1438,7 +1435,7 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
     let Ok(canonical) = file.canonicalize() else {
         return Ok(false);
     };
-    let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
 
     // Flush the live editor buffer to disk (editor = source of truth). Fail-open: an
     // error or absent ack means we cannot trust disk == buffer, so fall through.
@@ -1461,14 +1458,14 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
             barrier.typing_recent
         ),
     );
-    let socket_active = crate::ipc_socket::is_listener_active(&project_root);
+    let socket_active = agent_doc_ipc_io::is_listener_active(&project_root);
     if socket_active {
-        match crate::ipc_socket::send_save_document(&project_root, &path_str, &patch_id) {
+        match agent_doc_ipc_io::send_save_document(&project_root, &path_str, &patch_id) {
             Ok(true) => {}
             Ok(false) | Err(_) => return Ok(false),
         }
     } else {
-        match crate::ipc_socket::send_save_document_file_signal(&project_root, &path_str, &patch_id)
+        match agent_doc_ipc_io::send_save_document_file_signal(&project_root, &path_str, &patch_id)
         {
             Ok(true) => {}
             Ok(false) | Err(_) => return Ok(false),
@@ -1510,7 +1507,7 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
 
     // Reset the snapshot to HEAD: the editor's uncommitted edits now read as the
     // normal next-cycle prompt diff (editor-on-disk vs snapshot=HEAD).
-    crate::snapshot::save(file, &head)?;
+    agent_doc_snapshot_io::save(file, &head, crate::ops_log::log_op)?;
     rc.invalidate_snapshot_content();
     crate::ops_log::log_op(
         file,
@@ -1612,7 +1609,7 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
     }
     if !matches!(
         rc.snapshot_commit_status(),
-        crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+        agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
     ) {
         return Ok(false);
     }
@@ -1865,7 +1862,7 @@ fn collect_agent_done_ids_with_root(
 }
 
 fn snapshot_proves_queue_was_active(file: &Path) -> bool {
-    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
+    let Ok(Some(snapshot_content)) = agent_doc_snapshot_io::load(file) else {
         return false;
     };
     let Ok((fm, _)) = frontmatter::parse(&snapshot_content) else {
@@ -1930,16 +1927,7 @@ pub fn archive_pending_done(
         .context("document is missing agent:done component")?;
     let existing_body = &content_with_archive[archive.open_end..archive.close_start];
 
-    // Use the `date` command so we stay on agent-doc's no-chrono policy
-    // (see git.rs::chrono_timestamp). Fallback to "unknown-date" if the
-    // command fails — archival still succeeds with a legible placeholder.
-    let today = std::process::Command::new("date")
-        .args(["+%Y-%m-%d"])
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown-date".to_string());
+    let today = agent_doc_log_time::current_local_date_ymd();
 
     if let Some(archive_path) = archive.attrs.get("archive") {
         let target = resolve_done_archive_target(file, archive_path)?;
@@ -2032,12 +2020,13 @@ fn resolve_done_archive_target(file: &Path, archive_path: &str) -> Result<PathBu
     }
 
     let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = agent_doc_fs::find_project_root(&canonical_file).with_context(|| {
-        format!(
-            "failed to find repository root for done archive resolution from {}",
-            file.display()
-        )
-    })?;
+    let root =
+        agent_doc_project_root_io::project_root_containing(&canonical_file).with_context(|| {
+            format!(
+                "failed to find repository root for done archive resolution from {}",
+                file.display()
+            )
+        })?;
     let target = root.join(relative);
     if let Ok(canonical_target) = target.canonicalize() {
         if !canonical_target.starts_with(&root) {
@@ -2109,7 +2098,7 @@ fn append_external_done_archive(
 fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {
     // Canonicalize to find project root reliably.
     let canonical = file.canonicalize().ok()?;
-    let root = agent_doc_fs::find_project_root(&canonical)?;
+    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
 
     Some(root.join(".agent-doc/claims.log"))
 }
@@ -2315,7 +2304,7 @@ fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
         }
 
         // Compare last commit time of related doc against our snapshot mtime.
-        let related_mtime = match git::last_commit_mtime(&resolved) {
+        let related_mtime = match agent_doc_git_io::revision::last_commit_mtime(&resolved) {
             Ok(Some(t)) => t,
             _ => continue, // Not tracked or no commits — skip silently.
         };
@@ -2343,44 +2332,15 @@ fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
 
 /// Get a human-readable summary of recent commits for a file.
 fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> String {
-    let since_arg = since.and_then(|t| {
-        t.duration_since(std::time::UNIX_EPOCH)
-            .ok()
-            .map(|d| format!("--since={}", d.as_secs()))
-    });
-
-    let (git_root, resolved) = match agent_doc_git_io::dirs::resolve_to_git_root(file) {
-        Ok(pair) => pair,
-        Err(_) => return "changed (git unavailable)".to_string(),
-    };
-    let rel_path = resolved.strip_prefix(&git_root).unwrap_or(&resolved);
-
-    let mut args = vec!["log", "--oneline", "-5"];
-    let since_str;
-    if let Some(ref s) = since_arg {
-        since_str = s.clone();
-        args.push(&since_str);
-    }
-    args.push("--");
-    let rel_str = rel_path.to_string_lossy().to_string();
-    args.push(&rel_str);
-
-    let output = std::process::Command::new("git")
-        .current_dir(&git_root)
-        .args(&args)
-        .output();
-
-    match output {
-        Ok(out) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout).to_string();
-            let lines: Vec<&str> = text.lines().take(5).collect();
-            if lines.is_empty() {
-                "changed".to_string()
-            } else {
-                lines.join("; ")
-            }
+    match agent_doc_git_io::revision::recent_commit_lines(file, since, 5) {
+        agent_doc_git_io::revision::RecentCommitLog::Lines(lines) => lines.join("; "),
+        agent_doc_git_io::revision::RecentCommitLog::Empty => "changed".to_string(),
+        agent_doc_git_io::revision::RecentCommitLog::GitUnavailable => {
+            "changed (git unavailable)".to_string()
         }
-        _ => "changed (git log failed)".to_string(),
+        agent_doc_git_io::revision::RecentCommitLog::LogFailed => {
+            "changed (git log failed)".to_string()
+        }
     }
 }
 
@@ -2401,8 +2361,12 @@ fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
             // #mps Rung 2 (pin): when the cutover is enabled, also persist the
             // baseline as the model overlay so finalize can project it. Best
             // effort — the `.md` baseline above is the fail-safe.
-            if snapshot::mps_enabled() {
-                match snapshot::save_baseline_model(file, content) {
+            if agent_doc_snapshot_io::mps_enabled() {
+                match agent_doc_snapshot_io::save_baseline_model(
+                    file,
+                    content,
+                    crate::ops_log::log_op,
+                ) {
                     Ok(()) => {}
                     Err(e) => eprintln!("[preflight] #mps baseline model pin failed: {}", e),
                 }
@@ -2519,7 +2483,7 @@ mod th {
     ) -> PathBuf {
         let doc = root.join(rel);
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         commit_all(root, message, commit_date);
         doc
     }
@@ -2546,7 +2510,7 @@ mod th {
     }
     pub(crate) fn age_cycle_state(file: &Path, age_secs: u64) {
         let canonical = file.canonicalize().unwrap();
-        let root = agent_doc_fs::find_project_root(&canonical).unwrap();
+        let root = agent_doc_project_root_io::project_root_containing(&canonical).unwrap();
         let hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
         let path = root
             .join(".agent-doc/state/cycles")
@@ -2557,7 +2521,7 @@ mod th {
         state.updated_at = state.updated_at.saturating_sub(age_secs);
         std::fs::write(path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
     }
-    pub(crate) fn write_cycles_log(doc: &Path, entries: &[crate::ops_log::CycleEntry]) {
+    pub(crate) fn write_cycles_log(doc: &Path, entries: &[agent_doc_ops_log_io::CycleEntry]) {
         let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
         std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
         let mut file = std::fs::File::create(log_path).unwrap();
@@ -2599,7 +2563,7 @@ mod th {
             predicate_annotation
         );
         std::fs::write(&doc, &file_content).unwrap();
-        snapshot::save(&doc, &file_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &file_content, crate::ops_log::log_op).unwrap();
         doc
     }
     pub(crate) fn write_ops_log(dir: &TempDir, body: &str) {
@@ -2822,7 +2786,7 @@ mod tests {
         std::fs::write(&doc, original).unwrap();
 
         // Save snapshot of original, then add new content.
-        snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         std::fs::write(
             &doc,
             "---\nsession: test\n---\n\n## User\n\nHello\n\nNew question here.\n",
@@ -2830,7 +2794,11 @@ mod tests {
         .unwrap();
 
         // diff::compute should detect changes → no_changes = false.
-        let diff_result = diff_io::compute(&doc).unwrap();
+        let diff_result = agent_doc_diff_io::compute(
+            &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+            &doc,
+        )
+        .unwrap();
         assert!(diff_result.is_some(), "diff should detect new content");
     }
     #[test]
@@ -2895,7 +2863,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, active).unwrap();
-        snapshot::save(&doc, active).unwrap();
+        agent_doc_snapshot_io::save(&doc, active, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2923,13 +2891,13 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, drained).unwrap();
-        snapshot::save(&doc, drained).unwrap();
+        agent_doc_snapshot_io::save(&doc, drained, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active))
             .unwrap();
 
         assert!(matches!(
-            crate::git::verify_snapshot_committed(&doc).unwrap(),
-            crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+            agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
+            agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
         ));
         let rc = crate::graph::RunContext::new(doc.clone());
         assert!(
@@ -2940,8 +2908,8 @@ mod tests {
         assert!(recover_route_queue_snapshot_commit_boundary(&doc, &rc).unwrap());
         assert!(
             matches!(
-                crate::git::verify_snapshot_committed(&doc).unwrap(),
-                crate::git::SnapshotCommitStatus::Committed
+                agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
+                agent_doc_snapshot_io::SnapshotCommitStatus::Committed
             ),
             "drained queue must be committed after recovery"
         );
@@ -2977,7 +2945,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, active).unwrap();
-        snapshot::save(&doc, active).unwrap();
+        agent_doc_snapshot_io::save(&doc, active, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3003,7 +2971,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, drained_plus_edit).unwrap();
-        snapshot::save(&doc, drained_plus_edit).unwrap();
+        agent_doc_snapshot_io::save(&doc, drained_plus_edit, crate::ops_log::log_op).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active))
             .unwrap();
 
@@ -3020,7 +2988,7 @@ mod tests {
         let doc = root.join("session.md");
         let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, original).unwrap();
-        snapshot::save(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3035,7 +3003,7 @@ mod tests {
         let patched =
             "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nRecovered answer\n";
         std::fs::write(&doc, patched).unwrap();
-        snapshot::save(&doc, patched).unwrap();
+        agent_doc_snapshot_io::save(&doc, patched, crate::ops_log::log_op).unwrap();
         let ops = root.join(".agent-doc/logs/ops.log");
         std::fs::write(
             &ops,
@@ -3278,7 +3246,7 @@ mod tests {
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
         std::fs::write(&doc, committed).unwrap();
-        snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3298,7 +3266,7 @@ mod tests {
             new body\n\
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
-        snapshot::save(&doc, visible_snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, visible_snapshot, crate::ops_log::log_op).unwrap();
 
         let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
         std::fs::write(&doc, &with_user_edit).unwrap();
@@ -3493,7 +3461,7 @@ mod tests {
             prompt = prompt
         );
         std::fs::write(&doc, &snapshot).unwrap();
-        snapshot::save(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3524,7 +3492,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Doc\n").unwrap();
-        snapshot::save(&doc, "# Doc\n").unwrap();
+        agent_doc_snapshot_io::save(&doc, "# Doc\n", crate::ops_log::log_op).unwrap();
 
         // Write a claims log.
         let log_path = dir.path().join(".agent-doc/claims.log");

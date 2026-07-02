@@ -19,6 +19,7 @@ use agent_doc_controller::status::{
     preparing_controller_is_stale, resolve_controller_identity_version,
     stale_preparing_controller_threshold_from_env_value,
 };
+use agent_doc_controller_io::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use anyhow::{Context, Result};
@@ -983,7 +984,7 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(false);
     };
-    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
         return Ok(false);
     };
     let document_id =
@@ -1371,9 +1372,7 @@ pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
     reason: &str,
 ) -> Result<(usize, usize)> {
     let tmux = tmux_router::Tmux::default_server();
-    if let Err(err) =
-        <tmux_router::Tmux as crate::sessions::Multiplexer>::list_panes(&tmux, None, "#{pane_id}")
-    {
+    if let Err(err) = agent_doc_tmux_io::list_panes(&tmux, None, "#{pane_id}") {
         crate::ops_log::log_op(
             project_root,
             &format!(
@@ -1616,37 +1615,6 @@ pub fn terminate_stale_preparing_controllers(
     terminate_stale_preparing_controllers_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
-/// Process start age (seconds) for a live pid, derived from the `/proc/<pid>`
-/// directory mtime (the kernel stamps it at process start). Returns `None` when the
-/// process is gone or `/proc` is unavailable.
-fn process_start_age_secs(pid: u32) -> Option<u64> {
-    let modified = std::fs::metadata(format!("/proc/{pid}"))
-        .ok()?
-        .modified()
-        .ok()?;
-    SystemTime::now()
-        .duration_since(modified)
-        .ok()
-        .map(|elapsed| elapsed.as_secs())
-}
-
-/// True when `/proc/<pid>/cmdline` carries `--handoff-state preparing` — i.e. the
-/// controller process was *launched* as a replacement mid-handoff. The wedged
-/// replacement (client died before `promote_handoff`) keeps this arg for its whole
-/// life, which is exactly what makes it reapable by cmdline scan even after a newer
-/// controller overwrote the single per-project bootstrap record.
-fn cmdline_has_preparing_handoff(pid: u32) -> bool {
-    let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
-        return false;
-    };
-    let args: Vec<String> = cmdline
-        .split(|byte| *byte == 0)
-        .filter(|arg| !arg.is_empty())
-        .map(|arg| String::from_utf8_lossy(arg).to_string())
-        .collect();
-    agent_doc_controller::command_line::args_have_preparing_handoff(&args)
-}
-
 /// M3 (#stuckhandoff2) — process-scan reaper for *orphaned* preparing controllers.
 ///
 /// The record-scoped [`terminate_stale_preparing_controllers_for_caller`] only knows
@@ -1663,32 +1631,19 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
     dry_run: bool,
     caller: &str,
 ) -> Result<(usize, usize)> {
-    let self_pid = std::process::id();
     let generation = read_bootstrap(project_root)?
         .map(|bootstrap| bootstrap.controller_generation)
         .unwrap_or(0);
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return Ok((0, 0));
-    };
     let mut reaped = 0;
     let mut kept = 0;
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let Ok(pid) = name.parse::<u32>() else {
-            continue;
-        };
-        if pid == self_pid {
+    for pid in agent_doc_controller_io::process::project_controller_pids(project_root) {
+        if pid == std::process::id() {
             continue;
         }
-        if !is_same_project_controller_pid(project_root, pid) {
+        if !agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid) {
             continue;
         }
-        if !cmdline_has_preparing_handoff(pid) {
-            continue;
-        }
-        let age = process_start_age_secs(pid).unwrap_or(0);
+        let age = agent_doc_controller_io::process::process_start_age_secs(pid).unwrap_or(0);
         if age <= stale_after.as_secs() {
             // Freshly-launched replacement still inside a healthy handoff window.
             kept += 1;
@@ -1724,16 +1679,6 @@ pub fn reap_orphaned_preparing_controllers(
     reap_orphaned_preparing_controllers_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
-fn controller_serve_project_root(pid: u32) -> Option<PathBuf> {
-    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    let args: Vec<String> = cmdline
-        .split(|byte| *byte == 0)
-        .filter(|arg| !arg.is_empty())
-        .map(|arg| String::from_utf8_lossy(arg).to_string())
-        .collect();
-    agent_doc_controller::command_line::controller_serve_project_root_from_args(&args)
-}
-
 /// M5 (#stuckhandoff2) — cross-project process-scan sweep for wedged `Preparing`
 /// controllers.
 ///
@@ -1755,29 +1700,20 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
     dry_run: bool,
     caller: &str,
 ) -> Result<(usize, usize)> {
-    let self_pid = std::process::id();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return Ok((0, 0));
-    };
     let mut reaped = 0;
     let mut kept = 0;
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let Ok(pid) = name.parse::<u32>() else {
-            continue;
-        };
-        if pid == self_pid {
+    for pid in agent_doc_controller_io::process::process_pids() {
+        if pid == std::process::id() {
             continue;
         }
-        let Some(root) = controller_serve_project_root(pid) else {
+        let Some(root) = agent_doc_controller_io::process::controller_serve_project_root(pid)
+        else {
             continue;
         };
-        if !cmdline_has_preparing_handoff(pid) {
+        if !agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid) {
             continue;
         }
-        let age = process_start_age_secs(pid).unwrap_or(0);
+        let age = agent_doc_controller_io::process::process_start_age_secs(pid).unwrap_or(0);
         if age <= stale_after.as_secs() {
             // Freshly-launched replacement still inside a healthy handoff window.
             kept += 1;
@@ -1990,7 +1926,7 @@ fn emit_sessions_projection(
 ) -> Result<()> {
     let conn = open_state_db(project_root)?;
     let store = load_actor_store_from_db(&conn)?;
-    let mut registry = match crate::sessions::load_in(project_root) {
+    let mut registry = match agent_doc_session_registry_io::load_in(project_root) {
         Ok(registry) => registry,
         Err(err) => {
             record_projection_diagnostic_with_metadata(
@@ -2083,7 +2019,7 @@ fn emit_sessions_projection(
     let intended_hash = serde_json::to_string_pretty(&registry)
         .ok()
         .map(|content| agent_doc_hash::content_hash(&content));
-    if let Err(err) = crate::sessions::save_in(project_root, &registry) {
+    if let Err(err) = agent_doc_session_registry_io::save_in(project_root, &registry) {
         record_projection_diagnostic_with_metadata(
             project_root,
             "sessions.json",
@@ -2095,7 +2031,7 @@ fn emit_sessions_projection(
         );
         return Ok(());
     }
-    let projected = match crate::sessions::load_in(project_root) {
+    let projected = match agent_doc_session_registry_io::load_in(project_root) {
         Ok(registry) => registry,
         Err(err) => {
             record_projection_diagnostic_with_metadata(
@@ -2267,7 +2203,7 @@ pub(crate) fn spawn_preparing_controller_sentinel(project_root: &Path) -> std::p
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(2)
         && !(is_same_project_controller_pid(project_root, pid)
-            && cmdline_has_preparing_handoff(pid))
+            && agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid))
     {
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -2689,12 +2625,12 @@ mod tests {
                 supervisor_instance_id: "supervisor-1".to_string(),
             },
         );
-        crate::sessions::save_in(dir.path(), &registry).unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
 
         let record = actor_record(&document_id, "%51", "@2");
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
-        let projected = crate::sessions::load_in(dir.path()).unwrap();
+        let projected = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
         let entry = projected.get(&document_id).unwrap();
         assert_eq!(entry.pane, "%51");
         assert_eq!(entry.window, "@2");
@@ -2739,7 +2675,7 @@ mod tests {
                 supervisor_instance_id: "supervisor-b".to_string(),
             },
         );
-        crate::sessions::save_in(dir.path(), &registry).unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
 
         let mut record_a = actor_record(&document_a, "%70", "@7");
         record_a.session_id = "session-a".to_string();
@@ -2748,7 +2684,7 @@ mod tests {
         record_b.session_id = "session-b".to_string();
         store_actor_record(dir.path(), Some(0), &record_b).unwrap();
 
-        let projected = crate::sessions::load_in(dir.path()).unwrap();
+        let projected = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
         assert!(
             !projected.contains_key(&document_a),
             "displaced document must not remain in sessions.json"
@@ -2769,7 +2705,7 @@ mod tests {
 
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
-        let projected = crate::sessions::load_in(dir.path()).unwrap();
+        let projected = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
         let entry = projected.get(&document_id).unwrap();
         assert_eq!(entry.pane, "%61");
         assert_eq!(entry.window, "@3");
@@ -3444,7 +3380,8 @@ mod tests {
 
         let conn = open_state_db(dir.path()).unwrap();
         let boot_timestamp =
-            system_boot_timestamp_secs().expect("/proc/uptime should be available in tests");
+            agent_doc_controller_io::process::system_boot_timestamp_secs(timestamp_secs())
+                .expect("/proc/uptime should be available in tests");
         let old_transition_timestamp = boot_timestamp.saturating_sub(2);
         let preboot_pause_timestamp = boot_timestamp.saturating_sub(1);
         conn.execute(
@@ -4449,7 +4386,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
         crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)
@@ -4555,7 +4492,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
         crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)
@@ -4670,7 +4607,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
         crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)
@@ -5156,7 +5093,7 @@ agent:queue\n\
         drop(conn);
 
         std::fs::write(actor_projection_path(dir.path()), "{}").unwrap();
-        let _ = std::fs::remove_file(crate::sessions::registry_path_in(dir.path()));
+        let _ = std::fs::remove_file(agent_doc_session_registry_io::registry_path_in(dir.path()));
         let _ = std::fs::remove_file(layout_projection_path(dir.path()));
 
         let mut bootstrap = test_bootstrap(&dir);
@@ -5174,7 +5111,7 @@ agent:queue\n\
             .unwrap();
         assert_eq!(actor_projection.get(&document_id).unwrap(), &record);
 
-        let sessions_projection = crate::sessions::load_in(dir.path()).unwrap();
+        let sessions_projection = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
         let entry = sessions_projection.get(&document_id).unwrap();
         assert_eq!(entry.pane, "%88");
         assert_eq!(entry.window, "@8");
@@ -5691,7 +5628,7 @@ agent:queue\n\
     #[test]
     fn process_start_age_secs_reports_for_self() {
         assert!(
-            process_start_age_secs(std::process::id()).is_some(),
+            agent_doc_controller_io::process::process_start_age_secs(std::process::id()).is_some(),
             "process start age must resolve from /proc for a live pid"
         );
     }
@@ -5701,7 +5638,7 @@ agent:queue\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
         let pid = sentinel.id();
-        assert!(cmdline_has_preparing_handoff(pid));
+        assert!(agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid));
 
         // Just-launched (age ~0s) ⇒ inside a healthy handoff window ⇒ keep.
         let (reaped, kept) =
@@ -5722,7 +5659,7 @@ agent:queue\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let mut sentinel = spawn_controller_sentinel(dir.path());
         let pid = sentinel.id();
-        assert!(!cmdline_has_preparing_handoff(pid));
+        assert!(!agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid));
 
         // No `--handoff-state preparing` ⇒ not an orphaned handoff ⇒ never scanned.
         let (reaped, kept) =
@@ -5753,7 +5690,7 @@ agent:queue\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
         let pid = sentinel.id();
-        assert!(cmdline_has_preparing_handoff(pid));
+        assert!(agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid));
 
         // Age strictly past the 1s threshold. Start age is whole seconds (/proc dir
         // mtime), and the reaper keeps when `age <= threshold`, so a ~1.1s-old
@@ -6101,9 +6038,9 @@ agent:queue\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
         let pid = sentinel.id();
-        assert!(cmdline_has_preparing_handoff(pid));
+        assert!(agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid));
         assert_eq!(
-            controller_serve_project_root(pid).as_deref(),
+            agent_doc_controller_io::process::controller_serve_project_root(pid).as_deref(),
             Some(dir.path()),
             "the sweep must recover the sentinel's own --project-root from /proc"
         );

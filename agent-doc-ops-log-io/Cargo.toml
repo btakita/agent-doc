@@ -1,0 +1,23 @@
+[package]
+name = "agent-doc-ops-log-io"
+version = "0.34.67"
+edition = "2024"
+description = "Ops log read/write adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_ops_log_io"
+
+[dependencies]
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.67" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallbackRequest {
@@ -168,6 +169,127 @@ pub fn is_socket_ack_timeout_error(message: impl AsRef<str>) -> bool {
 
 pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
     message.as_ref().contains("IPC ack status error")
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IpcSnapshotSource {
+    AckContentSidecar,
+    ContentOurs,
+    FileRead,
+}
+
+impl IpcSnapshotSource {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::AckContentSidecar => "ack_content_sidecar",
+            Self::ContentOurs => "content_ours",
+            Self::FileRead => "file_read",
+        }
+    }
+
+    pub const fn is_ack_content_proven(self) -> bool {
+        matches!(self, Self::AckContentSidecar)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IpcDiskRepairReason {
+    PrefixDivergence,
+    IpcDedupe,
+    PrefixDivergenceThenIpcDedupe,
+    LivePromptDrift,
+}
+
+impl IpcDiskRepairReason {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::PrefixDivergence => "prefix_divergence",
+            Self::IpcDedupe => "ipc_dedupe",
+            Self::PrefixDivergenceThenIpcDedupe => "prefix_divergence_then_ipc_dedupe",
+            Self::LivePromptDrift => "live_prompt_drift",
+        }
+    }
+
+    pub const fn redelivery_kind(self) -> FullContentRepairRedelivery {
+        match self {
+            Self::PrefixDivergence => FullContentRepairRedelivery::NormalizationFallback,
+            Self::IpcDedupe | Self::PrefixDivergenceThenIpcDedupe => {
+                FullContentRepairRedelivery::IpcDedupe
+            }
+            Self::LivePromptDrift => FullContentRepairRedelivery::LivePromptDrift,
+        }
+    }
+
+    pub const fn merge_with_ipc_dedupe(self) -> Self {
+        match self {
+            Self::PrefixDivergence => Self::PrefixDivergenceThenIpcDedupe,
+            Self::IpcDedupe | Self::PrefixDivergenceThenIpcDedupe | Self::LivePromptDrift => self,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AlreadyAppliedSnapshotOutcome {
+    Persisted,
+    NeedsFileFallback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FullContentRepairRedelivery {
+    NormalizationFallback,
+    IpcDedupe,
+    LivePromptDrift,
+}
+
+impl FullContentRepairRedelivery {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NormalizationFallback => "sidecar_normalization_fallback",
+            Self::IpcDedupe => "ipc_dedupe",
+            Self::LivePromptDrift => "live_prompt_drift",
+        }
+    }
+
+    pub const fn success_message(self) -> &'static str {
+        match self {
+            Self::NormalizationFallback => {
+                "[write] sidecar normalization fallback re-delivered to editor via full-content IPC"
+            }
+            Self::IpcDedupe => "[write] IPC duplicate-response repair re-delivered to editor",
+            Self::LivePromptDrift => "[write] live prompt drift repair re-delivered to editor",
+        }
+    }
+
+    pub const fn not_consumed_message(self) -> &'static str {
+        match self {
+            Self::NormalizationFallback => {
+                "[write] sidecar normalization fallback editor repair was not consumed; refusing direct document write"
+            }
+            Self::IpcDedupe => {
+                "[write] IPC duplicate-response repair was not consumed; refusing direct document write"
+            }
+            Self::LivePromptDrift => {
+                "[write] live prompt drift visible repair was not consumed; refusing direct document write"
+            }
+        }
+    }
+
+    pub fn failed_message(self, error: impl fmt::Display) -> String {
+        match self {
+            Self::NormalizationFallback => format!(
+                "[write] sidecar normalization fallback editor repair failed: {}; refusing direct document write",
+                error
+            ),
+            Self::IpcDedupe => format!(
+                "[write] IPC duplicate-response repair failed: {}; refusing direct document write",
+                error
+            ),
+            Self::LivePromptDrift => format!(
+                "[write] live prompt drift visible repair failed: {}; refusing direct document write",
+                error
+            ),
+        }
+    }
 }
 
 pub fn existing_patch_is_reposition_only(payload: &serde_json::Value) -> bool {
@@ -600,16 +722,18 @@ impl FullContentIpcMode {
 #[cfg(test)]
 mod tests {
     use super::{
-        AckClassification, FullContentIpcMode, build_ipc_node_patches_json, callback_request,
-        callback_request_is_expired, callback_response, callback_response_matches_request,
-        callback_urgency_for_elapsed, classify_ack, early_ack_line, early_ack_ops_marker,
-        early_ack_tagged_message, effective_unmatched_for_patch_payload,
-        existing_patch_is_reposition_only, ipc_accept_thread_ops_marker,
-        is_already_applied_ack_error_message, is_socket_ack_timeout_error, is_socket_status_error,
-        message_requests_early_ack, normalization_repair_patch_message, patch_message,
-        pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
-        refresh_content_message, reload_lib_message, reposition_message, save_document_message,
-        vcs_refresh_message, vcs_refresh_probe_message,
+        AckClassification, AlreadyAppliedSnapshotOutcome, FullContentIpcMode,
+        FullContentRepairRedelivery, IpcDiskRepairReason, IpcSnapshotSource,
+        build_ipc_node_patches_json, callback_request, callback_request_is_expired,
+        callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
+        classify_ack, early_ack_line, early_ack_ops_marker, early_ack_tagged_message,
+        effective_unmatched_for_patch_payload, existing_patch_is_reposition_only,
+        ipc_accept_thread_ops_marker, is_already_applied_ack_error_message,
+        is_socket_ack_timeout_error, is_socket_status_error, message_requests_early_ack,
+        normalization_repair_patch_message, patch_message, pending_callback_from_request,
+        publish_live_buffer_message, queue_convergence_message, refresh_content_message,
+        reload_lib_message, reposition_message, save_document_message, vcs_refresh_message,
+        vcs_refresh_probe_message,
     };
 
     #[test]
@@ -1063,6 +1187,55 @@ mod tests {
         assert_eq!(
             FullContentIpcMode::OperatorMutation.source_label(),
             "compact_exchange"
+        );
+    }
+
+    #[test]
+    fn ipc_repair_vocabulary_labels_and_messages_are_stable() {
+        assert_eq!(
+            IpcSnapshotSource::AckContentSidecar.label(),
+            "ack_content_sidecar"
+        );
+        assert!(IpcSnapshotSource::AckContentSidecar.is_ack_content_proven());
+        assert!(!IpcSnapshotSource::FileRead.is_ack_content_proven());
+
+        assert_eq!(
+            IpcDiskRepairReason::PrefixDivergence.label(),
+            "prefix_divergence"
+        );
+        assert_eq!(
+            IpcDiskRepairReason::PrefixDivergence.merge_with_ipc_dedupe(),
+            IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe
+        );
+        assert_eq!(
+            IpcDiskRepairReason::LivePromptDrift.redelivery_kind(),
+            FullContentRepairRedelivery::LivePromptDrift
+        );
+
+        assert_eq!(
+            AlreadyAppliedSnapshotOutcome::Persisted,
+            AlreadyAppliedSnapshotOutcome::Persisted
+        );
+        assert_ne!(
+            AlreadyAppliedSnapshotOutcome::Persisted,
+            AlreadyAppliedSnapshotOutcome::NeedsFileFallback
+        );
+
+        assert_eq!(FullContentRepairRedelivery::IpcDedupe.label(), "ipc_dedupe");
+        assert!(
+            FullContentRepairRedelivery::IpcDedupe
+                .success_message()
+                .contains("re-delivered")
+        );
+        assert!(
+            FullContentRepairRedelivery::LivePromptDrift
+                .not_consumed_message()
+                .contains("refusing direct document write")
+        );
+        assert!(
+            FullContentRepairRedelivery::NormalizationFallback
+                .failed_message("boom")
+                .contains("boom")
         );
     }
 }

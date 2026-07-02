@@ -1,0 +1,22 @@
+[package]
+name = "agent-doc-session-registry-io"
+version = "0.34.67"
+edition = "2024"
+description = "Session registry filesystem adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_session_registry_io"
+
+[dependencies]
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
+agent-doc-session-registry = { path = "../agent-doc-session-registry", version = "0.34.67" }
+anyhow = "1"
+serde_json = "1"
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+
+[dev-dependencies]
+tempfile = "3"

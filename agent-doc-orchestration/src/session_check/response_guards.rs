@@ -173,7 +173,7 @@ pub(crate) fn check_snapshot_committed_guard(
     file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
-    use crate::git::SnapshotCommitStatus;
+    use agent_doc_snapshot_io::SnapshotCommitStatus;
     match rc.snapshot_commit_status() {
         SnapshotCommitStatus::Committed
         | SnapshotCommitStatus::NoSnapshot
@@ -193,7 +193,7 @@ pub(crate) fn check_snapshot_committed_guard(
             if detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
                 return Ok(GuardResult::None);
             }
-            let side_effects = tracked_side_effect_note(file)?;
+            let side_effects = agent_doc_git_io::status::tracked_side_effect_note(file)?;
             let recovery_hint = closeout_recovery_hint(file);
             let msg = agent_doc_workflow::session_check::snapshot_committed_guard_message(
                 snapshot_len,
@@ -297,7 +297,7 @@ pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result
         }
         agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyDecision::Interrupt => {}
     }
-    let side_effects = tracked_side_effect_note(file)?;
+    let side_effects = agent_doc_git_io::status::tracked_side_effect_note(file)?;
     let recovery_hint = closeout_recovery_hint(file);
     let msg = agent_doc_workflow::session_check::committed_without_response_body_guard_message(
         &state.cycle_id,
@@ -349,7 +349,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &content).unwrap();
-        crate::snapshot::save(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         crate::cycle_state::mark_pending_mutations(&doc).unwrap();
         crate::cycle_state::record_pending_done_ids(
@@ -389,7 +389,7 @@ mod tests {
         let current =
             "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
         fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         crate::cycle_state::mark_pending_mutations(&doc).unwrap();
         crate::cycle_state::record_pending_done_ids(&doc, &["nsga4verify".to_string()]).unwrap();

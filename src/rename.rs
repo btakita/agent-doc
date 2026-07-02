@@ -31,8 +31,6 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_doc_orchestration::sessions;
-
 /// State file types to migrate, with their subdirectory and extension.
 const STATE_FILES: &[(&str, &str)] = &[
     ("snapshots", "md"),
@@ -135,8 +133,9 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
     let old_key = tmux_router::registry::canonical_registry_key_in(&project_root, &old_path_str);
     let new_key = tmux_router::registry::canonical_registry_key_in(&project_root, &new_path_str);
 
-    let _lock = tmux_router::RegistryLock::acquire(&sessions::registry_path())?;
-    let mut registry = sessions::load()?;
+    let _lock =
+        tmux_router::RegistryLock::acquire(&agent_doc_session_registry_io::registry_path())?;
+    let mut registry = agent_doc_session_registry_io::load()?;
     let mut updated_sessions = 0u32;
     if let Some(mut entry) = registry.remove(&old_key) {
         entry.file = new_path_str.clone();
@@ -151,7 +150,7 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
         }
     }
     if updated_sessions > 0 {
-        sessions::save(&registry)?;
+        agent_doc_session_registry_io::save(&registry)?;
     }
 
     eprintln!(

@@ -16,12 +16,9 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
-use crate::snapshot;
-use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
-use agent_doc_queue::backlog_sync;
-use agent_doc_queue::document_queue;
 use agent_doc_queue::queue_heads::{ActiveQueueHeadKind, classify_active_queue_head};
+use agent_doc_queue_io::one_shot_sync::OneShotQueueSyncResult;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConsumeOptions {
@@ -195,87 +192,50 @@ pub fn prune_noise(file: &Path) -> Result<()> {
 }
 
 pub fn sync(file: &Path) -> Result<()> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-
-    let components = element::parse(&content)
-        .with_context(|| format!("failed to parse components in {}", file.display()))?;
-
-    let queue_comp = components.iter().find(|c| c.name == "queue");
-    let Some(qc) = queue_comp else {
-        bail!(
-            "{}: no agent:queue component found. Add `<!-- agent:queue -->..<!-- /agent:queue -->` to the document.",
-            file.display()
-        );
-    };
-
-    let Some(sync_request) =
-        backlog_sync::collect_one_shot_backlog_queue_sync(&components, &content)
-    else {
-        bail!(
-            "{}: no agent:backlog/agent:icebox/agent:pending component carries a `queue` attribute or enqueue marker. \
-             Add `<!-- agent:backlog queue -->` (or `queue=sync`, `queue=prepend`) or mark an item with `:inbox_tray:` / `/enqueue`.",
-            file.display()
-        );
-    };
-    let effective_mode = sync_request.mode;
-    let ids = sync_request.ids;
-
-    if ids.is_empty() {
-        bail!(
-            "{}: no active backlog items found to sync. Add `[ ] [#id] ...` items to agent:backlog first.",
-            file.display()
-        );
+    match agent_doc_queue_io::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(
+        file,
+        |path, content| agent_doc_snapshot_io::save(path, content, crate::ops_log::log_op),
+    )? {
+        OneShotQueueSyncResult::AlreadyInSync {
+            requested_count,
+            mode,
+        } => {
+            println!(
+                "{}: queue already in sync ({} active backlog id(s), {:?} mode). No changes.",
+                file.display(),
+                requested_count,
+                mode
+            );
+        }
+        OneShotQueueSyncResult::Synced(applied) => {
+            println!(
+                "{}: synced {} backlog id(s) → {} queue prompt(s) ({:?} mode)",
+                file.display(),
+                applied.requested_count,
+                applied.prompt_count,
+                applied.mode
+            );
+            if !applied.already_present.is_empty() {
+                println!(
+                    "{}: skipped already represented backlog id(s): {} (reason: already_in_queue)",
+                    file.display(),
+                    agent_doc_queue_io::one_shot_sync::format_queue_ids(&applied.already_present)
+                );
+            }
+            if !applied.newly_materialized.is_empty() {
+                println!(
+                    "{}: materialized backlog id(s): {}",
+                    file.display(),
+                    agent_doc_queue_io::one_shot_sync::format_queue_ids(
+                        &applied.newly_materialized
+                    )
+                );
+            }
+            if let Some(warning) = applied.snapshot_warning {
+                eprintln!("[queue sync] warning: failed to update snapshot: {warning}");
+            }
+        }
     }
-
-    let body = &content[qc.open_end..qc.close_start];
-    let entries = document_queue::parse(body)
-        .with_context(|| format!("failed to parse queue body in {}", file.display()))?;
-
-    let Some(synced) = document_queue::sync_backlog_into_queue(&entries, &ids, effective_mode)
-    else {
-        println!(
-            "{}: queue already in sync ({} active backlog id(s), {:?} mode). No changes.",
-            file.display(),
-            ids.len(),
-            effective_mode
-        );
-        return Ok(());
-    };
-
-    let new_body = document_queue::render(&synced);
-    let new_content = qc.replace_content(&content, &new_body);
-
-    std::fs::write(file, &new_content)
-        .with_context(|| format!("failed to write {}", file.display()))?;
-
-    let report = backlog_sync::backlog_queue_sync_report(&entries, &ids, &synced);
-    println!(
-        "{}: synced {} backlog id(s) → {} queue prompt(s) ({:?} mode)",
-        file.display(),
-        ids.len(),
-        report.prompt_count,
-        effective_mode
-    );
-    if !report.already_present.is_empty() {
-        println!(
-            "{}: skipped already represented backlog id(s): {} (reason: already_in_queue)",
-            file.display(),
-            backlog_sync::format_queue_ids(&report.already_present)
-        );
-    }
-    if !report.newly_materialized.is_empty() {
-        println!(
-            "{}: materialized backlog id(s): {}",
-            file.display(),
-            backlog_sync::format_queue_ids(&report.newly_materialized)
-        );
-    }
-
-    if let Err(e) = snapshot::save(file, &new_content) {
-        eprintln!("[queue sync] warning: failed to update snapshot: {}", e);
-    }
-
     Ok(())
 }
 
@@ -298,7 +258,7 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         sync(&doc).expect("enqueue marker should append to queue");
         let result = std::fs::read_to_string(&doc).unwrap();
@@ -337,7 +297,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         consume_with_options(&doc, 2, ConsumeOptions { force_disk: true })
             .expect("consume two answered free-text heads");
@@ -371,7 +331,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         consume_with_options(&doc, 5, ConsumeOptions { force_disk: true })
             .expect("consume should stop at the id-backed head");
@@ -399,7 +359,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let err = consume(&doc, 1).unwrap_err();
         assert!(
@@ -425,7 +385,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         let err = consume(&doc, 1).unwrap_err();
         assert!(

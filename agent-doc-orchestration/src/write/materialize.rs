@@ -2,7 +2,7 @@
 
 use super::*;
 use agent_doc_template::response_materialization::{
-    response_materialization_probe, same_ignoring_trailing_newlines, serialize_template_response,
+    same_ignoring_trailing_newlines, serialize_template_response,
     strip_partial_response_materialization_from_exchange,
 };
 use std::collections::HashSet;
@@ -135,33 +135,6 @@ pub(crate) fn log_partial_response_materialization_for_retry(
         ),
     );
     Ok(())
-}
-
-pub(crate) fn response_materialization_probe_from_ipc_payload(
-    payload: &serde_json::Value,
-) -> String {
-    let patches = payload
-        .get("patches")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    let name = item
-                        .get("component")
-                        .or_else(|| item.get("name"))
-                        .and_then(|value| value.as_str())?;
-                    let content = item.get("content").and_then(|value| value.as_str())?;
-                    Some(template::PatchBlock::new(name, content))
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let unmatched = payload
-        .get("unmatched")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    response_materialization_probe(&patches, unmatched)
 }
 
 pub fn normalize_backlog_patch_response(

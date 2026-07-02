@@ -74,28 +74,15 @@ pub fn detect_late_ipc_response_overapplication_with_context(
 }
 
 pub(crate) fn check_parent_submodule_pointer_guard(file: &Path) -> Result<GuardResult> {
-    let Some(drift) = crate::git::submodule_pointer_drift(file)? else {
+    let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)? else {
         return Ok(GuardResult::None);
     };
-    let msg = format!(
-        "[session-check] INTERRUPTED: {}",
-        agent_doc_git::parent_submodule_pointer_message(
-            &drift.relative_path,
-            drift.parent_head.as_deref(),
-            &drift.submodule_head,
-            &file.display().to_string(),
-        )
-    );
+    let file_display = file.display().to_string();
+    let msg = agent_doc_git::parent_submodule_pointer_guard_message(&drift, &file_display);
     eprintln!("{}", msg);
     crate::ops_log::log_op(
         file,
-        &format!(
-            "parent_submodule_pointer_guard_failed file={} submodule={} parent_head={} submodule_head={}",
-            file.display(),
-            drift.relative_path,
-            agent_doc_git::short_oid(drift.parent_head.as_deref()),
-            agent_doc_git::short_oid(Some(&drift.submodule_head))
-        ),
+        &agent_doc_git::parent_submodule_pointer_guard_log_line(&drift, &file_display),
     );
     Ok(GuardResult::Error(msg))
 }
@@ -106,44 +93,12 @@ pub(crate) fn check_prompt_only_exchange_tail_guard(
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached document content.
     let content = rc.doc_content();
-    let Some(prompt) = agent_doc_turn::exchange_tail::prompt_only_exchange_tail(&content) else {
-        return Ok(GuardResult::None);
-    };
     let file_display = file.display().to_string();
-    Ok(GuardResult::Error(
-        agent_doc_workflow::session_check::prompt_only_exchange_tail_guard_message(
-            &prompt,
-            &file_display,
-        ),
-    ))
-}
-
-pub(crate) fn tracked_side_effect_paths(file: &Path) -> Result<Vec<String>> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let doc_name = canonical
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_string();
-    Ok(crate::git::tracked_modified_paths(file)?
-        .into_iter()
-        .filter(|path| !path.starts_with(".agent-doc/"))
-        .filter(|path| path != &doc_name && !path.ends_with(&format!("/{doc_name}")))
-        .collect())
-}
-
-pub(crate) fn tracked_side_effect_note(file: &Path) -> Result<String> {
-    let mut paths = tracked_side_effect_paths(file)?;
-    if paths.is_empty() {
-        return Ok(String::new());
-    }
-    let overflow = paths.len().saturating_sub(3);
-    paths.truncate(3);
-    let mut note = format!("; tracked side-effect edits: {}", paths.join(", "));
-    if overflow > 0 {
-        note.push_str(&format!(" (+{} more)", overflow));
-    }
-    Ok(note)
+    Ok(
+        agent_doc_workflow::session_check::prompt_only_exchange_tail_guard(&content, &file_display)
+            .map(GuardResult::Error)
+            .unwrap_or(GuardResult::None),
+    )
 }
 
 /// Phase 3 (#jbccc3): JB File Cache Conflict cancel auto-recovery detection.
@@ -178,7 +133,7 @@ pub fn detect_jb_cache_conflict_cancel_recoverable_with_context(
     }
     if !matches!(
         rc.snapshot_commit_status(),
-        crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+        agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
     ) {
         return Ok(false);
     }
@@ -206,7 +161,7 @@ pub fn detect_uncommitted_closeout_drift_with_context(
     if crate::git::repair_committed_historical_snapshot_drift(file)?.is_some() {
         return Ok(None);
     }
-    if let Some(drift) = crate::git::submodule_pointer_drift(file)? {
+    if let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)? {
         return Ok(Some(agent_doc_git::parent_submodule_pointer_message(
             &drift.relative_path,
             drift.parent_head.as_deref(),
@@ -228,7 +183,7 @@ pub fn detect_uncommitted_closeout_drift_with_context(
         return Ok(Some(format!(
             "found likely direct response patchback without agent-doc cycle: {}{} {}",
             marker,
-            tracked_side_effect_note(file)?,
+            agent_doc_git_io::status::tracked_side_effect_note(file)?,
             closeout_recovery_hint(file)
         )));
     }
@@ -239,12 +194,12 @@ pub fn detect_uncommitted_closeout_drift_with_context(
         return Ok(Some(format!(
             "document has uncommitted exchange changes beyond the committed snapshot: {}{} {}",
             marker,
-            tracked_side_effect_note(file)?,
+            agent_doc_git_io::status::tracked_side_effect_note(file)?,
             closeout_recovery_hint(file)
         )));
     }
     match rc.snapshot_commit_status() {
-        crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead {
+        agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead {
             snapshot_len,
             head_len,
         } => {
@@ -255,14 +210,14 @@ pub fn detect_uncommitted_closeout_drift_with_context(
                 "snapshot differs from HEAD without an open or recoverable agent-doc cycle (snapshot_len={}, head_len={}){} {}",
                 snapshot_len,
                 head_len,
-                tracked_side_effect_note(file)?,
+                agent_doc_git_io::status::tracked_side_effect_note(file)?,
                 closeout_recovery_hint(file)
             )))
         }
-        crate::git::SnapshotCommitStatus::Committed
-        | crate::git::SnapshotCommitStatus::NoSnapshot
-        | crate::git::SnapshotCommitStatus::NoHead
-        | crate::git::SnapshotCommitStatus::NotInGitRepo => Ok(None),
+        agent_doc_snapshot_io::SnapshotCommitStatus::Committed
+        | agent_doc_snapshot_io::SnapshotCommitStatus::NoSnapshot
+        | agent_doc_snapshot_io::SnapshotCommitStatus::NoHead
+        | agent_doc_snapshot_io::SnapshotCommitStatus::NotInGitRepo => Ok(None),
     }
 }
 
@@ -309,7 +264,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -352,7 +307,7 @@ mod tests {
             "working tree restored to committed HEAD (duplicate dropped)"
         );
         assert_eq!(
-            crate::snapshot::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
             committed,
             "snapshot restored to committed HEAD"
         );
@@ -393,7 +348,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])

@@ -307,7 +307,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
             return Ok(None);
         }
     };
-    if let Some(existing) = sessions::lookup(session_id)?
+    if let Some(existing) = agent_doc_session_registry_io::lookup(session_id)?
         && tmux.pane_alive(&existing)
     {
         eprintln!(
@@ -321,8 +321,9 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
     // so `/agent-doc` invocations on submodule-hosted documents spawn panes
     // inside the correct submodule (e.g. `src/session-share`) instead of the
     // agent-loop super root where the command happened to be invoked from.
-    let cwd = crate::git::resolve_pane_cwd(file);
-    let registry_base_dir = registry_base_dir_for_file(file, &cwd);
+    let cwd = agent_doc_git_io::dirs::resolve_pane_cwd(file);
+    let registry_base_dir = agent_doc_project_root_io::project_root_or_file_parent(file)
+        .unwrap_or_else(|_| cwd.clone());
 
     // Resolve the agent-doc binary path (same binary that's currently running)
     let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
@@ -368,7 +369,8 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
             }
         }
     } else {
-        let has_agent_doc_window = has_named_window(tmux, session_name, "agent-doc");
+        let has_agent_doc_window =
+            agent_doc_tmux_io::has_window_named(tmux, session_name, "agent-doc");
         if has_agent_doc_window {
             anyhow::bail!(
                 "{}",
@@ -422,7 +424,13 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
         "route_owned_start_enter",
         "Enter",
     );
-    crate::sessions::send_submitted_text(tmux, &new_pane, &start_cmd)?;
+    agent_doc_tmux_io::send_submitted_text_logged(
+        tmux,
+        &new_pane,
+        &start_cmd,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        "sessions.send_submitted_text",
+    )?;
 
     eprintln!(
         "[route] Started {} for {} in pane {} (session {})",
@@ -597,7 +605,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                         ack_timeout.as_secs()
                     ),
                 );
-                let _ = crate::startup_miss::clear(file);
+                let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
             }
             None if fresh_start_pane_idle_ready(tmux, &dispatch_pane, harness) => {
                 // (#route-reaps-idle-fresh-start) The trigger was proven dispatched
@@ -624,7 +632,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                     file.display(),
                     dispatch_pane
                 );
-                let _ = crate::startup_miss::clear(file);
+                let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
             }
             None => {
                 crate::ops_log::log_op(
@@ -638,7 +646,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                     ),
                 );
                 let baseline_id = cycle_baseline.as_ref().map(|b| b.cycle_id.as_str());
-                let _ = crate::startup_miss::record(
+                let _ = agent_doc_supervisor_io::startup_miss::record_startup_miss(
                     file,
                     &dispatch_pane,
                     session_id,
@@ -725,7 +733,7 @@ pub(crate) fn wait_for_agent_ready_outcome(
             );
             return AgentReadyWaitOutcome::TimedOut;
         }
-        if let Ok(content) = sessions::capture_pane(tmux, pane_id) {
+        if let Ok(content) = agent_doc_tmux_io::capture_pane(tmux, pane_id) {
             if let Some(reason) = harness.dispatch_blocker_reason(&content) {
                 ready_streak = 0;
                 last_ready_line = None;
@@ -828,7 +836,7 @@ pub(crate) fn fresh_start_pane_idle_ready(
     pane: &str,
     harness: &HarnessConfig,
 ) -> bool {
-    match sessions::capture_pane(tmux, pane) {
+    match agent_doc_tmux_io::capture_pane(tmux, pane) {
         Ok(content) => matches!(
             fresh_start_ack_outcome(
                 false,
@@ -846,9 +854,8 @@ pub(crate) fn fresh_start_pane_idle_ready(
 /// to a different pane. Only runs on autoclaim — normal routing skips this.
 #[allow(dead_code)]
 pub(crate) fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) {
-    let window_id = match tmux.pane_window(pane_id) {
-        Ok(w) => w,
-        Err(_) => return,
+    let Some(window_id) = agent_doc_tmux_io::target_window_id(tmux, pane_id) else {
+        return;
     };
 
     // Use editor-provided col_args when available (authoritative layout).
@@ -857,7 +864,7 @@ pub(crate) fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) 
         col_args.to_vec()
     } else {
         // Load registry and find all files whose panes are in the same window
-        let registry = match sessions::load() {
+        let registry = match agent_doc_session_registry_io::load() {
             Ok(r) => r,
             Err(_) => return,
         };
@@ -867,7 +874,8 @@ pub(crate) fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) 
             .filter(|entry| {
                 !entry.pane.is_empty()
                     && tmux.pane_alive(&entry.pane)
-                    && tmux.pane_window(&entry.pane).ok().as_deref() == Some(&window_id)
+                    && agent_doc_tmux_io::target_window_id(tmux, &entry.pane).as_deref()
+                        == Some(&window_id)
                     && !entry.file.is_empty()
             })
             .map(|entry| entry.file.clone())
@@ -977,10 +985,10 @@ pub(crate) fn await_idle_with_max_wait(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
+    use agent_doc_supervisor_io::ipc::SupervisorIpc;
     #[test]
     fn codex_busy_ctrl_g_gate_only_fires_for_shell_search_blocker() {
         // C-g is allowed only for the two shell-search blocker reasons that
@@ -1153,7 +1161,7 @@ mod tests {
             &dir.path().to_string_lossy(),
         )
         .unwrap();
-        crate::startup_miss::append_session_log_event(
+        agent_doc_supervisor_io::startup_miss::append_session_log_event(
             &first,
             "session-a",
             &format!(
@@ -1171,12 +1179,12 @@ mod tests {
             "error should explain the rejected cross-file dispatch: {err}"
         );
         assert_eq!(
-            sessions::lookup_in(dir.path(), "session-a").unwrap(),
+            agent_doc_session_registry_io::lookup_in(dir.path(), "session-a").unwrap(),
             Some(pane_a.clone()),
             "the original authoritative pane must stay bound to its file"
         );
         assert_eq!(
-            sessions::lookup_in(dir.path(), "session-b").unwrap(),
+            agent_doc_session_registry_io::lookup_in(dir.path(), "session-b").unwrap(),
             Some(pane_b),
             "the requesting file must keep its own registered pane"
         );
@@ -1807,7 +1815,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -1819,38 +1827,39 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let restart_called_for_ipc = restart_called.clone();
         let supervisor_instance_id = "fresh-retry-handoff-supervisor".to_string();
         let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": true,
-                        "state": "healthy",
-                        "restart_count": 0,
-                        "actor_state": "ready",
-                        "supervisor_pid": 12345,
-                        "supervisor_instance_id": supervisor_instance_id_for_ipc
-                    })),
-                    IpcMethod::Restart { mode } => {
-                        if mode == "fresh" {
-                            restart_called_for_ipc.store(true, Ordering::Relaxed);
-                        }
-                        IpcResponse::ok_empty()
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            session_id,
+            move |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "restart_count": 0,
+                    "actor_state": "ready",
+                    "supervisor_pid": 12345,
+                    "supervisor_instance_id": supervisor_instance_id_for_ipc
+                })),
+                IpcMethod::Restart { mode } => {
+                    if mode == "fresh" {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
                     }
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcResponse::ok_empty()
                 }
-            })
-            .unwrap();
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
 
         let iso_for_thread = iso.clone();
         let ready_agent = write_mock_registered_agent_doc(dir.path());
@@ -1880,7 +1889,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 .unwrap();
             let prompt_wait_start = std::time::Instant::now();
             while prompt_wait_start.elapsed() < Duration::from_secs(5) {
-                let captured = crate::sessions::capture_pane(&iso_for_thread, &replacement_pane)
+                let captured = agent_doc_tmux_io::capture_pane(&iso_for_thread, &replacement_pane)
                     .unwrap_or_default();
                 if captured.contains("> ") {
                     break;
@@ -1933,13 +1942,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert!(restart_called.load(Ordering::Relaxed));
         assert_eq!(routed, pane);
 
-        let replacement_after = sessions::capture_pane(&iso, &replacement_pane).unwrap_or_default();
+        let replacement_after =
+            agent_doc_tmux_io::capture_pane(&iso, &replacement_pane).unwrap_or_default();
         assert!(
             !replacement_after.contains("GOT:agent-doc "),
             "route must not redirect the reopen into the replacement pane after the fresh restart retry: {replacement_after}"
         );
 
-        let miss = crate::startup_miss::load(&doc)
+        let miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
             .unwrap()
             .expect("fresh restart retry should leave an optimistic startup-miss marker");
         assert_eq!(miss.file, file_path);
@@ -1965,11 +1975,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let doc = dir.path().join("route-dispatch-only-startup-miss.md");
         let content = "---\nagent_doc_session: route-dispatch-only-startup-miss\nagent: codex\n---\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n";
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(
-        &doc,
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
-    )
-    .unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
+            crate::ops_log::log_op,
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-dispatch-only-startup-miss";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -1993,7 +2004,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
-        crate::startup_miss::record(
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
             &doc,
             &pane,
             session_id,
@@ -2067,7 +2078,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "busy mock session should be active in pane: {content}"
         );
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2082,41 +2093,42 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let ipc_tmux = iso.clone();
         let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
         let injected_pane_for_ipc = injected_pane.clone();
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": true,
-                        "state": "healthy",
-                        "restart_count": 0,
-                        "actor_state": "ready",
-                        "supervisor_pid": 12345,
-                        "supervisor_instance_id": supervisor_instance_id_for_ipc
-                    })),
-                    IpcMethod::Restart { mode } => {
-                        if mode == "fresh" {
-                            restart_called_for_ipc.store(true, Ordering::Relaxed);
-                        }
-                        IpcResponse::ok_empty()
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            session_id,
+            move |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "restart_count": 0,
+                    "actor_state": "ready",
+                    "supervisor_pid": 12345,
+                    "supervisor_instance_id": supervisor_instance_id_for_ipc
+                })),
+                IpcMethod::Restart { mode } => {
+                    if mode == "fresh" {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
                     }
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
-                            let _ = ipc_tmux.send_keys(&target, &bytes);
-                        }
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcResponse::ok_empty()
                 }
-            })
-            .unwrap();
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                        let _ = ipc_tmux.send_keys(&target, &bytes);
+                    }
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
         let ready_agent = write_mock_registered_agent_doc(dir.path());
         let iso_for_thread = iso.clone();
         let registry_root = dir.path().to_path_buf();
@@ -2146,7 +2158,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 .unwrap();
             let prompt_wait_start = std::time::Instant::now();
             while prompt_wait_start.elapsed() < Duration::from_secs(5) {
-                let captured = crate::sessions::capture_pane(&iso_for_thread, &replacement_pane)
+                let captured = agent_doc_tmux_io::capture_pane(&iso_for_thread, &replacement_pane)
                     .unwrap_or_default();
                 if captured.contains("> ") {
                     *injected_pane_for_thread.lock().unwrap() = Some(replacement_pane.clone());
@@ -2201,7 +2213,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "route should either report the handed-off pane or keep the reroute optimistic in the original pane: routed={routed} replacement={replacement_pane} original={pane}"
         );
 
-        let busy_after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        let busy_after = agent_doc_tmux_io::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
             !busy_after.contains("GOT:agent-doc "),
             "route must not keep dispatching into the stale busy pane after the fresh restart reroute: {busy_after}"
@@ -2233,7 +2245,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2243,35 +2255,36 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": true,
-                        "state": "healthy",
-                        "restart_count": 0
-                    })),
-                    IpcMethod::Restart { mode } => {
-                        if mode == "fresh" {
-                            restart_called_for_ipc.store(true, Ordering::Relaxed);
-                        }
-                        IpcResponse::ok_empty()
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            session_id,
+            move |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "restart_count": 0
+                })),
+                IpcMethod::Restart { mode } => {
+                    if mode == "fresh" {
+                        restart_called_for_ipc.store(true, Ordering::Relaxed);
                     }
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+                    IpcResponse::ok_empty()
                 }
-            })
-            .unwrap();
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
         let ready_agent = write_mock_registered_agent_doc(dir.path());
         let iso_for_thread = iso.clone();
         let registry_root = dir.path().to_path_buf();
@@ -2332,13 +2345,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert!(restart_called.load(Ordering::Relaxed));
         assert_eq!(routed, pane);
 
-        let replacement_after = sessions::capture_pane(&iso, &replacement_pane).unwrap_or_default();
+        let replacement_after =
+            agent_doc_tmux_io::capture_pane(&iso, &replacement_pane).unwrap_or_default();
         assert!(
             !replacement_after.contains("GOT:agent-doc "),
             "route must not redirect the reopen into the replacement pane after the fresh retry: {replacement_after}"
         );
 
-        let miss = crate::startup_miss::load(&doc)
+        let miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
             .unwrap()
             .expect("fresh restart retry should persist the optimistic startup-miss marker");
         assert_eq!(miss.file, file_path);
@@ -2387,7 +2401,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "busy mock session should be active in pane: {content}"
         );
 
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2399,34 +2413,35 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let restart_called_for_ipc = restart_called.clone();
         let injects = Arc::new(Mutex::new(Vec::<String>::new()));
         let injects_for_ipc = injects.clone();
-        let mut ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
-                match method {
-                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                        "running": false,
-                        "state": "healthy",
-                        "restart_count": 0
-                    })),
-                    IpcMethod::Restart { .. } => {
-                        restart_called_for_ipc.store(true, Ordering::Relaxed);
-                        IpcResponse::ok_empty()
-                    }
-                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        injects_for_ipc.lock().unwrap().push(bytes.clone());
-                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                    }
-                    IpcMethod::Stop { .. }
-                    | IpcMethod::StopAgent { .. }
-                    | IpcMethod::ReplicaRegister { .. }
-                    | IpcMethod::ReplicaDeregister { .. }
-                    | IpcMethod::ReplicaUpdate { .. }
-                    | IpcMethod::ReplicaPull { .. }
-                    | IpcMethod::ReplicaAck { .. }
-                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+        let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
+            dir.path(),
+            session_id,
+            move |method| match method {
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                    "running": false,
+                    "state": "healthy",
+                    "restart_count": 0
+                })),
+                IpcMethod::Restart { .. } => {
+                    restart_called_for_ipc.store(true, Ordering::Relaxed);
+                    IpcResponse::ok_empty()
                 }
-            })
-            .unwrap();
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    injects_for_ipc.lock().unwrap().push(bytes.clone());
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
 
         let iso_for_thread = iso.clone();
         let registry_root = dir.path().to_path_buf();
@@ -2460,7 +2475,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 .unwrap();
             let prompt_wait_start = std::time::Instant::now();
             while prompt_wait_start.elapsed() < Duration::from_secs(5) {
-                let captured = crate::sessions::capture_pane(&iso_for_thread, &replacement_pane)
+                let captured = agent_doc_tmux_io::capture_pane(&iso_for_thread, &replacement_pane)
                     .unwrap_or_default();
                 if captured.contains("> ") {
                     break;
@@ -2538,7 +2553,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &live_pane, &mock_agent, &doc);
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2557,7 +2572,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 supervisor_instance_id: String::new(),
             },
         );
-        sessions::save_in(dir.path(), &registry).unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
 
         let doc_for_thread = doc.clone();
         let snapshot_for_thread = snapshot.to_string();
@@ -2599,13 +2614,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "unexpected error: {err:#}"
         );
 
-        let live_content = sessions::capture_pane(&iso, &live_pane).unwrap_or_default();
+        let live_content = agent_doc_tmux_io::capture_pane(&iso, &live_pane).unwrap_or_default();
         assert!(
             !live_content.contains("GOT:agent-doc "),
             "route should not dispatch into the conflicting legacy live pane automatically: {live_content}"
         );
 
-        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        let stale_content = agent_doc_tmux_io::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
             !stale_content.contains("STALE:agent-doc "),
             "route should not dispatch into the stale registered pane either: {stale_content}"
@@ -2641,7 +2656,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -2727,11 +2742,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         .to_string();
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
-            sessions::lookup(session_id).unwrap().as_deref(),
+            agent_doc_session_registry_io::lookup(session_id)
+                .unwrap()
+                .as_deref(),
             Some(actor_pane.as_str())
         );
 
-        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        let stale_content = agent_doc_tmux_io::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
             !stale_content.contains("STALE:agent-doc "),
             "route should not dispatch into the stale registered pane when actor authority points elsewhere: {stale_content}"
@@ -2768,11 +2785,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let doc = dir.path().join("dispatch-only.md");
         let content = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n";
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(
-        &doc,
-        "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
-    )
-    .unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
+            crate::ops_log::log_op,
+        )
+        .unwrap();
         crate::cycle_state::start_preflight(
             &doc,
             Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
@@ -2847,7 +2865,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "ready authoritative dispatch-only path should submit through tmux pane input instead of supervisor inject"
         );
         assert_eq!(
-            sessions::lookup(session_id).unwrap().as_deref(),
+            agent_doc_session_registry_io::lookup(session_id)
+                .unwrap()
+                .as_deref(),
             Some(actor_pane.as_str())
         );
 
@@ -2862,7 +2882,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             pane_capture_contains_wrapped(&actor_after, &trigger),
             "dispatch-only reroute should submit the reopen in the authoritative pane: {actor_after}"
         );
-        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        let stale_content = agent_doc_tmux_io::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
             !stale_content.contains("STALE:agent-doc "),
             "dispatch-only reroute should not inject into the stale registered pane when actor authority points elsewhere: {stale_content}"
@@ -2903,7 +2923,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3002,7 +3022,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "dispatch-only reroute after session clear should still submit the bare reopen in the authoritative pane: {actor_after}"
         );
 
-        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        let stale_content = agent_doc_tmux_io::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
             !stale_content.contains("STALE:agent-doc "),
             "dispatch-only reroute should still avoid the stale registered pane after session clear: {stale_content}"
@@ -3051,7 +3071,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "---\nagent_doc_session: route-dispatch-only-authoritative-unproven\nagent: codex\ncodex_network_access: enabled\n---\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3157,7 +3177,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
             let current = format!("{snapshot}❯ follow-up question\n");
             std::fs::write(&doc, &current).unwrap();
-            crate::snapshot::save(&doc, snapshot).unwrap();
+            agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
             crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
             crate::cycle_state::mark_committed(
                 &doc,
@@ -3231,18 +3251,22 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "route must not inject a duplicate reopen while the authoritative actor is {actor_state}"
             );
             assert_eq!(
-                sessions::lookup(&session_id).unwrap().as_deref(),
+                agent_doc_session_registry_io::lookup(&session_id)
+                    .unwrap()
+                    .as_deref(),
                 Some(actor_pane.as_str()),
                 "route should still refresh the registry projection to the authoritative actor pane for {actor_state}"
             );
 
             let trigger = HarnessConfig::codex().trigger_command(&file_path);
-            let actor_after = sessions::capture_pane(&iso, &actor_pane).unwrap_or_default();
+            let actor_after =
+                agent_doc_tmux_io::capture_pane(&iso, &actor_pane).unwrap_or_default();
             assert!(
                 !actor_after.contains(&trigger),
                 "route must not type a reopen into the blocked/closed authoritative pane: {actor_after}"
             );
-            let stale_after = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+            let stale_after =
+                agent_doc_tmux_io::capture_pane(&iso, &stale_pane).unwrap_or_default();
             assert!(
                 !stale_after.contains(&trigger),
                 "route must not fall back to the stale registered pane when actor state is {actor_state}: {stale_after}"
@@ -3270,7 +3294,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3356,7 +3380,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         .to_string();
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
-            sessions::lookup(session_id).unwrap().as_deref(),
+            agent_doc_session_registry_io::lookup(session_id)
+                .unwrap()
+                .as_deref(),
             Some(actor_pane.as_str())
         );
 
@@ -3403,7 +3429,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3498,7 +3524,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         .to_string();
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
-            sessions::lookup(session_id).unwrap().as_deref(),
+            agent_doc_session_registry_io::lookup(session_id)
+                .unwrap()
+                .as_deref(),
             Some(actor_pane.as_str())
         );
 
@@ -3533,7 +3561,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3647,7 +3675,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3717,7 +3745,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "dispatch-only authoritative reroute must not queue through supervisor IPC while the actor is starting"
         );
 
-        let actor_after = sessions::capture_pane(&iso, &actor_pane).unwrap_or_default();
+        let actor_after = agent_doc_tmux_io::capture_pane(&iso, &actor_pane).unwrap_or_default();
         assert!(
             !actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
             "dispatch-only authoritative reroute must not submit through the live pane path while still starting: {actor_after}"
@@ -3762,7 +3790,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        crate::snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
@@ -3846,12 +3874,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "dispatch-only reroute after /clear should not queue through supervisor IPC"
         );
 
-        let actor_after = sessions::capture_pane(&iso, &actor_pane).unwrap_or_default();
+        let actor_after = agent_doc_tmux_io::capture_pane(&iso, &actor_pane).unwrap_or_default();
         assert!(
             !actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
             "dispatch-only reroute after /clear must not submit to a pane before it is dispatch-ready: {actor_after}"
         );
-        let stale_after = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        let stale_after = agent_doc_tmux_io::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
             !stale_after.contains("STALE:agent-doc "),
             "dispatch-only reroute should avoid stale registered panes after /clear: {stale_after}"
@@ -3967,7 +3995,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
         let harness = HarnessConfig::claude();
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
-        let content = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        let content = agent_doc_tmux_io::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
             ready && agent_doc_harness::ready_prompt_candidate(&content, &harness).is_some(),
             "should detect ❯ in pane content, got: {}",
@@ -4039,12 +4067,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         iso.select_pane(&pane1).unwrap();
 
         // Verify pane1 is now the active pane
-        let active = iso
-            .cmd()
-            .args(["display-message", "-t", session, "-p", "#{pane_id}"])
-            .output()
-            .unwrap();
-        let active_pane = String::from_utf8_lossy(&active.stdout).trim().to_string();
+        let active_pane = agent_doc_tmux_io::target_pane_id(&iso, session).unwrap();
         assert_eq!(
             active_pane, pane1,
             "select_pane should switch to the correct window/pane"
@@ -4068,7 +4091,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
         // The command "echo DONE" should NOT be in the prompt anymore
         // (it was accepted and executed)
-        let content = sessions::capture_pane(&iso, &pane).unwrap();
+        let content = agent_doc_tmux_io::capture_pane(&iso, &pane).unwrap();
         let _cmd_in_last_lines = content
             .lines()
             .rev()
@@ -4093,12 +4116,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         // Check session name
-        let output = iso
-            .cmd()
-            .args(["display-message", "-t", &pane, "-p", "#{session_name}"])
-            .output()
-            .unwrap();
-        let detected_session = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detected_session = agent_doc_tmux_io::target_session_name(&iso, &pane).unwrap();
         assert_eq!(
             detected_session, session,
             "pane should be in session '{}'",
@@ -4119,30 +4137,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let wrong_pane = iso.auto_start("wrong", &cwd).unwrap();
 
         // Verify they're in different sessions
-        let correct_session = iso
-            .cmd()
-            .args([
-                "display-message",
-                "-t",
-                &correct_pane,
-                "-p",
-                "#{session_name}",
-            ])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap();
-        let wrong_session = iso
-            .cmd()
-            .args([
-                "display-message",
-                "-t",
-                &wrong_pane,
-                "-p",
-                "#{session_name}",
-            ])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap();
+        let correct_session = agent_doc_tmux_io::target_session_name(&iso, &correct_pane).unwrap();
+        let wrong_session = agent_doc_tmux_io::target_session_name(&iso, &wrong_pane).unwrap();
 
         assert_eq!(correct_session, "correct");
         assert_eq!(wrong_session, "wrong");
@@ -4346,17 +4342,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                let out = iso
-                    .cmd()
-                    .args([
-                        "display-message",
-                        "-t",
-                        &busy_pane,
-                        "-p",
-                        "#{pane_current_command}",
-                    ])
-                    .output()?;
-                let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                let cmd = agent_doc_tmux_io::target_current_command(&iso, &busy_pane)
+                    .unwrap_or_else(|| "?".to_string());
                 if cmd == "agent-doc" {
                     break;
                 }
@@ -4538,7 +4525,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
 
         if let Some(target) = target_panes.first() {
-            sessions::join_pane_guarded(&iso, &stashed_pane, target, session, "-dh").unwrap();
+            agent_doc_tmux_io::join_pane_guarded(&iso, &stashed_pane, target, session, "-dh")
+                .unwrap();
             let rescued_win = iso.pane_window(&stashed_pane).unwrap();
             let visible_win = iso.pane_window(&pane1).unwrap();
             assert_eq!(
@@ -4582,7 +4570,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let target_panes = iso.list_window_panes(&agent_doc_window).unwrap();
         let target = &target_panes[0];
 
-        sessions::join_pane_guarded(&iso, &pane2, target, session, "-dbh").unwrap();
+        agent_doc_tmux_io::join_pane_guarded(&iso, &pane2, target, session, "-dbh").unwrap();
 
         let agent_doc_panes = iso.list_panes_ordered(&agent_doc_window).unwrap();
         assert!(
@@ -4674,12 +4662,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let _ = iso.raw_cmd(&["resize-window", "-t", &window, "-x", "300", "-y", "60"]);
         let pane_b = iso.split_window(&pane_a, dir.path(), "-dh").unwrap();
         let extra_pane = iso.split_window(&pane_b, dir.path(), "-dh").unwrap();
-        let pane_a_pid = pane_display_value(&iso, &pane_a, "#{pane_pid}")
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap();
-        let pane_b_pid = pane_display_value(&iso, &pane_b, "#{pane_pid}")
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap();
+        let pane_a_pid = agent_doc_tmux_io::pane_pid(&iso, &pane_a).unwrap();
+        let pane_b_pid = agent_doc_tmux_io::pane_pid(&iso, &pane_b).unwrap();
 
         sessions::register_full_with_cwd(
             "route-sync-claim-a",
@@ -5113,7 +5097,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "both provisioned panes should remain visible in the shared window"
         );
 
-        let registry = sessions::load_in(dir.path()).unwrap();
+        let registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
         assert!(
             registry
                 .values()

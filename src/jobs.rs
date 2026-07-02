@@ -1543,7 +1543,6 @@ fn relative_to(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_orchestration::snapshot;
     use agent_doc_work_graph::schedule::classify_session_review_log;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
@@ -1604,7 +1603,8 @@ agent_doc_dispatch: auto
             "do [#docs1]\ndo [#spec2]\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
         (dir, doc)
     }
 
@@ -1728,7 +1728,8 @@ agent_doc_dispatch: auto
             "do [#x63e] [#v4v0]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
         let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", "/no/such/tsift");
 
         let index = create_index(

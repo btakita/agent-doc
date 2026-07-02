@@ -1,11 +1,6 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_element_exchange::{
-    dedupe_adjacent_prompt_prefix_duplicates_in_doc, dedupe_live_prompt_prefix_variants_in_doc,
-    dedupe_prompt_lines_against_before_doc, exchange_shrink_guard_block,
-    live_exchange_without_ack_content_retry_required,
-};
 #[cfg(test)]
 use agent_doc_element_exchange::{exchange_content, normalized_prompt_counts};
 
@@ -20,33 +15,14 @@ pub(crate) fn check_exchange_shrink_guard(
     content_ours: &str,
     file: &Path,
 ) -> Result<()> {
-    if let Some(block) = exchange_shrink_guard_block(
+    agent_doc_element_exchange_io::check_exchange_shrink_guard_with_log(
         content_at_start,
         content_ours,
+        file,
         SHRINK_GUARD_MIN_BYTES,
         SHRINK_GUARD_MAX_RATIO,
-    ) {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "shrink_guard_blocked file={} old_len={} new_len={} ratio={:.3}",
-                file.display(),
-                block.old_exchange_len,
-                block.new_exchange_len,
-                block.ratio
-            ),
-        );
-        anyhow::bail!(
-            "exchange content would shrink from {} to {} bytes ({:.0}% of original) — \
-             refusing write to prevent accidental truncation. If this is intentional, \
-             use `agent-doc compact` or re-run with meaningful content.",
-            block.old_exchange_len,
-            block.new_exchange_len,
-            block.ratio * 100.0
-        );
-    }
-
-    Ok(())
+        crate::ops_log::log_op,
+    )
 }
 
 pub(crate) fn file_ipc_consumed_without_live_exchange_ack(
@@ -58,126 +34,17 @@ pub(crate) fn file_ipc_consumed_without_live_exchange_ack(
     after: &str,
     ack_content_proven: bool,
 ) -> bool {
-    let Some(before) = before else {
-        return false;
-    };
-    if !live_exchange_without_ack_content_retry_required(
-        baseline,
-        Some(before),
-        after,
-        ack_content_proven,
-    ) {
-        return false;
-    }
-
-    let before_hash = agent_doc_hash::content_hash(before);
-    let after_hash = agent_doc_hash::content_hash(after);
-    eprintln!(
-        "[write] file IPC consumed for {} with live exchange edits but no ack-content proof and no exchange materialization — retry required before snapshot/commit",
-        file.display()
-    );
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "file_ipc_live_exchange_unacknowledged file={} source={} patch_id={} before_hash={} after_hash={}",
-            file.display(),
-            source,
-            patch_id.unwrap_or("-"),
-            before_hash,
-            after_hash
-        ),
-    );
-    log_ipc_proof_failure(
+    agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
         file,
         source,
         patch_id,
-        "live_exchange_without_ack_content",
-        "retry_without_disk_write",
-        &format!("before_hash={} after_hash={}", before_hash, after_hash),
-    );
-    true
-}
-
-pub(crate) fn dedupe_live_prompt_prefix_variants_in_tail(
-    content: &str,
-    file: &Path,
-) -> (String, bool) {
-    let Some(repaired) = dedupe_live_prompt_prefix_variants_in_doc(content) else {
-        return (content.to_string(), false);
-    };
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "live_prompt_prefix_variant_repaired file={} before_commit=true",
-            file.display()
-        ),
-    );
-    (repaired, true)
-}
-
-pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates(
-    content: &str,
-    file: &Path,
-) -> (String, bool) {
-    let Some(repaired) = dedupe_adjacent_prompt_prefix_duplicates_in_doc(content) else {
-        return (content.to_string(), false);
-    };
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "live_prompt_prefix_variant_repaired file={} before_commit=true",
-            file.display()
-        ),
-    );
-    (repaired, true)
-}
-
-pub(crate) fn dedupe_prompt_lines_against_before(
-    before: &str,
-    after: &str,
-    file: &Path,
-) -> (String, bool) {
-    let Some(repaired) = dedupe_prompt_lines_against_before_doc(before, after) else {
-        return (after.to_string(), false);
-    };
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "ipc_prompt_duplicate_repaired file={} before_commit=true",
-            file.display()
-        ),
-    );
-    (repaired, true)
-}
-
-pub(crate) fn remove_post_exchange_duplicate_prompt_comments_with_log(
-    content: &str,
-    file: &Path,
-    source: &str,
-    preserve_doc: Option<&str>,
-    preserve_current_doc: Option<&str>,
-) -> (String, bool) {
-    let preserve_docs = [preserve_doc, preserve_current_doc]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    let Some(cleaned) =
-        agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
-            content,
-            &preserve_docs,
-        )
-    else {
-        return (content.to_string(), false);
-    };
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "post_exchange_duplicate_prompt_comment_removed file={} source={} before_commit=true",
-            file.display(),
-            source
-        ),
-    );
-    (cleaned, true)
+        baseline,
+        before,
+        after,
+        ack_content_proven,
+        crate::ops_log::log_op,
+        log_ipc_proof_failure,
+    )
 }
 
 #[cfg(test)]

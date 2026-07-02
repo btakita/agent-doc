@@ -147,7 +147,7 @@ use agent_doc_workflow::owner_pane_self_invocation::{
     OwnedPaneSelfInvocationOptions, build_owned_pane_self_invocation,
 };
 
-use crate::{agent, diff_io, frontmatter_io, git, merge, snapshot, template_io, write};
+use crate::{agent, git, write};
 
 const AGENT_DOC_RUN_HEARTBEAT_SECS_ENV: &str = "AGENT_DOC_RUN_HEARTBEAT_SECS";
 const DEFAULT_RUN_HEARTBEAT_SECS: u64 = 30;
@@ -180,7 +180,7 @@ impl RunStderrRedirect {
         let canonical = file
             .canonicalize()
             .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-        let project_root = agent_doc_fs::find_project_root(&canonical)
+        let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
             .with_context(|| format!("failed to resolve project root for {}", file.display()))?;
         let logs_dir = project_root.join(".agent-doc").join("logs");
         std::fs::create_dir_all(&logs_dir)
@@ -469,8 +469,11 @@ fn run_once(
     }
     if !dry_run {
         let early_rc = crate::graph::RunContext::new(file.to_path_buf());
-        let (early_fm, _) =
-            frontmatter_io::parse_for_file_with_context(&content_original, file, &early_rc)?;
+        let (early_fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+            &content_original,
+            file,
+            &early_rc.ssh_context(),
+        )?;
         let early_agent_name = agent_name
             .or(early_fm.agent.as_deref())
             .or(config.default_agent.as_deref())
@@ -503,7 +506,11 @@ fn run_once(
         owned_rc = crate::graph::RunContext::new(file.to_path_buf());
         &owned_rc
     };
-    let (fm, _body) = frontmatter_io::parse_for_file_with_context(&content_original, file, rc)?;
+    let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+        &content_original,
+        file,
+        &rc.ssh_context(),
+    )?;
     let mut prompt_fm = fm.clone();
     if force_fresh_agent_session && prompt_fm.resume.is_some() {
         eprintln!(
@@ -702,14 +709,21 @@ fn run_once(
 
     // Create branch if requested
     if branch && !no_git {
-        git::create_branch(file)?;
+        agent_doc_git_io::branch::create_session_branch(file)?;
     }
 
     // Pre-commit: commit user's changes before sending to agent
     // This lets the editor show agent additions as diff gutters
     if !no_git {
         let did_commit = git::commit(file)?;
-        if !did_commit && !queue_synthetic_diff && diff_io::compute(file)?.is_none() {
+        if !did_commit
+            && !queue_synthetic_diff
+            && agent_doc_diff_io::compute(
+                &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+                file,
+            )?
+            .is_none()
+        {
             anyhow::bail!(
                 "no child-agent dispatch: the pre-commit repair closed {} as already committed and no new assistant response body was supplied. If you need to recover a missed response patchback, pipe the response through `agent-doc write --commit {}`.",
                 file.display(),
@@ -816,7 +830,10 @@ fn run_once(
 }
 
 fn compute_run_diff(file: &Path) -> Result<Option<(String, bool)>> {
-    if let Some(d) = diff_io::compute(file)? {
+    if let Some(d) = agent_doc_diff_io::compute(
+        &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+        file,
+    )? {
         eprintln!("[run] diff computed ({} bytes)", d.len());
         return Ok(Some((d, false)));
     }
@@ -870,7 +887,11 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = frontmatter_io::parse_for_file_with_context(&content, file, &rc)?;
+    let (fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+        &content,
+        file,
+        &rc.ssh_context(),
+    )?;
     if fm.queue_active != Some(true) {
         return Ok(ActiveQueuePromptState::Inactive);
     }
@@ -918,7 +939,7 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
 
 fn typed_queue_prompt_state(file: &Path, content: &str) -> Option<ActiveQueuePromptState> {
     let canonical = file.canonicalize().ok()?;
-    let project_root = agent_doc_fs::find_project_root(&canonical)?;
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
     let document_hash = agent_doc_fs::document_state_hash(&canonical).ok()?;
     let ledger = crate::project_controller::load_state_event_ledger(&project_root).ok()?;
     let projection = ledger.project_document(&document_hash)?;
@@ -1111,7 +1132,7 @@ impl RunHeartbeat {
                     .map(|state| {
                         (
                             state.cycle_id.as_str(),
-                            cycle_phase_label(state.phase),
+                            state.phase.as_str(),
                             state.updated_at.saturating_sub(state.started_at),
                         )
                     })
@@ -1163,7 +1184,7 @@ fn record_run_progress(file: &Path, phase: &str, agent_name: &str, timeout: Opti
 fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
     let file_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} after run write", file.display()))?;
-    let snapshot_content = snapshot::load(file)?;
+    let snapshot_content = agent_doc_snapshot_io::load(file)?;
     crate::cycle_state::mark_write_applied(
         file,
         event,
@@ -1204,7 +1225,7 @@ fn record_run_preflight_timeout(file: &Path, event: &str, diagnostic: &str) -> R
 fn abandon_run_recursive_cycle(file: &Path, event: &str, diagnostic: &str) -> Result<()> {
     let compact = diagnostic.split_whitespace().collect::<Vec<_>>().join(" ");
     let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
-    let snapshot_content = snapshot::load(file)?;
+    let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let file_content = std::fs::read_to_string(file).ok();
     crate::cycle_state::mark_abandoned(
         file,
@@ -1237,8 +1258,9 @@ pub(crate) fn owned_pane_self_invocation_detail(
     if agent_name != "codex" || agent_doc_model_tier::detect_harness() != "codex" {
         return None;
     }
-    let current_pane = crate::sessions::current_pane().ok()?;
-    let registry_match = crate::sessions::lookup_entry(session_id)
+    let tmux = tmux_router::Tmux::default_server();
+    let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)?;
+    let registry_match = agent_doc_session_registry_io::lookup_entry(session_id)
         .ok()
         .flatten()
         .filter(|entry| entry.pane == current_pane);
@@ -1304,7 +1326,9 @@ pub(crate) fn detect_owned_pane_self_invocation_with_options(
     if owned_pane_self_invocation_detail(file, session_id, agent_name).is_none() {
         return Ok(None);
     }
-    let current_pane = crate::sessions::current_pane().unwrap_or_default();
+    let tmux = tmux_router::Tmux::default_server();
+    let current_pane =
+        agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux).unwrap_or_default();
     let actor = actor_record_for_file(file).ok().flatten();
     let actor_generation = actor.as_ref().map(|record| record.generation);
     let actor_state = actor
@@ -1363,7 +1387,7 @@ fn owner_pane_queue_edit_should_defer_until_closeout(
     if prompt_bearing_changes.is_empty() {
         return false;
     }
-    let Some(previous) = snapshot::load(file).ok().flatten() else {
+    let Some(previous) = agent_doc_snapshot_io::load(file).ok().flatten() else {
         return false;
     };
     let Some(summary) = agent_doc_diff::semantic::semantic_diff_summary(
@@ -1442,13 +1466,14 @@ pub fn recursive_codex_start_invocation_diagnostic(
 fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {
     let state = crate::cycle_state::load(file).ok().flatten();
     let actor = actor_record_for_file(file).ok().flatten();
-    let current_pane = crate::sessions::current_pane().ok();
+    let tmux = tmux_router::Tmux::default_server();
+    let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux);
     let (cycle_id, phase, last_event) = state
         .as_ref()
         .map(|state| {
             (
                 state.cycle_id.as_str(),
-                cycle_phase_label(state.phase),
+                state.phase.as_str(),
                 state.last_event.as_str(),
             )
         })
@@ -1485,21 +1510,11 @@ fn actor_record_for_file(
     file: &Path,
 ) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         return Ok(None);
     };
     let file_arg = canonical.to_string_lossy();
     crate::session_actor::load_record_in(&project_root, &file_arg)
-}
-
-fn cycle_phase_label(phase: agent_doc_turn::CyclePhase) -> &'static str {
-    match phase {
-        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
-        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
-        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
-        agent_doc_turn::CyclePhase::Committed => "committed",
-        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
-    }
 }
 
 fn maybe_abort_after_write_applied_for_test() -> Result<()> {
@@ -1576,8 +1591,15 @@ fn build_prompt_volatile_suffix(
         agent_doc_prompt_context::format_active_format_requirements(content)
             .map(|section| format!("\n\n{}\n", section))
             .unwrap_or_default();
-    let document_section =
-        crate::prompt_context::build_document_section(file, the_diff, content, session_accretion);
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let ssh_context = rc.ssh_context();
+    let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
+        file,
+        the_diff,
+        content,
+        session_accretion,
+        &ssh_context,
+    );
     match (run_mode, fm.resume.is_some()) {
         (RunMode::Template, true) => format!(
             "<agent_doc_prompt_volatile_suffix>\n\
@@ -1622,7 +1644,7 @@ fn build_prompt_volatile_suffix(
 
 fn apply_append_response(file: &Path, baseline: &str, response: &str) -> Result<()> {
     let doc_lock = acquire_doc_lock(file)?;
-    snapshot::save_pre_response(file, baseline)?;
+    agent_doc_snapshot_io::save_pre_response(file, baseline)?;
 
     let mut content_ours = baseline.to_string();
     if !content_ours.ends_with('\n') {
@@ -1640,11 +1662,11 @@ fn apply_append_response(file: &Path, baseline: &str, response: &str) -> Result<
         content_ours
     } else {
         eprintln!("File was modified during run. Merging changes...");
-        merge::merge_contents(baseline, &content_ours, &content_current)?
+        agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?
     };
 
     write::guard_visible_write_idle(file, "direct_run_append")?;
-    snapshot::save(file, &final_content)?;
+    agent_doc_snapshot_io::save(file, &final_content, crate::ops_log::log_op)?;
     atomic_write(file, &final_content)?;
     drop(doc_lock);
     Ok(())
@@ -1676,12 +1698,17 @@ fn apply_template_response(
     )?;
 
     let doc_lock = acquire_doc_lock(file)?;
-    snapshot::save_pre_response(file, baseline)?;
+    agent_doc_snapshot_io::save_pre_response(file, baseline)?;
 
-    let content_ours =
-        template_io::apply_patches_with_context(baseline, &patches, &unmatched, file, Some(&rc))
-            .context("failed to apply template patches")?;
-    let snapshot_doc = snapshot::load(file).ok().flatten();
+    let content_ours = agent_doc_template_io::apply_patches_with_project_config(
+        baseline,
+        &patches,
+        &unmatched,
+        file,
+        Some(rc.project_config()),
+    )
+    .context("failed to apply template patches")?;
+    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     let content_ours = normalize_direct_run_template_content(
         file,
         baseline,
@@ -1699,7 +1726,13 @@ fn apply_template_response(
         (content_ours, state)
     } else if use_crdt {
         eprintln!("File was modified during run. CRDT merging changes...");
-        let base_state = snapshot::crdt_merge_base_state(file, baseline)?.state;
+        let base_state = agent_doc_snapshot_io::crdt_merge_base_state_with(
+            file,
+            baseline,
+            agent_doc_op_capture_io::has_pending_editor_ops,
+            crate::ops_log::log_op,
+        )?
+        .state;
         // `#crdtauth4` — disk demotion (plan phase 6). Under `MultiReplica` (a live
         // editor is attached) the in-memory canonical replica is authoritative and
         // the disk `.yrs` is a write-through recovery projection only: reconcile the
@@ -1721,7 +1754,7 @@ fn apply_template_response(
     } else {
         eprintln!("File was modified during run. Merging changes...");
         (
-            merge::merge_contents(baseline, &content_ours, &content_current)?,
+            agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?,
             None,
         )
     };
@@ -1733,9 +1766,9 @@ fn apply_template_response(
     )?;
 
     write::guard_visible_write_idle(file, "direct_run_template")?;
-    snapshot::save(file, &final_content)?;
+    agent_doc_snapshot_io::save(file, &final_content, crate::ops_log::log_op)?;
     if let Some(state) = crdt_state {
-        snapshot::save_document_crdt(file, &state, &final_content)?;
+        agent_doc_merge_io::save_document_crdt(file, &state, &final_content)?;
     }
     atomic_write(file, &final_content)?;
     drop(doc_lock);
@@ -1760,7 +1793,7 @@ fn normalize_direct_run_prompt_prefixes(
         return Ok(content.to_string());
     }
 
-    let Some(snapshot_doc) = snapshot::load(file).ok().flatten() else {
+    let Some(snapshot_doc) = agent_doc_snapshot_io::load(file).ok().flatten() else {
         return Ok(content.to_string());
     };
     let boundary_normalized = template::reposition_boundary_to_end_clean(content);
@@ -1797,7 +1830,7 @@ fn update_resume_id(file: &Path, session_id: &str) -> Result<()> {
     let updated = frontmatter::set_resume_id(&current, session_id)?;
     write::guard_visible_write_idle(file, "direct_run_update_resume_id")?;
     atomic_write(file, &updated)?;
-    snapshot::save(file, &updated)?;
+    agent_doc_snapshot_io::save(file, &updated, crate::ops_log::log_op)?;
     Ok(())
 }
 
@@ -1937,7 +1970,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         let node_key = first_queue_node_key(content);
         append_typed_selected_queue_head(dir.path(), &doc, &node_key, "  /clear  ", true);
 
@@ -1968,7 +2001,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
 
         assert_eq!(
             active_queue_prompt_state(&doc).unwrap(),
@@ -2004,7 +2037,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
             .unwrap()
             .into_iter()
@@ -2052,7 +2085,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         let outcome = RunCycleOutcome {
             dispatched: true,
             queue_synthetic_diff: true,
@@ -2093,7 +2126,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         append_typed_selected_queue_head(
             dir.path(),
             &doc,
@@ -2136,7 +2169,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
             .unwrap()
             .into_iter()
@@ -2185,7 +2218,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
             .unwrap()
             .into_iter()
@@ -2744,7 +2777,7 @@ old status\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, baseline).unwrap();
-        snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -2801,7 +2834,7 @@ old status\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, baseline).unwrap();
-        snapshot::save(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
 
         let diff_text = agent_doc_diff::unified_diff_from_contents(snapshot, baseline)
             .expect("snapshot and baseline differ");
@@ -2837,7 +2870,7 @@ old status\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
 
         let err = run(
             &doc,

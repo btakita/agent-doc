@@ -40,9 +40,8 @@ use std::io::BufRead;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use super::streaming::StreamingAgent;
 use super::{Agent, AgentResponse};
-use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_stream_line};
+use agent_doc_turn_executor::agent_stream::{StreamChunk, StreamingAgent, parse_stream_line};
 use agent_doc_turn_executor::claude_launch::{
     claude_json_args, claude_streaming_args, default_base_args,
 };

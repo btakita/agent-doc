@@ -49,7 +49,6 @@ use std::process::Command;
 use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_backlog::backlog;
 use agent_doc_orchestration::graph::RunContext;
-use agent_doc_orchestration::snapshot;
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {
@@ -302,7 +301,7 @@ fn save_snapshot(file: &Path, doc: &str, rc: &RunContext) -> Result<()> {
         std::fs::write(&snap_abs, doc)
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     } else {
-        snapshot::save(file, doc)
+        agent_doc_snapshot_io::save(file, doc, agent_doc_orchestration::ops_log::log_op)
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     }
     Ok(())

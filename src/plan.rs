@@ -51,7 +51,6 @@ use agent_doc_prompt_context::loaded_context::{
 
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_orchestration::diff_io;
 use agent_doc_workflow::session_cycle::{
     FinalizePendingMutation, FinalizePendingMutationKind, SessionExecutionScope,
     classify_execution_scope, finalize_command, prompt_targets_from_changes,
@@ -160,7 +159,10 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file(&content, file)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
 
-    let doc_diff = diff_io::compute(file)?;
+    let doc_diff = agent_doc_diff_io::compute(
+        &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_orchestration::ops_log::log_op),
+        file,
+    )?;
     let harness_diff = if doc_diff.is_none() {
         agent_doc_harness::prompt_source::synthetic_diff_for_file(
             file,
@@ -260,7 +262,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     if let Some(deferral) = plan_backlog_only_deferral_warning(execution_scope, &prompt_diff_text) {
         warnings.push(deferral);
     }
-    match agent_doc_orchestration::memory_cmd::semantic_completion_matches(file, None, 5) {
+    match agent_doc_memory_io::session::semantic_completion_matches(file, None, 5) {
         Ok(matches) => {
             warnings.extend(
                 matches
@@ -852,7 +854,6 @@ fn shared_doc_security_blockers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_orchestration::snapshot;
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -896,10 +897,7 @@ mod tests {
         }
     }
 
-    fn write_cycles_log(
-        doc: &std::path::Path,
-        entries: &[agent_doc_orchestration::ops_log::CycleEntry],
-    ) {
+    fn write_cycles_log(doc: &std::path::Path, entries: &[agent_doc_ops_log_io::CycleEntry]) {
         let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
         std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
         let mut file = std::fs::File::create(log_path).unwrap();
@@ -966,7 +964,8 @@ synchronous orcestra
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1020,7 +1019,8 @@ What changed?
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1066,7 +1066,8 @@ Done.
 <!-- /agent:backlog -->
 "#;
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1111,7 +1112,8 @@ Done.
 <!-- /agent:queue -->
 "#;
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1158,7 +1160,8 @@ queue_active: true
 <!-- /agent:done -->
 "#;
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
         assert_eq!(plan.prompt_targets, vec!["Repair cache duplication"]);
@@ -1203,7 +1206,8 @@ Done.
             "<!-- agent:queue -->\n- do [#gdbpropscan]\n<!-- /agent:queue -->",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1257,7 +1261,8 @@ agent_doc_write: crdt
             "do [#jobslock]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let script = dir.path().join("fake-tsift-lock.sh");
         std::fs::write(
@@ -1321,7 +1326,8 @@ agent_doc_write: crdt
             "do [#staleg]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let script = dir.path().join("fake-tsift-stale.sh");
         std::fs::write(
@@ -1401,7 +1407,8 @@ do [#dodone]. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1453,7 +1460,8 @@ agent_doc_write: crdt
         );
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1504,7 +1512,8 @@ agent_doc_dispatch: auto
         );
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1582,7 +1591,8 @@ do #ice01. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1632,7 +1642,8 @@ compact exchange
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1704,7 +1715,8 @@ add to backlog: what tasks remain?
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1757,7 +1769,8 @@ prompt_presets:
             "#agent-doc-bug\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, &baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, &baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
         let expect_add = plan
@@ -1826,7 +1839,8 @@ prompt_presets:
             "#agent-doc-bug\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
         let expect_add = plan
@@ -1890,7 +1904,8 @@ prompt_presets:
             "#agent-doc-bug\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, &baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, &baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
         let expect_add = plan
@@ -1943,7 +1958,8 @@ prompt_presets:
             "First captured bug. #agent-doc-bug\n---\nSecond captured bug. #agent-doc-bug\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, &baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, &baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
         let expect_adds = plan
@@ -2006,7 +2022,8 @@ What should we do next? Any recommendations?
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2075,7 +2092,8 @@ Done.
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2124,7 +2142,8 @@ Done.
             &format!("{prompt}\n<!-- /agent:exchange -->"),
         );
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2196,7 +2215,8 @@ How does the CRDT merge work?
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2240,7 +2260,8 @@ Done.
 "#;
 
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let _prompt = EnvGuard::set(
             "AGENT_DOC_HARNESS_PROMPT",
@@ -2314,7 +2335,8 @@ do #spec2. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
         assert_eq!(plan.pending_mutations.len(), 1);
@@ -2377,7 +2399,8 @@ do #spec2. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
         assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
@@ -2412,7 +2435,8 @@ Done.
 "#;
 
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let _prompt = EnvGuard::set(
             "AGENT_DOC_HARNESS_PROMPT",
@@ -2469,7 +2493,8 @@ Done.
         );
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2520,7 +2545,8 @@ Waiting.
         );
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2570,7 +2596,8 @@ Waiting.
         );
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2640,7 +2667,8 @@ Done.
 "#;
 
         std::fs::write(&doc, content).unwrap();
-        snapshot::save(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let _prompt = EnvGuard::set("AGENT_DOC_HARNESS_PROMPT", "#agent-doc-bug");
         let plan = build(&doc).unwrap();
@@ -2709,7 +2737,8 @@ do #pbct. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2771,7 +2800,8 @@ do #tmuxreprocmd. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2819,7 +2849,8 @@ Done.
         );
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2872,11 +2903,12 @@ do #nooploop. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
         write_cycles_log(
             &doc,
             &[
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(20).to_string(),
@@ -2884,7 +2916,7 @@ do #nooploop. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(10).to_string(),
@@ -2961,11 +2993,12 @@ do #cmpclr. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
+            .unwrap();
         write_cycles_log(
             &doc,
             &[
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(120).to_string(),
@@ -2973,7 +3006,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(110).to_string(),
@@ -2981,7 +3014,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(100).to_string(),
@@ -2989,7 +3022,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(90).to_string(),
@@ -2997,7 +3030,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(80).to_string(),
@@ -3005,7 +3038,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(70).to_string(),
@@ -3013,7 +3046,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(60).to_string(),
@@ -3021,7 +3054,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(50).to_string(),
@@ -3029,7 +3062,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(40).to_string(),
@@ -3037,7 +3070,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(30).to_string(),
@@ -3047,8 +3080,7 @@ do #cmpclr. spec-test-build-install-commit-push
                 },
             ],
         );
-        agent_doc_orchestration::session_accretion::record_recent_exchange_compaction(&doc)
-            .unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -3105,13 +3137,13 @@ do #aftercmp. spec-test-build-install-commit-push
 
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(&doc, current).unwrap();
-        snapshot::save(&doc, baseline).unwrap();
-        agent_doc_orchestration::session_accretion::record_recent_exchange_compaction(&doc)
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
             .unwrap();
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
         write_cycles_log(
             &doc,
             &[
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(5).to_string(),
@@ -3119,7 +3151,7 @@ do #aftercmp. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                agent_doc_orchestration::ops_log::CycleEntry {
+                agent_doc_ops_log_io::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(4).to_string(),

@@ -40,11 +40,11 @@ pub fn admit(file: &Path) -> Result<AdmitOutput> {
     let disk = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let current = crate::realtime_model::resolve_current_doc(file, &disk).content;
-    let snapshot = crate::snapshot::load(file)
+    let snapshot = agent_doc_snapshot_io::load(file)
         .with_context(|| format!("failed to load snapshot for {}", file.display()))?;
 
     let state = crate::cycle_state::start_preflight(file, snapshot.as_deref(), Some(&current))?;
-    let phase = crate::cycle_state::cycle_phase_label(state.phase).to_string();
+    let phase = state.phase.as_str().to_string();
     crate::ops_log::log_op(
         file,
         &format!(

@@ -173,10 +173,17 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
         let cmd_str = format!("{}{}", env_prefix, cmd_parts.join(" "));
 
         // Send the command to the pane
-        agent_doc_orchestration::sessions::send_submitted_text(&tmux, &pane_id, &cmd_str)
-            .with_context(|| {
-                format!("failed to send keys to pane {} for task {}", pane_id, i + 1)
-            })?;
+        agent_doc_tmux_io::send_submitted_text_logged(
+            &tmux,
+            &pane_id,
+            &cmd_str,
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                None,
+                agent_doc_orchestration::ops_log::log_op,
+            ),
+            "sessions.send_submitted_text",
+        )
+        .with_context(|| format!("failed to send keys to pane {} for task {}", pane_id, i + 1))?;
 
         // Stash the pane so it doesn't clutter the user's view
         if let Err(e) = tmux.stash_pane(&pane_id, &session_name) {

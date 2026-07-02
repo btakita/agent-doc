@@ -62,7 +62,7 @@ pub(crate) fn run_with_dependencies(
             // auto-run is recoverable without git/sidecar archaeology. Best-effort
             // and non-fatal — a tag failure must not block the run.
             if config.from_queue
-                && let Err(e) = agent_doc_orchestration::compact::create_pre_mutation_tag(
+                && let Err(e) = agent_doc_git_io::checkpoint::create_pre_mutation_tag(
                     file,
                     "pre-auto-run",
                     None,
@@ -208,7 +208,7 @@ pub(crate) fn run_with_dependencies(
             // auto-run is recoverable without git/sidecar archaeology. Best-effort
             // and non-fatal — a tag failure must not block the run.
             if config.from_queue
-                && let Err(e) = agent_doc_orchestration::compact::create_pre_mutation_tag(
+                && let Err(e) = agent_doc_git_io::checkpoint::create_pre_mutation_tag(
                     file,
                     "pre-auto-run",
                     None,
@@ -247,10 +247,10 @@ pub(crate) fn run_ordered_tasks_internal(
 ) -> Result<()> {
     let mut effective_model: Option<String> = options.model_override.map(String::from);
     let dispatch_ctx = build_dispatch_context(file);
-    agent_doc_orchestration::flow::orchestration_batch::log_queue_freeze_event(
+    agent_doc_flow_io::log_flow_event(
         file,
-        tasks.len(),
-        options.exchange_source.is_some(),
+        agent_doc_work_graph::queue_freeze_event(tasks.len(), options.exchange_source.is_some()),
+        agent_doc_orchestration::ops_log::log_op,
     );
 
     for (idx, task) in tasks.iter().enumerate() {
@@ -288,33 +288,35 @@ pub(crate) fn run_ordered_tasks_internal(
                     lifecycle,
                     agent_runner,
                 ) {
-                    Ok(()) => {
-                        agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
-                            label: task.label.clone(),
-                            outcome: agent_doc_flow::types::FlowOutcome::Completed,
-                            proof: Some(
-                                graph_evidence
-                                    .and_then(|evidence| {
-                                        evidence.closeout_audit_proof_for_task(&task.label)
-                                    })
-                                    .unwrap_or_else(|| "finalize_session_check".to_string()),
-                            ),
-                        }
-                    }
+                    Ok(()) => agent_doc_work_graph::BatchChildResult {
+                        label: task.label.clone(),
+                        outcome: agent_doc_flow::types::FlowOutcome::Completed,
+                        proof: Some(
+                            graph_evidence
+                                .and_then(|evidence| {
+                                    evidence.closeout_audit_proof_for_task(&task.label)
+                                })
+                                .unwrap_or_else(|| "finalize_session_check".to_string()),
+                        ),
+                    },
                     Err(err) => {
-                        let child =
-                            agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
-                                label: task.label.clone(),
-                                outcome: agent_doc_flow::types::FlowOutcome::FailedClosed,
-                                proof: Some("child_step_error".to_string()),
-                            };
-                        agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(file, &child);
+                        let child = agent_doc_work_graph::BatchChildResult {
+                            label: task.label.clone(),
+                            outcome: agent_doc_flow::types::FlowOutcome::FailedClosed,
+                            proof: Some("child_step_error".to_string()),
+                        };
+                        agent_doc_flow_io::log_flow_event(
+                            file,
+                            agent_doc_work_graph::child_closeout_event(&child),
+                            agent_doc_orchestration::ops_log::log_op,
+                        );
                         return Err(err);
                     }
                 };
-                agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(
+                agent_doc_flow_io::log_flow_event(
                     file,
-                    &child_result,
+                    agent_doc_work_graph::child_closeout_event(&child_result),
+                    agent_doc_orchestration::ops_log::log_op,
                 );
                 if idx + 1 < tasks.len()
                     && agent_doc_work_graph::classify_batch_progress(
@@ -398,11 +400,14 @@ pub(crate) fn run_auto_dag_mode(
     } else {
         agent_doc_work_graph::AutoDagScheduleDecision::Ready
     };
-    agent_doc_orchestration::flow::orchestration_batch::log_auto_dag_schedule_event(
+    agent_doc_flow_io::log_flow_event(
         file,
-        schedule_decision,
-        schedule.nodes.len(),
-        schedule.batches.len(),
+        agent_doc_work_graph::auto_dag_schedule_event(
+            schedule_decision,
+            schedule.nodes.len(),
+            schedule.batches.len(),
+        ),
+        agent_doc_orchestration::ops_log::log_op,
     );
     if let Some(blocker) = schedule_blocker {
         anyhow::bail!(blocker);
@@ -472,10 +477,10 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
 ) -> Result<()> {
     let mut effective_model: Option<String> = options.ordered.model_override.map(String::from);
     let dispatch_ctx = build_dispatch_context(file);
-    agent_doc_orchestration::flow::orchestration_batch::log_queue_freeze_event(
+    agent_doc_flow_io::log_flow_event(
         file,
-        schedule.nodes.len(),
-        true,
+        agent_doc_work_graph::queue_freeze_event(schedule.nodes.len(), true),
+        agent_doc_orchestration::ops_log::log_op,
     );
 
     for batch in &schedule.batches {
@@ -543,21 +548,22 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                         &node.id,
                         AutoDagNodeState::Complete,
                     )?;
-                    let child =
-                        agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
-                            label: node.label.clone(),
-                            outcome: agent_doc_flow::types::FlowOutcome::Completed,
-                            proof: Some(
-                                options
-                                    .graph_evidence
-                                    .and_then(|evidence| {
-                                        evidence.closeout_audit_proof_for_task(&node.label)
-                                    })
-                                    .unwrap_or_else(|| "finalize_session_check".to_string()),
-                            ),
-                        };
-                    agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(
-                        file, &child,
+                    let child = agent_doc_work_graph::BatchChildResult {
+                        label: node.label.clone(),
+                        outcome: agent_doc_flow::types::FlowOutcome::Completed,
+                        proof: Some(
+                            options
+                                .graph_evidence
+                                .and_then(|evidence| {
+                                    evidence.closeout_audit_proof_for_task(&node.label)
+                                })
+                                .unwrap_or_else(|| "finalize_session_check".to_string()),
+                        ),
+                    };
+                    agent_doc_flow_io::log_flow_event(
+                        file,
+                        agent_doc_work_graph::child_closeout_event(&child),
+                        agent_doc_orchestration::ops_log::log_op,
                     );
                 }
                 Err(err) => {
@@ -567,14 +573,15 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                         &node.id,
                         AutoDagNodeState::Failed,
                     )?;
-                    let child =
-                        agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
-                            label: node.label.clone(),
-                            outcome: agent_doc_flow::types::FlowOutcome::FailedClosed,
-                            proof: Some("auto_dag_child_step_error".to_string()),
-                        };
-                    agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(
-                        file, &child,
+                    let child = agent_doc_work_graph::BatchChildResult {
+                        label: node.label.clone(),
+                        outcome: agent_doc_flow::types::FlowOutcome::FailedClosed,
+                        proof: Some("auto_dag_child_step_error".to_string()),
+                    };
+                    agent_doc_flow_io::log_flow_event(
+                        file,
+                        agent_doc_work_graph::child_closeout_event(&child),
+                        agent_doc_orchestration::ops_log::log_op,
                     );
                     return Err(err);
                 }

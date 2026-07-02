@@ -209,7 +209,29 @@ Took the next rung: **`#adstatechartlean` (Lean invariant proof) — DONE, commi
 **Honest boundary unchanged:** this is per-process safety only. It proves the chart cannot *take* the illegal edge and has no non-accepting dead-end; it does **not** prove production wedge-freedom — a live wedge is "the unblocking IPC-ack/recycle event never fires", a distributed-liveness property outside a per-process chart (root cause **B**).
 
 **Remaining cascade:** `#adstatechart2` (observability read) / `#adstatechart3` (live wiring — gated behind the decomposition landing + install), the JetBrains-plugin lazily-kt 0.9.0 dep bump + `#mergestatemachine3` fold-in (`#adstatechartkt`), and the VS Code-plugin `@lazily/js` 1.1.0 dep bump (`#adstatechartjs`; npm publish still operator-2FA-gated, `#lzjsnpmpub`). Say "cascade" for the next rung (I'd take the JetBrains-plugin kt dep bump next — it's the one with live-plugin payoff), or name one.
-<!-- agent:boundary:8ff0bcbe -->
+
+### Re: cascade — opus-4-8
+
+Took a rung, and re-scoped a blocked one. Two outcomes.
+
+**`#adstatechartkt` re-scoped (not done as written — the framing was wrong).** "Bump the JB plugin's lazily-kt dep to 0.9.0 and consume ChartBuilder/ThreadSafeStateChart" can't be executed:
+- **JVM split:** lazily-kt 0.9.0 is `jvmToolchain(21)` (Kotlin 2.0.21 → JVM21 bytecode); the JB plugin builds on Kotlin 1.9.25 / JVM17 (IntelliJ 2.11). A JVM21 artifact can't be consumed by the JVM17 plugin build.
+- **Contradicts `#lzpkgwire`:** `StateGraphMirror.kt` / `StateProjectionBridge.kt` document that the JB (and VS Code) plugins *deliberately keep a plugin-local canonical copy* of the lazily wire/chart shapes — *because* of that toolchain split — pinned 1:1 to lazily-spec conformance fixtures. Adding a Maven dep reverses that shipped decision.
+- **Value already delivered:** the plugin already mirrors the FFI merge-ownership state (`agent_doc.supervisor.owner`) via the `#lazilystatesync3` `StateGraphMirror`; the SM is FFI-owned (`agent-doc-merge/src/ownership.rs`), plugins are thin reporters by design.
+- **adstatechart-specific part is blocked anyway** on `#adstatechart3` (adstatechart isn't wired into the live state graph yet).
+
+So `#adstatechartkt` should be **closed as superseded by `#lazilystatesync3`** (the dep-bump is architecturally excluded; the ownership-visibility it wanted already ships). Recommend striking it and dropping the "bump lazily-kt dep" phrasing from the cascade.
+
+**`#adstatechart2` (Phase E rung 2, observability read) — DONE, committed (`c8ed0f7c` in the agent-doc submodule).** Advisory, read-only projection of the four orthogonal regions, logged during `session-check` alongside the existing `ops.log` markers. No closeout behavior change.
+- `adstatechart.rs`: `configuration_snapshot(facts, observed)` drives a throwaway chart to the fact-implied configuration and reads `active_leaves()` back as `transport.x editor_sync.x closeout.x supervisor.x`. The closeout region carries the real `editor_synced` guard, so an observed `Committed` while editor-ahead faithfully reports `closeout.written` (the guard rejects the edge) rather than the caller's optimistic phase. +6 unit tests.
+- `adstatechart_snapshot.rs` (orchestration): fail-safe assembler sourcing facts session-check already has — live-buffer edit/sync epochs, IPC listener presence, stale-install detection, cycle phase — and emitting the advisory marker. +2 tests.
+- Guard semantics match the shipped A/C closeout guard (`git.rs commit_blocked_live_buffer_ahead_of_disk`). state-backbone tests 14/14 green; clippy clean.
+- **Verified live:** `session-check` on this doc logged `adstatechart_snapshot advisory=1 transport.socket editor_sync.synced closeout.committed supervisor.sup_idle` — `closeout.committed` correctly reflects the committed cycle state.
+
+**Two honest caveats on the commit.** (1) The agent-doc submodule is mid-decomposition with ~205 uncommitted files (not mine); I staged only my 4 hunks (`c8ed0f7c`) and left that work-in-progress untouched — verified the committed subset compiles against HEAD APIs. (2) `make check` shows 3 pre-existing `finalize_integration` failures + a broken `snapshot.rs` test from that in-flight refactor; I confirmed they fail identically without my change. The superproject `src/agent-doc` pointer was already behind at session start and is left as-is.
+
+**Remaining cascade:** `#adstatechart3` (live wiring — gated behind decomposition + install; also unblocks any real plugin adstatechart mirror). Say "cascade" for the next rung, or name one.
+<!-- agent:boundary:5c5e2f0c -->
 <!-- /agent:exchange -->
 ## Queue
 

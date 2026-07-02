@@ -127,7 +127,7 @@ fn build_backend_command(
     let mut args = config
         .map(|ac| ac.args.clone())
         .unwrap_or_else(|| match name {
-            "claude" => claude::default_base_args(),
+            "claude" => agent_doc_turn_executor::claude_launch::default_base_args(),
             "codex" => agent_doc_turn_executor::codex_launch::default_base_args(),
             "opencode" => opencode::default_base_args(),
             _ => Vec::new(),

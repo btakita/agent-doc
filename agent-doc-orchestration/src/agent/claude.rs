@@ -43,33 +43,14 @@ use std::sync::{Arc, Mutex};
 use super::streaming::StreamingAgent;
 use super::{Agent, AgentResponse};
 use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_stream_line};
-use agent_doc_turn_executor::claude_launch::{claude_json_args, claude_streaming_args};
+use agent_doc_turn_executor::claude_launch::{
+    claude_json_args, claude_streaming_args, default_base_args,
+};
 
 pub struct Claude {
     command: String,
     base_args: Vec<String>,
     env: Vec<(String, Option<String>)>,
-}
-
-pub fn default_base_args() -> Vec<String> {
-    vec![
-        "-p".to_string(),
-        "--output-format".to_string(),
-        "json".to_string(),
-        "--permission-mode".to_string(),
-        "acceptEdits".to_string(),
-    ]
-}
-
-/// Structural minimum args required for non-interactive JSON communication.
-/// Permission settings are intentionally excluded — callers supply those
-/// from frontmatter or config.
-pub fn structural_base_args() -> Vec<String> {
-    vec![
-        "-p".to_string(),
-        "--output-format".to_string(),
-        "json".to_string(),
-    ]
 }
 
 impl Claude {

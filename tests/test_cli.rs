@@ -11870,6 +11870,8 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         );
     }
     for required_snippet in [
+        "pub fn default_base_args(",
+        "pub fn structural_base_args(",
         "pub fn claude_json_args(",
         "pub fn claude_streaming_args(",
         "fn append_claude_session_args(",
@@ -12223,6 +12225,8 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     for forbidden_snippet in [
         "args.push(\"--append-system-prompt\".to_string())",
         "fn build_streaming_args(",
+        "pub fn default_base_args(",
+        "pub fn structural_base_args(",
         "streaming_args_replace_output_format_and_preserve_add_dir",
         "streaming_args_includes_verbose",
     ] {
@@ -12232,9 +12236,11 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         );
     }
     assert!(
-        claude.contains(
-            "use agent_doc_turn_executor::claude_launch::{claude_json_args, claude_streaming_args};"
-        ) && claude.contains("claude_json_args(&self.base_args, session_id, fork, model)")
+        claude.contains("use agent_doc_turn_executor::claude_launch::{")
+            && claude.contains("claude_json_args")
+            && claude.contains("claude_streaming_args")
+            && claude.contains("default_base_args")
+            && claude.contains("claude_json_args(&self.base_args, session_id, fork, model)")
             && claude.contains("claude_streaming_args(&self.base_args, session_id, fork, model)"),
         "agent::claude should call focused Claude launch argv policy directly"
     );
@@ -12334,12 +12340,14 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "src/orchestrate.rs should call focused binary launch resolution directly"
     );
     assert!(
-        orchestrate_dispatch_source.contains("default_base_args as codex_default_base_args")
+        orchestrate_dispatch_source.contains("structural_base_args as claude_structural_base_args")
+            && orchestrate_dispatch_source.contains("claude_structural_base_args()")
+            && orchestrate_dispatch_source.contains("default_base_args as codex_default_base_args")
             && orchestrate_dispatch_source
                 .contains("structural_base_args as codex_structural_base_args")
             && orchestrate_dispatch_source.contains("codex_structural_base_args()")
             && orchestrate_dispatch_source.contains("unwrap_or_else(codex_default_base_args)"),
-        "orchestrate dispatch should call focused Codex base-arg helpers directly"
+        "orchestrate dispatch should call focused Claude/Codex base-arg helpers directly"
     );
 
     let executor_manifest =

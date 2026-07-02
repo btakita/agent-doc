@@ -4,6 +4,27 @@ Respond concisely in markdown. Classify prompt-bearing inline edits \
 as prompt targets vs content edits, and address new ## User blocks \
 as well as prompt-bearing changes inside prior responses.";
 
+pub fn default_base_args() -> Vec<String> {
+    vec![
+        "-p".to_string(),
+        "--output-format".to_string(),
+        "json".to_string(),
+        "--permission-mode".to_string(),
+        "acceptEdits".to_string(),
+    ]
+}
+
+/// Structural minimum args required for non-interactive JSON communication.
+/// Permission settings are intentionally excluded -- callers supply those from
+/// frontmatter or config.
+pub fn structural_base_args() -> Vec<String> {
+    vec![
+        "-p".to_string(),
+        "--output-format".to_string(),
+        "json".to_string(),
+    ]
+}
+
 pub fn claude_json_args(
     base_args: &[String],
     session_id: Option<&str>,
@@ -67,6 +88,32 @@ fn append_claude_session_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
+    #[test]
+    fn default_base_args_use_claude_json_accept_edits_policy() {
+        assert_eq!(
+            default_base_args(),
+            strings(&[
+                "-p",
+                "--output-format",
+                "json",
+                "--permission-mode",
+                "acceptEdits"
+            ])
+        );
+    }
+
+    #[test]
+    fn structural_base_args_include_prompt_json_only() {
+        assert_eq!(
+            structural_base_args(),
+            strings(&["-p", "--output-format", "json"])
+        );
+    }
 
     #[test]
     fn streaming_args_replace_output_format_and_preserve_add_dir() {

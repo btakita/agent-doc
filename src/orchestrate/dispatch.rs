@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_turn_executor::claude_launch::structural_base_args as claude_structural_base_args;
 use agent_doc_turn_executor::codex_launch::{
     CODEX_SANDBOX_NETWORK_DISABLED_ENV, apply_codex_network_access_env_overrides,
     codex_network_status_from_overrides, default_base_args as codex_default_base_args,
@@ -72,7 +73,7 @@ pub(crate) fn build_effective_agent_config(
     let global_agent_config = global_config.agents.get(agent_name);
     if let Some(args_str) = resolved_args {
         let mut args = match agent_name {
-            "claude" => agent::claude::structural_base_args(),
+            "claude" => claude_structural_base_args(),
             "codex" => codex_structural_base_args(),
             _ => Vec::new(),
         };

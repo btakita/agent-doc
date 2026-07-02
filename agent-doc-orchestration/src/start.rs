@@ -142,8 +142,9 @@ use agent_doc_queue::queue::{
     idle_queue_context_reset_decision, idle_queue_drain_decision,
 };
 use agent_doc_supervisor::auto_trigger::{
-    AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction,
-    AutoTriggerStopOutcome, auto_trigger_clear_cooldown_action, auto_trigger_no_prompt_action,
+    AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction, AutoTriggerOutcome,
+    AutoTriggerStopOutcome, CapabilityProofGate, auto_trigger_clear_cooldown_action,
+    auto_trigger_no_prompt_action,
 };
 use agent_doc_supervisor::config::AgentLaunchArgsSources;
 use agent_doc_supervisor::crash_policy::{
@@ -278,64 +279,6 @@ const ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS: u32 = STALE_BUSY_RECONCILE_TICKS;
 const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SHARED_WRITER_WRITE_POLL_INTERVAL_MS: i32 = 50;
 const SHARED_WRITER_CHUNK_MAX: usize = 1024;
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-enum AutoTriggerOutcome {
-    NotNeeded = 0,
-    Pending = 1,
-    Sent = 2,
-    Timeout = 3,
-    SendFailed = 4,
-    Cancelled = 5,
-    SkippedClearCooldown = 6,
-}
-
-impl AutoTriggerOutcome {
-    fn from_u8(value: u8) -> Self {
-        match value {
-            1 => Self::Pending,
-            2 => Self::Sent,
-            3 => Self::Timeout,
-            4 => Self::SendFailed,
-            5 => Self::Cancelled,
-            6 => Self::SkippedClearCooldown,
-            _ => Self::NotNeeded,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::NotNeeded => "not_needed",
-            Self::Pending => "pending",
-            Self::Sent => "sent",
-            Self::Timeout => "timeout",
-            Self::SendFailed => "send_failed",
-            Self::Cancelled => "cancelled",
-            Self::SkippedClearCooldown => "skipped_clear_cooldown",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-enum CapabilityProofGate {
-    NotRequired = 0,
-    Pending = 1,
-    Proven = 2,
-    Failed = 3,
-}
-
-impl CapabilityProofGate {
-    fn from_u8(value: u8) -> Self {
-        match value {
-            1 => Self::Pending,
-            2 => Self::Proven,
-            3 => Self::Failed,
-            _ => Self::NotRequired,
-        }
-    }
-}
-
 /// Fail-closed handler for an expired session-startup deadline: record a
 /// `startup_miss` marker against the owned pane and surface an actionable
 /// "session did not become dispatch-ready in Ns" diagnostic on stderr, so a hung

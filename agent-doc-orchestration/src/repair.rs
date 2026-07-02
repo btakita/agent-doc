@@ -103,15 +103,6 @@ impl RepairOutcome {
     }
 }
 
-fn capture_is_repairable(capture: &crate::capture::CaptureRecord) -> bool {
-    matches!(
-        capture.state,
-        agent_doc_workflow::capture::CaptureState::Captured
-            | agent_doc_workflow::capture::CaptureState::WriteApplied
-            | agent_doc_workflow::capture::CaptureState::Replayed
-    )
-}
-
 fn historical_committed_capture_replay(
     file: &Path,
     doc_content: &str,
@@ -1211,7 +1202,8 @@ pub(crate) fn run_with_queue_completion_ids(
         .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
 
     let pending_path = agent_doc_fs::pending_response_path_for(&canonical)?;
-    let capture = crate::capture::load_active(&canonical)?.filter(capture_is_repairable);
+    let capture = crate::capture::load_active(&canonical)?
+        .filter(|capture| agent_doc_workflow::capture::capture_state_is_repairable(capture.state));
     let doc_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read document for repair {}", file.display()))?;
     let cycle_state = crate::cycle_state::load(file)?;

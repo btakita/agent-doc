@@ -16,7 +16,7 @@ use agent_doc_controller::status::{
     ControllerBootstrapStatusFacts, ControllerFreshnessFacts, ControllerFreshnessStatus,
     ControllerHandoffState, ControllerStatus, LaunchMode, controller_restart_recovery_needed,
     default_controller_generation, preparing_controller_is_stale,
-    resolve_controller_identity_version,
+    resolve_controller_identity_version, stale_preparing_controller_threshold_from_env_value,
 };
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
@@ -73,12 +73,6 @@ const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_millis(250);
 const CONTROLLER_IDLE_CLIENT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
 
-/// Default staleness threshold for the stuck-handoff reaper (#kqr6 / #sjwm /
-/// #stuckhandoff). A controller handoff should reach `Promoted`/`Stable` within
-/// seconds; a record still `Preparing`/`Promoted` past this age is treated as
-/// wedged and its live process is terminated. Seconds, not the 1h projection GC
-/// window — a wedged controller keeps re-corrupting the working tree every tick.
-const DEFAULT_STALE_PREPARING_CONTROLLER_SECS: u64 = 45;
 const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS";
 
 /// `#ctlrecycle` — how long a process must continuously observe "wants-recycle AND
@@ -1603,11 +1597,8 @@ pub fn prune_dead_actors(
 /// Resolve the stuck-`Preparing` controller staleness threshold, honoring the
 /// `AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS` env override.
 pub fn stale_preparing_controller_threshold() -> Duration {
-    let secs = std::env::var(STALE_PREPARING_CONTROLLER_SECS_ENV)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .unwrap_or(DEFAULT_STALE_PREPARING_CONTROLLER_SECS);
-    Duration::from_secs(secs.max(1))
+    let raw = std::env::var(STALE_PREPARING_CONTROLLER_SECS_ENV).ok();
+    stale_preparing_controller_threshold_from_env_value(raw.as_deref())
 }
 
 /// Terminate a controller wedged in `Preparing`/`Promoted` past `stale_after`

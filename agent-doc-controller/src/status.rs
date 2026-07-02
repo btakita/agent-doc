@@ -7,6 +7,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+const DEFAULT_STALE_PREPARING_CONTROLLER_SECS: u64 = 45;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchMode {
@@ -347,6 +349,15 @@ pub fn preparing_controller_is_stale(
         return false;
     };
     now.saturating_sub(started) > stale_after.as_secs()
+}
+
+/// Resolve the stuck-`Preparing` controller staleness threshold from the raw
+/// environment override value. Callers own environment IO.
+pub fn stale_preparing_controller_threshold_from_env_value(raw: Option<&str>) -> Duration {
+    let secs = raw
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_STALE_PREPARING_CONTROLLER_SECS);
+    Duration::from_secs(secs.max(1))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -946,6 +957,38 @@ mod tests {
             now,
             stale_after,
         ));
+    }
+
+    #[test]
+    fn stale_preparing_controller_threshold_defaults_on_missing_or_invalid_env_value() {
+        assert_eq!(
+            stale_preparing_controller_threshold_from_env_value(None),
+            Duration::from_secs(45)
+        );
+        assert_eq!(
+            stale_preparing_controller_threshold_from_env_value(Some("")),
+            Duration::from_secs(45)
+        );
+        assert_eq!(
+            stale_preparing_controller_threshold_from_env_value(Some("bogus")),
+            Duration::from_secs(45)
+        );
+        assert_eq!(
+            stale_preparing_controller_threshold_from_env_value(Some("-3")),
+            Duration::from_secs(45)
+        );
+    }
+
+    #[test]
+    fn stale_preparing_controller_threshold_trims_and_clamps_to_one_second() {
+        assert_eq!(
+            stale_preparing_controller_threshold_from_env_value(Some(" 90 ")),
+            Duration::from_secs(90)
+        );
+        assert_eq!(
+            stale_preparing_controller_threshold_from_env_value(Some("0")),
+            Duration::from_secs(1)
+        );
     }
 
     #[test]

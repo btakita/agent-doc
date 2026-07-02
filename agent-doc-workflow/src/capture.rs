@@ -26,6 +26,13 @@ pub const fn capture_state_can_advance(from: CaptureState, to: CaptureState) -> 
     capture_state_rank(to) >= capture_state_rank(from)
 }
 
+pub const fn capture_state_is_repairable(state: CaptureState) -> bool {
+    matches!(
+        state,
+        CaptureState::Captured | CaptureState::WriteApplied | CaptureState::Replayed
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,5 +67,18 @@ mod tests {
             CaptureState::Committed,
             CaptureState::Replayed
         ));
+    }
+
+    #[test]
+    fn capture_state_is_repairable_accepts_unfinished_states() {
+        assert!(capture_state_is_repairable(CaptureState::Captured));
+        assert!(capture_state_is_repairable(CaptureState::WriteApplied));
+        assert!(capture_state_is_repairable(CaptureState::Replayed));
+    }
+
+    #[test]
+    fn capture_state_is_repairable_rejects_terminal_states() {
+        assert!(!capture_state_is_repairable(CaptureState::Committed));
+        assert!(!capture_state_is_repairable(CaptureState::Discarded));
     }
 }

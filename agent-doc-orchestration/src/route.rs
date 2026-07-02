@@ -171,9 +171,10 @@ use agent_doc_controller::dispatch::{
     DispatchActorState, DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts,
     DispatchOnlyProofOutcomeFacts, DispatchOnlyReopenDelivery, DispatchRuntimeHealth,
     DispatchStartProofDecision, DispatchStartProofFacts, DuplicatePanePolicyErrorFacts,
-    MissingCycleAckFacts, PromptReadyBarrierDecision, ReopenMode, RetryBudget,
-    RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts, RouteDispatchBugReportItemFacts,
-    RouteLatencyFacts, RouteLatencyStatus, RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
+    MissingCycleAckFacts, OpenCodePaneDispatchStartProofFacts, PromptReadyBarrierDecision,
+    ReopenMode, RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
+    RouteDispatchBugReportItemFacts, RouteLatencyFacts, RouteLatencyStatus,
+    RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
     RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
     RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
     RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON, StartingActorLogFacts,
@@ -183,7 +184,8 @@ use agent_doc_controller::dispatch::{
     busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
     busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
-    classify_closeout_block_dispatch, classify_dispatch_start_proof, decide_authoritative_reopen,
+    classify_closeout_block_dispatch, classify_codex_routed_dispatch_start_proof,
+    classify_dispatch_start_proof, decide_authoritative_reopen,
     degraded_authoritative_actor_direct_submit_log_message, direct_pane_acceptance_poll_status,
     direct_pane_can_continue_enter_resubmit, direct_pane_can_enter_existing_draft,
     direct_pane_max_enter_resubmits, direct_pane_resubmit_proof_line,
@@ -200,7 +202,7 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
     existing_pane_ready_timeout, failclosed_wait_context, fresh_route_start_ack_timeout,
-    recent_lines_contain_trigger, route_busy_diagnostic_message,
+    opencode_pane_state_changed_from_idle, route_busy_diagnostic_message,
     route_busy_queued_diagnostic_message, route_dispatch_bug_report_item, route_latency_message,
     route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_cycle_ack_timeout,
@@ -920,69 +922,51 @@ fn build_routed_dispatch_start_tracker(
     }
 }
 
-fn codex_state_advanced(
-    tracker: &RoutedDispatchStartTracker,
-    state: &crate::codex_hook::ActiveSessionState,
-) -> bool {
+fn codex_routed_dispatch_start_proof_facts<'a>(
+    tracker: &'a RoutedDispatchStartTracker,
+    state: &'a crate::codex_hook::ActiveSessionState,
+) -> Option<agent_doc_controller::dispatch::CodexRoutedDispatchStartProofFacts<'a>> {
     let RoutedDispatchStartTracker::CodexHook {
+        trigger,
         previous_session_id,
         previous_turn_id,
         previous_updated_at,
-        ..
     } = tracker
     else {
-        return false;
-    };
-    match (
-        previous_session_id.as_deref(),
-        previous_turn_id.as_deref(),
-        *previous_updated_at,
-    ) {
-        (None, None, None) => true,
-        (previous_session_id, previous_turn_id, previous_updated_at) => {
-            previous_session_id != Some(state.session_id.as_str())
-                || previous_turn_id != Some(state.last_turn_id.as_str())
-                || previous_updated_at.is_none_or(|updated_at| state.updated_at > updated_at)
-        }
-    }
-}
-
-fn codex_routed_dispatch_start_proof(
-    tracker: &RoutedDispatchStartTracker,
-    state: &crate::codex_hook::ActiveSessionState,
-) -> Option<RoutedDispatchStartProof> {
-    let RoutedDispatchStartTracker::CodexHook { trigger, .. } = tracker else {
         return None;
     };
-    if !codex_state_advanced(tracker, state) {
-        return None;
-    }
-
-    if state.last_prompt.trim() == trigger.trim() {
-        Some(RoutedDispatchStartProof::HookPromptMatched)
-    } else {
-        Some(RoutedDispatchStartProof::HookStateAdvanced)
-    }
+    Some(
+        agent_doc_controller::dispatch::CodexRoutedDispatchStartProofFacts {
+            trigger,
+            previous_session_id: previous_session_id.as_deref(),
+            previous_turn_id: previous_turn_id.as_deref(),
+            previous_updated_at: *previous_updated_at,
+            current_session_id: state.session_id.as_str(),
+            current_turn_id: state.last_turn_id.as_str(),
+            current_updated_at: state.updated_at,
+            current_prompt: state.last_prompt.as_str(),
+        },
+    )
 }
 
-fn opencode_pane_state_changed_from_idle(
+fn opencode_pane_dispatch_start_proof_facts<'a>(
     harness: &HarnessConfig,
-    trigger: &str,
-    pre_dispatch_content: &str,
-    current_content: &str,
-) -> bool {
-    if current_content == pre_dispatch_content
-        || recent_lines_contain_trigger(current_content, trigger)
-    {
-        return false;
-    }
-    if agent_doc_harness::ready_prompt_candidate(current_content, harness).is_some()
-        || harness.is_idle_chrome_only_output(current_content)
-    {
-        return false;
-    }
-    harness.has_busy_cue(current_content)
-        || current_content
+    trigger: &'a str,
+    pre_dispatch_content: &'a str,
+    current_content: &'a str,
+) -> OpenCodePaneDispatchStartProofFacts<'a> {
+    OpenCodePaneDispatchStartProofFacts {
+        trigger,
+        pre_dispatch_content,
+        current_content,
+        current_has_ready_prompt_candidate: agent_doc_harness::ready_prompt_candidate(
+            current_content,
+            harness,
+        )
+        .is_some(),
+        current_is_idle_chrome_only_output: harness.is_idle_chrome_only_output(current_content),
+        current_has_busy_cue: harness.has_busy_cue(current_content),
+        current_has_non_idle_output_line: current_content
             .lines()
             .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
             .any(|line| {
@@ -990,7 +974,8 @@ fn opencode_pane_state_changed_from_idle(
                 !trimmed.is_empty()
                     && !harness.is_ignorable_output_line(trimmed)
                     && !harness.is_dispatch_ready_prompt_line(trimmed)
-            })
+            }),
+    }
 }
 
 fn wait_for_routed_dispatch_start(
@@ -1011,7 +996,8 @@ fn wait_for_routed_dispatch_start(
         match tracker {
             RoutedDispatchStartTracker::CodexHook { .. } => {
                 if let Some(state) = crate::codex_hook::load_latest_prompt_state_for_file(file)?
-                    && let Some(proof) = codex_routed_dispatch_start_proof(tracker, &state)
+                    && let Some(facts) = codex_routed_dispatch_start_proof_facts(tracker, &state)
+                    && let Some(proof) = classify_codex_routed_dispatch_start_proof(facts)
                 {
                     return Ok(Some(proof));
                 }
@@ -1027,12 +1013,13 @@ fn wait_for_routed_dispatch_start(
                         pane
                     )
                 })?;
-                if opencode_pane_state_changed_from_idle(
+                let facts = opencode_pane_dispatch_start_proof_facts(
                     harness,
                     trigger,
                     pre_dispatch_content,
                     &content,
-                ) {
+                );
+                if opencode_pane_state_changed_from_idle(facts) {
                     return Ok(Some(RoutedDispatchStartProof::PaneStateChanged));
                 }
             }
@@ -6003,52 +5990,6 @@ mod tests {
         assert!(
             registered.is_some(),
             "dead registered pane should attempt lazy claim"
-        );
-    }
-    #[test]
-    fn codex_routed_dispatch_start_proof_accepts_any_newer_state_for_same_file() {
-        let tracker = RoutedDispatchStartTracker::CodexHook {
-            trigger: "agent-doc /tmp/task.md".to_string(),
-            previous_session_id: Some("codex-session".to_string()),
-            previous_turn_id: Some("turn-1".to_string()),
-            previous_updated_at: Some(10),
-        };
-        let state = crate::codex_hook::ActiveSessionState {
-            session_id: "codex-session".to_string(),
-            doc_path: "/tmp/task.md".to_string(),
-            last_turn_id: "turn-2".to_string(),
-            last_prompt: "/review current changes".to_string(),
-            updated_at: 11,
-        };
-        assert_eq!(
-            codex_routed_dispatch_start_proof(&tracker, &state),
-            Some(RoutedDispatchStartProof::HookStateAdvanced)
-        );
-    }
-    #[test]
-    fn opencode_pane_state_change_proof_requires_trigger_to_leave_composer() {
-        let harness = HarnessConfig::opencode();
-        let trigger = harness.trigger_command("tasks/bugs.md");
-        let before = ">\n";
-        let drafted = format!("> {trigger}\n");
-        assert!(
-            !opencode_pane_state_changed_from_idle(&harness, &trigger, before, &drafted),
-            "drafted trigger text is pane input, not dispatch-start proof"
-        );
-
-        let active = "\
-Working (2s - esc to interrupt)
-zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
-";
-        assert!(
-            opencode_pane_state_changed_from_idle(&harness, &trigger, before, active),
-            "OpenCode leaving idle chrome for active output should prove dispatch start"
-        );
-
-        let idle_status = "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n";
-        assert!(
-            !opencode_pane_state_changed_from_idle(&harness, &trigger, before, idle_status),
-            "idle status chrome alone must not prove dispatch start"
         );
     }
     #[test]

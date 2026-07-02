@@ -10347,6 +10347,7 @@ fn test_agent_doc_controller_owns_handoff_staleness_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/status.rs")).unwrap();
     for required in [
         "pub fn preparing_controller_is_stale(",
+        "pub fn stale_preparing_controller_threshold_from_env_value(",
         "pub struct ControllerWatchdogFacts",
         "pub fn controller_watchdog_should_suicide(",
         "pub fn handoff_replacement_is_stranded(",
@@ -10368,6 +10369,7 @@ fn test_agent_doc_controller_owns_handoff_staleness_policy() {
             "fn handoff_replacement_is_stranded(",
             "fn controller_handoff_replacement_is_stranded(",
             "pub(crate) fn controller_handoff_replacement_is_stranded(",
+            "fn stale_preparing_controller_threshold_from_env_value(",
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -10385,6 +10387,8 @@ fn test_agent_doc_controller_owns_handoff_staleness_policy() {
     .unwrap();
     assert!(
         project_controller.contains("preparing_controller_is_stale")
+            && project_controller
+                .contains("stale_preparing_controller_threshold_from_env_value(raw.as_deref())")
             && project_controller_rpc.contains("status::controller_watchdog_should_suicide")
             && project_controller_rpc.contains("status::ControllerWatchdogFacts"),
         "orchestration should call focused controller handoff/watchdog policy directly"
@@ -10776,9 +10780,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct AuthoritativeRuntimeFacts",
         "pub fn authoritative_actor_dispatch_guard_reason(",
         "pub enum RoutedDispatchStartProof",
+        "pub struct CodexRoutedDispatchStartProofFacts",
         "pub enum DispatchStartProofDecision",
         "pub struct DispatchStartProofFacts",
         "pub fn classify_dispatch_start_proof(",
+        "pub fn classify_codex_routed_dispatch_start_proof(",
+        "pub struct OpenCodePaneDispatchStartProofFacts",
+        "pub fn opencode_pane_state_changed_from_idle(",
         "pub fn dispatch_only_dispatch_start_proof_required(",
         "pub struct RetryBudget",
         "pub fn authoritative_actor_ready_retry_budget(",
@@ -10909,6 +10917,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn format_duplicate_pane_policy_error(",
         "fn route_dispatch_bug_report_item(",
         "fn routed_dispatch_start_timeout(",
+        "fn codex_state_advanced(",
+        "fn codex_routed_dispatch_start_proof(",
+        "fn opencode_pane_state_changed_from_idle(",
         "fn dispatch_only_busy_refusal_message(",
         "fn dispatch_only_busy_refusal_wait_secs(",
     ] {
@@ -11042,7 +11053,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
+            && route_source.contains("CodexRoutedDispatchStartProofFacts")
             && route_source.contains("classify_dispatch_start_proof")
+            && route_source.contains("classify_codex_routed_dispatch_start_proof")
+            && route_source.contains("OpenCodePaneDispatchStartProofFacts")
+            && route_source.contains("opencode_pane_state_changed_from_idle")
             && route_source.contains("DirectPaneSubmitStatus as CommandDispatchStatus")
             && route_source.contains("direct_pane_submit_outcome")
             && route_source.contains("DirectPaneDispatchStartProofFacts")
@@ -12129,6 +12144,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-supervisor/src/auto_trigger.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure auto-trigger state policy"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-supervisor/src/ipc_protocol.rs")
             .exists(),
         "agent-doc-supervisor must own supervisor IPC protocol vocabulary"
@@ -12203,6 +12224,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/startup_miss.rs")).unwrap();
     let supervisor_idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/idle_watch.rs")).unwrap();
+    let supervisor_auto_trigger =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/auto_trigger.rs")).unwrap();
     let supervisor_terminal_filter =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/terminal_filter.rs"))
             .unwrap();
@@ -12265,6 +12288,34 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         session_actor_source.contains("use agent_doc_supervisor::{")
             && session_actor_source.contains("infer_latest_generation_from_content(&content)"),
         "session_actor should call focused supervisor lifecycle vocabulary directly"
+    );
+    for required_snippet in [
+        "pub enum AutoTriggerOutcome",
+        "pub fn from_u8(value: u8) -> Self",
+        "pub fn as_str(self) -> &'static str",
+        "pub enum CapabilityProofGate",
+    ] {
+        assert!(
+            supervisor_auto_trigger.contains(required_snippet),
+            "agent-doc-supervisor must own auto-trigger wire-state policy: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "enum AutoTriggerOutcome",
+        "impl AutoTriggerOutcome",
+        "enum CapabilityProofGate",
+        "impl CapabilityProofGate",
+    ] {
+        assert!(
+            !orchestration_start.contains(forbidden_snippet),
+            "start.rs must not re-own auto-trigger wire-state policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_start.contains("use agent_doc_supervisor::auto_trigger::{")
+            && orchestration_start.contains("AutoTriggerOutcome")
+            && orchestration_start.contains("CapabilityProofGate"),
+        "start.rs should import auto-trigger wire-state policy directly"
     );
     for required_snippet in [
         "pub struct TerminalFilterConfig",
@@ -14314,6 +14365,28 @@ fn test_extracted_pure_layers_keep_focused_owners() {
             && claim.contains("registry_entry_matches_claimed_document(")
             && claim.contains("agent_doc_git_io::dirs::resolve_canonical_or_absolute_file_path"),
         "claim.rs should call focused claim-binding policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_workflow_owns_capture_repairability_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workflow_capture =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/capture.rs")).unwrap();
+    assert!(
+        workflow_capture.contains("pub const fn capture_state_is_repairable("),
+        "agent-doc-workflow must own pure capture repairability policy"
+    );
+
+    let repair =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    assert!(
+        !repair.contains("fn capture_is_repairable("),
+        "repair.rs must not re-own capture repairability policy"
+    );
+    assert!(
+        repair.contains("agent_doc_workflow::capture::capture_state_is_repairable("),
+        "repair.rs should call capture repairability policy from agent-doc-workflow directly"
     );
 }
 

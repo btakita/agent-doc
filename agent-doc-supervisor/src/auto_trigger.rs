@@ -36,9 +36,67 @@ impl AutoTriggerMonitor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AutoTriggerOutcome {
+    NotNeeded = 0,
+    Pending = 1,
+    Sent = 2,
+    Timeout = 3,
+    SendFailed = 4,
+    Cancelled = 5,
+    SkippedClearCooldown = 6,
+}
+
+impl AutoTriggerOutcome {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Pending,
+            2 => Self::Sent,
+            3 => Self::Timeout,
+            4 => Self::SendFailed,
+            5 => Self::Cancelled,
+            6 => Self::SkippedClearCooldown,
+            _ => Self::NotNeeded,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotNeeded => "not_needed",
+            Self::Pending => "pending",
+            Self::Sent => "sent",
+            Self::Timeout => "timeout",
+            Self::SendFailed => "send_failed",
+            Self::Cancelled => "cancelled",
+            Self::SkippedClearCooldown => "skipped_clear_cooldown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoTriggerStopOutcome {
     Cancelled,
     Timeout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CapabilityProofGate {
+    NotRequired = 0,
+    Pending = 1,
+    Proven = 2,
+    Failed = 3,
+}
+
+impl CapabilityProofGate {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Pending,
+            2 => Self::Proven,
+            3 => Self::Failed,
+            _ => Self::NotRequired,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +143,52 @@ pub fn auto_trigger_no_prompt_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_trigger_outcome_round_trips_stable_wire_values() {
+        let cases = [
+            (0, AutoTriggerOutcome::NotNeeded, "not_needed"),
+            (1, AutoTriggerOutcome::Pending, "pending"),
+            (2, AutoTriggerOutcome::Sent, "sent"),
+            (3, AutoTriggerOutcome::Timeout, "timeout"),
+            (4, AutoTriggerOutcome::SendFailed, "send_failed"),
+            (5, AutoTriggerOutcome::Cancelled, "cancelled"),
+            (
+                6,
+                AutoTriggerOutcome::SkippedClearCooldown,
+                "skipped_clear_cooldown",
+            ),
+        ];
+
+        for (wire_value, outcome, label) in cases {
+            assert_eq!(AutoTriggerOutcome::from_u8(wire_value), outcome);
+            assert_eq!(outcome as u8, wire_value);
+            assert_eq!(outcome.as_str(), label);
+        }
+        assert_eq!(
+            AutoTriggerOutcome::from_u8(7),
+            AutoTriggerOutcome::NotNeeded
+        );
+    }
+
+    #[test]
+    fn capability_proof_gate_round_trips_stable_wire_values() {
+        let cases = [
+            (0, CapabilityProofGate::NotRequired),
+            (1, CapabilityProofGate::Pending),
+            (2, CapabilityProofGate::Proven),
+            (3, CapabilityProofGate::Failed),
+        ];
+
+        for (wire_value, gate) in cases {
+            assert_eq!(CapabilityProofGate::from_u8(wire_value), gate);
+            assert_eq!(gate as u8, wire_value);
+        }
+        assert_eq!(
+            CapabilityProofGate::from_u8(4),
+            CapabilityProofGate::NotRequired
+        );
+    }
 
     #[test]
     fn auto_trigger_monitor_cancels_before_timeout() {

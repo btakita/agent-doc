@@ -1969,6 +1969,75 @@ impl RoutedDispatchStartProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodexRoutedDispatchStartProofFacts<'a> {
+    pub trigger: &'a str,
+    pub previous_session_id: Option<&'a str>,
+    pub previous_turn_id: Option<&'a str>,
+    pub previous_updated_at: Option<u64>,
+    pub current_session_id: &'a str,
+    pub current_turn_id: &'a str,
+    pub current_updated_at: u64,
+    pub current_prompt: &'a str,
+}
+
+pub fn codex_routed_dispatch_state_advanced(
+    facts: &CodexRoutedDispatchStartProofFacts<'_>,
+) -> bool {
+    match (
+        facts.previous_session_id,
+        facts.previous_turn_id,
+        facts.previous_updated_at,
+    ) {
+        (None, None, None) => true,
+        (previous_session_id, previous_turn_id, previous_updated_at) => {
+            previous_session_id != Some(facts.current_session_id)
+                || previous_turn_id != Some(facts.current_turn_id)
+                || previous_updated_at
+                    .is_none_or(|updated_at| facts.current_updated_at > updated_at)
+        }
+    }
+}
+
+pub fn classify_codex_routed_dispatch_start_proof(
+    facts: CodexRoutedDispatchStartProofFacts<'_>,
+) -> Option<RoutedDispatchStartProof> {
+    if !codex_routed_dispatch_state_advanced(&facts) {
+        return None;
+    }
+
+    if facts.current_prompt.trim() == facts.trigger.trim() {
+        Some(RoutedDispatchStartProof::HookPromptMatched)
+    } else {
+        Some(RoutedDispatchStartProof::HookStateAdvanced)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenCodePaneDispatchStartProofFacts<'a> {
+    pub trigger: &'a str,
+    pub pre_dispatch_content: &'a str,
+    pub current_content: &'a str,
+    pub current_has_ready_prompt_candidate: bool,
+    pub current_is_idle_chrome_only_output: bool,
+    pub current_has_busy_cue: bool,
+    pub current_has_non_idle_output_line: bool,
+}
+
+pub fn opencode_pane_state_changed_from_idle(
+    facts: OpenCodePaneDispatchStartProofFacts<'_>,
+) -> bool {
+    if facts.current_content == facts.pre_dispatch_content
+        || recent_lines_contain_trigger(facts.current_content, facts.trigger)
+    {
+        return false;
+    }
+    if facts.current_has_ready_prompt_candidate || facts.current_is_idle_chrome_only_output {
+        return false;
+    }
+    facts.current_has_busy_cue || facts.current_has_non_idle_output_line
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchStartProofDecision {
     Accepted,
     FailClosedAcceptedOnly,
@@ -2476,6 +2545,107 @@ mod tests {
         };
         assert_eq!(receipt.status.as_str(), "accepted");
         assert_eq!(receipt.proof_scope.as_str(), "accepted_only");
+    }
+
+    #[test]
+    fn codex_routed_dispatch_start_proof_accepts_any_newer_state_for_same_file() {
+        let facts = CodexRoutedDispatchStartProofFacts {
+            trigger: "agent-doc /tmp/task.md",
+            previous_session_id: Some("codex-session"),
+            previous_turn_id: Some("turn-1"),
+            previous_updated_at: Some(10),
+            current_session_id: "codex-session",
+            current_turn_id: "turn-2",
+            current_updated_at: 11,
+            current_prompt: "/review current changes",
+        };
+        assert_eq!(
+            classify_codex_routed_dispatch_start_proof(facts),
+            Some(RoutedDispatchStartProof::HookStateAdvanced)
+        );
+    }
+
+    #[test]
+    fn codex_routed_dispatch_start_proof_matches_trigger_prompt() {
+        let facts = CodexRoutedDispatchStartProofFacts {
+            trigger: "agent-doc /tmp/task.md",
+            previous_session_id: None,
+            previous_turn_id: None,
+            previous_updated_at: None,
+            current_session_id: "codex-session",
+            current_turn_id: "turn-1",
+            current_updated_at: 10,
+            current_prompt: " agent-doc /tmp/task.md ",
+        };
+        assert_eq!(
+            classify_codex_routed_dispatch_start_proof(facts),
+            Some(RoutedDispatchStartProof::HookPromptMatched)
+        );
+    }
+
+    #[test]
+    fn codex_routed_dispatch_start_proof_waits_for_state_advance() {
+        let facts = CodexRoutedDispatchStartProofFacts {
+            trigger: "agent-doc /tmp/task.md",
+            previous_session_id: Some("codex-session"),
+            previous_turn_id: Some("turn-1"),
+            previous_updated_at: Some(10),
+            current_session_id: "codex-session",
+            current_turn_id: "turn-1",
+            current_updated_at: 10,
+            current_prompt: "agent-doc /tmp/task.md",
+        };
+        assert_eq!(classify_codex_routed_dispatch_start_proof(facts), None);
+    }
+
+    #[test]
+    fn opencode_pane_state_change_proof_requires_trigger_to_leave_composer() {
+        let trigger = "agent-doc tasks/bugs.md";
+        let before = ">\n";
+        let drafted = format!("> {trigger}\n");
+        assert!(
+            !opencode_pane_state_changed_from_idle(OpenCodePaneDispatchStartProofFacts {
+                trigger,
+                pre_dispatch_content: before,
+                current_content: &drafted,
+                current_has_ready_prompt_candidate: false,
+                current_is_idle_chrome_only_output: false,
+                current_has_busy_cue: true,
+                current_has_non_idle_output_line: true,
+            }),
+            "drafted trigger text is pane input, not dispatch-start proof"
+        );
+
+        let active = "\
+Working (2s - esc to interrupt)
+zai/glm-5 - ~/work/btakita/agent-loop - context 0% used
+";
+        assert!(
+            opencode_pane_state_changed_from_idle(OpenCodePaneDispatchStartProofFacts {
+                trigger,
+                pre_dispatch_content: before,
+                current_content: active,
+                current_has_ready_prompt_candidate: false,
+                current_is_idle_chrome_only_output: false,
+                current_has_busy_cue: true,
+                current_has_non_idle_output_line: true,
+            }),
+            "OpenCode leaving idle chrome for active output should prove dispatch start"
+        );
+
+        let idle_status = "zai/glm-5 - ~/work/btakita/agent-loop - context 0% used\n";
+        assert!(
+            !opencode_pane_state_changed_from_idle(OpenCodePaneDispatchStartProofFacts {
+                trigger,
+                pre_dispatch_content: before,
+                current_content: idle_status,
+                current_has_ready_prompt_candidate: false,
+                current_is_idle_chrome_only_output: true,
+                current_has_busy_cue: false,
+                current_has_non_idle_output_line: false,
+            }),
+            "idle status chrome alone must not prove dispatch start"
+        );
     }
 
     #[test]

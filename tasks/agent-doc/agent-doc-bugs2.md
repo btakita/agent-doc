@@ -39,7 +39,34 @@ done
 Compacted content:
 - Archived 1 response topic(s): JB Run Agent Doc dispatch hang (#kjw0)
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): Claim for Tmux Pane should open a NEW pane in the same session
-<!-- agent:boundary:d7e19143 -->
+
+### Re: next-steps to fix bugs (and "clear the review items") — opus-4-8
+
+
+**Review is already empty.** `agent:review` has no gated items, so the "make backlog replacements for all gated review items / clear the review items" ask is already satisfied — there is nothing left to convert or clear this round.
+
+**I'm not bulk-closing the queue tail.** The plan machinery wanted to `--done r4gq/af88/qeditrace/falsetyping-guard` in one shot. Three of those are `[focused-cycle]` deep code items and one is `[operator-verify]`; marking them done without real work + proof would be a false closeout, so I left them open.
+
+**Why I'm holding off on install/commit/push this cycle:** the live controller (pid 986050) is running the installed binary from 19:56, which is behind the committed refactors, and `src/agent-doc` has 3 uncommitted WIP files (`agent-doc-orchestration/src/flow/closeout.rs`, `agent-doc-turn/src/closeout_recovery.rs`, `tests/test_cli.rs`). A concurrent session also owns `equityfundingsource.md` (pane %87). A `make install` / push now would build+ship that half-finished WIP and risk the concurrent-session force-push + `live_prompt_drift` failure mode. Commit/land the 3 WIP files (or tell me they're mine to finish) before any install.
+
+**The remaining backlog splits cleanly — here are the next steps:**
+
+Ready for *your* live testing (fixes already shipped; grep the named ops.log marker after each):
+- `#r4gq` — Run Agent Doc into a BUSY codex pane, expect fast queued-behind-active-turn; grep `route_dispatch_start_queued_behind_active_turn` present, `accepted_without_dispatch_start_proof` absent.
+- `#jbcompactcommit` — JB Compact Exchange on a large doc, HEAD lands compacted content; `compact_commit_head_mismatch` must be absent.
+- `#2y8j` — sustained typing burst in a large doc, smooth; `crdt_merge_base` no longer per-keystroke.
+- `#nsfz` — hung/auth-walled harness, fail-closed within 30s with startup_miss marker.
+- `#tmuxsynccrashlog`, `#kj5flive`, `#crdtauth6`, `#suprestassoc-live` — live editor/pane proofs per their plan files.
+
+Each needs a *dedicated agent focused-cycle* (I can take one at a time — say which):
+- `#qeditrace` — pre-run multi-add queue revert; investigate `preflight/maintenance.rs` + add SimWorld coverage. Plan: `plan-queue-edit-race-consolidated.md`.
+- `#af88` — remaining IPC wedge hardening (E: pty.rs stdin.lock across blocking read; B/D: editor IPC listener read_line backstop; F: connect_sync timeout).
+- `#boundaryaccum1` — self-healing single-boundary invariant in the binary-owned snapshot.
+- `#falsetyping-guard` — provenance-aware visible-write guard (deep/live-CRDT-critical; also needs operator proof).
+- `#qactsync`, `#claimnewpane`, `#cdtcutover`, `#coredecomp`, `#orchdecomp`, `#skillharnessplugin` — larger, each own cycle.
+
+Recommendation: run the operator-verify live proofs now (they only need your editor + a log grep), and pick **one** focused-cycle code item for me to actually implement + test in isolation. I did not edit the queue (supervisor is active — avoiding go-queue churn).
+<!-- agent:boundary:db6bae54 -->
 <!-- /agent:exchange -->
 ## Queue
 

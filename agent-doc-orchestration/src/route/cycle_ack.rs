@@ -8,14 +8,14 @@ use agent_doc_turn::cycle_ack::{
 
 pub(crate) fn wait_for_start_ack(
     file: &Path,
-    baseline: Option<&crate::cycle_state::CycleState>,
+    baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     timeout: Duration,
-) -> Option<crate::cycle_state::CycleState> {
+) -> Option<agent_doc_cycle_state_io::CycleState> {
     let start = std::time::Instant::now();
     let poll = Duration::from_millis(200);
 
     while start.elapsed() < timeout {
-        if let Ok(Some(state)) = crate::cycle_state::load(file)
+        if let Ok(Some(state)) = agent_doc_cycle_state_io::load(file)
             && cycle_state_advances_start_ack(
                 CycleAckState {
                     cycle_id: &state.cycle_id,
@@ -46,7 +46,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
     session_id: &str,
     file_path: &str,
     harness: &HarnessConfig,
-    baseline: Option<&crate::cycle_state::CycleState>,
+    baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     marker: &str,
     ack_timeout: Duration,
 ) -> Result<Option<String>> {
@@ -251,7 +251,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
 
 pub(crate) fn pending_prompt_bearing_context_for_route(
     file: &Path,
-    baseline: Option<&crate::cycle_state::CycleState>,
+    baseline: Option<&agent_doc_cycle_state_io::CycleState>,
 ) -> Result<Option<PromptBearingRouteContext>> {
     if baseline.is_some_and(|state| state.is_open()) {
         return Ok(None);
@@ -273,7 +273,7 @@ pub(crate) fn require_routed_cycle_ack(
     session_id: &str,
     file_path: &str,
     harness: &HarnessConfig,
-    baseline: Option<&crate::cycle_state::CycleState>,
+    baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     prompt_bearing_marker: Option<&str>,
     live_child_for_file: bool,
     dispatch_start: RoutedDispatchStartProof,
@@ -543,7 +543,7 @@ mod tests {
         let doc_for_thread = doc.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some("# Session\n"))
+            agent_doc_cycle_state_io::start_preflight(&doc_for_thread, None, Some("# Session\n"))
                 .unwrap();
         });
 
@@ -564,22 +564,22 @@ mod tests {
         let doc = dir.path().join("route-live-pane-busy.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some("# Session\n"),
             Some("# Session\n"),
         )
         .unwrap();
-        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let baseline = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
 
         let doc_for_thread = doc.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some("# Session\n"))
+            agent_doc_cycle_state_io::start_preflight(&doc_for_thread, None, Some("# Session\n"))
                 .unwrap();
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_success",
                 Some("# Session\n"),
@@ -600,15 +600,15 @@ mod tests {
         let doc = dir.path().join("route-live-same-cycle.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some("# Session\n"),
             Some("# Session\n"),
         )
         .unwrap();
-        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let baseline = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
 
         let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(250));
         assert!(
@@ -623,20 +623,20 @@ mod tests {
         let doc = dir.path().join("route-live-ack-ok.md");
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some("# Session\n"),
             Some("# Session\n"),
         )
         .unwrap();
-        let baseline = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let baseline = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
 
         let doc_for_thread = doc.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_already_current",
                 Some("# Session\n"),
@@ -662,21 +662,21 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("route-live-owner-missing.md");
         std::fs::write(&doc, "# Session\n").unwrap();
-        crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        let open_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        let open_state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert!(!should_require_routed_cycle_ack(RoutedCycleAckFacts {
             baseline_cycle_open: open_state.is_open(),
             prompt_bearing_marker_present: true,
         }));
 
-        crate::cycle_state::mark_committed(
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some("# Session\n"),
             Some("# Session\n"),
         )
         .unwrap();
-        let committed_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let committed_state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert!(should_require_routed_cycle_ack(RoutedCycleAckFacts {
             baseline_cycle_open: committed_state.is_open(),
             prompt_bearing_marker_present: true,

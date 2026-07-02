@@ -24,6 +24,7 @@ agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.67" }
 agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.34.67" }
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
 agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.34.67" }

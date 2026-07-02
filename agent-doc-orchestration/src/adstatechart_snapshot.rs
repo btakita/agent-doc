@@ -100,7 +100,7 @@ fn assemble(file: &Path, doc_git_root: &Path) -> (ChartFacts, ObservedPhases) {
         installed_build_id,
     };
 
-    let closeout = crate::cycle_state::load(file)
+    let closeout = agent_doc_cycle_state_io::load(file)
         .ok()
         .flatten()
         .map(|state| closeout_phase_from_cycle(state.phase))

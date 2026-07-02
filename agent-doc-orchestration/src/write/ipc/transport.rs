@@ -172,7 +172,7 @@ pub fn queue_file_ipc_reposition_boundary(
     // already-committed cycle; this carries the same generation token on the
     // durable file patch so the asynchronous apply side can make the identical
     // decision. (Plan: tasks/agent-doc/plan-late-ipc-patch-duplicate-stalls-queue.md.)
-    if let Ok(Some(cs)) = crate::cycle_state::load(file) {
+    if let Ok(Some(cs)) = agent_doc_cycle_state_io::load(file) {
         payload["cycle_id"] = serde_json::Value::String(cs.cycle_id);
     }
     if let Ok(live) = std::fs::read_to_string(file) {
@@ -274,7 +274,7 @@ pub fn try_ipc(
             );
             let snapshot_content = agent_doc_snapshot_io::load(file)?;
             let file_content_for_state = std::fs::read_to_string(file).ok();
-            let _ = crate::cycle_state::start_preflight(
+            let _ = agent_doc_cycle_state_io::start_preflight(
                 file,
                 snapshot_content.as_deref(),
                 file_content_for_state.as_deref(),
@@ -378,7 +378,7 @@ pub fn try_ipc(
                 ));
         }
         socket_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
-        if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
+        if let Ok(Some(ref cs)) = agent_doc_cycle_state_io::load(file) {
             socket_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
         }
         if let Some(yaml) = frontmatter_yaml {
@@ -919,7 +919,7 @@ pub fn try_ipc(
             ));
     }
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
-    if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
+    if let Ok(Some(ref cs)) = agent_doc_cycle_state_io::load(file) {
         ipc_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
     }
 
@@ -2512,7 +2512,7 @@ mod submodule_patch_routing_tests {
         );
         fs::write(&doc, baseline).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         fs::write(&doc, live_already_applied_with_user_edit).unwrap();
 
         let _listener = start_already_applied_listener(&root);
@@ -2549,7 +2549,7 @@ mod submodule_patch_routing_tests {
             "live editor content should remain the committed snapshot candidate"
         );
         assert!(
-            !crate::cycle_state::load(&doc)
+            !agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .unwrap()
                 .ipc_snapshot_adoption_blocked,
@@ -2628,7 +2628,7 @@ mod submodule_patch_routing_tests {
         );
         fs::write(&doc, baseline).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         let editor_id = "jetbrains-test-editor";
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
@@ -2757,7 +2757,7 @@ mod submodule_patch_routing_tests {
         );
         fs::write(&doc, baseline).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-stale-ack-content";
         fs::write(
@@ -2848,7 +2848,7 @@ mod submodule_patch_routing_tests {
         );
         fs::write(&doc, baseline).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-unsaved-live-editor";
         let editor_id = "jetbrains-test-editor";
@@ -2949,7 +2949,7 @@ mod submodule_patch_routing_tests {
         );
         fs::write(&doc, baseline).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         let editor_id = "jetbrains-test-editor";
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
@@ -3061,7 +3061,7 @@ mod submodule_patch_routing_tests {
         );
         fs::write(&doc, baseline).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         fs::write(&doc, duplicated_live_buffer).unwrap();
 
         let _listener = start_already_applied_listener(&root);
@@ -3385,7 +3385,7 @@ mod submodule_patch_routing_tests {
         );
         fs::write(&doc, baseline).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let _listener = start_fixed_ack_content_listener(&root, duplicated_ack_content.to_string());
         wait_for_listener(&root);
@@ -3421,7 +3421,7 @@ mod submodule_patch_routing_tests {
             "visible duplicated ack-content should remain editor-owned"
         );
         assert!(
-            crate::cycle_state::load(&doc)
+            agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .unwrap()
                 .ipc_snapshot_adoption_blocked,
@@ -4394,8 +4394,8 @@ mod late_fallback_patch_guard_tests {
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
         let doc = doc_in_agent_doc_project(&tmp, content);
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &doc,
             "test",
             Some(content),
@@ -4404,8 +4404,10 @@ mod late_fallback_patch_guard_tests {
             None,
         )
         .unwrap();
-        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
+            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(&doc, "test", Some(content), Some(content))
+            .unwrap();
 
         let result = cycle_already_committed(&doc);
         assert!(result.is_some(), "should return Some for committed cycle");
@@ -4417,7 +4419,7 @@ mod late_fallback_patch_guard_tests {
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
         let doc = doc_in_agent_doc_project(&tmp, content);
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert!(cycle_already_committed(&doc).is_none());
     }
@@ -4470,8 +4472,8 @@ mod late_fallback_patch_guard_tests {
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
         let doc = doc_in_agent_doc_project(&tmp, content);
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &doc,
             "test",
             Some(content),
@@ -4480,8 +4482,10 @@ mod late_fallback_patch_guard_tests {
             None,
         )
         .unwrap();
-        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
+            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(&doc, "test", Some(content), Some(content))
+            .unwrap();
 
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let stale_patch_path = tmp
@@ -4545,8 +4549,8 @@ mod late_fallback_patch_guard_tests {
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
         let doc = doc_in_agent_doc_project(&tmp, content);
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &doc,
             "test",
             Some(content),
@@ -4555,8 +4559,10 @@ mod late_fallback_patch_guard_tests {
             None,
         )
         .unwrap();
-        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
+            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(&doc, "test", Some(content), Some(content))
+            .unwrap();
 
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let stale_patch_path = tmp
@@ -5533,8 +5539,8 @@ Implemented.
         // The finalize path records the adoption block before repair; the
         // in-cycle auto-recovery is gated on that flag, so mirror it here (a
         // cycle must exist first, exactly as preflight seeds it in production).
-        crate::cycle_state::start_preflight(&doc, Some(repaired), Some(disk_lag)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(repaired), Some(disk_lag)).unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let decision = IpcRepairDecision {
             snapshot_content: repaired.to_string(),
@@ -5591,7 +5597,7 @@ Implemented.
         let doc = doc_in_agent_doc_project(&tmp, disk_lag);
         let agent_doc_dir = tmp.path().join(".agent-doc");
 
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let decision = IpcRepairDecision {
             snapshot_content: repaired.to_string(),

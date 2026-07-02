@@ -440,7 +440,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
         &session_id[..std::cmp::min(8, session_id.len())]
     );
 
-    let cycle_baseline = crate::cycle_state::load(file).unwrap_or(None);
+    let cycle_baseline = agent_doc_cycle_state_io::load(file).unwrap_or(None);
 
     if skip_wait {
         eprintln!(
@@ -1816,9 +1816,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-codex-fresh-retry-handoff";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -1918,8 +1923,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             )
             .unwrap();
             std::thread::sleep(Duration::from_millis(1200));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
+            agent_doc_cycle_state_io::start_preflight(
+                &doc_for_thread,
+                None,
+                Some(&current_for_thread),
+            )
+            .unwrap();
             replacement_pane
         });
 
@@ -2079,9 +2088,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-pane-busy-fresh-reroute";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -2188,8 +2202,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             )
             .unwrap();
             std::thread::sleep(Duration::from_millis(1200));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
+            agent_doc_cycle_state_io::start_preflight(
+                &doc_for_thread,
+                None,
+                Some(&current_for_thread),
+            )
+            .unwrap();
             replacement_pane
         });
 
@@ -2246,9 +2264,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-pane-fresh-reroute-relative-doc";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -2323,8 +2346,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             )
             .unwrap();
             std::thread::sleep(Duration::from_millis(1200));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
+            agent_doc_cycle_state_io::start_preflight(
+                &doc_for_thread,
+                None,
+                Some(&current_for_thread),
+            )
+            .unwrap();
             replacement_pane
         });
 
@@ -2402,9 +2429,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-busy-restart-handoff";
         sessions::register(session_id, &busy_pane, &file_path).unwrap();
@@ -2494,7 +2526,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             )
             .unwrap();
             std::thread::sleep(Duration::from_millis(1200));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&ack_current)).unwrap();
+            agent_doc_cycle_state_io::start_preflight(&doc_for_thread, None, Some(&ack_current))
+                .unwrap();
             replacement_pane
         });
 
@@ -2554,9 +2587,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &live_pane, &mock_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let mut registry = tmux_router::Registry::default();
         registry.insert(
@@ -2579,13 +2617,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current_for_thread = current.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
                 Some(&snapshot_for_thread),
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -2657,9 +2695,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-authoritative-actor-dispatch";
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
@@ -2707,13 +2750,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current_for_thread = current.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
                 Some(&snapshot_for_thread),
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -2791,13 +2834,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             crate::ops_log::log_op,
         )
         .unwrap();
-        crate::cycle_state::start_preflight(
+        agent_doc_cycle_state_io::start_preflight(
             &doc,
             Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
             Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
         )
         .unwrap();
-        crate::cycle_state::mark_committed(
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
@@ -2924,9 +2967,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-dispatch-only-clear-no-restart";
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
@@ -3072,9 +3120,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-dispatch-only-authoritative-unproven";
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
@@ -3178,8 +3231,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             let current = format!("{snapshot}❯ follow-up question\n");
             std::fs::write(&doc, &current).unwrap();
             agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-            crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-            crate::cycle_state::mark_committed(
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot))
+                .unwrap();
+            crate::pipeline_frontmatter::mark_committed(
                 &doc,
                 "commit_success",
                 Some(snapshot),
@@ -3295,9 +3349,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-authoritative-actor-busy";
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
@@ -3345,13 +3404,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current_for_thread = current.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
                 Some(&snapshot_for_thread),
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -3430,9 +3489,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-authoritative-actor-starting";
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
@@ -3487,13 +3551,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current_for_thread = current.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
                 Some(&snapshot_for_thread),
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -3562,9 +3626,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-authoritative-actor-starting-closed";
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
@@ -3676,9 +3745,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-dispatch-only-authoritative-starting-direct";
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
@@ -3791,9 +3865,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-dispatch-only-authoritative-starting-clear";
         sessions::register(session_id, &stale_pane, &file_path).unwrap();

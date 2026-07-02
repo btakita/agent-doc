@@ -14,7 +14,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
         return Ok(GuardResult::None);
     }
 
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -85,7 +85,7 @@ pub(crate) fn check_gated_phase_split_guard(
     file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -169,7 +169,7 @@ pub(crate) fn check_gated_phase_split_guard(
 /// so the binary only flags the unambiguous collapse rather than trying to
 /// classify free-text rows itself.
 pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardResult> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -291,7 +291,7 @@ pub(crate) fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<St
 
 pub(crate) fn open_cycle_message(
     file: &Path,
-    state: &crate::cycle_state::CycleState,
+    state: &agent_doc_cycle_state_io::CycleState,
 ) -> Result<String> {
     let ipc_hint = agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(file)?
         .map(|hint| format!(" {hint}"))
@@ -309,7 +309,7 @@ pub(crate) fn open_cycle_message(
 
 pub(crate) fn open_cycle_manual_patchback_message(
     file: &Path,
-    state: &crate::cycle_state::CycleState,
+    state: &agent_doc_cycle_state_io::CycleState,
 ) -> Result<Option<String>> {
     if !matches!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
         return Ok(None);

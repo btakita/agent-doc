@@ -990,7 +990,7 @@ pub fn run_with_reap_policy(
     // Crash policy state machine
     let mut policy = CrashPolicy::new();
     let route_owned_cycle_baseline = if route_owned {
-        crate::cycle_state::load(file).unwrap_or(None)
+        agent_doc_cycle_state_io::load(file).unwrap_or(None)
     } else {
         None
     };
@@ -1049,12 +1049,12 @@ pub fn run_with_reap_policy(
     // already-consumed checkpoint, or a non-recycle boot all resume nothing.
     {
         let is_recycle_boot = pending_adopt.is_some();
-        let cycle_open = crate::cycle_state::load(file)
+        let cycle_open = agent_doc_cycle_state_io::load(file)
             .ok()
             .flatten()
             .map(|state| state.is_open())
             .unwrap_or(false);
-        let already_consumed = crate::cycle_state::load(file)
+        let already_consumed = agent_doc_cycle_state_io::load(file)
             .ok()
             .flatten()
             .map(|state| state.recycle_resume_consumed)
@@ -1075,7 +1075,7 @@ pub fn run_with_reap_policy(
                 // adopt) and re-trigger the same turn on the first iteration. Mark the
                 // checkpoint consumed so a second boot reading the same still-open
                 // checkpoint cannot re-dispatch the turn again (idempotency).
-                let checkpoint = crate::cycle_state::load(file).ok().flatten();
+                let checkpoint = agent_doc_cycle_state_io::load(file).ok().flatten();
                 let target = checkpoint
                     .as_ref()
                     .and_then(|s| {
@@ -1091,7 +1091,7 @@ pub fn run_with_reap_policy(
                     .unwrap_or_default();
                 pending_adopt = None;
                 auto_trigger_next_launch = true;
-                if let Err(err) = crate::cycle_state::mark_recycle_resume_consumed(file) {
+                if let Err(err) = agent_doc_cycle_state_io::mark_recycle_resume_consumed(file) {
                     eprintln!(
                         "[agent-doc] warning: failed to mark #durablerecycle checkpoint consumed for {} ({err:#}) — continuing; the re-dispatch may repeat on a second boot",
                         file.display()

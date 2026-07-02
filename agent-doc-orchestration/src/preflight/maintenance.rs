@@ -37,7 +37,7 @@ use agent_doc_workflow::preflight_policy::ResolvedFreeTextExecution;
 pub(crate) fn resolve_pipeline_state(
     file: &Path,
 ) -> Result<Option<agent_doc_frontmatter::frontmatter::AgentDocPipeline>> {
-    if let Some(state) = crate::cycle_state::load(file)? {
+    if let Some(state) = agent_doc_cycle_state_io::load(file)? {
         return Ok(Some(state.to_pipeline()));
     }
     let current = std::fs::read_to_string(file).unwrap_or_default();
@@ -211,7 +211,7 @@ fn run_pending_maintenance_with_options(
             // snapshot, so a brand-new same-cycle add is already present in
             // `snapshot_ids` and the snapshot test cannot exclude it. Cross-check
             // the ids cycle-state recorded as added this cycle and never reap them.
-            let added_this_cycle = crate::cycle_state::pending_added_ids(file);
+            let added_this_cycle = agent_doc_cycle_state_io::pending_added_ids(file);
             let ops_proof_completions: Vec<
                 agent_doc_element_backlog::ops_proof::OpsProofCompletion,
             > = agent_doc_element_backlog::ops_proof::ops_proof_completion_candidates(
@@ -268,9 +268,9 @@ fn run_pending_maintenance_with_options(
                             ),
                         );
                     }
-                    let _ = crate::cycle_state::record_pending_done_ids(file, &removed_ids);
-                    let _ = crate::cycle_state::record_reaped_pending_ids(file, &removed_ids);
-                    let _ = crate::cycle_state::mark_pending_mutations(file);
+                    let _ = agent_doc_cycle_state_io::record_pending_done_ids(file, &removed_ids);
+                    let _ = agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
+                    let _ = agent_doc_cycle_state_io::mark_pending_mutations(file);
                     current_body = after_ops_proof_reap;
                     mutated = true;
                     removed_items.extend(ops_proof_items);
@@ -288,7 +288,7 @@ fn run_pending_maintenance_with_options(
                 reaped_items.len(),
                 removed_ids.join(", ")
             );
-            let _ = crate::cycle_state::record_reaped_pending_ids(file, &removed_ids);
+            let _ = agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
             current_body = after_reap;
             mutated = true;
         }
@@ -741,7 +741,7 @@ pub(crate) fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunCont
             file.display()
         )
     })?;
-    let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
+    let resolved_ids = agent_doc_cycle_state_io::resolved_pending_ids(file)?;
 
     let external_done_ids = external_done_archive_ids(file, &current_content)?;
     let report =
@@ -2924,7 +2924,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 /// same-cycle pending additions. It never applies a full priority/sync recompute,
 /// so it cannot move the head that the current response just consumed.
 pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<Vec<String>> {
-    let added_this_cycle = crate::cycle_state::pending_added_ids(file);
+    let added_this_cycle = agent_doc_cycle_state_io::pending_added_ids(file);
     if added_this_cycle.is_empty() {
         return Ok(Vec::new());
     }
@@ -4571,8 +4571,8 @@ mod tests {
         );
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
 
         let synced = sync_same_cycle_pending_adds_into_go_queue(&doc).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -4615,8 +4615,8 @@ mod tests {
         );
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
 
         let synced = sync_same_cycle_pending_adds_into_go_queue(&doc).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -6326,8 +6326,9 @@ mod tests {
         // snapshot-only guard cannot tell this is a brand-new add.
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         // cycle_state records #freshgate as added this cycle.
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::record_pending_added_ids(&doc, &["freshgate".to_string()]).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["freshgate".to_string()])
+            .unwrap();
 
         run_pending_maintenance_force_disk(&doc).unwrap();
 
@@ -6619,7 +6620,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, current).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(current)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(current)).unwrap();
 
         let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert!(!report.reordered);
@@ -7038,7 +7039,7 @@ mod tests {
             "---\nagent_doc_pipeline:\n  run_id: stale-mirror\n  step: committed\n---\n\nbody\n",
         )
         .unwrap();
-        let state = crate::cycle_state::start_preflight_with_task(
+        let state = agent_doc_cycle_state_io::start_preflight_with_task(
             &doc,
             Some("snap"),
             Some("body"),

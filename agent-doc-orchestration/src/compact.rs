@@ -1587,8 +1587,8 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         std::fs::create_dir_all(&patches_dir).unwrap();
         agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&file, Some(doc), Some(doc)).unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(&file, Some(doc), Some(doc)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &file,
             "test",
             Some(doc),
@@ -1597,8 +1597,8 @@ mod tests {
             None,
         )
         .unwrap();
-        crate::cycle_state::mark_write_applied(&file, "test", Some(doc), Some(doc)).unwrap();
-        crate::cycle_state::mark_committed(&file, "test", Some(doc), Some(doc)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(&file, "test", Some(doc), Some(doc)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(&file, "test", Some(doc), Some(doc)).unwrap();
 
         run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap();

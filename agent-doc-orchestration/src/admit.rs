@@ -43,7 +43,8 @@ pub fn admit(file: &Path) -> Result<AdmitOutput> {
     let snapshot = agent_doc_snapshot_io::load(file)
         .with_context(|| format!("failed to load snapshot for {}", file.display()))?;
 
-    let state = crate::cycle_state::start_preflight(file, snapshot.as_deref(), Some(&current))?;
+    let state =
+        agent_doc_cycle_state_io::start_preflight(file, snapshot.as_deref(), Some(&current))?;
     let phase = state.phase.as_str().to_string();
     crate::ops_log::log_op(
         file,
@@ -97,7 +98,7 @@ mod tests {
         assert_eq!(output.cycle_phase, "preflight_started");
         assert_eq!(fs::read_to_string(&file).unwrap(), original);
 
-        let state = crate::cycle_state::load(&file).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&file).unwrap().unwrap();
         assert_eq!(state.cycle_id, output.cycle_id);
         assert_eq!(state.phase, CyclePhase::PreflightStarted);
         assert_eq!(state.last_event, "preflight_started");

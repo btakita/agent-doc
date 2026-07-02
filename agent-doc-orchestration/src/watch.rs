@@ -812,7 +812,7 @@ pub fn status() -> Result<()> {
 /// crashed/stuck cycle still lets the watch proceed to preflight, which repairs
 /// stale cycles.
 pub(crate) fn cycle_freshly_in_flight(path: &std::path::Path, now_secs: u64) -> bool {
-    match crate::cycle_state::load(path) {
+    match agent_doc_cycle_state_io::load(path) {
         Ok(Some(cs)) => cycle_phase_freshly_in_flight(cs.phase, cs.updated_at, now_secs),
         _ => false,
     }
@@ -842,7 +842,8 @@ mod tests {
         assert!(!cycle_freshly_in_flight(&doc, now));
 
         // Open, fresh cycle -> watch skips (agent composing response).
-        let cs = crate::cycle_state::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let cs =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         assert!(cs.is_open());
         assert!(cycle_freshly_in_flight(&doc, now));
         assert!(cycle_freshly_in_flight(&doc, now + 60));

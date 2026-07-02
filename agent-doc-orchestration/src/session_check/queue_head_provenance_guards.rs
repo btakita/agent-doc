@@ -10,7 +10,7 @@ pub(crate) fn check_expect_done_or_gate_guard(
         return Ok(GuardResult::None);
     }
 
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     if state.expect_done_or_gate_ids.is_empty() {
@@ -84,7 +84,7 @@ pub(crate) fn check_queue_head_removal_guard(
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     if state.active_queue_heads.is_empty() {
@@ -111,7 +111,7 @@ pub(crate) fn check_queue_head_removal_guard(
     // chose to keep open via an explicit edit. A done/gate/reap also removes the
     // id from `open_backlog`, so this set is a defensive superset.
     let mut resolved: std::collections::HashSet<String> =
-        crate::cycle_state::resolved_pending_ids(file)?;
+        agent_doc_cycle_state_io::resolved_pending_ids(file)?;
     resolved.extend(
         state
             .pending_gated_ids
@@ -186,7 +186,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     if state.active_free_text_queue_heads.is_empty() {
@@ -302,11 +302,16 @@ mod tests {
     }
 
     fn mark_cycle_committed(doc: &Path, preflight: &str, committed: &str) {
-        crate::cycle_state::start_preflight(doc, Some(preflight), Some(preflight)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(doc, Some(preflight), Some(preflight)).unwrap();
         fs::write(doc, committed).unwrap();
         agent_doc_snapshot_io::save(doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::mark_committed(doc, "commit_success", Some(committed), Some(committed))
-            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
     }
 
     fn run_context(doc: &Path, content: &str) -> crate::graph::RunContext {
@@ -348,7 +353,7 @@ mod tests {
         );
         let doc = make_doc(tmp.path(), preflight);
         mark_cycle_committed(&doc, preflight, committed);
-        crate::cycle_state::record_pending_done_ids(&doc, &["done".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["done".to_string()]).unwrap();
 
         let rc = run_context(&doc, committed);
         assert!(

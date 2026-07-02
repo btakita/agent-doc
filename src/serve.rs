@@ -877,7 +877,7 @@ fn doc_event_payload(doc: &Path, fingerprint: &DocFingerprint) -> serde_json::Va
 fn active_partial_response(
     doc: &Path,
 ) -> Result<Option<agent_doc_orchestration::capture::PartialCaptureRecord>> {
-    let Some(state) = agent_doc_orchestration::cycle_state::load(doc)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(doc)? else {
         return Ok(None);
     };
     if !state.is_open() {
@@ -1142,7 +1142,7 @@ fn handle_save(
 }
 
 fn active_cycle_in_scope(doc: &Path) -> Result<bool> {
-    Ok(agent_doc_orchestration::cycle_state::load(doc)?.is_some_and(|state| state.is_open()))
+    Ok(agent_doc_cycle_state_io::load(doc)?.is_some_and(|state| state.is_open()))
 }
 
 fn write_and_close_active_cycle(doc: &Path, body: &str) -> Result<()> {
@@ -1387,8 +1387,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op)
             .unwrap();
-        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(content), Some(content))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let mut writer = agent_doc_orchestration::capture::PartialCheckpointWriter::with_interval(
             &doc,
             Duration::ZERO,
@@ -1416,14 +1415,10 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
 
         assert!(!active_cycle_in_scope(&doc).unwrap());
-        agent_doc_orchestration::cycle_state::start_preflight(
-            &doc,
-            Some("# Session\n"),
-            Some("# Session\n"),
-        )
-        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("# Session\n"), Some("# Session\n"))
+            .unwrap();
         assert!(active_cycle_in_scope(&doc).unwrap());
-        agent_doc_orchestration::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::mark_committed(
             &doc,
             "test",
             Some("# Session\n"),

@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 pub fn unresolved_backlog_capture_targets(
     file: &Path,
-    state: &crate::cycle_state::CycleState,
+    state: &agent_doc_cycle_state_io::CycleState,
 ) -> Vec<String> {
     let current = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
 
@@ -56,7 +56,7 @@ pub fn unresolved_backlog_capture_targets(
 
 pub(crate) fn promised_backlog_item_ids_from_response(
     response_text: &str,
-    state: &crate::cycle_state::CycleState,
+    state: &agent_doc_cycle_state_io::CycleState,
 ) -> Vec<String> {
     pending_capture::promised_backlog_item_ids_from_response(
         response_text,
@@ -68,7 +68,7 @@ pub(crate) fn promised_backlog_item_ids_from_response(
 }
 
 pub fn promised_backlog_item_inventory_shortfall(
-    state: &crate::cycle_state::CycleState,
+    state: &agent_doc_cycle_state_io::CycleState,
     response_text: &str,
 ) -> Option<(usize, usize)> {
     pending_capture::promised_backlog_item_inventory_shortfall(
@@ -113,7 +113,7 @@ pub(crate) fn promised_plan_reference_paths(file: &Path, response_text: &str) ->
 
 pub fn promised_plan_reference_shortfall(
     file: &Path,
-    state: &crate::cycle_state::CycleState,
+    state: &agent_doc_cycle_state_io::CycleState,
     response_text: &str,
 ) -> Option<(usize, usize)> {
     let promised_count = promised_plan_reference_paths(file, response_text).len();
@@ -126,7 +126,7 @@ pub fn promised_plan_reference_shortfall(
 
 pub fn unresolved_promised_backlog_item_ids(
     file: &Path,
-    state: &crate::cycle_state::CycleState,
+    state: &agent_doc_cycle_state_io::CycleState,
     response_text: &str,
 ) -> Vec<String> {
     if state.required_backlog_targets.is_empty() {
@@ -174,7 +174,7 @@ pub fn unresolved_promised_backlog_item_ids(
 }
 
 pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(());
     };
     if state.had_pending_mutations && state.required_backlog_targets.is_empty() {
@@ -356,7 +356,7 @@ pub(crate) fn prewrite_pending_capture_check(
         return Ok(());
     }
 
-    let state = crate::cycle_state::load(file)?;
+    let state = agent_doc_cycle_state_io::load(file)?;
     let has_explicit_targets = state
         .as_ref()
         .is_some_and(|state| !state.required_backlog_targets.is_empty());
@@ -589,7 +589,7 @@ pub(crate) fn precommit_pending_done_check_with_options(
         return Ok(());
     }
 
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(());
     };
 
@@ -637,8 +637,8 @@ pub(crate) fn precommit_pending_done_check_with_options(
             }
             Ok(())
         })?;
-        crate::cycle_state::record_pending_done_ids(file, &missing)?;
-        crate::cycle_state::mark_pending_mutations(file)?;
+        agent_doc_cycle_state_io::record_pending_done_ids(file, &missing)?;
+        agent_doc_cycle_state_io::mark_pending_mutations(file)?;
         eprintln!(
             "[finalize] auto_done: recorded {}",
             missing
@@ -692,7 +692,7 @@ pub(crate) fn prewrite_pending_done_check(
         return Ok(());
     }
 
-    let state = crate::cycle_state::load(file)?;
+    let state = agent_doc_cycle_state_io::load(file)?;
     let mut recorded_done_ids = state
         .as_ref()
         .map(|state| state.pending_done_ids.clone())
@@ -788,7 +788,7 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
         return Ok(());
     }
 
-    let state = crate::cycle_state::load(file)?;
+    let state = agent_doc_cycle_state_io::load(file)?;
     let mut recorded_done_ids = state
         .as_ref()
         .map(|state| state.pending_done_ids.clone())
@@ -824,8 +824,8 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
         }
         Ok(())
     })?;
-    crate::cycle_state::record_pending_done_ids(file, &missing)?;
-    crate::cycle_state::mark_pending_mutations(file)?;
+    agent_doc_cycle_state_io::record_pending_done_ids(file, &missing)?;
+    agent_doc_cycle_state_io::mark_pending_mutations(file)?;
     *current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {} after auto_done", file.display()))?;
     eprintln!(
@@ -875,7 +875,7 @@ pub(crate) fn run_closeout_pending_maintenance(
 }
 
 fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
-    if let Some(state) = crate::cycle_state::load(file)?
+    if let Some(state) = agent_doc_cycle_state_io::load(file)?
         && (state.had_pending_mutations
             || state.pending_added_this_cycle
             || !state.pending_done_ids.is_empty()
@@ -921,12 +921,12 @@ mod precommit_pending_capture_tests {
         let content = format!("{frontmatter}## Exchange\n\nHello\n");
         fs::write(&doc, &content).unwrap();
         agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if had_pending_mutations {
-            crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+            agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         }
-        crate::cycle_state::mark_write_applied(
+        agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
             Some(&content),
@@ -977,10 +977,10 @@ mod precommit_pending_capture_tests {
         }
         fs::write(&doc, &content).unwrap();
         agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if !pending_done_ids.is_empty() {
-            crate::cycle_state::record_pending_done_ids(
+            agent_doc_cycle_state_io::record_pending_done_ids(
                 &doc,
                 &pending_done_ids
                     .iter()
@@ -989,7 +989,7 @@ mod precommit_pending_capture_tests {
             )
             .unwrap();
         }
-        crate::cycle_state::mark_write_applied(
+        agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
             Some(&content),
@@ -1082,7 +1082,7 @@ mod precommit_pending_capture_tests {
             "### Re: #done1 — gpt-5\n\nImplemented and verified.\n",
             false,
         );
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
 
         super::prewrite_pending_capture_check(
             &doc,
@@ -1106,9 +1106,9 @@ mod precommit_pending_capture_tests {
             "### Re: #done1 — gpt-5\n\nImplemented and verified.\n",
             false,
         );
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
-        crate::cycle_state::record_pending_done_ids(&doc, &["done1".to_string()]).unwrap();
-        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["done1".to_string()]).unwrap();
+        agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
 
         super::precommit_pending_capture_check(&doc)
             .expect("recorded pending-done mutation should satisfy capture guard");
@@ -1179,7 +1179,7 @@ mod precommit_pending_capture_tests {
             "### Re: code review — opus-4-6\n\n1. High: Queue closeout can drift.\n2. Medium: Snapshot repair is too permissive.\n",
             false,
         );
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
 
         let err = super::precommit_pending_capture_check(&doc).unwrap_err();
         assert!(err.to_string().contains("requested backlog capture"));
@@ -1195,7 +1195,7 @@ mod precommit_pending_capture_tests {
             "### Re: code review — opus-4-6\n\nNo new backlog item came out of this change.\n",
             false,
         );
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
 
         super::precommit_pending_capture_check(&doc)
             .expect("explicit no-follow-up proof should satisfy backlog-required closeout");
@@ -1213,10 +1213,10 @@ mod precommit_pending_capture_tests {
         let target = tmp.path().join("bugs.md");
         write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
 
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
-        crate::cycle_state::record_backlog_target_requirements(
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_target_requirements(
             &doc,
-            &[crate::cycle_state::BacklogTargetRequirement {
+            &[agent_doc_cycle_state_io::BacklogTargetRequirement {
                 path: std::fs::canonicalize(&target)
                     .unwrap()
                     .display()
@@ -1245,10 +1245,10 @@ mod precommit_pending_capture_tests {
         let target = tmp.path().join("bugs.md");
         write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
 
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
-        crate::cycle_state::record_backlog_target_requirements(
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_target_requirements(
             &doc,
-            &[crate::cycle_state::BacklogTargetRequirement {
+            &[agent_doc_cycle_state_io::BacklogTargetRequirement {
                 path: std::fs::canonicalize(&target)
                     .unwrap()
                     .display()
@@ -1277,10 +1277,10 @@ mod precommit_pending_capture_tests {
         let target = tmp.path().join("bugs.md");
         write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
 
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
-        crate::cycle_state::record_backlog_target_requirements(
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_target_requirements(
             &doc,
-            &[crate::cycle_state::BacklogTargetRequirement {
+            &[agent_doc_cycle_state_io::BacklogTargetRequirement {
                 path: std::fs::canonicalize(&target)
                     .unwrap()
                     .display()
@@ -1317,7 +1317,7 @@ mod precommit_pending_capture_tests {
         );
         let target = tmp.path().join("bugs.md");
         write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
-        let requirement = crate::cycle_state::BacklogTargetRequirement {
+        let requirement = agent_doc_cycle_state_io::BacklogTargetRequirement {
             path: std::fs::canonicalize(&target)
                 .unwrap()
                 .display()
@@ -1331,8 +1331,8 @@ mod precommit_pending_capture_tests {
             "- [ ] [#new1] New transferred item\n- [ ] [#old1] Existing item\n",
         );
 
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
-        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
 
         super::precommit_pending_capture_check(&doc)
             .expect("changed explicit backlog target should satisfy closeout");
@@ -1352,7 +1352,7 @@ mod precommit_pending_capture_tests {
             &target,
             "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Routed-cycle ack follow-up\n- [ ] [#old1] Existing item\n",
         );
-        let requirement = crate::cycle_state::BacklogTargetRequirement {
+        let requirement = agent_doc_cycle_state_io::BacklogTargetRequirement {
             path: std::fs::canonicalize(&target)
                 .unwrap()
                 .display()
@@ -1362,9 +1362,9 @@ mod precommit_pending_capture_tests {
             baseline_item_ids: vec!["old1".to_string()],
         };
 
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
-        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
-        crate::cycle_state::record_required_explicit_backlog_item_count(&doc, 4).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+        agent_doc_cycle_state_io::record_required_explicit_backlog_item_count(&doc, 4).unwrap();
 
         let err = super::precommit_pending_capture_check(&doc).unwrap_err();
         assert!(
@@ -1388,7 +1388,7 @@ mod precommit_pending_capture_tests {
         );
         let target = tmp.path().join("bugs.md");
         write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
-        let requirement = crate::cycle_state::BacklogTargetRequirement {
+        let requirement = agent_doc_cycle_state_io::BacklogTargetRequirement {
             path: std::fs::canonicalize(&target)
                 .unwrap()
                 .display()
@@ -1402,8 +1402,8 @@ mod precommit_pending_capture_tests {
             "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#old1] Existing item\n",
         );
 
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
-        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
 
         let err = super::precommit_pending_capture_check(&doc).unwrap_err();
         assert!(err.to_string().contains("promised new tracked item(s)"));
@@ -1426,7 +1426,7 @@ mod precommit_pending_capture_tests {
         std::fs::create_dir_all(plan.parent().unwrap()).unwrap();
         std::fs::write(&plan, "# Plan\n").unwrap();
 
-        crate::cycle_state::record_required_plan_reference_count(&doc, 2).unwrap();
+        agent_doc_cycle_state_io::record_required_plan_reference_count(&doc, 2).unwrap();
 
         let err = super::precommit_pending_capture_check(&doc).unwrap_err();
         assert!(
@@ -1458,7 +1458,7 @@ mod precommit_pending_capture_tests {
         std::fs::write(&first_plan, "# Plan\n").unwrap();
         std::fs::write(&second_plan, "# Plan\n").unwrap();
 
-        crate::cycle_state::record_required_plan_reference_count(&doc, 2).unwrap();
+        agent_doc_cycle_state_io::record_required_plan_reference_count(&doc, 2).unwrap();
 
         super::precommit_pending_capture_check(&doc)
             .expect("matching plan references should satisfy closeout");
@@ -1514,7 +1514,7 @@ mod precommit_pending_capture_tests {
         .expect("auto_done should record and apply missing --done mutations");
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("- [x] [#4qja] Stream orchestrate patchback"));
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert!(state.pending_done_ids.contains(&"4qja".to_string()));
         assert!(state.had_pending_mutations);
     }
@@ -1529,7 +1529,7 @@ mod precommit_pending_capture_tests {
             "- [ ] [#fvtg] Rollout validation item\n",
             &[],
         );
-        crate::cycle_state::record_pending_kept_open_ids(&doc, &["fvtg".to_string()])
+        agent_doc_cycle_state_io::record_pending_kept_open_ids(&doc, &["fvtg".to_string()])
             .unwrap()
             .unwrap();
 
@@ -1638,7 +1638,7 @@ mod precommit_pending_capture_tests {
             "do #followup. spec-test-build-install-commit-push\n<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, &drifted).unwrap();
-        crate::cycle_state::mark_committed(
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_already_current",
             Some(initial),

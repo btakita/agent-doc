@@ -434,7 +434,7 @@ pub struct PreflightOutput {
     /// companion `semantic_merge_ack_pending` warning carries the same summary so
     /// the existing "surface warnings" skill path drives the acknowledgement.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub semantic_merge_acks: Vec<crate::cycle_state::PendingSemanticMergeAck>,
+    pub semantic_merge_acks: Vec<agent_doc_cycle_state_io::PendingSemanticMergeAck>,
 }
 
 pub(crate) fn is_zero_usize(n: &usize) -> bool {
@@ -534,7 +534,7 @@ fn explicit_backlog_target_requirements(
     source_file: &Path,
     source_frontmatter: &frontmatter::Frontmatter,
     targets: &[PathBuf],
-) -> Result<Vec<crate::cycle_state::BacklogTargetRequirement>> {
+) -> Result<Vec<agent_doc_cycle_state_io::BacklogTargetRequirement>> {
     let mut requirements = Vec::new();
     for target in targets {
         let target_existing = if target.exists() {
@@ -563,7 +563,7 @@ fn explicit_backlog_target_requirements(
             }
             None => agent_doc_document::tracked_work_projection::TrackedWorkFingerprint::empty(),
         };
-        requirements.push(crate::cycle_state::BacklogTargetRequirement {
+        requirements.push(agent_doc_cycle_state_io::BacklogTargetRequirement {
             path: std::fs::canonicalize(target)
                 .unwrap_or_else(|_| target.to_path_buf())
                 .display()
@@ -1023,7 +1023,7 @@ fn detect_duplicate_claims(registry: &tmux_router::Registry) -> Vec<String> {
 ///
 /// Outputs JSON to stdout. Progress/diagnostic messages go to stderr.
 fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
-    let state = crate::cycle_state::load(file)?;
+    let state = agent_doc_cycle_state_io::load(file)?;
     let missing_commit_event = if state.as_ref().map(|state| state.is_open()).unwrap_or(false) {
         None
     } else {
@@ -1179,7 +1179,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         }
     };
 
-    if let Some(after) = crate::cycle_state::load(file)?
+    if let Some(after) = agent_doc_cycle_state_io::load(file)?
         && after.is_open()
     {
         let marker_note = if matches!(after.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
@@ -1601,7 +1601,7 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
     file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<bool> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(false);
     };
     if state.is_open() {
@@ -2515,7 +2515,7 @@ mod th {
         let path = root
             .join(".agent-doc/state/cycles")
             .join(format!("{hash}.json"));
-        let mut state: crate::cycle_state::CycleState =
+        let mut state: agent_doc_cycle_state_io::CycleState =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         state.started_at = state.started_at.saturating_sub(age_secs);
         state.updated_at = state.updated_at.saturating_sub(age_secs);
@@ -2892,8 +2892,13 @@ mod tests {
         );
         std::fs::write(&doc, drained).unwrap();
         agent_doc_snapshot_io::save(&doc, drained, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active))
-            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(active),
+            Some(active),
+        )
+        .unwrap();
 
         assert!(matches!(
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
@@ -2972,8 +2977,13 @@ mod tests {
         );
         std::fs::write(&doc, drained_plus_edit).unwrap();
         agent_doc_snapshot_io::save(&doc, drained_plus_edit, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active))
-            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(active),
+            Some(active),
+        )
+        .unwrap();
 
         let rc = crate::graph::RunContext::new(doc.clone());
         assert!(
@@ -3025,7 +3035,7 @@ mod tests {
             "commit boundary should resume and create a commit"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 
         let show = Command::new("git")
@@ -3270,9 +3280,13 @@ mod tests {
 
         let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
         std::fs::write(&doc, &with_user_edit).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(visible_snapshot), Some(&with_user_edit))
-            .unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(visible_snapshot),
+            Some(&with_user_edit),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &doc,
             "response_captured",
             Some(visible_snapshot),
@@ -3292,7 +3306,7 @@ mod tests {
             "HEAD-current closeout should not create a duplicate git commit"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
 
@@ -4134,7 +4148,7 @@ mod tests {
         );
 
         let output = PreflightOutput {
-            semantic_merge_acks: vec![crate::cycle_state::PendingSemanticMergeAck {
+            semantic_merge_acks: vec![agent_doc_cycle_state_io::PendingSemanticMergeAck {
                 component: "exchange".to_string(),
                 id: "p3kj".to_string(),
                 reason: "operator_deleted_agent_edited_node".to_string(),

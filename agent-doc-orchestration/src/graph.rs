@@ -31,7 +31,7 @@ use agent_doc_frontmatter::project_config::ProjectConfig;
 use agent_doc_frontmatter_io::session::ResolvedSshContext;
 use lazily::{CellHandle, Context, SlotHandle};
 
-use crate::cycle_state::CycleState;
+use agent_doc_cycle_state_io::CycleState;
 use agent_doc_project_config_io as project_config_io;
 
 pub type FilePathCell = CellHandle<PathBuf>;
@@ -211,7 +211,7 @@ impl RunContext {
             let fp = file_path_cell;
             move |ctx: &Context| -> Option<Arc<CycleState>> {
                 let path: PathBuf = ctx.get_cell(&fp);
-                match crate::cycle_state::load(&path) {
+                match agent_doc_cycle_state_io::load(&path) {
                     Ok(state) => state.map(Arc::new),
                     Err(e) => {
                         eprintln!(
@@ -1165,7 +1165,7 @@ mod tests {
         assert!(rc.is_cycle_state_cached());
 
         // Create a cycle-state sidecar, then prove invalidation reloads it.
-        crate::cycle_state::start_preflight(&doc, Some("hello"), Some("hello")).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("hello"), Some("hello")).unwrap();
         assert!(
             rc.cycle_state().is_none(),
             "still cached as None until invalidated"

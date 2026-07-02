@@ -39,7 +39,7 @@ pub(crate) fn check_backlog_replay_guard(
         },
     };
 
-    let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
+    let resolved_ids = agent_doc_cycle_state_io::resolved_pending_ids(file)?;
 
     let external_done_ids = crate::preflight::external_done_archive_ids(file, &current_content)?;
     Ok(dropped_from_history_guard(

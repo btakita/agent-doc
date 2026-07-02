@@ -200,7 +200,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // repair can normalize a dirty response body into prompt-looking lines.
     // Open cycles still go through repair first so interrupted write/commit
     // boundaries can recover normally.
-    let open_cycle = crate::cycle_state::load(file)?
+    let open_cycle = agent_doc_cycle_state_io::load(file)?
         .map(|state| state.is_open())
         .unwrap_or(false);
     if !options.probe
@@ -887,7 +887,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             let file_content = std::fs::read_to_string(file).unwrap_or_default();
             let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
             let file_len = file_content.len();
-            crate::cycle_state::start_preflight(file, snap.as_deref(), Some(&file_content))?;
+            agent_doc_cycle_state_io::start_preflight(file, snap.as_deref(), Some(&file_content))?;
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -942,7 +942,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         agent_doc_queue::queue_directive::do_directive_target_ids(&prompt_targets);
     let checkpoint_queue_task_id = directive_target_ids.first().map(String::as_str);
     if !options.probe {
-        crate::cycle_state::record_turn_checkpoint(
+        agent_doc_cycle_state_io::record_turn_checkpoint(
             file,
             baseline_file.as_deref(),
             &prompt_targets,
@@ -1017,7 +1017,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         }
         _ => None,
     };
-    let active_scope_cycle_is_open = crate::cycle_state::load(file)
+    let active_scope_cycle_is_open = agent_doc_cycle_state_io::load(file)
         .ok()
         .flatten()
         .is_some_and(|state| state.is_open());
@@ -1272,17 +1272,20 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         }
     };
     if !options.probe && !no_changes {
-        crate::cycle_state::record_backlog_capture_requirement(file, backlog_capture_required)?;
-        crate::cycle_state::record_backlog_target_requirements(
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(
+            file,
+            backlog_capture_required,
+        )?;
+        agent_doc_cycle_state_io::record_backlog_target_requirements(
             file,
             &explicit_backlog_requirements,
         )?;
-        crate::cycle_state::record_expect_done_or_gate_ids(file, &expect_done_or_gate_ids)?;
-        crate::cycle_state::record_required_explicit_backlog_item_count(
+        agent_doc_cycle_state_io::record_expect_done_or_gate_ids(file, &expect_done_or_gate_ids)?;
+        agent_doc_cycle_state_io::record_required_explicit_backlog_item_count(
             file,
             required_explicit_backlog_item_count,
         )?;
-        crate::cycle_state::record_required_plan_reference_count(
+        agent_doc_cycle_state_io::record_required_plan_reference_count(
             file,
             required_plan_reference_count,
         )?;
@@ -1421,7 +1424,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // `start_preflight` from the prior cycle's convergence semantic merge. Also
     // emit a companion warning so the existing "surface warnings" skill path
     // drives the acknowledgement without a SKILL.md change.
-    let semantic_merge_acks = crate::cycle_state::load(file)
+    let semantic_merge_acks = agent_doc_cycle_state_io::load(file)
         .ok()
         .flatten()
         .map(|state| state.pending_semantic_merge_acks)
@@ -1636,7 +1639,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_eq!(state.queue_task_id.as_deref(), Some("#durablerecycle"));
         assert_eq!(state.turn_id.as_deref(), Some("#durablerecycle"));
@@ -1849,7 +1852,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert!(
             state.requires_backlog_capture,
@@ -1885,7 +1888,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::PreflightStarted,
@@ -1928,7 +1931,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.queue_task_id.as_deref(), Some("#active"));
         assert!(
             state
@@ -1985,7 +1988,7 @@ mod tests {
             updated.contains("- 🚧 :round_pushpin: do [#blocker]\n- do [#active] after=#blocker"),
             "auto-DAG must reselect the blocker as the active head:\n{updated}"
         );
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.queue_task_id.as_deref(), Some("#blocker"));
     }
 
@@ -2030,7 +2033,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_ne!(
             state.queue_task_id.as_deref(),
             Some("#active"),
@@ -2081,7 +2084,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_ne!(
             state.queue_task_id.as_deref(),
             Some("#active"),
@@ -2122,7 +2125,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        if let Some(state) = crate::cycle_state::load(&doc).unwrap() {
+        if let Some(state) = agent_doc_cycle_state_io::load(&doc).unwrap() {
             assert!(
                 !state.is_open(),
                 "slash-only active queue heads must be supervisor handoffs, not response cycles: {:?}",
@@ -2185,7 +2188,7 @@ mod tests {
             baseline_path.display()
         );
         assert!(
-            crate::cycle_state::load(&doc).unwrap().is_none(),
+            agent_doc_cycle_state_io::load(&doc).unwrap().is_none(),
             "probe must not create or advance cycle state"
         );
     }
@@ -2605,7 +2608,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
     }
     #[test]
@@ -2615,7 +2618,7 @@ mod tests {
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nAnswer\n";
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::mark_write_applied(
+        agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
             Some(content),
@@ -2625,7 +2628,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_success");
     }
@@ -2662,16 +2665,21 @@ mod tests {
         let patched = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
         std::fs::write(&doc, patched).unwrap();
         agent_doc_snapshot_io::save(&doc, patched, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::mark_write_applied(
+        agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
             Some(patched),
             Some(patched),
         )
         .unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(patched), Some(patched))
-            .unwrap();
-        let pre_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(patched),
+            Some(patched),
+        )
+        .unwrap();
+        let pre_state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(pre_state.phase, agent_doc_turn::CyclePhase::Committed);
         assert!(matches!(
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
@@ -2726,7 +2734,7 @@ mod tests {
         let patched = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
         std::fs::write(&doc, patched).unwrap();
         agent_doc_snapshot_io::save(&doc, patched, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::mark_write_applied(
+        agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
             Some(patched),
@@ -2734,7 +2742,7 @@ mod tests {
         )
         .unwrap();
 
-        let pre_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let pre_state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(pre_state.phase, agent_doc_turn::CyclePhase::WriteApplied);
         assert!(matches!(
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
@@ -2751,7 +2759,7 @@ mod tests {
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
             agent_doc_snapshot_io::SnapshotCommitStatus::Committed
         ));
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         let show = Command::new("git")
             .current_dir(root)
@@ -2819,7 +2827,7 @@ mod tests {
         );
         std::fs::write(&doc, &materialized).unwrap();
         agent_doc_snapshot_io::save(&doc, &materialized, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::mark_committed(
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(&materialized),
@@ -2907,8 +2915,8 @@ mod tests {
             .args(["commit", "-m", "committed response", "--no-verify"])
             .output()
             .unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -2975,8 +2983,8 @@ mod tests {
             .args(["commit", "-m", "committed responses", "--no-verify"])
             .output()
             .unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -3058,8 +3066,8 @@ mod tests {
             .args(["commit", "-m", "committed response", "--no-verify"])
             .output()
             .unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -3249,12 +3257,12 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         crate::git::commit(&doc).unwrap();
         let prior =
-            crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello again\n").unwrap();
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_ne!(
             state.cycle_id, prior.cycle_id,
@@ -3291,8 +3299,8 @@ mod tests {
             .args(["commit", "-m", "add doc", "--no-verify"])
             .output()
             .unwrap();
-        let prior =
-            crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        let prior = agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot))
+            .unwrap();
 
         let live = snapshot.replace(
             "<!-- agent:boundary:abc123 -->\n",
@@ -3306,7 +3314,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_ne!(
             state.cycle_id, prior.cycle_id,
@@ -3352,8 +3360,8 @@ mod tests {
             .args(["commit", "-m", "add doc", "--no-verify"])
             .output()
             .unwrap();
-        let prior =
-            crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        let prior = agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot))
+            .unwrap();
 
         let prompt = "Left/Right buttons still do not work with agent-doc opencode. #next-steps";
         let live = snapshot.replace(
@@ -3368,7 +3376,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_ne!(
             state.cycle_id, prior.cycle_id,
@@ -3451,7 +3459,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::PreflightStarted,
@@ -3528,9 +3536,14 @@ mod tests {
 
         agent_doc_snapshot_io::save(&doc, &queued, crate::ops_log::log_op).unwrap();
         std::fs::write(&doc, &live).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&queued), Some(&queued))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&queued),
+            Some(&queued),
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -3566,7 +3579,7 @@ mod tests {
             !snapshot_after.contains("Same with this file"),
             "preflight must not absorb the live edit into the committed snapshot:\n{snapshot_after}"
         );
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::PreflightStarted,
@@ -3610,7 +3623,7 @@ mod tests {
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(live)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(live)).unwrap();
 
         run(&doc).unwrap();
 
@@ -3630,7 +3643,7 @@ mod tests {
             "HEAD should keep the live follow-up question instead of reverting:\n{committed}"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
     }
     #[test]
@@ -3646,7 +3659,7 @@ mod tests {
         );
         std::fs::write(&doc, snapshot).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
 
         let live = concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -3666,7 +3679,7 @@ mod tests {
             "expected fail-closed ambiguous patchback error, got: {message}"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::PreflightStarted,
@@ -3708,7 +3721,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, live).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(live)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(live)).unwrap();
 
         let err = run(&doc).unwrap_err();
         let message = err.to_string();
@@ -3717,7 +3730,7 @@ mod tests {
             "expected uncommitted response patchback error, got: {message}"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::PreflightStarted,
@@ -3773,7 +3786,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::PreflightStarted,
@@ -3850,7 +3863,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::PreflightStarted,
@@ -4520,7 +4533,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::PreflightStarted,
@@ -4584,7 +4597,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap();
         assert!(
             state.as_ref().is_none_or(|state| !state.is_open()),
             "boundary-artifact-only preflight must not leave an open cycle"
@@ -4617,7 +4630,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("Recovered answer."));

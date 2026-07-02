@@ -600,7 +600,7 @@ fn guard_no_explicit_baseline_replay_after_committed_cycle(
     // `preflight_started` cycle from HEAD instead of forcing a manual preflight,
     // and hand the caller the HEAD baseline so the new response diffs against the
     // actual committed state (the stale explicit baseline is discarded).
-    crate::cycle_state::start_preflight(file, Some(&head), Some(&head))?;
+    agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&head))?;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -749,7 +749,7 @@ fn guard_no_exchange_compaction_request_between(
 ///    the content-level proof that a response is genuinely uncommitted, so a
 ///    pending/status-only bare write (no response placed) is never force-committed.
 fn bare_write_placed_response_body(file: &Path) -> Result<bool> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(false);
     };
     if !state.is_open() {
@@ -838,7 +838,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // the document again and surfaces any genuine I/O error).
     match std::fs::read_to_string(file) {
         Ok(live_doc) => {
-            if let Err(err) = crate::cycle_state::observe_live_queue_heads(file, &live_doc) {
+            if let Err(err) = agent_doc_cycle_state_io::observe_live_queue_heads(file, &live_doc) {
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -1033,11 +1033,11 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 || !options.icebox_add_before.is_empty()
                 || !options.icebox_add_back.is_empty()
             {
-                crate::cycle_state::mark_pending_mutations(file)?;
-                crate::cycle_state::mark_pending_added(file)?;
+                agent_doc_cycle_state_io::mark_pending_mutations(file)?;
+                agent_doc_cycle_state_io::mark_pending_added(file)?;
             }
             if !same_cycle_added_ids.is_empty() {
-                crate::cycle_state::record_pending_added_ids(file, &same_cycle_added_ids)?;
+                agent_doc_cycle_state_io::record_pending_added_ids(file, &same_cycle_added_ids)?;
             }
             if !options.pending_edit.is_empty() {
                 let edits = parse_tracked_work_edits(&options.pending_edit, "--backlog-edit")?;
@@ -1051,7 +1051,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 crate::backlog_cmd::gate(file, id)?;
             }
             if !options.pending_gate.is_empty() {
-                crate::cycle_state::record_pending_gated_ids(file, &options.pending_gate)?;
+                agent_doc_cycle_state_io::record_pending_gated_ids(file, &options.pending_gate)?;
             }
             for pair in &options.pending_set_gate_type {
                 let (id, gt) = pair.split_once('=').with_context(|| {
@@ -1077,7 +1077,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             if !review_added_ids.is_empty() {
                 // `#opsproof-samecycle-add`: a freshly added gated review item must
                 // not be ops-proof auto-completed on the cycle it first appears.
-                crate::cycle_state::record_pending_added_ids(file, &review_added_ids)?;
+                agent_doc_cycle_state_io::record_pending_added_ids(file, &review_added_ids)?;
             }
             for pair in &options.review_edit {
                 let (id, text) = pair
@@ -1102,8 +1102,8 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 crate::backlog_cmd::done(file, id)?;
             }
             if !options.pending_done.is_empty() {
-                crate::cycle_state::record_pending_done_ids(file, &options.pending_done)?;
-                crate::cycle_state::mark_pending_mutations(file)?;
+                agent_doc_cycle_state_io::record_pending_done_ids(file, &options.pending_done)?;
+                agent_doc_cycle_state_io::mark_pending_mutations(file)?;
             }
             if let Some(ref order) = options.pending_reorder {
                 let ids = parse_id_order(order);
@@ -1114,9 +1114,12 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 crate::backlog_cmd::icebox_reorder(file, &ids)?;
             }
             if !pending_kept_open_ids.is_empty() {
-                crate::cycle_state::record_pending_kept_open_ids(file, &pending_kept_open_ids)?;
+                agent_doc_cycle_state_io::record_pending_kept_open_ids(
+                    file,
+                    &pending_kept_open_ids,
+                )?;
             }
-            crate::cycle_state::mark_pending_mutations(file)?;
+            agent_doc_cycle_state_io::mark_pending_mutations(file)?;
             Ok(())
         })?;
     }
@@ -2249,7 +2252,7 @@ fn log_exchange_write_diagnostic(
         .unwrap_or(0);
     let normalized_prefix_delta = after_prefix_count.saturating_sub(before_prefix_count);
     let prompt_text_normalized = normalized_prefix_delta > 0;
-    let cycle_id = crate::cycle_state::load(file)
+    let cycle_id = agent_doc_cycle_state_io::load(file)
         .ok()
         .flatten()
         .map(|state| state.cycle_id)
@@ -2841,7 +2844,7 @@ mod tests {
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         let editor_visible = format!("{committed}\neditor-only mutation\n");
         agent_doc_debounce::document_changed_with_content_for_editor(
             &doc.display().to_string(),
@@ -2858,7 +2861,7 @@ mod tests {
             "error should identify the unresolved session closeout:\n{err}"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::PreflightStarted,
@@ -2986,7 +2989,8 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        let cs = crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let cs =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let result = queue_file_ipc_reposition_boundary(&doc, Some("abc123"), &[]).unwrap();
         assert!(matches!(result, FileIpcRepositionResult::Queued));
@@ -3289,7 +3293,7 @@ mod tests {
         .to_string();
         fs::write(&doc, &source).unwrap();
         agent_doc_snapshot_io::save(&doc, &source, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&source), Some(&source)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&source), Some(&source)).unwrap();
         crate::capture::capture_response(&doc, "Done.").unwrap();
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
@@ -6056,7 +6060,7 @@ scratch
         );
         fs::write(&doc, visible).unwrap();
         agent_doc_snapshot_io::save(&doc, visible, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
 
         let strict = WriteFlags {
             strict_closeout: true,
@@ -6073,7 +6077,7 @@ scratch
                 && recovered.contains("### Re: latest committed — gpt-5"),
             "strict recovery must preserve current edits and restore committed response:\n{recovered}"
         );
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         let head_after = agent_doc_git_io::revision::show_head(&doc)
             .unwrap()

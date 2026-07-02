@@ -122,7 +122,7 @@ pub fn detect_jb_cache_conflict_cancel_recoverable_with_context(
     file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<bool> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(false);
     };
     if !matches!(
@@ -275,8 +275,8 @@ mod tests {
             .args(["commit", "-m", "committed", "--no-verify"])
             .output()
             .unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),

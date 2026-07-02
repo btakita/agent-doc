@@ -98,7 +98,7 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
     if id.is_empty() {
         return Ok(false);
     }
-    if crate::cycle_state::resolved_pending_ids(file)?.contains(&id) {
+    if agent_doc_cycle_state_io::resolved_pending_ids(file)?.contains(&id) {
         return Ok(true);
     }
 

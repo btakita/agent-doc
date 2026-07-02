@@ -73,7 +73,7 @@ pub(crate) fn protected_registered_pane_state_from_capture(
 }
 
 pub(crate) fn open_cycle_protected_file_state(file: &Path) -> Option<OpenCycleProtectedPaneState> {
-    let state = crate::cycle_state::load(file).ok().flatten()?;
+    let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
     agent_doc_sync::open_cycle_protected_file_state_from_phase(file, state.phase)
 }
 
@@ -196,7 +196,7 @@ pub(crate) fn recover_missing_pane_closeout(
     Option<agent_doc_turn::repair::RepairOutcome>,
     Option<String>,
 ) {
-    let state = match crate::cycle_state::load(file) {
+    let state = match agent_doc_cycle_state_io::load(file) {
         Ok(state) => state,
         Err(err) => {
             return (
@@ -253,7 +253,7 @@ pub(crate) fn recover_missing_pane_closeout(
 }
 
 pub(crate) fn pending_missing_pane_repair_phase(file: &Path) -> Option<&'static str> {
-    let state = crate::cycle_state::load(file).ok().flatten()?;
+    let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
     match state.phase {
         agent_doc_turn::CyclePhase::PreflightStarted => Some("preflight_started"),
         agent_doc_turn::CyclePhase::ResponseCaptured => Some("response_captured"),
@@ -478,7 +478,7 @@ mod tests {
         let content = "---\nagent_doc_session: session-lost-pane\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
         std::fs::create_dir_all(&log_dir).unwrap();
@@ -501,7 +501,7 @@ mod tests {
         assert!(repair.repaired_stale_preflight);
         assert!(repair.dead_pane.is_none());
 
-        let state = crate::cycle_state::load(&doc)
+        let state = agent_doc_cycle_state_io::load(&doc)
             .unwrap()
             .expect("cycle state should exist");
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
@@ -538,7 +538,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let response = "<!-- patch:exchange -->\n### Re: topic — gpt-5\nRecovered body.\n<!-- /patch:exchange -->\n";
         crate::repair::save_pending(&doc, response).unwrap();
 
@@ -565,7 +565,7 @@ mod tests {
         assert!(block_reason.contains("session doctor"));
         assert!(!repair.repaired_stale_preflight);
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         assert!(
             agent_doc_fs::pending_response_path_for(&doc)
@@ -596,7 +596,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let response = "<!-- patch:exchange -->\n### Re: topic — gpt-5\nRecovered body.\n<!-- /patch:exchange -->\n";
         crate::repair::save_pending(&doc, response).unwrap();
 
@@ -630,7 +630,7 @@ mod tests {
         assert!(repair.block_auto_start_reason.is_none());
         assert!(!repair.repaired_stale_preflight);
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
@@ -670,7 +670,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let response = "<!-- patch:exchange -->\n### Re: topic — gpt-5\nRecovered body.\n<!-- /patch:exchange -->\n";
         crate::repair::save_pending(&doc, response).unwrap();
 
@@ -689,7 +689,7 @@ mod tests {
         );
         std::fs::write(&doc, updated).unwrap();
         agent_doc_snapshot_io::save(&doc, updated, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::mark_write_applied(
+        agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
             Some(updated),
@@ -728,7 +728,7 @@ mod tests {
         assert!(repair.block_auto_start_reason.is_none());
         assert!(!repair.repaired_stale_preflight);
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
@@ -752,7 +752,7 @@ mod tests {
         let content = "---\nagent_doc_session: dead-pane-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
         std::fs::create_dir_all(&log_dir).unwrap();
@@ -849,7 +849,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let response = concat!(
             "<!-- patch:exchange -->\n",
             "### Re: topic — gpt-5\n",
@@ -1189,7 +1189,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 
         assert_eq!(open_cycle_protected_file_state(&doc), None);
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let protected =
             open_cycle_protected_file_state(&doc).expect("preflight_started should protect file");
         assert_eq!(protected.file, doc);

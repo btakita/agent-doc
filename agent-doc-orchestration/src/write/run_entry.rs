@@ -94,7 +94,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
         log_dedup(file, "no changes after merge, skipping write");
-        let _ = crate::cycle_state::mark_write_applied(
+        let _ = agent_doc_cycle_state_io::mark_write_applied(
             file,
             "write_inline_dedup",
             Some(&content_current),
@@ -169,7 +169,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
             final_content.len()
         ),
     );
-    if let Err(e) = crate::cycle_state::mark_write_applied(
+    if let Err(e) = agent_doc_cycle_state_io::mark_write_applied(
         file,
         "write_inline",
         Some(&final_content),
@@ -179,8 +179,8 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     }
     // #22a8: mirror the live pipeline phase into the document frontmatter now the
     // response is fully on disk (doc lock still held, so no writer races).
-    if let Ok(Some(st)) = crate::cycle_state::load(file) {
-        crate::cycle_state::mirror_pipeline_frontmatter(file, &st);
+    if let Ok(Some(st)) = agent_doc_cycle_state_io::load(file) {
+        crate::pipeline_frontmatter::mirror_pipeline_frontmatter(file, &st);
     }
 
     drop(doc_lock);
@@ -403,7 +403,7 @@ pub fn run_template(
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
         log_dedup(file, "no changes after merge, skipping write");
-        let _ = crate::cycle_state::mark_write_applied(
+        let _ = agent_doc_cycle_state_io::mark_write_applied(
             file,
             "write_template_dedup",
             Some(&content_current),
@@ -481,7 +481,7 @@ pub fn run_template(
             patches.len()
         ),
     );
-    if let Err(e) = crate::cycle_state::mark_write_applied(
+    if let Err(e) = agent_doc_cycle_state_io::mark_write_applied(
         file,
         "write_template",
         Some(&final_content),
@@ -491,8 +491,8 @@ pub fn run_template(
     }
     // #22a8: mirror the live pipeline phase into the document frontmatter now the
     // response is fully on disk (doc lock still held, so no writer races).
-    if let Ok(Some(st)) = crate::cycle_state::load(file) {
-        crate::cycle_state::mirror_pipeline_frontmatter(file, &st);
+    if let Ok(Some(st)) = agent_doc_cycle_state_io::load(file) {
+        crate::pipeline_frontmatter::mirror_pipeline_frontmatter(file, &st);
     }
 
     drop(doc_lock);
@@ -1067,7 +1067,7 @@ pub fn run_stream(
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
         log_dedup(file, "no changes after merge, skipping write");
-        let _ = crate::cycle_state::mark_write_applied(
+        let _ = agent_doc_cycle_state_io::mark_write_applied(
             file,
             "write_stream_dedup",
             Some(&content_current),
@@ -1190,7 +1190,7 @@ pub fn run_stream(
             final_content.len()
         ),
     );
-    if let Err(e) = crate::cycle_state::mark_write_applied(
+    if let Err(e) = agent_doc_cycle_state_io::mark_write_applied(
         file,
         "write_stream",
         Some(&final_content),
@@ -1389,7 +1389,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             ),
         ));
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
-    if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
+    if let Ok(Some(ref cs)) = agent_doc_cycle_state_io::load(file) {
         ipc_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
     }
 

@@ -182,7 +182,7 @@ use agent_doc_project_config_io as project_config_io;
 
 struct RouteOwnedCompletionConfig {
     file: PathBuf,
-    baseline: Option<crate::cycle_state::CycleState>,
+    baseline: Option<agent_doc_cycle_state_io::CycleState>,
     reap_policy: RouteOwnedReapPolicy,
     harness: agent_doc_harness::HarnessConfig,
 }
@@ -524,7 +524,7 @@ fn prompt_for_restart_or_quit(
 }
 
 fn route_owned_facts_from_cycle_state(
-    state: &crate::cycle_state::CycleState,
+    state: &agent_doc_cycle_state_io::CycleState,
 ) -> RouteOwnedCycleFacts {
     let phase = if state.phase == agent_doc_turn::CyclePhase::Committed {
         RouteOwnedCyclePhase::Committed
@@ -620,7 +620,7 @@ fn spawn_route_owned_completion_thread(
             let mut ready_busy_key: Option<(String, String)> = None;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
             while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
-                if let Ok(Some(state)) = crate::cycle_state::load(&file)
+                if let Ok(Some(state)) = agent_doc_cycle_state_io::load(&file)
                 {
                     let facts = route_owned_facts_from_cycle_state(&state);
                     if !route_owned_cycle_committed_since_start(&facts, baseline.as_ref()) {
@@ -2282,8 +2282,8 @@ mod th {
         id: &str,
         phase: agent_doc_turn::CyclePhase,
         updated_at: u64,
-    ) -> crate::cycle_state::CycleState {
-        crate::cycle_state::CycleState {
+    ) -> agent_doc_cycle_state_io::CycleState {
+        agent_doc_cycle_state_io::CycleState {
             cycle_id: id.to_string(),
             file: "doc.md".to_string(),
             phase,

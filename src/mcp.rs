@@ -962,9 +962,7 @@ mod tests {
         assert_eq!(admission["preflight_required"], false);
         assert_eq!(admission["cycle_phase"], "preflight_started");
 
-        let state = agent_doc_orchestration::cycle_state::load(&file)
-            .unwrap()
-            .unwrap();
+        let state = agent_doc_cycle_state_io::load(&file).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
     }
 
@@ -999,9 +997,7 @@ mod tests {
         assert!(error.contains("stale agent-doc MCP server"));
         assert!(error.to_ascii_lowercase().contains("restart"));
         assert!(
-            agent_doc_orchestration::cycle_state::load(&file)
-                .unwrap()
-                .is_none(),
+            agent_doc_cycle_state_io::load(&file).unwrap().is_none(),
             "stale MCP mutation guard must fire before opening a response cycle"
         );
     }

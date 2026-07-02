@@ -4323,7 +4323,7 @@ mod th {
         .unwrap();
 
         let protected_content = std::fs::read_to_string(&protected_doc).unwrap();
-        crate::cycle_state::start_preflight(
+        agent_doc_cycle_state_io::start_preflight(
             &protected_doc,
             Some(&protected_content),
             Some(&protected_content),
@@ -4404,7 +4404,7 @@ mod tests {
         );
         std::fs::write(&doc, &materialized).unwrap();
         agent_doc_snapshot_io::save(&doc, &materialized, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::mark_committed(
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(&materialized),
@@ -7048,7 +7048,8 @@ mod tests {
         )
         .unwrap();
 
-        crate::cycle_state::start_preflight(&doc_a, Some(content_a), Some(content_a)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc_a, Some(content_a), Some(content_a))
+            .unwrap();
 
         run_with_tmux(
             &[doc_b.to_string_lossy().to_string()],
@@ -7074,7 +7075,10 @@ mod tests {
             "open-cycle pane should move out of the visible agent-doc window"
         );
         assert_eq!(
-            crate::cycle_state::load(&doc_a).unwrap().unwrap().phase,
+            agent_doc_cycle_state_io::load(&doc_a)
+                .unwrap()
+                .unwrap()
+                .phase,
             agent_doc_turn::CyclePhase::PreflightStarted
         );
     }
@@ -7322,8 +7326,12 @@ mod tests {
         .unwrap();
 
         let doc_a_content = std::fs::read_to_string(&doc_a).unwrap();
-        crate::cycle_state::start_preflight(&doc_a, Some(&doc_a_content), Some(&doc_a_content))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(
+            &doc_a,
+            Some(&doc_a_content),
+            Some(&doc_a_content),
+        )
+        .unwrap();
 
         run_with_options_internal(
             &[
@@ -7431,8 +7439,12 @@ mod tests {
         .unwrap();
 
         let doc_a_content = std::fs::read_to_string(&doc_a).unwrap();
-        crate::cycle_state::start_preflight(&doc_a, Some(&doc_a_content), Some(&doc_a_content))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(
+            &doc_a,
+            Some(&doc_a_content),
+            Some(&doc_a_content),
+        )
+        .unwrap();
 
         run_with_options_internal(
             &[
@@ -7947,8 +7959,12 @@ mod tests {
         .unwrap();
 
         let doc_a_content = std::fs::read_to_string(&doc_a).unwrap();
-        crate::cycle_state::start_preflight(&doc_a, Some(&doc_a_content), Some(&doc_a_content))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(
+            &doc_a,
+            Some(&doc_a_content),
+            Some(&doc_a_content),
+        )
+        .unwrap();
         iso.select_pane(&pane_a).unwrap();
 
         run_with_options_internal(

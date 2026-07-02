@@ -10,7 +10,7 @@ pub(crate) fn check_pending_capture_guard(
         return Ok(GuardResult::None);
     }
 
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     if state.is_open() || state.had_pending_mutations {
@@ -211,7 +211,7 @@ pub(crate) fn check_pending_done_guard(
         return Ok(GuardResult::None);
     }
 
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     if state.is_open() {

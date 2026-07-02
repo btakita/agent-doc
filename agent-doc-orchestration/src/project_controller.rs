@@ -981,7 +981,7 @@ fn insert_admin_operation_record(
 }
 
 pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(false);
     };
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
@@ -4976,20 +4976,30 @@ agent:queue\n\
         std::fs::write(&doc, content).unwrap();
 
         let state =
-            crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::record_active_queue_heads(
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_active_queue_heads(
             &doc,
             &["do [#ctrlplane-sessionactor]".to_string()],
         )
         .unwrap();
-        crate::cycle_state::record_pending_done_ids(&doc, &["ctrlplane-sessionactor".to_string()])
+        agent_doc_cycle_state_io::record_pending_done_ids(
+            &doc,
+            &["ctrlplane-sessionactor".to_string()],
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::record_pending_gated_ids(&doc, &["held-item".to_string()])
             .unwrap();
-        crate::cycle_state::record_pending_gated_ids(&doc, &["held-item".to_string()]).unwrap();
-        crate::cycle_state::record_pending_kept_open_ids(&doc, &["later-item".to_string()])
+        agent_doc_cycle_state_io::record_pending_kept_open_ids(&doc, &["later-item".to_string()])
             .unwrap();
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["stale-item".to_string()]).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(content), Some(content))
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["stale-item".to_string()])
             .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
 
         assert!(persist_session_actor_closeout(&doc).unwrap());
 

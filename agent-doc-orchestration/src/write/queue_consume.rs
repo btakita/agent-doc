@@ -884,7 +884,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         // document head is that recorded addition, consume the snapshot active
         // head wherever it now sits in the current queue and leave the insertion
         // live for a later turn.
-        let dropped_evidence = crate::cycle_state::load(file)
+        let dropped_evidence = agent_doc_cycle_state_io::load(file)
             .ok()
             .flatten()
             .map(|s| s.dropped_queue_prompts)
@@ -1929,8 +1929,8 @@ mod core_tests {
         agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
 
         // Record the live-buffer drift evidence for the document head.
-        crate::cycle_state::start_preflight(&doc, Some(snap), Some(content)).unwrap();
-        crate::cycle_state::record_dropped_queue_prompts(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snap), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_dropped_queue_prompts(
             &doc,
             &["handle the new live-buffer request".to_string()],
         )
@@ -1992,8 +1992,9 @@ mod core_tests {
         );
         agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(snap), Some(content)).unwrap();
-        crate::cycle_state::record_dropped_queue_prompts(&doc, &["test".to_string()]).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snap), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_dropped_queue_prompts(&doc, &["test".to_string()])
+            .unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .expect("consume must preserve the live edit and close the snapshot head")

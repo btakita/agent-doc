@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {

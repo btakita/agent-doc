@@ -1815,7 +1815,7 @@ fn scrub_duplicate_prompt_comments_for_route(
 }
 
 fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseoutDrainOutcome> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
     };
     if !state.is_open() {
@@ -1892,7 +1892,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
         };
 
         // Concurrent-finalize detection: re-read the cycle after the failed check.
-        let reloaded = crate::cycle_state::load(file)?;
+        let reloaded = agent_doc_cycle_state_io::load(file)?;
         let decision = dispatch_drain_retry_decision(
             &state.cycle_id,
             state.phase,
@@ -2590,7 +2590,7 @@ fn route_via_authoritative_actor(
     target_session: &str,
     split_before: bool,
     harness: &HarnessConfig,
-    baseline: Option<&crate::cycle_state::CycleState>,
+    baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     prompt_context: Option<&PromptBearingRouteContext>,
     dispatch_only: bool,
     actor: AuthoritativeActorDispatchTarget,
@@ -5771,7 +5771,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
         // Open cycle so the drain actually runs (is_open()).
-        crate::cycle_state::start_preflight(&doc, None, Some(content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, None, Some(content)).unwrap();
 
         // The drain may still report Blocked on later (committed/etc.) guards in this
         // minimal fixture, but the all-surface reap runs before that — assert the
@@ -5882,8 +5882,8 @@ mod tests {
 
     fn write_open_cycle_route_doc(doc: &std::path::Path, content: &str) {
         std::fs::write(doc, content).unwrap();
-        crate::cycle_state::start_preflight(doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_pending_mutations(doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_pending_mutations(doc).unwrap();
     }
 
     #[test]

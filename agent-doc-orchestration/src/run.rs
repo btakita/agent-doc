@@ -421,7 +421,7 @@ fn run_once(
 
     // Compute diff
     let Some((the_diff, queue_synthetic_diff)) = compute_run_diff(file)? else {
-        let cycle_state = crate::cycle_state::load(file)?;
+        let cycle_state = agent_doc_cycle_state_io::load(file)?;
         let no_change_input = cycle_state.as_ref().map(|state| NoChangeCycleStateInput {
             cycle_id: &state.cycle_id,
             file: &state.file,
@@ -1126,7 +1126,7 @@ impl RunHeartbeat {
                     elapsed.as_secs(),
                     timeout_detail
                 );
-                let state = crate::cycle_state::record_open_cycle_progress(&file, &event)
+                let state = agent_doc_cycle_state_io::record_open_cycle_progress(&file, &event)
                     .ok()
                     .flatten();
                 let (cycle_id, cycle_phase, last_event_age) = state
@@ -1179,7 +1179,7 @@ fn record_run_progress(file: &Path, phase: &str, agent_name: &str, timeout: Opti
         .map(|timeout| format!(" timeout_s={}", timeout.as_secs()))
         .unwrap_or_default();
     let event = format!("run_progress phase={phase} agent={agent_name}{timeout_detail}");
-    let _ = crate::cycle_state::record_open_cycle_progress(file, &event);
+    let _ = agent_doc_cycle_state_io::record_open_cycle_progress(file, &event);
     eprintln!("[run] progress phase={phase}{timeout_detail}");
 }
 
@@ -1187,7 +1187,7 @@ fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
     let file_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} after run write", file.display()))?;
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
-    crate::cycle_state::mark_write_applied(
+    agent_doc_cycle_state_io::mark_write_applied(
         file,
         event,
         snapshot_content.as_deref(),
@@ -1204,7 +1204,7 @@ fn start_run_cycle(file: &Path) -> Result<()> {
 fn record_run_preflight_timeout(file: &Path, event: &str, diagnostic: &str) -> Result<()> {
     let compact = diagnostic.split_whitespace().collect::<Vec<_>>().join(" ");
     let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
-    crate::cycle_state::mark_recoverable_preflight_timeout(file, &event)?;
+    agent_doc_cycle_state_io::mark_recoverable_preflight_timeout(file, &event)?;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -1229,7 +1229,7 @@ fn abandon_run_recursive_cycle(file: &Path, event: &str, diagnostic: &str) -> Re
     let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let file_content = std::fs::read_to_string(file).ok();
-    crate::cycle_state::mark_abandoned(
+    crate::pipeline_frontmatter::mark_abandoned(
         file,
         &event,
         snapshot_content.as_deref(),
@@ -1375,7 +1375,7 @@ fn owner_pane_queue_edit_should_defer_until_closeout(
     diff_text: &str,
     current_content: &str,
 ) -> bool {
-    let open_cycle = crate::cycle_state::load(file)
+    let open_cycle = agent_doc_cycle_state_io::load(file)
         .ok()
         .flatten()
         .is_some_and(|state| state.is_open());
@@ -1466,7 +1466,7 @@ pub fn recursive_codex_start_invocation_diagnostic(
 }
 
 fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {
-    let state = crate::cycle_state::load(file).ok().flatten();
+    let state = agent_doc_cycle_state_io::load(file).ok().flatten();
     let actor = actor_record_for_file(file).ok().flatten();
     let tmux = tmux_router::Tmux::default_server();
     let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux);
@@ -1939,7 +1939,7 @@ mod tests {
 
         start_run_cycle(&doc).unwrap();
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_eq!(state.last_event, "preflight_started");
 

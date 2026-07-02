@@ -129,7 +129,7 @@ impl PartialCheckpointWriter {
     }
 
     pub fn with_interval(file: &Path, interval: Duration) -> Self {
-        let cycle_id = crate::cycle_state::load(file)
+        let cycle_id = agent_doc_cycle_state_io::load(file)
             .ok()
             .flatten()
             .map(|state| state.cycle_id)
@@ -178,7 +178,7 @@ impl PartialCheckpointWriter {
     }
 
     fn active_cycle_accepts_checkpoint(&mut self) -> Result<bool> {
-        let Some(state) = crate::cycle_state::load(&self.file)? else {
+        let Some(state) = agent_doc_cycle_state_io::load(&self.file)? else {
             return Ok(self.cycle_id.starts_with("partial-"));
         };
         if state.cycle_id == self.cycle_id && state.is_open() {
@@ -211,7 +211,7 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
         .with_context(|| format!("failed to read {} for response capture", file.display()))?;
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let response_sha256 = agent_doc_hash::content_hash(response);
-    let existing_cycle_id = crate::cycle_state::load(file)?.map(|s| s.cycle_id);
+    let existing_cycle_id = agent_doc_cycle_state_io::load(file)?.map(|s| s.cycle_id);
     let capture_id = existing_cycle_id.unwrap_or_else(|| format!("synthetic-{}", now_millis()));
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
 
@@ -247,7 +247,7 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
         state: CaptureState::Captured,
     };
     write_record(file, &record)?;
-    crate::cycle_state::mark_response_captured(
+    agent_doc_cycle_state_io::mark_response_captured(
         file,
         "response_captured",
         snapshot_content.as_deref(),
@@ -315,7 +315,7 @@ fn checkpoint_partial_response_for_cycle(
 }
 
 pub fn load_active(file: &Path) -> Result<Option<CaptureRecord>> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -918,7 +918,7 @@ mod tests {
 
         let record = capture_response(&doc, "response body").unwrap();
         let active = load_active(&doc).unwrap().unwrap();
-        let cycle = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
 
         assert_eq!(record, active);
         assert_eq!(record.state, CaptureState::Captured);
@@ -945,7 +945,7 @@ mod tests {
             crate::ops_log::log_op,
         )
         .unwrap();
-        crate::cycle_state::start_preflight(
+        agent_doc_cycle_state_io::start_preflight(
             &doc,
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(&std::fs::read_to_string(&doc).unwrap()),
@@ -957,7 +957,7 @@ mod tests {
             .maybe_checkpoint("partial streamed response")
             .unwrap()
             .unwrap();
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         let loaded = latest_partial_checkpoint(&doc).unwrap().unwrap();
 
         assert_eq!(checkpoint, loaded);
@@ -973,11 +973,12 @@ mod tests {
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
         agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
         assert!(writer.maybe_checkpoint("first").unwrap().is_some());
-        crate::cycle_state::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
+        crate::pipeline_frontmatter::mark_committed(&doc, "test", Some("body"), Some("body"))
+            .unwrap();
 
         assert!(writer.maybe_checkpoint("second").unwrap().is_none());
         let loaded = latest_partial_checkpoint(&doc).unwrap().unwrap();
@@ -990,11 +991,12 @@ mod tests {
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
         agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
         assert!(writer.maybe_checkpoint("first").unwrap().is_some());
-        crate::cycle_state::mark_abandoned(&doc, "test", Some("body"), Some("body")).unwrap();
+        crate::pipeline_frontmatter::mark_abandoned(&doc, "test", Some("body"), Some("body"))
+            .unwrap();
 
         assert!(writer.maybe_checkpoint("second").unwrap().is_none());
         let loaded = latest_partial_checkpoint(&doc).unwrap().unwrap();
@@ -1017,7 +1019,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
         agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         // Capture A — a committed response that compaction is about to archive.
         let archived =

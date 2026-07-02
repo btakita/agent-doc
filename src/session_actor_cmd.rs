@@ -264,7 +264,7 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
     let mut rows: Vec<serde_json::Value> = Vec::with_capacity(store.len());
     for (document_id, record) in &store {
         let doc_path = Path::new(document_id);
-        let cycle_phase = agent_doc_orchestration::cycle_state::load(doc_path)
+        let cycle_phase = agent_doc_cycle_state_io::load(doc_path)
             .ok()
             .flatten()
             .map(|s| phase_str(s.phase));
@@ -1087,7 +1087,7 @@ fn supervisor_runtime_applies_to_record(ctx: &SessionContext) -> bool {
 }
 
 fn document_dirty_after_committed_cycle(file: &Path) -> Result<bool> {
-    let Some(state) = agent_doc_orchestration::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(false);
     };
     if state.phase != agent_doc_turn::CyclePhase::Committed {
@@ -4323,7 +4323,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let committed = "---\nagent_doc_session: session-1\n---\n\nDone.\n";
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_orchestration::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -4830,8 +4830,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     fn clear_reclaims_orphaned_empty_preflight_cycle() {
         let (_dir, doc) = clear_reclaim_project();
         let content = std::fs::read_to_string(&doc).unwrap();
-        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(&content), Some(&content))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
 
         // The clear path reclaims the orphaned cycle so the next Run Agent Doc
         // is not wedged by a stale open cycle.
@@ -4839,9 +4838,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             reclaim_orphaned_cycle_on_clear(&doc),
             agent_doc_turn::repair::CancelOutcome::Abandoned
         );
-        let state = agent_doc_orchestration::cycle_state::load(&doc)
-            .unwrap()
-            .unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
     }
 
@@ -4849,8 +4846,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     fn clear_protects_cycle_that_already_captured_a_response() {
         let (_dir, doc) = clear_reclaim_project();
         let content = std::fs::read_to_string(&doc).unwrap();
-        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(&content), Some(&content))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         agent_doc_orchestration::capture::capture_response(
             &doc,
             "### Re: do — opus-4-8\n\nDone.\n",
@@ -4863,7 +4859,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             agent_doc_turn::repair::CancelOutcome::Protected
         );
         assert!(
-            agent_doc_orchestration::cycle_state::load(&doc)
+            agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .unwrap()
                 .is_open(),

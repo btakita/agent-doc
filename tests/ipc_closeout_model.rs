@@ -782,13 +782,8 @@ fn wedge_content_ours(original: &str) -> String {
 /// response) while the visible file lost the response, and the cycle carries the
 /// `ipc_snapshot_adoption_blocked` flag from the drift guard.
 fn wedge_cycle_state(doc: &Path, content_ours: &str, fragmented: &str) {
-    agent_doc_orchestration::cycle_state::start_preflight(
-        doc,
-        Some(content_ours),
-        Some(fragmented),
-    )
-    .unwrap();
-    agent_doc_orchestration::cycle_state::record_ipc_snapshot_adoption_blocked(doc).unwrap();
+    agent_doc_cycle_state_io::start_preflight(doc, Some(content_ours), Some(fragmented)).unwrap();
+    agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(doc).unwrap();
 }
 
 #[test]

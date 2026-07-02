@@ -106,7 +106,7 @@ fn gather_convergence_facts(
     deferring_since: Option<std::time::Instant>,
     timeout_ms: u64,
 ) -> agent_doc_document_realtime::convergence_gate::ConvergenceFacts {
-    let committed = match crate::cycle_state::load(file) {
+    let committed = match agent_doc_cycle_state_io::load(file) {
         Ok(Some(state)) => matches!(state.phase, agent_doc_turn::CyclePhase::Committed),
         _ => true,
     };
@@ -148,7 +148,7 @@ fn record_convergence_gate_blocked(
     facts: &agent_doc_document_realtime::convergence_gate::ConvergenceFacts,
     unmet: &[&'static str],
 ) {
-    let state = crate::cycle_state::load(file).ok().flatten();
+    let state = agent_doc_cycle_state_io::load(file).ok().flatten();
     let cycle_id = state
         .as_ref()
         .map(|s| s.cycle_id.clone())
@@ -1422,17 +1422,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // true turn boundary; mid-turn, preserve the open checkpoint so a
                 // finalize/recycle race can still be resumed by the fresh supervisor.
                 let inflight = agent_doc_ipc_io::inflight_connection_handlers();
-                let cycle_open = match crate::cycle_state::load(&path).ok().flatten() {
+                let cycle_open = match agent_doc_cycle_state_io::load(&path).ok().flatten() {
                     Some(state) if state.is_open() => {
                         if turn_boundary
                             && state.open_stalled(
                             inflight,
                             current_epoch_secs(),
-                            crate::cycle_state::STALLED_CYCLE_RESOLVE_SECS,
+                            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
                         ) {
                             let stalled_secs =
                                 current_epoch_secs().saturating_sub(state.updated_at);
-                            if let Err(err) = crate::cycle_state::mark_abandoned(
+                            if let Err(err) = crate::pipeline_frontmatter::mark_abandoned(
                                 &path,
                                 "suprecyclespin_stalled_cycle_resolved",
                                 None,
@@ -2939,10 +2939,11 @@ mod tests {
         // Open a cycle on disk (preflight taken, finalize not committed). The
         // production `cycle_open` reads this via `cycle_state::load(..).is_open()`.
         let opened =
-            crate::cycle_state::start_preflight(&file, Some("# plan\n"), Some("# plan\n")).unwrap();
+            agent_doc_cycle_state_io::start_preflight(&file, Some("# plan\n"), Some("# plan\n"))
+                .unwrap();
         assert!(opened.is_open(), "fresh preflight cycle must be open");
 
-        let cycle_open_while_open = crate::cycle_state::load(&file)
+        let cycle_open_while_open = agent_doc_cycle_state_io::load(&file)
             .ok()
             .flatten()
             .map(|state| state.is_open())
@@ -2974,9 +2975,14 @@ mod tests {
         // Commit the cycle: now it is no longer open and (in this single-threaded
         // test) no IPC handler is in flight, so cycle_open is false and the same
         // inputs recycle — the deferred recycle fires at the true quiescent boundary.
-        crate::cycle_state::mark_committed(&file, "committed", Some("# plan\n"), Some("# plan\n"))
-            .unwrap();
-        let cycle_open_after_commit = crate::cycle_state::load(&file)
+        crate::pipeline_frontmatter::mark_committed(
+            &file,
+            "committed",
+            Some("# plan\n"),
+            Some("# plan\n"),
+        )
+        .unwrap();
+        let cycle_open_after_commit = agent_doc_cycle_state_io::load(&file)
             .ok()
             .flatten()
             .map(|state| state.is_open())

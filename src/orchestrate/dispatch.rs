@@ -256,7 +256,7 @@ fn injected_prompt_diff(task: &str) -> String {
 }
 
 pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
-    let Some(state) = agent_doc_orchestration::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(());
     };
     if state.phase != agent_doc_turn::CyclePhase::PreflightStarted {
@@ -278,7 +278,7 @@ pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
         &file_content,
         agent_doc_orchestration::ops_log::log_op,
     )?;
-    agent_doc_orchestration::cycle_state::mark_abandoned(
+    agent_doc_cycle_state_io::mark_abandoned(
         file,
         "orchestrate_preflight_handoff_closed",
         snapshot_content.as_deref(),
@@ -439,12 +439,7 @@ mod tests {
             "synchronous orchestra\npreset #spec-test\n- do #first\n<!-- agent:boundary:keep -->",
         );
         fs::write(&doc, &handoff).unwrap();
-        agent_doc_orchestration::cycle_state::start_preflight(
-            &doc,
-            Some(&snapshot),
-            Some(&handoff),
-        )
-        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&handoff)).unwrap();
 
         close_open_preflight_handoff_cycle(&doc).unwrap();
         inject_prompt(&doc, "do #first").unwrap();
@@ -455,10 +450,7 @@ mod tests {
         assert!(!snap.contains("❯ do #first"));
         assert!(live.contains("❯ do #first"));
         assert_eq!(
-            agent_doc_orchestration::cycle_state::load(&doc)
-                .unwrap()
-                .unwrap()
-                .phase,
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
             agent_doc_turn::CyclePhase::Abandoned
         );
     }

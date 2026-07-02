@@ -806,7 +806,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             ours,
             &stale_message,
         );
-        let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
+        let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
         return false;
     }
 
@@ -850,7 +850,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             agent_doc_hash::content_hash(ours)
         ),
     );
-    let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
+    let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
 
     let candidate = decision.snapshot_content.clone();
     // #qdelipc: live queue deletion in the IPC candidate is not proof of
@@ -924,7 +924,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                     reasons.join(","),
                 ),
             );
-            if let Err(e) = crate::cycle_state::record_semantic_merge_acks(file, &sm.requires_ack) {
+            if let Err(e) =
+                agent_doc_cycle_state_io::record_semantic_merge_acks(file, &sm.requires_ack)
+            {
                 eprintln!(
                     "[write] warning: failed to record semantic_merge acks for carry-forward: {e}"
                 );
@@ -986,7 +988,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     // prompt guard reads this persisted evidence to fail closed instead.
     let dropped = dropped_prompt_lines_after_content_ours(base, &candidate, ours);
     if !dropped.is_empty() {
-        if let Err(e) = crate::cycle_state::record_dropped_exchange_prompts(file, &dropped) {
+        if let Err(e) = agent_doc_cycle_state_io::record_dropped_exchange_prompts(file, &dropped) {
             eprintln!(
                 "[write] warning: failed to record dropped exchange prompt(s) for {}: {}",
                 file.display(),
@@ -1011,7 +1013,8 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     let dropped_queue =
         dropped_queue_prompt_lines_after_content_ours(base, &candidate, &queue_reconciled_ours);
     if !dropped_queue.is_empty() {
-        if let Err(e) = crate::cycle_state::record_dropped_queue_prompts(file, &dropped_queue) {
+        if let Err(e) = agent_doc_cycle_state_io::record_dropped_queue_prompts(file, &dropped_queue)
+        {
             eprintln!(
                 "[write] warning: failed to record dropped queue prompt(s) for {}: {}",
                 file.display(),
@@ -1091,7 +1094,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
             ours,
             &stale_message,
         );
-        let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
+        let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
         return false;
     }
 
@@ -1138,7 +1141,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
             agent_doc_hash::content_hash(ours)
         ),
     );
-    let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
+    let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
     decision.replace_snapshot_with_content_ours_for_prompt_duplication(ours, bad_state);
     true
 }
@@ -2629,7 +2632,7 @@ pub(crate) fn repair_ipc_decision_visible_state(
         decision.snapshot_content.len(),
         agent_doc_hash::content_hash(&decision.snapshot_content)
     );
-    if let Err(err) = crate::cycle_state::record_editor_convergence_required(
+    if let Err(err) = agent_doc_cycle_state_io::record_editor_convergence_required(
         file,
         "ipc_visible_repair",
         reason.label(),

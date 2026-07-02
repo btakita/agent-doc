@@ -281,7 +281,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // next preflight can emit `queue_stall_detected` if the loop neither
                 // continued nor recorded a valid stop reason (the prose no-stall
                 // guidance is advisory; this makes the violation a hard signal).
-                let stall_cycle_id = crate::cycle_state::load(file)
+                let stall_cycle_id = agent_doc_cycle_state_io::load(file)
                     .ok()
                     .flatten()
                     .map(|s| s.cycle_id)
@@ -402,7 +402,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
             // recoverable — adopt the visible response idempotently instead of
             // blocking.
             if codex_final_gate
-                && let Some(cycle) = crate::cycle_state::load(file).ok().flatten()
+                && let Some(cycle) = agent_doc_cycle_state_io::load(file).ok().flatten()
                 && matches!(cycle.phase, agent_doc_turn::CyclePhase::Abandoned)
                 && cycle
                     .last_event
@@ -728,7 +728,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
         )));
     }
 
-    if let Some(state) = crate::cycle_state::load(file)? {
+    if let Some(state) = agent_doc_cycle_state_io::load(file)? {
         if state.is_open() {
             if let Some(blocked) = state.blocked_closeout.as_ref() {
                 return Ok(SessionCheckStatus::Interrupted(blocked_closeout_message(
@@ -1001,7 +1001,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 file,
                 "session_check_commit_boundary_recovered",
             )? {
-                let repaired_cycle = crate::cycle_state::load(file)?;
+                let repaired_cycle = agent_doc_cycle_state_io::load(file)?;
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(
                         "[session-check] INTERRUPTED: last ops.log entry was `{}`, recovered the missing commit boundary from {}, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
@@ -1090,8 +1090,8 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
 
 fn blocked_closeout_message(
     file: &Path,
-    state: &crate::cycle_state::CycleState,
-    blocked: &crate::cycle_state::BlockedCloseout,
+    state: &agent_doc_cycle_state_io::CycleState,
+    blocked: &agent_doc_cycle_state_io::BlockedCloseout,
 ) -> String {
     let editor_authority = blocked_closeout_editor_authority_note(file, blocked);
     let file_display = file.display().to_string();
@@ -1113,7 +1113,7 @@ fn blocked_closeout_message(
 
 fn blocked_closeout_editor_authority_note(
     file: &Path,
-    blocked: &crate::cycle_state::BlockedCloseout,
+    blocked: &agent_doc_cycle_state_io::BlockedCloseout,
 ) -> String {
     if blocked.kind != "editor_convergence_required" {
         return String::new();
@@ -1317,13 +1317,13 @@ mod tests {
         }
         fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if had_pending_mutations {
-            crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+            agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         }
         if !pending_done_ids.is_empty() {
-            crate::cycle_state::record_pending_done_ids(
+            agent_doc_cycle_state_io::record_pending_done_ids(
                 &doc,
                 &pending_done_ids
                     .iter()
@@ -1332,8 +1332,13 @@ mod tests {
             )
             .unwrap();
         }
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&current), Some(&current))
-            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&current),
+            Some(&current),
+        )
+        .unwrap();
         crate::capture::mark_committed(&doc).unwrap();
         doc
     }
@@ -1353,16 +1358,16 @@ mod tests {
             "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
         fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         if capture {
             crate::capture::capture_response(&doc, "### Re: do #nsga4verify — gpt-5\n\nDone.")
                 .unwrap();
         }
         if had_pending_mutations {
-            crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+            agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         }
         if !pending_done_ids.is_empty() {
-            crate::cycle_state::record_pending_done_ids(
+            agent_doc_cycle_state_io::record_pending_done_ids(
                 &doc,
                 &pending_done_ids
                     .iter()
@@ -1371,8 +1376,13 @@ mod tests {
             )
             .unwrap();
         }
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&current), Some(&current))
-            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&current),
+            Some(&current),
+        )
+        .unwrap();
         doc
     }
     fn write_queue_drain_doc(root: &std::path::Path, exchange_body: &str) -> std::path::PathBuf {
@@ -1385,14 +1395,19 @@ mod tests {
         );
         fs::write(&doc, &content).unwrap();
         agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         // A response WAS captured/parsed this turn (capture_id set)...
         crate::capture::capture_response(&doc, "### Re: do #x — gpt-5\n\nDone.").unwrap();
-        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         // ...and this is a queue-drain turn (a head was recorded).
-        crate::cycle_state::record_active_queue_heads(&doc, &["x".to_string()]).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&content), Some(&content))
-            .unwrap();
+        agent_doc_cycle_state_io::record_active_queue_heads(&doc, &["x".to_string()]).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
         doc
     }
     fn write_backlog_doc(path: &Path, backlog_body: &str) {
@@ -1437,10 +1452,10 @@ mod tests {
         }
         fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if !expect_ids.is_empty() {
-            crate::cycle_state::record_expect_done_or_gate_ids(
+            agent_doc_cycle_state_io::record_expect_done_or_gate_ids(
                 &doc,
                 &expect_ids
                     .iter()
@@ -1450,14 +1465,14 @@ mod tests {
             .unwrap();
         }
         if !done_ids.is_empty() {
-            crate::cycle_state::record_pending_done_ids(
+            agent_doc_cycle_state_io::record_pending_done_ids(
                 &doc,
                 &done_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
             )
             .unwrap();
         }
         if !kept_open_ids.is_empty() {
-            crate::cycle_state::record_pending_kept_open_ids(
+            agent_doc_cycle_state_io::record_pending_kept_open_ids(
                 &doc,
                 &kept_open_ids
                     .iter()
@@ -1466,8 +1481,13 @@ mod tests {
             )
             .unwrap();
         }
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&current), Some(&current))
-            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&current),
+            Some(&current),
+        )
+        .unwrap();
         crate::capture::mark_committed(&doc).unwrap();
         doc
     }
@@ -1507,10 +1527,10 @@ mod tests {
         }
         fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if !expect_ids.is_empty() {
-            crate::cycle_state::record_expect_done_or_gate_ids(
+            agent_doc_cycle_state_io::record_expect_done_or_gate_ids(
                 &doc,
                 &expect_ids
                     .iter()
@@ -1520,7 +1540,7 @@ mod tests {
             .unwrap();
         }
         if !gated_ids.is_empty() {
-            crate::cycle_state::record_pending_gated_ids(
+            agent_doc_cycle_state_io::record_pending_gated_ids(
                 &doc,
                 &gated_ids
                     .iter()
@@ -1530,7 +1550,7 @@ mod tests {
             .unwrap();
         }
         if !kept_open_ids.is_empty() {
-            crate::cycle_state::record_pending_kept_open_ids(
+            agent_doc_cycle_state_io::record_pending_kept_open_ids(
                 &doc,
                 &kept_open_ids
                     .iter()
@@ -1540,10 +1560,15 @@ mod tests {
             .unwrap();
         }
         if added {
-            crate::cycle_state::mark_pending_added(&doc).unwrap();
+            agent_doc_cycle_state_io::mark_pending_added(&doc).unwrap();
         }
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&current), Some(&current))
-            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&current),
+            Some(&current),
+        )
+        .unwrap();
         crate::capture::mark_committed(&doc).unwrap();
         doc
     }
@@ -1614,13 +1639,13 @@ mod tests {
         );
         fs::write(&doc, visible_lost_latest).unwrap();
         agent_doc_snapshot_io::save(&doc, visible_lost_latest, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(
+        agent_doc_cycle_state_io::start_preflight(
             &doc,
             Some(visible_lost_latest),
             Some(visible_lost_latest),
         )
         .unwrap();
-        crate::cycle_state::mark_committed(
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(visible_lost_latest),
@@ -1701,13 +1726,13 @@ mod tests {
             &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
-        crate::cycle_state::start_preflight(
+        agent_doc_cycle_state_io::start_preflight(
             &doc,
             Some(visible_disk_lost_latest),
             Some(visible_disk_lost_latest),
         )
         .unwrap();
-        crate::cycle_state::mark_committed(
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(visible_disk_lost_latest),
@@ -1745,8 +1770,9 @@ mod tests {
         let doc_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nHello\n";
         fs::write(&doc, doc_content).unwrap();
         agent_doc_snapshot_io::save(&doc, doc_content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(doc_content), Some(doc_content)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(doc_content), Some(doc_content))
+            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(doc_content),
@@ -1808,8 +1834,8 @@ mod tests {
                 .output()
                 .unwrap();
         }
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -1852,13 +1878,18 @@ mod tests {
     ];
     fn record_queue_clear_heads(doc: &Path) {
         let heads: Vec<String> = QUEUE_CLEAR_HEADS.iter().map(|s| s.to_string()).collect();
-        crate::cycle_state::record_active_queue_heads(doc, &heads).unwrap();
+        agent_doc_cycle_state_io::record_active_queue_heads(doc, &heads).unwrap();
     }
     fn capture_test_response_and_commit(doc: &Path, response: &str) {
         crate::capture::capture_response(doc, response).unwrap();
         let content = fs::read_to_string(doc).unwrap();
-        crate::cycle_state::mark_committed(doc, "commit_success", Some(&content), Some(&content))
-            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            doc,
+            "commit_success",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
         crate::capture::mark_committed(doc).unwrap();
     }
     // `#manual-queue-head-loss` — a fixture mirroring the sampleorders repro:
@@ -2328,9 +2359,14 @@ Body\n\
         );
         fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(current),
+            Some(current),
+        )
+        .unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -2387,8 +2423,8 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -2434,9 +2470,14 @@ Body\n\
         );
         fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(current),
+            Some(current),
+        )
+        .unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -2625,11 +2666,14 @@ Body\n\
         .to_string();
         fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
-        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
-        crate::cycle_state::record_active_queue_heads(&doc, &["do [#eqrecovery]".to_string()])
-            .unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
+        agent_doc_cycle_state_io::record_active_queue_heads(
+            &doc,
+            &["do [#eqrecovery]".to_string()],
+        )
+        .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_already_current",
             Some(&current),
@@ -2660,7 +2704,7 @@ Body\n\
         let doc = make_project(tmp.path());
         let current = fs::read_to_string(&doc).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -2695,7 +2739,8 @@ Body\n\
             "<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["alreadydone".to_string()])
+            .unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -2734,7 +2779,8 @@ Body\n\
             "<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["alreadydone".to_string()])
+            .unwrap();
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
@@ -2762,7 +2808,8 @@ Body\n\
             "<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["alreadydone".to_string()])
+            .unwrap();
 
         // Without a live listener the clean-session head is drainable → INTERRUPT.
         match inspect(&doc).unwrap() {
@@ -2830,7 +2877,8 @@ Body\n\
             "<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["alreadydone".to_string()])
+            .unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -2866,9 +2914,10 @@ Body\n\
             "<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_active_queue_heads(&doc, &["do [#lostresp]".to_string()])
+        agent_doc_cycle_state_io::record_active_queue_heads(&doc, &["do [#lostresp]".to_string()])
             .unwrap();
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["lostresp".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["lostresp".to_string()])
+            .unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -2906,9 +2955,10 @@ Body\n\
             "<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_active_queue_heads(&doc, &["do [#answered]".to_string()])
+        agent_doc_cycle_state_io::record_active_queue_heads(&doc, &["do [#answered]".to_string()])
             .unwrap();
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["answered".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["answered".to_string()])
+            .unwrap();
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
@@ -2935,7 +2985,8 @@ Body\n\
             "<!-- /agent:backlog -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["normaldone".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["normaldone".to_string()])
+            .unwrap();
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
@@ -2964,7 +3015,8 @@ Body\n\
             "<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["alreadydone".to_string()])
+            .unwrap();
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
@@ -3147,7 +3199,7 @@ Body\n\
     fn session_check_open_cycle_state_exits_one() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
-        crate::cycle_state::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("cycle started but no write/commit followed"));
@@ -3159,7 +3211,7 @@ Body\n\
     fn session_check_open_cycle_surfaces_ipc_proof_diagnostic() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
-        crate::cycle_state::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         crate::ops_log::log_op(
             &doc,
             &format!(
@@ -3181,9 +3233,10 @@ Body\n\
     fn session_check_committed_cycle_state_exits_zero() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
-        crate::cycle_state::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit", Some("body"), Some("body")).unwrap();
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        crate::pipeline_frontmatter::mark_committed(&doc, "commit", Some("body"), Some("body"))
+            .unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert!(!state.is_open());
         assert_eq!(state.phase.as_str(), "committed");
     }
@@ -3370,8 +3423,8 @@ Body\n\
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -3411,8 +3464,8 @@ Body\n\
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -3462,8 +3515,8 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -3528,8 +3581,8 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -3581,8 +3634,8 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -3635,8 +3688,8 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -3707,8 +3760,8 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -3884,8 +3937,8 @@ Body\n\
             .unwrap();
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
-        crate::cycle_state::mark_write_applied(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
             Some(snapshot),
@@ -3903,7 +3956,7 @@ Body\n\
             other => panic!("expected repaired ok status, got {other:?}"),
         }
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "session_check_commit_boundary_recovered");
         let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
@@ -3963,7 +4016,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, manual_patchback).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -3983,7 +4036,7 @@ Body\n\
             other => panic!("expected interrupted status, got {other:?}"),
         }
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
     }
     #[test]
@@ -4074,7 +4127,7 @@ Body\n\
             other => panic!("expected repaired ok status, got {other:?}"),
         }
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "session_check_commit_boundary_recovered");
     }
@@ -4150,8 +4203,9 @@ Body\n\
             .args(["commit", "-m", "manual repair", "--no-verify"])
             .output()
             .unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(stale_snapshot), Some(historical)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(stale_snapshot), Some(historical))
+            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(historical),
@@ -4268,8 +4322,9 @@ Body\n\
             .unwrap();
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(head)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(head), Some(head)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(head)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(head), Some(head))
+            .unwrap();
 
         let current = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
@@ -4384,8 +4439,8 @@ Body\n\
             .unwrap();
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "repair_preflight_committed_historical",
             Some(snapshot),
@@ -4485,8 +4540,9 @@ Body\n\
             .unwrap();
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(head)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(head), Some(head)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(head)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(head), Some(head))
+            .unwrap();
 
         let current = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
@@ -4694,7 +4750,7 @@ Body\n\
             "### Re: code review — gpt-5\n\n1. High: Queue closeout can drift.\n2. Medium: Snapshot repair is too permissive.\n",
             false,
         );
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
 
         let report = inspect_with_warnings(&doc).unwrap();
         match report.status {
@@ -4713,7 +4769,7 @@ Body\n\
             "### Re: code review — gpt-5\n\nNo actionable follow-up items remained after this pass.\n",
             false,
         );
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
 
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
@@ -4733,7 +4789,7 @@ Body\n\
             &target,
             "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#lvak] Routed-cycle ack follow-up\n- [ ] [#old1] Existing item\n",
         );
-        let requirement = crate::cycle_state::BacklogTargetRequirement {
+        let requirement = agent_doc_cycle_state_io::BacklogTargetRequirement {
             path: std::fs::canonicalize(&target)
                 .unwrap()
                 .display()
@@ -4743,9 +4799,9 @@ Body\n\
             baseline_item_ids: vec!["old1".to_string()],
         };
 
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
-        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
-        crate::cycle_state::record_required_explicit_backlog_item_count(&doc, 4).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+        agent_doc_cycle_state_io::record_required_explicit_backlog_item_count(&doc, 4).unwrap();
 
         let report = inspect_with_warnings(&doc).unwrap();
         match report.status {
@@ -4767,7 +4823,7 @@ Body\n\
         );
         let target = tmp.path().join("bugs.md");
         write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
-        let requirement = crate::cycle_state::BacklogTargetRequirement {
+        let requirement = agent_doc_cycle_state_io::BacklogTargetRequirement {
             path: std::fs::canonicalize(&target)
                 .unwrap()
                 .display()
@@ -4781,8 +4837,8 @@ Body\n\
             "- [ ] [#zpc0] Existing transfer that landed\n- [ ] [#old1] Existing item\n",
         );
 
-        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
-        crate::cycle_state::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true).unwrap();
+        agent_doc_cycle_state_io::record_backlog_target_requirements(&doc, &[requirement]).unwrap();
 
         let report = inspect_with_warnings(&doc).unwrap();
         match report.status {
@@ -4809,7 +4865,7 @@ Body\n\
         std::fs::create_dir_all(plan.parent().unwrap()).unwrap();
         std::fs::write(&plan, "# Plan\n").unwrap();
 
-        crate::cycle_state::record_required_plan_reference_count(&doc, 2).unwrap();
+        agent_doc_cycle_state_io::record_required_plan_reference_count(&doc, 2).unwrap();
 
         let report = inspect_with_warnings(&doc).unwrap();
         match report.status {
@@ -4936,7 +4992,7 @@ Body\n\
             Some("- [ ] [#fvtg] Release validation follow-up\n"),
             &[],
         );
-        crate::cycle_state::record_pending_kept_open_ids(&doc, &["fvtg".to_string()])
+        agent_doc_cycle_state_io::record_pending_kept_open_ids(&doc, &["fvtg".to_string()])
             .unwrap()
             .unwrap();
 
@@ -4955,7 +5011,7 @@ Body\n\
             Some("- [/] [#qew8] Await rollout verification\n"),
             &[],
         );
-        crate::cycle_state::record_pending_kept_open_ids(&doc, &["#QEW8".to_string()])
+        agent_doc_cycle_state_io::record_pending_kept_open_ids(&doc, &["#QEW8".to_string()])
             .unwrap()
             .unwrap();
 
@@ -5027,7 +5083,7 @@ Body\n\
             ),
         )
         .unwrap();
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["done1".to_string()])
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["done1".to_string()])
             .unwrap()
             .unwrap();
 
@@ -5136,8 +5192,8 @@ Body\n\
             Some("jetbrains-old"),
         )
         .unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::record_editor_convergence_required(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_editor_convergence_required(
             &doc,
             "try_editor_converge",
             "no_ack",
@@ -5897,8 +5953,9 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
 
         // Mark cycle as committed (simulating a bug where cycle_state lied)
-        crate::cycle_state::start_preflight(&doc, Some(old_content), Some(old_content)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(old_content), Some(old_content))
+            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(snapshot_content),
@@ -5970,8 +6027,9 @@ Body\n\
         let new_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: test\nresponse\n";
         fs::write(&doc, new_content).unwrap();
         agent_doc_snapshot_io::save(&doc, new_content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(old_content), Some(old_content)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(old_content), Some(old_content))
+            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(new_content),
@@ -6034,8 +6092,8 @@ Body\n\
             .args(["commit", "-m", "committed response", "--no-verify"])
             .output()
             .unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -6116,8 +6174,8 @@ Body\n\
 
         // Run opened a preflight cycle, then the recursive guard fired before any
         // response capture and abandoned it.
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_abandoned(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_abandoned(
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(committed),
@@ -6184,8 +6242,8 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_abandoned(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_abandoned(
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(committed),
@@ -6261,8 +6319,8 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_abandoned(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_abandoned(
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(committed),
@@ -6323,8 +6381,8 @@ Body\n\
             .args(["commit", "-m", "committed responses", "--no-verify"])
             .output()
             .unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -6408,8 +6466,8 @@ Body\n\
                 .output()
                 .unwrap();
         }
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -6417,7 +6475,8 @@ Body\n\
         )
         .unwrap();
         // Adoption-time evidence: the user's "go" was dropped into content_ours.
-        crate::cycle_state::record_dropped_exchange_prompts(&doc, &["go".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_dropped_exchange_prompts(&doc, &["go".to_string()])
+            .unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -6476,22 +6535,23 @@ Body\n\
                 .output()
                 .unwrap();
         }
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
             Some(committed),
         )
         .unwrap();
-        crate::cycle_state::record_dropped_exchange_prompts(&doc, &["go".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_dropped_exchange_prompts(&doc, &["go".to_string()])
+            .unwrap();
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped prompt is present in HEAD"
         );
         assert!(
-            crate::cycle_state::load(&doc)
+            agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .expect("state")
                 .dropped_exchange_prompts
@@ -6510,8 +6570,11 @@ Body\n\
             "\n<!-- agent:queue auto -->\n- do [#existing]\n<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#gscaccess]".to_string()])
-            .unwrap();
+        agent_doc_cycle_state_io::record_dropped_queue_prompts(
+            &doc,
+            &["do [#gscaccess]".to_string()],
+        )
+        .unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -6538,15 +6601,18 @@ Body\n\
             "\n<!-- agent:queue auto -->\n- do [#gscaccess]\n- do [#existing]\n<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#gscaccess]".to_string()])
-            .unwrap();
+        agent_doc_cycle_state_io::record_dropped_queue_prompts(
+            &doc,
+            &["do [#gscaccess]".to_string()],
+        )
+        .unwrap();
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped queue edit is preserved in HEAD"
         );
         assert!(
-            crate::cycle_state::load(&doc)
+            agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .expect("state")
                 .dropped_queue_prompts
@@ -6572,7 +6638,7 @@ Body\n\
             "\n<!-- agent:queue auto -->\n- ~~do [#qpauseux]~~\n- do [#existing]\n<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_dropped_queue_prompts(&doc, &["[#qpauseux]".to_string()])
+        agent_doc_cycle_state_io::record_dropped_queue_prompts(&doc, &["[#qpauseux]".to_string()])
             .unwrap();
 
         assert!(
@@ -6580,7 +6646,7 @@ Body\n\
             "guard should self-clear when the dropped [#id] is preserved as a struck do [#id] head"
         );
         assert!(
-            crate::cycle_state::load(&doc)
+            agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .expect("state")
                 .dropped_queue_prompts
@@ -6600,9 +6666,13 @@ Body\n\
             "\n<!-- agent:queue auto -->\n- do [#existing]\n<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#gscaccess]".to_string()])
+        agent_doc_cycle_state_io::record_dropped_queue_prompts(
+            &doc,
+            &["do [#gscaccess]".to_string()],
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["gscaccess".to_string()])
             .unwrap();
-        crate::cycle_state::record_pending_done_ids(&doc, &["gscaccess".to_string()]).unwrap();
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
@@ -6623,7 +6693,7 @@ Body\n\
             "\n<!-- agent:queue auto -->\n- ~~:round_pushpin: [#gscaccess]~~\n- do [#existing]\n<!-- /agent:queue -->\n",
         );
         let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
-        crate::cycle_state::record_dropped_queue_prompts(
+        agent_doc_cycle_state_io::record_dropped_queue_prompts(
             &doc,
             &[":round_pushpin: [#gscaccess]".to_string()],
         )
@@ -6634,7 +6704,7 @@ Body\n\
             "guard should clear when the dropped queue head is struck in place"
         );
         assert!(
-            crate::cycle_state::load(&doc)
+            agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .expect("state")
                 .dropped_queue_prompts
@@ -6650,7 +6720,8 @@ Body\n\
         let committed = queue_clear_fixture("");
         let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
         record_queue_clear_heads(&doc);
-        crate::cycle_state::record_pending_done_ids(&doc, &["convqa-rerun".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["convqa-rerun".to_string()])
+            .unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -6688,9 +6759,10 @@ Body\n\
         ));
         let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
         let current = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         record_queue_clear_heads(&doc);
-        crate::cycle_state::record_pending_done_ids(&doc, &["convqa-rerun".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["convqa-rerun".to_string()])
+            .unwrap();
         capture_test_response_and_commit(
             &doc,
             "### Re: do #convqa-rerun — gpt-5\n\nRefreshed the conversion QA gate.",
@@ -6710,7 +6782,7 @@ Body\n\
         // preflight recorded only `do [#unrelated]` (no manual head). Simulate the
         // live pre-write working tree the user typed the manual head into.
         let live = manual_head_loss_fixture("- do [#unrelated]\n- do [#shipstationaudit]\n");
-        crate::cycle_state::observe_live_queue_heads(&doc, &live).unwrap();
+        agent_doc_cycle_state_io::observe_live_queue_heads(&doc, &live).unwrap();
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
@@ -6729,7 +6801,7 @@ Body\n\
         let committed = manual_head_loss_fixture("- do [#unrelated]\n- do [#shipstationaudit]\n");
         let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
         let live = committed.clone();
-        crate::cycle_state::observe_live_queue_heads(&doc, &live).unwrap();
+        agent_doc_cycle_state_io::observe_live_queue_heads(&doc, &live).unwrap();
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
@@ -6744,8 +6816,8 @@ Body\n\
         let committed = manual_head_loss_fixture("- do [#unrelated]\n");
         let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
         let live = manual_head_loss_fixture("- do [#unrelated]\n- do [#shipstationaudit]\n");
-        crate::cycle_state::observe_live_queue_heads(&doc, &live).unwrap();
-        crate::cycle_state::record_pending_done_ids(&doc, &["shipstationaudit".to_string()])
+        agent_doc_cycle_state_io::observe_live_queue_heads(&doc, &live).unwrap();
+        agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["shipstationaudit".to_string()])
             .unwrap();
 
         // #shipstationaudit is still in `agent:backlog` in the fixture, but the
@@ -6851,7 +6923,7 @@ Body\n\
         );
         fs::write(&doc, without_head).unwrap();
         agent_doc_snapshot_io::save(&doc, without_head, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::record_dropped_queue_prompts(&doc, &[head.to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_dropped_queue_prompts(&doc, &[head.to_string()]).unwrap();
 
         let rc = crate::graph::RunContext::new(doc.clone());
         rc.set_doc_content(without_head.to_string());
@@ -7434,9 +7506,14 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(content), Some(content))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
 
         let status = inspect(&doc).unwrap();
         match status {
@@ -7498,9 +7575,14 @@ Body\n\
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(content), Some(content))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
 
         let drifted = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
@@ -7576,8 +7658,8 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -7634,8 +7716,8 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -7703,8 +7785,8 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -7765,8 +7847,8 @@ Body\n\
             .unwrap();
 
         // Recursive guard abandoned the cycle with no captured response.
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_abandoned(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::pipeline_frontmatter::mark_abandoned(
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(committed),

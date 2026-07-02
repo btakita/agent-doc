@@ -1403,7 +1403,7 @@ fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
 }
 
 fn open_cycle_started_from_unchanged_file(file: &Path) -> Result<bool> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(false);
     };
     if !state.is_open() {
@@ -2008,7 +2008,7 @@ agent-doc {}\n",
         let doc = write_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let response = apply_stop(&StopInput {
@@ -2094,8 +2094,8 @@ agent-doc {}\n",
         );
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::cycle_state::mark_abandoned(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::pipeline_frontmatter::mark_abandoned(
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(&original),
@@ -2145,8 +2145,8 @@ agent-doc {}\n",
         let doc = write_manual_queue_doc(&dir, &["Remove the max character count cap"]);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::cycle_state::mark_abandoned(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::pipeline_frontmatter::mark_abandoned(
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(&original),
@@ -2380,7 +2380,7 @@ agent-doc {}\n",
         fs::write(&doc, original).unwrap();
         agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
-        crate::cycle_state::start_preflight(&doc, Some(original), Some(original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let payload = concat!(
@@ -2435,7 +2435,7 @@ agent-doc {}\n",
         fs::write(&doc, original).unwrap();
         agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
-        crate::cycle_state::start_preflight(&doc, Some(original), Some(original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let payload = concat!(
@@ -2495,7 +2495,7 @@ agent-doc {}\n",
         fs::write(&doc, original).unwrap();
         agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
-        crate::cycle_state::start_preflight(&doc, Some(original), Some(original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let payload = concat!(
@@ -2546,8 +2546,8 @@ agent-doc {}\n",
         let doc = write_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(&original),
@@ -2605,7 +2605,7 @@ agent-doc {}\n",
         let doc = write_nested_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
 
         apply_user_prompt_submit(&UserPromptSubmitInput {
             session_id: "codex-session".to_string(),
@@ -2657,8 +2657,8 @@ agent-doc {}\n",
         let doc = write_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(&original),
@@ -2730,7 +2730,7 @@ agent-doc {}\n",
         let dir = setup_project();
         let doc = write_doc(&dir);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let response = apply_stop(&StopInput {
@@ -2768,7 +2768,7 @@ agent-doc {}\n",
         let dir = setup_project();
         let doc = write_doc(&dir);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let transcript_dump = concat!(
@@ -2821,9 +2821,14 @@ agent-doc {}\n",
         let dir = setup_project();
         let doc = write_doc(&dir);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit", Some(&original), Some(&original))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let response = apply_stop(&StopInput {
@@ -2973,7 +2978,7 @@ agent-doc {}\n",
         let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let response = apply_stop(&StopInput {
@@ -3013,7 +3018,7 @@ agent-doc {}\n",
         write_codex_mcp_config(dir.path());
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let response = apply_stop(&StopInput {
@@ -3506,7 +3511,7 @@ agent-doc {}\n",
         let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let response = apply_stop(&StopInput {
@@ -3680,7 +3685,7 @@ agent-doc {}\n",
         let dir = setup_project();
         let doc = write_doc(&dir);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         let response = apply_stop(&StopInput {
@@ -3709,9 +3714,14 @@ agent-doc {}\n",
         let dir = setup_project();
         let doc = write_doc(&dir);
         let original = fs::read_to_string(&doc).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit", Some(&original), Some(&original))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
         fs::write(
             &doc,
             format!(

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn cycle_phase_label(file: &Path) -> Option<String> {
-    let state = crate::cycle_state::load(file).ok().flatten()?;
+    let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
     Some(state.phase.as_str().to_string())
 }
 

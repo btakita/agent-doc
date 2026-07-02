@@ -275,10 +275,10 @@ pub fn normalize_backlog_patch_response(
             ),
         );
         if saw_pending_add {
-            crate::cycle_state::mark_pending_mutations(file)?;
+            agent_doc_cycle_state_io::mark_pending_mutations(file)?;
         }
         if !pending_done_ids.is_empty() {
-            crate::cycle_state::record_pending_done_ids(file, &pending_done_ids)?;
+            agent_doc_cycle_state_io::record_pending_done_ids(file, &pending_done_ids)?;
         }
     }
 

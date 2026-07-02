@@ -8,7 +8,7 @@ pub(crate) fn check_no_response_active_queue_head(
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed) {
@@ -31,7 +31,7 @@ pub(crate) fn check_no_response_active_queue_head(
         agent_doc_document::tracked_work_projection::open_backlog_ids(&content)
             .into_iter()
             .collect();
-    let mut resolved_or_deferred = crate::cycle_state::resolved_pending_ids(file)?;
+    let mut resolved_or_deferred = agent_doc_cycle_state_io::resolved_pending_ids(file)?;
     resolved_or_deferred.extend(
         state
             .pending_gated_ids
@@ -97,7 +97,7 @@ pub(crate) fn check_reaped_queue_head_without_response(
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed) {

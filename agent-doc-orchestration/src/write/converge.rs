@@ -205,7 +205,7 @@ fn classify_stale_snapshot_visible_rebase(
 }
 
 fn active_capture_response_removed(file: &Path, snapshot_doc: &str, current_doc: &str) -> bool {
-    let Ok(Some(state)) = crate::cycle_state::load(file) else {
+    let Ok(Some(state)) = agent_doc_cycle_state_io::load(file) else {
         return false;
     };
     if !state.is_open() {
@@ -267,7 +267,7 @@ pub fn try_auto_recover_live_prompt_drift(
     snapshot: &str,
     file_content: &str,
 ) -> Result<Option<String>> {
-    let Some(cycle) = crate::cycle_state::load(file)? else {
+    let Some(cycle) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(None);
     };
     if !cycle.ipc_snapshot_adoption_blocked {
@@ -629,7 +629,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
     if let Some(frontmatter) = frontmatter {
         payload["frontmatter"] = serde_json::Value::String(frontmatter);
     }
-    if let Ok(Some(ref cycle)) = crate::cycle_state::load(file) {
+    if let Ok(Some(ref cycle)) = agent_doc_cycle_state_io::load(file) {
         payload["cycle_id"] = serde_json::Value::String(cycle.cycle_id.clone());
     }
 
@@ -825,7 +825,7 @@ fn refuse_unproven_editor_delivery(
         ),
     );
     let detail = format!("editor_endpoint={editor_endpoint}");
-    if let Err(err) = crate::cycle_state::record_editor_convergence_required(
+    if let Err(err) = agent_doc_cycle_state_io::record_editor_convergence_required(
         file,
         source,
         reason,
@@ -3090,8 +3090,8 @@ mod core_tests {
         // Preflight observed the historical response. The operator deleted it
         // before auto-recovery ran, so recovery must not resurrect it while
         // trying to restore the new response.
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&preflight)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&preflight)).unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &current).unwrap();
         assert!(
@@ -3122,8 +3122,9 @@ mod core_tests {
         );
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
+            .unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented)
             .unwrap()
@@ -3152,8 +3153,9 @@ mod core_tests {
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         // The drift guard fired this cycle and adopted content_ours.
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
+            .unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert_eq!(
@@ -3184,8 +3186,9 @@ mod core_tests {
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
+            .unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let _listener =
             crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), snapshot.clone());
@@ -3242,8 +3245,9 @@ mod core_tests {
         .expect("partial exchange text should be preserved in the target");
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
+            .unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let _listener = crate::test_support::start_live_prompt_drift_ack_listener(
             dir.path(),
@@ -3284,8 +3288,9 @@ mod core_tests {
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
+            .unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
@@ -3329,7 +3334,8 @@ mod core_tests {
         agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
         // A cycle exists but the drift guard never fired (flag stays false) →
         // not the wedge we own.
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
+            .unwrap();
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert!(
@@ -3352,12 +3358,16 @@ mod core_tests {
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
+            .unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
         // A genuine dropped user prompt was recorded this cycle → session-check
         // owns the fail-closed; auto-recovery must NOT paper over it.
-        crate::cycle_state::record_dropped_exchange_prompts(&doc, &["do #dropped".to_string()])
-            .unwrap();
+        agent_doc_cycle_state_io::record_dropped_exchange_prompts(
+            &doc,
+            &["do #dropped".to_string()],
+        )
+        .unwrap();
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert!(
@@ -3400,10 +3410,12 @@ mod core_tests {
             crate::test_support::drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
+            .unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
         // The drift heuristic recorded the consumed item as a dropped queue prompt.
-        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#fix]".to_string()]).unwrap();
+        agent_doc_cycle_state_io::record_dropped_queue_prompts(&doc, &["do [#fix]".to_string()])
+            .unwrap();
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert!(
@@ -3629,7 +3641,7 @@ mod core_tests {
         );
         fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
         crate::capture::capture_response(&doc, &response_patch).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
 

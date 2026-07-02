@@ -146,7 +146,7 @@ fn merge_live_session_check(
 }
 
 fn read_cycle_state(file: &Path, warnings: &mut Vec<String>) -> CycleStateDoctorFacts {
-    match crate::cycle_state::load(file) {
+    match agent_doc_cycle_state_io::load(file) {
         Ok(Some(state)) => {
             let open = state.is_open();
             CycleStateDoctorFacts {

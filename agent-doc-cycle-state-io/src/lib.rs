@@ -1101,74 +1101,7 @@ pub fn mark_committed(
     }
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
-    clear_pipeline_frontmatter(file);
     Ok(state)
-}
-
-/// #22a8 (Phase 5b write-side): mirror the live cycle phase into the session
-/// document's `agent_doc_pipeline:` frontmatter block so any later invocation or
-/// editor can read where the pipeline is without parsing the sidecar JSON.
-///
-/// Best-effort and non-fatal — a mirror failure is logged but never breaks the
-/// cycle. The write is byte-precise (only the managed block changes) and every
-/// doc-baseline comparison strips that block (diff layer + capture replay +
-/// session_check), so the mirror is invisible to change detection / replay /
-/// patchback guards.
-///
-/// Called from the write-path (`write.rs`) after the response is fully on disk —
-/// NOT from `mark_write_applied`, so a direct state-transition (e.g. repair unit
-/// tests) does not mutate the document, and the streaming write-back loop is
-/// never raced.
-pub(crate) fn mirror_pipeline_frontmatter(file: &Path, state: &CycleState) {
-    if let Err(e) = (|| -> Result<()> {
-        let content = std::fs::read_to_string(file)?;
-        let updated = agent_doc_frontmatter::frontmatter::splice_pipeline_block(
-            &content,
-            &state.to_pipeline(),
-        )?;
-        if updated != content {
-            // `#fcc0`: converge the frontmatter mirror through the editor IPC when a
-            // live JB listener is active so the post-response mirror write never
-            // raises a `File Cache Conflict`; plain disk write otherwise.
-            crate::write::converge_or_disk_write(file, &content, &updated, "pipeline_mirror")?;
-        }
-        Ok(())
-    })() {
-        crate::ops_log::log_op(
-            file,
-            &format!("pipeline_mirror_failed file={} err={}", file.display(), e),
-        );
-    }
-}
-
-/// #22a8 (Phase 5b write-side): clear the `agent_doc_pipeline:` block at a
-/// terminal phase — the default auto-delete-when-the-turn-ends lifecycle — so a
-/// drained cycle leaves no stale tracker behind. Best-effort and non-fatal; only
-/// writes when a block is actually present so the frontmatter is otherwise
-/// untouched.
-fn clear_pipeline_frontmatter(file: &Path) {
-    if let Err(e) = (|| -> Result<()> {
-        let content = std::fs::read_to_string(file)?;
-        if !content.contains("agent_doc_pipeline:") {
-            return Ok(());
-        }
-        let updated = agent_doc_frontmatter::frontmatter::splice_pipeline_block(
-            &content,
-            &Default::default(),
-        )?;
-        if updated != content {
-            // `#fcc0`: converge the frontmatter clear through the editor IPC when a
-            // live JB listener is active (no `File Cache Conflict`); plain disk
-            // write otherwise.
-            crate::write::converge_or_disk_write(file, &content, &updated, "pipeline_clear")?;
-        }
-        Ok(())
-    })() {
-        crate::ops_log::log_op(
-            file,
-            &format!("pipeline_clear_failed file={} err={}", file.display(), e),
-        );
-    }
 }
 
 pub fn mark_abandoned(
@@ -1198,7 +1131,6 @@ pub fn mark_abandoned(
     }
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
-    clear_pipeline_frontmatter(file);
     Ok(state)
 }
 

@@ -101,7 +101,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
     created_panes: &mut Vec<String>,
 ) -> Result<String> {
     let registered = lookup_dispatch_registration(file_path, session_id)?;
-    let cycle_baseline = crate::cycle_state::load(file)?;
+    let cycle_baseline = agent_doc_cycle_state_io::load(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     let authoritative_actor =
@@ -468,7 +468,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         "route::resolve_or_create_pane"
     );
     let registered = lookup_dispatch_registration(file_path, session_id)?;
-    let cycle_baseline = crate::cycle_state::load(file)?;
+    let cycle_baseline = agent_doc_cycle_state_io::load(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     if let Some(actor) = load_authoritative_actor_dispatch_target(
@@ -1102,7 +1102,7 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
     target_session: &str,
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
-    cycle_baseline: Option<&crate::cycle_state::CycleState>,
+    cycle_baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     prompt_bearing_marker: Option<&str>,
     allow_auto_fix_retry: bool,
     allow_busy_interrupt_retry: bool,
@@ -1311,7 +1311,7 @@ pub(crate) fn optimistic_busy_pane_dispatch(
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
-    cycle_baseline: Option<&crate::cycle_state::CycleState>,
+    cycle_baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     prompt_bearing_marker: Option<&str>,
     detail: &str,
 ) -> Result<String> {
@@ -1517,9 +1517,14 @@ mod tests {
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-child-extended-ack";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -1547,7 +1552,8 @@ mod tests {
         let doc_for_thread = doc.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1300));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current)).unwrap();
+            agent_doc_cycle_state_io::start_preflight(&doc_for_thread, None, Some(&current))
+                .unwrap();
         });
 
         let routed = resolve_or_create_pane(
@@ -1574,7 +1580,7 @@ mod tests {
             "route should dispatch the bare Codex reopen through supervisor IPC before waiting for the delayed live-child ack"
         );
 
-        let state = crate::cycle_state::load(&doc)
+        let state = agent_doc_cycle_state_io::load(&doc)
             .unwrap()
             .expect("cycle state should exist after delayed ack");
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
@@ -1600,9 +1606,14 @@ mod tests {
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register("route-live-child-skip", &pane, &file_path).unwrap();
         let injects = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -1685,9 +1696,14 @@ mod tests {
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-codex-fresh-retry";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -1764,8 +1780,12 @@ mod tests {
                 ])
                 .unwrap();
             std::thread::sleep(Duration::from_millis(1200));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
+            agent_doc_cycle_state_io::start_preflight(
+                &doc_for_thread,
+                None,
+                Some(&current_for_thread),
+            )
+            .unwrap();
         });
 
         let resolved = resolve_or_create_pane(
@@ -1820,9 +1840,14 @@ mod tests {
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
 
         let stale_agent =
             write_mock_registered_agent_doc_with_prefix(dir.path(), "agent-doc-stale", "STALE");
@@ -1917,8 +1942,12 @@ mod tests {
                 ])
                 .unwrap();
             std::thread::sleep(Duration::from_millis(1200));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
+            agent_doc_cycle_state_io::start_preflight(
+                &doc_for_thread,
+                None,
+                Some(&current_for_thread),
+            )
+            .unwrap();
         });
 
         let resolved = resolve_or_create_pane(
@@ -1981,9 +2010,14 @@ mod tests {
         );
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register("route-live-pane-busy", &pane, &file_path).unwrap();
 
@@ -2040,9 +2074,14 @@ mod tests {
         );
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register("route-dispatch-only-busy-pane", &pane, &file_path).unwrap();
 
@@ -2090,9 +2129,14 @@ mod tests {
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
 
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-dispatch-only-starting-pane";
@@ -2279,9 +2323,14 @@ mod tests {
         .unwrap();
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-pane-busy-interrupt-retry";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -2310,8 +2359,12 @@ mod tests {
         let current_for_thread = current.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1300));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
+            agent_doc_cycle_state_io::start_preflight(
+                &doc_for_thread,
+                None,
+                Some(&current_for_thread),
+            )
+            .unwrap();
         });
 
         let reused = resolve_or_create_pane_with_auto_fix_retry(
@@ -2376,9 +2429,14 @@ mod tests {
         );
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-pane-busy-ctrl-g-retry";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -2407,8 +2465,12 @@ mod tests {
         let current_for_thread = current.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1300));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
+            agent_doc_cycle_state_io::start_preflight(
+                &doc_for_thread,
+                None,
+                Some(&current_for_thread),
+            )
+            .unwrap();
         });
 
         let reused = resolve_or_create_pane_with_auto_fix_retry(
@@ -2475,9 +2537,14 @@ mod tests {
         );
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-opencode-busy-escape-retry";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -2506,8 +2573,12 @@ mod tests {
         let current_for_thread = current.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1300));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
+            agent_doc_cycle_state_io::start_preflight(
+                &doc_for_thread,
+                None,
+                Some(&current_for_thread),
+            )
+            .unwrap();
         });
 
         let reused = resolve_or_create_pane_with_auto_fix_retry(
@@ -2574,9 +2645,14 @@ mod tests {
         );
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-pane-busy-interrupt-blocked";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -2685,9 +2761,14 @@ mod tests {
         .unwrap();
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-pane-busy-auto-fix";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -2716,8 +2797,12 @@ mod tests {
         let current_for_thread = current.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1300));
-            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
-                .unwrap();
+            agent_doc_cycle_state_io::start_preflight(
+                &doc_for_thread,
+                None,
+                Some(&current_for_thread),
+            )
+            .unwrap();
         });
 
         let reused = resolve_or_create_pane(
@@ -2774,9 +2859,14 @@ mod tests {
         );
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register("route-live-pane-busy-no-drift", &pane, &file_path).unwrap();
 
@@ -2818,9 +2908,14 @@ mod tests {
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-same-cycle";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -2849,7 +2944,7 @@ mod tests {
         let snapshot_for_thread = snapshot.to_string();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_already_current",
                 Some(&snapshot_for_thread),
@@ -2909,9 +3004,14 @@ mod tests {
         let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-ok";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -2941,13 +3041,13 @@ mod tests {
         let current_for_thread = current.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
                 Some(&snapshot_for_thread),
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -3005,9 +3105,14 @@ mod tests {
         let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-live-content-edit-ok";
         sessions::register(session_id, &pane, &file_path).unwrap();
@@ -3037,13 +3142,13 @@ mod tests {
         let current_for_thread = current.to_string();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
                 Some(&snapshot_for_thread),
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -3123,13 +3228,13 @@ mod tests {
         let current_for_thread = "# Session\n❯ follow-up question\n".to_string();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
                 Some("# Session\n"),
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::cycle_state::mark_committed(
+            crate::pipeline_frontmatter::mark_committed(
                 &doc_for_thread,
                 "commit_success",
                 Some("# Session\n"),
@@ -3197,9 +3302,14 @@ mod tests {
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-authoritative-actor-dispatch-only-fallback";
         sessions::register(session_id, &actor_pane, &file_path).unwrap();
@@ -3280,9 +3390,14 @@ mod tests {
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-dispatch-only-waiting-input";
         sessions::register(session_id, &actor_pane, &file_path).unwrap();
@@ -3422,9 +3537,14 @@ mod tests {
         let current = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
-            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(current),
+            Some(current),
+        )
+        .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-stale-starting-ready-prompt";
         sessions::register(session_id, &actor_pane, &file_path).unwrap();
@@ -3571,7 +3691,7 @@ mod tests {
         let target_doc_for_thread = target_doc.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &target_doc_for_thread,
                 Some("# Target\n"),
                 Some("# Target\n"),
@@ -3663,7 +3783,7 @@ mod tests {
         let doc_for_thread = doc.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1300));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
                 Some("# Session\n"),
                 Some("# Session\n"),
@@ -3708,7 +3828,7 @@ mod tests {
             "route should still dispatch the trigger before observing the delayed ack: {content}"
         );
 
-        let state = crate::cycle_state::load(&doc)
+        let state = agent_doc_cycle_state_io::load(&doc)
             .unwrap()
             .expect("cycle state should exist after delayed fresh-start ack");
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
@@ -3751,7 +3871,7 @@ mod tests {
         let doc_for_thread = doc.clone();
         let ack_handle = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1500));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_thread,
                 Some("# Session\n"),
                 Some("# Session\n"),
@@ -3856,7 +3976,7 @@ mod tests {
         let doc_for_ack = doc.clone();
         let ack = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1500));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_ack,
                 Some("# Session\n"),
                 Some("# Session\n"),
@@ -3981,7 +4101,7 @@ mod tests {
         let doc_for_ack = doc.clone();
         let ack = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1500));
-            crate::cycle_state::start_preflight(
+            agent_doc_cycle_state_io::start_preflight(
                 &doc_for_ack,
                 Some("# Session\n"),
                 Some("# Session\n"),

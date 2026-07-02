@@ -400,7 +400,7 @@ fn strike_answered_free_text_heads_at_commit_seam(file: &Path) {
 /// (`#qheadstrike`). Returns `None` when there is no cycle state, no recorded
 /// `capture_id`, or no readable capture record.
 fn capture_response_body_for(file: &Path) -> Option<String> {
-    let state = crate::cycle_state::load(file).ok().flatten()?;
+    let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
     let capture_id = state.capture_id?;
     let record = crate::capture::load_by_id(file, &capture_id)
         .ok()
@@ -570,7 +570,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             false
         };
 
-    let cycle_state_for_commit = crate::cycle_state::load(file)?;
+    let cycle_state_for_commit = agent_doc_cycle_state_io::load(file)?;
     let ipc_snapshot_adoption_blocked = cycle_state_for_commit
         .as_ref()
         .is_some_and(|state| state.ipc_snapshot_adoption_blocked);
@@ -1129,7 +1129,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             );
             let snap = agent_doc_snapshot_io::load(file).ok().flatten();
             let file_content = std::fs::read_to_string(file).ok();
-            if let Err(e) = crate::cycle_state::mark_committed(
+            if let Err(e) = crate::pipeline_frontmatter::mark_committed(
                 file,
                 "commit_success",
                 snap.as_deref(),
@@ -2209,7 +2209,8 @@ fn finalize_already_committed_noop(
         file,
         &format!("commit_already_current file={} basis=head", file.display()),
     );
-    if let Err(e) = crate::cycle_state::mark_committed(file, event, snapshot_content, file_content)
+    if let Err(e) =
+        crate::pipeline_frontmatter::mark_committed(file, event, snapshot_content, file_content)
     {
         eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
     }
@@ -2222,7 +2223,7 @@ fn finalize_already_committed_noop(
 }
 
 fn cycle_is_terminal(file: &Path) -> bool {
-    crate::cycle_state::load(file)
+    agent_doc_cycle_state_io::load(file)
         .ok()
         .flatten()
         .is_some_and(|state| !state.is_open())
@@ -2575,8 +2576,8 @@ mod tests {
         );
         fs::write(&doc, compacted).unwrap();
         agent_doc_snapshot_io::save(&doc, compacted, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(compacted), Some(compacted)).unwrap();
-        crate::cycle_state::mark_write_applied(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(compacted), Some(compacted)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
             Some(compacted),
@@ -2733,8 +2734,8 @@ Duplicate replay should stay live.
         let doc = root.join("session.md");
         fs::write(&doc, live).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(initial), Some(initial)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(initial), Some(initial)).unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let did_commit = commit(&doc).expect("commit should stage content_ours snapshot");
 
@@ -4090,9 +4091,13 @@ Duplicate replay should stay live.
 
         let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
         fs::write(&doc, &with_user_edit).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(visible_snapshot), Some(&with_user_edit))
-            .unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(visible_snapshot),
+            Some(&with_user_edit),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &doc,
             "response_captured",
             Some(visible_snapshot),
@@ -4108,7 +4113,7 @@ Duplicate replay should stay live.
             "HEAD-current closeout should not create a duplicate git commit"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
 
@@ -4154,8 +4159,8 @@ Duplicate replay should stay live.
         commit_file(root, "session.md", committed, "add doc");
         fs::write(&doc, committed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &doc,
             "response_captured",
             Some(committed),
@@ -4180,7 +4185,7 @@ Duplicate replay should stay live.
             "error should identify the unresolved editor buffer:\n{err}"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             agent_doc_turn::CyclePhase::ResponseCaptured,
@@ -4298,7 +4303,7 @@ Duplicate replay should stay live.
             "HEAD-current synced snapshot should close without a duplicate commit"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap();
         assert!(
             state.is_none()
                 || state
@@ -4488,7 +4493,7 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         let response = concat!(
             "<!-- patch:exchange -->\n",
             "### Re: missed patchback — gpt-5\n\n",
@@ -4521,7 +4526,7 @@ Duplicate replay should stay live.
             "blocked no-op closeout must not advance HEAD"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
         assert_eq!(
@@ -4576,7 +4581,7 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         let response = concat!(
             "<!-- patch:exchange -->\n",
             "### Re: stale sidecar — gpt-5\n\n",
@@ -4924,8 +4929,9 @@ Duplicate replay should stay live.
             <!-- agent:boundary:live -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, working).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(stale_snapshot), Some(working)).unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(stale_snapshot), Some(working))
+            .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &doc,
             "response_captured",
             Some(stale_snapshot),
@@ -4985,7 +4991,7 @@ Duplicate replay should stay live.
             "working tree should keep the user's follow-up prompt uncommitted:\n{working_after}"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
 
@@ -5040,7 +5046,7 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        let committed_state = crate::cycle_state::mark_committed(
+        let committed_state = crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -5057,7 +5063,7 @@ Duplicate replay should stay live.
             commit(&doc).expect("terminal user-follow-up drift should remain a prompt handoff");
         assert!(!did_commit, "no new commit should be created");
 
-        let state_after = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state_after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state_after, committed_state,
             "terminal user follow-up drift must not rewrite committed cycle state"
@@ -5384,8 +5390,8 @@ Duplicate replay should stay live.
         commit_file(root, "session.md", head_doc, "agent-doc: prior response");
         let doc = root.join("session.md");
         agent_doc_snapshot_io::save(&doc, head_doc, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(head_doc), Some(head_doc)).unwrap();
-        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc)
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(head_doc), Some(head_doc)).unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc)
             .unwrap()
             .expect("cycle state should be present");
 
@@ -5749,8 +5755,9 @@ Duplicate replay should stay live.
         );
         fs::write(&doc, working).unwrap();
         agent_doc_snapshot_io::save(&doc, stale_snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(stale_snapshot), Some(working)).unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(stale_snapshot), Some(working))
+            .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &doc,
             "response_captured",
             Some(stale_snapshot),
@@ -5790,7 +5797,7 @@ Duplicate replay should stay live.
             "snapshot must stay on the pre-repair baseline when the historical patchback is rejected"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         assert_eq!(state.last_event, "response_captured");
 
@@ -6142,7 +6149,7 @@ Duplicate replay should stay live.
             "later local edits on top of HEAD must stay uncommitted"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
 
@@ -6228,8 +6235,8 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        crate::cycle_state::start_preflight(&doc, Some(cleaned), Some(cleaned)).unwrap();
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["gone1".to_string()])
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(cleaned), Some(cleaned)).unwrap();
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["gone1".to_string()])
             .unwrap()
             .unwrap();
 
@@ -6332,8 +6339,8 @@ Duplicate replay should stay live.
             <!-- /agent:exchange -->\n";
         fs::write(&doc, bypassed).unwrap();
         agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(committed), Some(bypassed)).unwrap();
-        crate::cycle_state::mark_response_captured(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(bypassed)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
             &doc,
             "response_captured",
             Some(committed),
@@ -6354,7 +6361,7 @@ Duplicate replay should stay live.
             "error should surface the offending heading:\n{message}"
         );
 
-        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         assert_eq!(state.last_event, "response_captured");
 
@@ -6450,8 +6457,8 @@ Duplicate replay should stay live.
             .unwrap();
 
         agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
-        crate::cycle_state::mark_write_applied(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
             Some(snapshot),

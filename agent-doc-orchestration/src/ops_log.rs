@@ -114,7 +114,7 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
     let session = cached_session_id(file, rc);
     let turn = match rc {
         Some(rc) => rc.cycle_state().map(|cs| cs.cycle_id.clone()),
-        None => crate::cycle_state::load(file)
+        None => agent_doc_cycle_state_io::load(file)
             .ok()
             .flatten()
             .map(|cs| cs.cycle_id),

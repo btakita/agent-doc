@@ -679,8 +679,7 @@ fn mcp_finalize_close_after_capture_recovers_on_next_preflight_once() {
     fs::write(&doc, &content).unwrap();
     init_git_repo(root, &doc);
     seed_snapshot(root, &doc, &content);
-    agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(&content), Some(&content))
-        .unwrap();
+    agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
 
     let response =
         "<!-- patch:exchange -->\n### Re: MCP finalize - gpt-5\nbody\n<!-- /patch:exchange -->\n";
@@ -5317,8 +5316,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let pending_capture =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/pending_capture.rs")).unwrap();
     let cycle_state =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/cycle_state.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
     for required in [
         "pub fn tracked_work_ids_from_component_body",
         "pub fn tracked_work_ids_for_target",
@@ -6626,9 +6624,14 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         "agent-doc-turn must stay a first-class workspace crate"
     );
 
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod cycle_state"),
+        "agent-doc-orchestration must not keep a cycle_state facade module"
+    );
     let cycle_state_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/cycle_state.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
     assert!(
         !cycle_state_source.contains("pub use agent_doc_turn::CyclePhase"),
         "cycle_state must not re-export CyclePhase from the focused turn crate"
@@ -6767,7 +6770,6 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         let relative = path.strip_prefix(manifest_dir).unwrap().display();
         for forbidden_snippet in [
             "cycle_state::CyclePhase",
-            "agent_doc_orchestration::cycle_state::CyclePhase",
             "use crate::cycle_state::CyclePhase",
             "fn cycle_phase_name(",
             "fn cycle_phase_label(phase",
@@ -11547,8 +11549,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     );
 
     let cycle_state_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/cycle_state.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
     let cycle_state_production = cycle_state_source
         .split("#[cfg(test)]")
         .next()
@@ -12260,7 +12261,7 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
         "agent-doc-markdown-ast must not keep semantic_merge as a compatibility module"
     );
     for relative in [
-        "agent-doc-orchestration/src/cycle_state.rs",
+        "agent-doc-cycle-state-io/src/lib.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
         "src/sim_world.rs",
         "src/sim_world/engine.rs",
@@ -20298,7 +20299,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-orchestration/src/graph.rs",
         "agent-doc-orchestration/src/realtime_model.rs",
         "agent-doc-orchestration/src/repair.rs",
-        "agent-doc-orchestration/src/cycle_state.rs",
+        "agent-doc-cycle-state-io/src/lib.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
     ] {
@@ -20315,7 +20316,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
     }
     for relative in [
         "agent-doc-orchestration/src/repair.rs",
-        "agent-doc-orchestration/src/cycle_state.rs",
+        "agent-doc-cycle-state-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -23058,8 +23059,7 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     }
 
     let cycle_state =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/cycle_state.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub fn active_queue_directive_heads(",
         "pub fn active_free_text_queue_heads(",

@@ -13,7 +13,7 @@ pub(crate) fn check_dropped_queue_prompt_guard(
     file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     if state.dropped_queue_prompts.is_empty() {
@@ -30,7 +30,7 @@ pub(crate) fn check_dropped_queue_prompt_guard(
         .as_deref()
         .map(String::as_str)
         .unwrap_or_default();
-    let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
+    let resolved_ids = agent_doc_cycle_state_io::resolved_pending_ids(file)?;
     let still_missing = agent_doc_turn::closeout_signal::still_missing_dropped_queue_prompts(
         &visible,
         head,
@@ -38,7 +38,7 @@ pub(crate) fn check_dropped_queue_prompt_guard(
         &resolved_ids,
     );
     if still_missing.is_empty() {
-        crate::cycle_state::clear_dropped_queue_prompts(file)?;
+        agent_doc_cycle_state_io::clear_dropped_queue_prompts(file)?;
         return Ok(GuardResult::None);
     }
     crate::ops_log::log_op(
@@ -108,7 +108,7 @@ pub(crate) fn check_dropped_exchange_prompt_guard(
     file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     if state.dropped_exchange_prompts.is_empty() {
@@ -125,7 +125,7 @@ pub(crate) fn check_dropped_exchange_prompt_guard(
     );
     if still_missing.is_empty() {
         // The dropped prompt reached the committed document — resolved.
-        crate::cycle_state::clear_dropped_exchange_prompts(file)?;
+        agent_doc_cycle_state_io::clear_dropped_exchange_prompts(file)?;
         return Ok(GuardResult::None);
     }
     crate::ops_log::log_op(
@@ -262,7 +262,7 @@ pub(crate) fn committed_exchange_has_response_body(file: &Path) -> Result<bool> 
 }
 
 pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResult> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
     let committed_exchange_has_body = committed_exchange_has_response_body(file)?;
@@ -350,20 +350,25 @@ mod tests {
         .to_string();
         fs::write(&doc, &content).unwrap();
         agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
-        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
-        crate::cycle_state::record_pending_done_ids(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
+        agent_doc_cycle_state_io::record_pending_done_ids(
             &doc,
             &["ipc1".to_string(), "39c5".to_string()],
         )
         .unwrap();
-        crate::cycle_state::record_active_queue_heads(
+        agent_doc_cycle_state_io::record_active_queue_heads(
             &doc,
             &["do [#ipc1]".to_string(), "do [#39c5]".to_string()],
         )
         .unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&content), Some(&content))
-            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
 
         assert!(matches!(
             check_committed_without_response_body_guard(&doc).unwrap(),
@@ -390,10 +395,11 @@ mod tests {
             "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
         fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
-        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
-        crate::cycle_state::record_pending_done_ids(&doc, &["nsga4verify".to_string()]).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
+        agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["nsga4verify".to_string()])
+            .unwrap();
+        crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_already_current",
             Some(&current),

@@ -32,6 +32,7 @@ dependencies = [
  "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-controller-io",
+ "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-diff",
  "agent-doc-diff-io",
@@ -247,6 +248,25 @@ dependencies = [
  "agent-doc-tmux-commands",
  "anyhow",
  "fs2",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-cycle-state-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-document",
+ "agent-doc-element-backlog",
+ "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-merge",
+ "agent-doc-queue",
+ "agent-doc-supervisor-io",
+ "agent-doc-turn",
+ "anyhow",
  "serde",
  "serde_json",
  "tempfile",
@@ -762,6 +782,7 @@ dependencies = [
  "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-controller-io",
+ "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-diff",
  "agent-doc-diff-io",

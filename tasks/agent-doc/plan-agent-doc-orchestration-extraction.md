@@ -353,6 +353,19 @@ seams:
   `agent-doc-controller::supervisor_replacement`; RPC now adapts raw controller
   request fields into focused mode/force facts and keeps the background worker,
   authorization, IPC, and cold-start effects.
+- Closeout latency log-message formatting moved from
+  `flow/closeout.rs` to `agent-doc-flow::closeout`; closeout orchestration keeps
+  timing, stderr, and ops-log effects while calling the focused formatter.
+- Missing-pane repair message formatting moved from `sync/pane_repair.rs` to
+  `agent-doc-tmux`; sync repair keeps cycle-state lookup, closeout-drift
+  detection, pane repair effects, and tmux sync decisions.
+- Codex Stop-hook committed-prompt-diff interruption parsing moved from
+  `codex_hook.rs` to `agent-doc-turn::response_text`; the hook keeps session
+  checks, file reads, MCP detection, and StopResponse construction.
+- Workflow autofix remediation action names and automatic-command whitelist
+  policy moved from orchestration autofix to
+  `agent-doc-workflow::invariants::RemediationAction`; orchestration keeps
+  doctor/proof-ledger IO, command execution, and report rendering.
 
 The no-shim policy remains active for these layer extractions: old helper names
 were removed or confined to static test strings, and boundary tests now assert
@@ -1120,6 +1133,17 @@ the owning crates expose the policy while orchestration does not re-own it.
   fallback, and force-flag resolution. Orchestration imports all three focused
   helpers directly and keeps only file, DB, route-outcome, RPC authorization,
   worker, IPC, and cold-start effects.
+- The next fan-out/local pass extracted another helper layer without
+  compatibility shims. `agent-doc-flow::closeout` now owns closeout latency
+  message formatting. `agent-doc-tmux` now owns missing-pane repair message
+  formatting. `agent-doc-turn::response_text` now owns Codex Stop-hook
+  committed-prompt-diff interruption parsing, prompt-target extraction from
+  interruption reasons, and first non-empty prompt-line selection.
+  `agent-doc-workflow::invariants::RemediationAction` now owns stable action
+  names and the v1 automatic-remediation command whitelist. Orchestration imports
+  each focused helper directly and keeps only timing/logging, closeout-drift
+  detection, Stop-hook/file/session effects, proof-ledger IO, command execution,
+  and report rendering.
 
 ### Earlier closure finding
 

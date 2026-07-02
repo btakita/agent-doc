@@ -182,8 +182,7 @@ Verified in the built output `BrianTakita.md`: the Skills line lists **Lean**, a
 No further action on this prompt. One note: the tailored **LSAC profile** (`law-school-admission-council.toml`) doesn't surface Lean — that role skews Azure / Copilot, so formal methods was left off the curated cut. Say the word if you want Lean pulled into the LSAC tailoring too.
 
 Queue: the `go` head `/goal Implement backlog item(s): #fcmm` points at a backlog item that isn't present (backlog is empty), so it's a dangling reference — nothing in-session-drainable (`queue_continuation_required: false`). Remove the head or tell me what `#fcmm` should be and I'll queue it properly.
-<!-- agent:boundary:22d3fd1a -->
-### Re: CopilotKit added + draft revised (natural voice) — opus-4.8 (HEAD)
+### Re: CopilotKit added + draft revised (natural voice) — opus-4.8
 
 Both new queue items done and committed (item 1 was already complete last cycle).
 
@@ -214,6 +213,7 @@ Best,
 Brian
 
 Note: I added CopilotKit to the master resume based on your note that the experience is with the confidential ("Stealth") client. If that attribution isn't right, tell me and I'll move or reword it. Want me to push the submodules now?
+<!-- agent:boundary:00ea5899 -->
 <!-- /agent:exchange -->
 
 ## Queue

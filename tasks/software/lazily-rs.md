@@ -151,7 +151,33 @@ This was completed and pushed last cycle — striking the head so the queue stop
 - Committed + pushed: `lazily-hub/lazily-py` `ed786cc` (`docs: refresh README …`).
 
 Nothing else changed this cycle. Queue stays operator-paused on the `release + publish` heads — not looping.
-<!-- agent:boundary:1c67a323 -->
+### Re: Upgrade lazily / complete integrating statechart — opus-4-8
+
+> **Queue prompt:** Upgrade lazily. Complete integrating statechart.
+
+Statechart was already **implemented, tagged, and conformance-wired in every binding** — the only unintegrated piece was that the superproject gitlinks lagged. Completed the integration by recording it in the superproject (no submodule pushes, no registry publishes, per your choice).
+
+**Assessment — statechart is done at the code level across the family:**
+
+| binding | version | statechart surface |
+|---|---|---|
+| lazily-rs | v0.20.0 | engine **moved to core** (`ChartBuilder`/`StateChart`/`ThreadSafe`/`Async`); `statechart` feature now a deprecated no-op, `serde_json` split behind `statechart-json` |
+| lazily-js | v1.1.0 | typed `ChartBuilder` |
+| lazily-kt | v0.9.0 | Kotlin `ChartBuilder` + `ThreadSafeStateChart` |
+| lazily-dart | v0.5.0 | statechart + `lazily-formal` conformance |
+| lazily-py | v0.14.0 | `statechart.py` + spec-conformance CI |
+| lazily-zig | v0.4.0 | full Harel/SCXML chart (gitlink already in sync) |
+| lazily-spec | v0.3.0 | `docs/state-charts.md` chapter + `schemas/statechart.json` + `conformance/statechart/` fixtures |
+
+Full Harel semantics are present (compound/parallel/history states, guards, actions, entry/exit, internal/external transitions), and **all six bindings consume the shared `lazily-spec/conformance/statechart` fixtures** — so a chart means the same thing in every language.
+
+**Landed:** superproject commit `84dfed577` bumps the 6 lagging gitlinks (`lazily-rs/py/js/kt/dart` + `lazily-spec`) to their tagged statechart releases. Staged diff was exactly 6 pure gitlink SHA bumps — no `.gitmodules`, no task files, no unrelated submodules. Each submodule was already clean and in sync with its own `origin/main`.
+
+**Not done (deliberately):**
+- **No superproject push** — the shared superproject has documented concurrent-session force-push collision risk, and other panes are active (acadian, EFS, agent-doc-bugs2). The commit is local; say the word to push.
+- **No registry publishes** — the `release + publish` queue heads stay operator-gated (interactive 2FA, irreversible).
+- **Stale agent-doc install** — preflight flags `~/.cargo/bin/agent-doc` + cdylib predate the latest local source edit. Unrelated to lazily; noting it, not acting mid-session.
+<!-- agent:boundary:3facb411 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -161,9 +187,9 @@ Nothing else changed this cycle. Queue stays operator-paused on the `release + p
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
 - ~~Update lazily-py README with the latest docs using the latest changes using lazily-spec + the lazily family.~~
-- 🚧 Update lazily-zig README with the latest docs using the latest changes using lazily-spec + the lazily family.
+- ~~Update lazily-zig README with the latest docs using the latest changes using lazily-spec + the lazily family.~~ — auto-struck: answered this cycle (#ftstrike)
 - Update lazily-js README with the latest docs using the latest changes using lazily-spec + the lazily family.
-- 🚧 Update lazily-py README with the latest docs using the latest changes using lazily-spec + the lazily family.
+- ~~Update lazily-py README with the latest docs using the latest changes using lazily-spec + the lazily family.~~
 - Update lazily-zig README with the latest docs using the latest changes using lazily-spec + the lazily family.
 <!-- /agent:queue -->
 

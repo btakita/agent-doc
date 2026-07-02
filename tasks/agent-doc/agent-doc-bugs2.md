@@ -71,7 +71,7 @@ The rest of this session's work, all committed:
 
 `make check` green (6827 tests). Installed 0.34.67 (binary + cdylib) — this very finalize proves the fresh cdylib cleared the drift. **`[operator-verify]`:** install the new plugin builds (JB 0.2.206 / VS Code 0.2.39) and confirm a live IDE force-reloads the cdylib on the next `make install` broadcast (no lazy-FFI wait, no wedge).
 
-### Re: Would a lazily-rs State Chart improve state management / observability / locatability? — opus-4-8 (HEAD)
+### Re: Would a lazily-rs State Chart improve state management / observability / locatability? — opus-4-8
 
 Yes — for the **per-process local** state, which is exactly where this doc's recurring bugs live. But it is not a fix for the cross-process/cross-host bugs, and it's worth being precise about the boundary.
 
@@ -94,7 +94,7 @@ These are three or four **orthogonal regions** — transport, editor-sync, close
 This is not greenfield: `#mergestatemachine3` / `#lazilystatesync` already routes JB+VSCode attach/detach/ownership through a merge-ownership state machine. The Harel chart is the natural upgrade of that flat FSM once you add the orthogonal transport/closeout regions.
 
 Recommendation: worth doing, scoped to local process state. Queued as `[recommended] #adstatechart` (PRD-first) so it doesn't auto-drain without your go.
-<!-- agent:boundary:187af0a0 -->
+<!-- agent:boundary:cf84cde5 -->
 <!-- /agent:exchange -->
 ## Queue
 

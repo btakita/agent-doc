@@ -79,7 +79,19 @@ Changes in `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`:
 I chose responsive-fit + wrap over full-screen — it handles any email length and keeps the dialog consistent with the other pipeline dialogs. Shipped: EFS `aab1c9c` (pushed), superproject gitlink `7a746bd75`. Not deployed (the `deploy` queue item is separate and needs your go).
 
 Note: the full EFS suite has 3 pre-existing failures unrelated to this change (`#multi-upload` accreditation multi-file, `#msgrt` PortalMessages WebSocket) — identical on the clean tree; this change adds none.
-<!-- agent:boundary:29aa8cee -->
+❯ Fix the test suite. #spec-test-commit-push-deploy
+
+### Re: Fix the test suite (#spec-test-commit-push-deploy) — opus-4-8
+
+Suite is green (**1376 pass, 0 fail**) and deployed. The 3 pre-existing failures were two different problems:
+
+- **portal_messages realtime — stale test.** The WebSocket subscription is already implemented (`use_admin_events_` on the portal realtime path + silent `reload_(true)` + new-message highlighting). The test asserted an outdated hardcoded `path: '...'`; updated it to match the real config-driven path (`config.realtime_endpoint ?? '/api/portal/messages/realtime/ws'`). No runtime change.
+- **accreditation multi-upload — questionnaire-only.** `accreditation.tsx` is attestations + e-signature with no evidence-upload UI or backend, so per your call it isn't a FileDropZone field: removed it from the `#multi-upload` `DROPZONE_FIELDS` list and dropped the grouped-upload assertions. (If accreditation evidence upload becomes a real requirement it's a feature build — UI + endpoint + R2 + admin review — not a test fix.)
+
+Shipped `#spec-test-commit-push-deploy`: EFS `eec3c4e` (pushed), superproject gitlink `d7e1d4d45`. **Deployed to production** — worker version `d2788b20`, live HTTP 200 at https://equityfundingsource.brian-takita.workers.dev. This deploy also shipped the earlier lender-modal email-fit fix (`aab1c9c`) that was pending.
+
+Persisted via force-disk (editor still closed).
+<!-- agent:boundary:73a41961 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,6 +111,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
+/goal Implement backlog item(s): #zhfn
 - ~~/goal Implement backlog item(s): #ccpz~~
 - https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4046fa5a-65d4-4292-bfa6-59b66376cf6c&deal_tab=interests -> Messages should have the interested lender conversations as separate tabs.
 - deploy

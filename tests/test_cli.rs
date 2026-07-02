@@ -10817,6 +10817,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct AuthoritativeRuntimeFacts",
         "pub fn authoritative_actor_dispatch_guard_reason(",
         "pub enum RoutedDispatchStartProof",
+        "pub fn busy_dispatch_start_outcome(",
         "pub struct CodexRoutedDispatchStartProofFacts",
         "pub enum DispatchStartProofDecision",
         "pub struct DispatchStartProofFacts",
@@ -11094,6 +11095,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
+            && route_source.contains("busy_dispatch_start_outcome")
             && route_source.contains("CodexRoutedDispatchStartProofFacts")
             && route_source.contains("classify_dispatch_start_proof")
             && route_source.contains("classify_codex_routed_dispatch_start_proof")
@@ -11184,6 +11186,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_can_continue_enter_resubmit(",
         "fn direct_pane_can_enter_existing_draft(",
         "fn direct_pane_should_await_dispatch_start_proof(",
+        "fn busy_dispatch_start_outcome(",
         "fn resubmit_result_label(",
         "fn route_submit_resubmit_proof_line(",
         "fn routed_trigger_payload(",
@@ -11207,6 +11210,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("DirectPaneResubmitProofFacts")
             && route_dispatch_source.contains("direct_pane_resubmit_proof_line(")
             && route_dispatch_source.contains("routed_dispatch_start_timeout_for_binary(")
+            && route_dispatch_source.contains("busy_dispatch_start_outcome(true, probe_proof)")
             && route_dispatch_source.contains("Some(harness.binary.as_str())")
             && route_dispatch_source.contains("cfg!(test)")
             && route_dispatch_source.contains("RoutedTriggerPayloadFacts")

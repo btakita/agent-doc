@@ -861,21 +861,6 @@ fn short_circuit_dispatch_start_when_pane_busy(
     Ok(outcome)
 }
 
-/// Pure decision for the busy dispatch-start short-circuit. When the pane is not
-/// mid-turn, returns `None` (caller runs the normal proof wait). When the pane
-/// is mid-turn, returns the short-probe proof if the active turn already proved
-/// to be our routed prompt, otherwise `AcceptedQueuedBehindActiveTurn` — the
-/// trigger is queued behind the active turn and dispatches when it finishes.
-fn busy_dispatch_start_outcome(
-    pane_busy: bool,
-    probe_proof: Option<RoutedDispatchStartProof>,
-) -> Option<RoutedDispatchStartProof> {
-    if !pane_busy {
-        return None;
-    }
-    Some(probe_proof.unwrap_or(RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn))
-}
-
 pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
     tmux: &Tmux,
     file: &Path,
@@ -1778,36 +1763,6 @@ mod tests {
     use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
-
-    #[test]
-    fn busy_dispatch_start_outcome_short_circuits_queued_when_busy_without_probe_proof() {
-        // #kjw0 / #jbrunautobug: pane mid-turn, short probe finds no proof →
-        // queue behind the active turn (fast) instead of the 21s proof-wait hang.
-        assert_eq!(
-            busy_dispatch_start_outcome(true, None),
-            Some(RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn)
-        );
-    }
-
-    #[test]
-    fn busy_dispatch_start_outcome_prefers_real_probe_proof_over_queued() {
-        // If the pane is busy BECAUSE our own routed prompt already started, the
-        // short probe proves it — don't discard that proof by mislabeling queued.
-        assert_eq!(
-            busy_dispatch_start_outcome(true, Some(RoutedDispatchStartProof::HookPromptMatched)),
-            Some(RoutedDispatchStartProof::HookPromptMatched)
-        );
-    }
-
-    #[test]
-    fn busy_dispatch_start_outcome_defers_to_normal_wait_when_idle() {
-        // Pane not mid-turn → no short-circuit; caller runs the normal proof wait.
-        assert_eq!(busy_dispatch_start_outcome(false, None), None);
-        assert_eq!(
-            busy_dispatch_start_outcome(false, Some(RoutedDispatchStartProof::HookStateAdvanced)),
-            None
-        );
-    }
 
     #[test]
     fn dispatch_start_busy_probe_timeout_is_much_smaller_than_full_budget() {

@@ -1968,6 +1968,20 @@ impl RoutedDispatchStartProof {
     }
 }
 
+/// Pure decision for the busy dispatch-start short-circuit. When the pane is not
+/// mid-turn, returns `None` so the caller runs the normal proof wait. When the
+/// pane is mid-turn, returns the short-probe proof if the active turn already
+/// proved to be the routed prompt, otherwise `AcceptedQueuedBehindActiveTurn`.
+pub fn busy_dispatch_start_outcome(
+    pane_busy: bool,
+    probe_proof: Option<RoutedDispatchStartProof>,
+) -> Option<RoutedDispatchStartProof> {
+    if !pane_busy {
+        return None;
+    }
+    Some(probe_proof.unwrap_or(RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CodexRoutedDispatchStartProofFacts<'a> {
     pub trigger: &'a str,
@@ -3115,6 +3129,35 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert_eq!(
             RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn.startup_miss_label(),
             "queued-behind-active-turn"
+        );
+    }
+
+    #[test]
+    fn busy_dispatch_start_outcome_short_circuits_queued_when_busy_without_probe_proof() {
+        // #kjw0 / #jbrunautobug: pane mid-turn, short probe finds no proof, so
+        // queue behind the active turn instead of waiting on dispatch-start proof.
+        assert_eq!(
+            busy_dispatch_start_outcome(true, None),
+            Some(RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn)
+        );
+    }
+
+    #[test]
+    fn busy_dispatch_start_outcome_prefers_real_probe_proof_over_queued() {
+        // If the pane is busy because the routed prompt already started, keep
+        // that proof instead of relabeling it as queued.
+        assert_eq!(
+            busy_dispatch_start_outcome(true, Some(RoutedDispatchStartProof::HookPromptMatched)),
+            Some(RoutedDispatchStartProof::HookPromptMatched)
+        );
+    }
+
+    #[test]
+    fn busy_dispatch_start_outcome_defers_to_normal_wait_when_idle() {
+        assert_eq!(busy_dispatch_start_outcome(false, None), None);
+        assert_eq!(
+            busy_dispatch_start_outcome(false, Some(RoutedDispatchStartProof::HookStateAdvanced)),
+            None
         );
     }
 

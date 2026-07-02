@@ -181,6 +181,7 @@ use agent_doc_controller::dispatch::{
     StartingTimeoutActorFacts, StartupMissRouteFacts, accepted_only_dispatch_start_log_message,
     accepted_only_dispatch_start_refusal_message, actor_blocked_by_starting_timeout,
     actor_dispatch_blocker_reason, actor_recovery_hint, authoritative_actor_ready_retry_budget,
+    busy_dispatch_start_outcome,
     busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
     busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,

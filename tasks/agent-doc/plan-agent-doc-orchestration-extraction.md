@@ -894,6 +894,13 @@ the owning crates expose the policy while orchestration does not re-own it.
   child-process launch effects while importing the focused `codex_launch`
   helpers directly; the old `agent_doc_orchestration::agent::*` network policy
   path was deleted instead of retained as a facade.
+- `agent-doc-turn-executor` now owns Claude base launch-argument policy:
+  default `-p --output-format json --permission-mode acceptEdits` args and the
+  structural prompt/JSON minimum for frontmatter/config overrides live next to
+  the existing Claude launch-argv helpers. Orchestration keeps process launch
+  and streaming effects while importing the focused `claude_launch` helpers
+  directly; the old local `agent::claude` base-args helpers were deleted rather
+  than kept as facades.
 - `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
   focus-only expansion policy: restoring remembered sibling panes, preserving
   duplicate-column layout state, returning restoration/expansion events for

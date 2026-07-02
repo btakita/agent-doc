@@ -39,17 +39,29 @@ done
 Compacted content:
 - Archived 3 response topic(s): next-steps to fix bugs (and "clear the review items"); wedge root cause + "should we retry until states match?"; do #falsetyping-guard
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): JB Run Agent Doc dispatch hang (#kjw0)
-<!-- agent:boundary:b8ac4063 -->
+
+### Re: #restartstderrbleed — restart stderr/stdout bleed into the agent pane — opus-4-8
+
+Diagnosed. The bleed and the `/usage`+split-pane symptom both trace to **auto-install child stdio inheriting the agent pane** during a supervisor/PCP restart.
+
+**Root cause.** The route-owned supervisor renders the agent TUI into its own **fd1 (stdout)**; only **fd2 (stderr)** is process-redirected to `.agent-doc/logs/supervisor-stderr.log` (`SupervisorStderrRedirect`, `start/run.rs`). When the supervisor spawns `make install` during a restart/recycle/auto-install (`run_auto_install_steps_once`, `project_controller/rpc.rs`), an inherited-stdio child sends `make`'s recipe echo and cargo stdout straight to **fd1 — into the live agent pane**. Those raw build bytes, read by tmux/Claude Code, are what produced your two observations: a stray control byte parsed as a tmux prefix → `%` split-window, and bled text ending in a newline getting submitted as `/usage`. It is byte-bleed interpreted as input, not a genuine command.
+
+**Fix (already in source + committed).** `auto_install_child_stdio` (`agent-doc-supervisor/src/auto_install_stdio.rs`) routes the child's stdout+stderr to a **dup of fd2** (the redirected log, never fd1) and **nulls stdin** so a build sub-process cannot consume forwarded keystrokes. Regression `auto_install_child_stdio_redirects_stdout_off_the_pane` (`rpc.rs:4586`) proves a probe child's stdout lands on the log target, not the pane.
+
+**Why you still saw it.** The running supervisor is a pre-fix build (preflight `stale_install`, driven by *unrelated* uncommitted submodule edits — agent/sync/write). The committed fix lands once the supervisor rebuilds at a clean idle boundary. I did **not** `make install` now: the submodule working tree carries those unrelated uncommitted edits that must not be built into an install.
+
+**Residual gap (filed `#restartbleednonroute`).** `auto_install_child_stdio_plan()` blindly dups **fd2**, which only equals the log when the redirect is active (`route_owned && is_tui_harness`, and `maybe_start` did not fall back to inactive on error). If the redirect is absent/failed, dup(fd2) is the pane again. Hardening (target the real supervisor-stderr.log fd) + an operator live re-proof are queued as follow-ups.
+<!-- agent:boundary:15aff8dc -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~:round_pushpin: do [#falsetyping-guard]~~
 - [#claimnewpane]
 - [#boundaryaccum1]
 - [#qactsync]
-- 🚧 [#ftimmediate]
-- :pushpin: do [#restartstderrbleed]
+- 🚧 :pushpin: do [#restartstderrbleed]
 Error: timed out waiting for project controller at /home/brian/work/btakita/agent-loop/.agent-doc/controller.sock`
 - I saw serious bleeding into Claude Code during a previous restart. Also, a split pane was opened with Claude Code `/usage` somehow called.
 - :pushpin: do [#jbcompactcommit]
@@ -70,10 +82,11 @@ Error: timed out waiting for project controller at /home/brian/work/btakita/agen
 - :pushpin: do [#skillharnessplugin]
 - :pushpin: do [#elementgraphprd]
 - :pushpin: do [#60ev]
+- [#ftimmediate]
 - do [#r4gq]
 - do [#af88]
 - do [#qeditrace]
-- do [#falsetyping-guard]
+- do [#restartbleednonroute]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -100,6 +113,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#restartbleednonroute] #agent-doc-bug Harden auto-install child stdio against fd2==pane: run_auto_install_steps_once (project_controller/rpc.rs) blindly dups fd2 via auto_install_child_stdio_plan(); when SupervisorStderrRedirect is inactive (non-route-owned TUI, or route-owned but maybe_start fell back to inactive on error) fd2 is the agent pane and make-install output still bleeds. Open the session project_root .agent-doc/logs/supervisor-stderr.log and pass its fd to auto_install_child_stdio_plan_to_fd(log_fd) so build output is off-pane regardless of route ownership; add a redirect-inactive regression.
+- [ ] [#gd88] [operator-verify] #restartstderrbleed live re-proof on a fixed binary: after the supervisor rebuilds onto a build containing auto_install_child_stdio, trigger a restart/auto-install idle boundary and confirm the agent pane shows NO make/cargo bleed, NO tmux split-window, and NO submitted /usage.
 - [ ] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).
 - [ ] [#af88] [focused-cycle] #agent-doc-bug IPC wedge hardening follow-ups from the 2026-07-01 audit (wedges C + A FIXED this cycle: supervisor IPC listener now spawns per-connection threads so a half-open client cannot freeze all supervisor dispatch; editor IPC send now has set_send_timeout). Remaining: (E) pty.rs stdin.lock() held across the blocking read — evaluate a raw-fd read that preserves the restart/quit-prompt stdin coexistence in start.rs; (B/D) editor IPC listener per-connection read_line has no timeout (thread/fd leak under a persistent half-open client) — add a bounded backstop; (F) connect_sync has no connect timeout (mitigated today by the 3s wait_for_controller deadline loop). Also decide the AGENTS.md 'No async' convention nuance for the server-scale roadmap.
 - [ ] [#claimnewpane] [focused-cycle] #agent-doc-feature Claim for Tmux Pane should open a new document in a fresh pane in the SAME tmux session (never replace the current pane or move the window to another session). Plan: tasks/agent-doc/plan-claim-new-pane-same-session.md
@@ -108,7 +123,6 @@ What are #next-steps to fix bugs?
 - [ ] 🚧 [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
 - [ ] [#qeditrace] [focused-cycle] #agent-doc-bug Pre-run queue edits partially reverted: when the operator adds multiple queue heads before a run (or JB Run Agent Doc) with no active turn, only the FIRST added head survives and the rest revert to the pre-edit queue. Distinct from the during-turn race - the preflight queue-maintenance reconcile drops all-but-first operator addition. Investigate preflight/maintenance.rs: queue_journal record + record_live_buffer (#qftloss mode-6), #mirrorall backlog-to-queue mirror, #rz3a freshly-added hold-out, #7r2s manual-add pin, #qdedupsync dedup - hypothesis is convergence keeps the first new head (pin/anchor match) but journals-without-replaying the rest. Repro 2026-07-01 reitrades.md; live dup heads in bugs2 (do #tmuxsynccrashlog x2, do #60ev x2). Add SimWorld coverage for multi-line pre-run operator-add survival + fail-closed recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
-- [ ] [#restartstderrbleed] #agent-doc-bug Diagnose binary-restart stderr bleed into the agent after supervisor/PCP restart; capture the stderr source and add regression/proof that restart diagnostics stay out of the agent prompt/UI. Related JB Run Agent Doc route failure remains tracked by #kjw0.
 - [ ] [#qftlossdelta] #agent-doc-bug focused invariant-loss follow-up from failed #qftlossproof live proof: `.agent-doc/logs/ops.log:4338964-4338997` shows ACK/live-buffer content at len 16676 hash `83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192`, then closeout committed len 16669 hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`; `live_buffer_classify` suppressed the differing operator-capable buffer with `reason=write_provenance_newer_than_buffer` and no durable sidecar preserving the 16676-byte content was found. Fix the operator-wins merge/write-provenance path so concurrent operator text is preserved end-to-end or the write fails closed with a recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md

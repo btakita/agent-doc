@@ -18,6 +18,22 @@ pub const CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER: &str = "AGENT_DOC_WRITABLE_ROO
 pub const OPENCODE_CHILD_SSH_PROBE_MARKER: &str = "AGENT_DOC_OPENCODE_SSH_PROBE_OK";
 const CODEX_TEXT_FILE_BUSY_RETRIES: usize = 3;
 
+pub fn default_base_args() -> Vec<String> {
+    vec![
+        "exec".to_string(),
+        "--json".to_string(),
+        "-s".to_string(),
+        "workspace-write".to_string(),
+    ]
+}
+
+/// Structural minimum args required for non-interactive JSON communication.
+/// Approval and sandbox settings are intentionally excluded -- callers supply
+/// those from frontmatter or config.
+pub fn structural_base_args() -> Vec<String> {
+    vec!["exec".to_string(), "--json".to_string()]
+}
+
 pub fn is_codex_text_file_busy_launch_error(err: &std::io::Error) -> bool {
     #[cfg(unix)]
     {
@@ -1133,6 +1149,19 @@ mod tests {
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| item.to_string()).collect()
+    }
+
+    #[test]
+    fn default_base_args_use_codex_json_workspace_launch_policy() {
+        assert_eq!(
+            default_base_args(),
+            strings(&["exec", "--json", "-s", "workspace-write"])
+        );
+    }
+
+    #[test]
+    fn structural_base_args_include_exec_json_only() {
+        assert_eq!(structural_base_args(), strings(&["exec", "--json"]));
     }
 
     #[test]

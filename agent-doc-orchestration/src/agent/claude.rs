@@ -43,7 +43,7 @@ use std::sync::{Arc, Mutex};
 use super::streaming::StreamingAgent;
 use super::{Agent, AgentResponse};
 use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_stream_line};
-use agent_doc_turn_executor::claude_launch::claude_streaming_args;
+use agent_doc_turn_executor::claude_launch::{claude_json_args, claude_streaming_args};
 
 pub struct Claude {
     command: String,
@@ -99,30 +99,7 @@ impl Agent for Claude {
         fork: bool,
         model: Option<&str>,
     ) -> Result<AgentResponse> {
-        let mut args = self.base_args.clone();
-
-        if let Some(sid) = session_id {
-            args.push("--resume".to_string());
-            args.push(sid.to_string());
-        } else if fork {
-            args.push("--continue".to_string());
-            args.push("--fork-session".to_string());
-        }
-
-        if let Some(m) = model {
-            args.push("--model".to_string());
-            args.push(m.to_string());
-        }
-
-        args.push("--append-system-prompt".to_string());
-        args.push(
-            "You are responding inside an interactive session document. \
-             The user edits the document and submits diffs to you. \
-             Respond concisely in markdown. Classify prompt-bearing inline edits \
-             as prompt targets vs content edits, and address new ## User blocks \
-             as well as prompt-bearing changes inside prior responses."
-                .to_string(),
-        );
+        let args = claude_json_args(&self.base_args, session_id, fork, model);
 
         let mut cmd = Command::new(&self.command);
         cmd.args(&args).env_remove("CLAUDECODE");

@@ -1,3 +1,20 @@
+const CLAUDE_SESSION_DOCUMENT_PROMPT: &str = "You are responding inside an interactive session document. \
+The user edits the document and submits diffs to you. \
+Respond concisely in markdown. Classify prompt-bearing inline edits \
+as prompt targets vs content edits, and address new ## User blocks \
+as well as prompt-bearing changes inside prior responses.";
+
+pub fn claude_json_args(
+    base_args: &[String],
+    session_id: Option<&str>,
+    fork: bool,
+    model: Option<&str>,
+) -> Vec<String> {
+    let mut args = base_args.to_vec();
+    append_claude_session_args(&mut args, session_id, fork, model);
+    args
+}
+
 pub fn claude_streaming_args(
     base_args: &[String],
     session_id: Option<&str>,
@@ -20,6 +37,16 @@ pub fn claude_streaming_args(
     args.push("stream-json".to_string());
     args.push("--verbose".to_string());
 
+    append_claude_session_args(&mut args, session_id, fork, model);
+    args
+}
+
+fn append_claude_session_args(
+    args: &mut Vec<String>,
+    session_id: Option<&str>,
+    fork: bool,
+    model: Option<&str>,
+) {
     if let Some(sid) = session_id {
         args.push("--resume".to_string());
         args.push(sid.to_string());
@@ -34,15 +61,7 @@ pub fn claude_streaming_args(
     }
 
     args.push("--append-system-prompt".to_string());
-    args.push(
-        "You are responding inside an interactive session document. \
-The user edits the document and submits diffs to you. \
-Respond concisely in markdown. Classify prompt-bearing inline edits \
-as prompt targets vs content edits, and address new ## User blocks \
-as well as prompt-bearing changes inside prior responses."
-            .to_string(),
-    );
-    args
+    args.push(CLAUDE_SESSION_DOCUMENT_PROMPT.to_string());
 }
 
 #[cfg(test)]
@@ -72,6 +91,43 @@ mod tests {
         assert!(args.contains(&"--verbose".to_string()));
         assert!(args.windows(2).any(|w| w == ["--add-dir", "/tmp/gitdir"]));
         assert!(!args.windows(2).any(|w| w == ["--output-format", "json"]));
+    }
+
+    #[test]
+    fn json_args_preserve_base_output_format_and_add_session_prompt() {
+        let args = claude_json_args(
+            &[
+                "-p".into(),
+                "--output-format".into(),
+                "json".into(),
+                "--permission-mode".into(),
+                "acceptEdits".into(),
+            ],
+            Some("session-123"),
+            true,
+            Some("opus"),
+        );
+
+        assert!(args.windows(2).any(|w| w == ["--output-format", "json"]));
+        assert!(args.windows(2).any(|w| w == ["--resume", "session-123"]));
+        assert!(!args.contains(&"--continue".to_string()));
+        assert!(!args.contains(&"--fork-session".to_string()));
+        assert!(args.windows(2).any(|w| w == ["--model", "opus"]));
+        assert!(
+            args.windows(2).any(|w| w[0] == "--append-system-prompt"
+                && w[1].contains("interactive session document"))
+        );
+    }
+
+    #[test]
+    fn json_args_fork_when_no_session_id() {
+        let args = claude_json_args(&["-p".into()], None, true, None);
+
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--continue", "--fork-session"])
+        );
+        assert!(!args.contains(&"--resume".to_string()));
     }
 
     #[test]

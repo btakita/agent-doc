@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-watch-io"
-version = "0.34.66"
+version = "0.34.67"
 edition = "2024"
 description = "Watch daemon process IO boundary for agent-doc"
 license = "MIT"

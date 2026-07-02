@@ -72,7 +72,7 @@ use agent_doc_turn_executor::codex_launch::{
     classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
     classify_child_writable_root_probe_failure, codex_child_network_probe_prompt,
     codex_child_writable_roots_probe_prompt, codex_exec_args_for_probe, codex_resume_restart_args,
-    codex_text_file_busy_launch_retry_delay, codex_transport_403_429_diagnostic,
+    codex_text_file_busy_launch_retry_delay, codex_transport_403_429_diagnostic, default_base_args,
     filter_codex_stderr_noise, format_required_ssh_failure, looks_like_codex_transport_403_429,
     looks_like_local_browser_cdp_permission_denied, looks_like_opencode_usage_output,
     looks_like_ssh_alias_config_failure, looks_like_ssh_auth_failure, looks_like_ssh_dns_failure,
@@ -611,22 +611,6 @@ pub fn prove_managed_session_capabilities(
             .unwrap_or_default(),
         timings.event_fields()
     )))
-}
-
-pub fn default_base_args() -> Vec<String> {
-    vec![
-        "exec".to_string(),
-        "--json".to_string(),
-        "-s".to_string(),
-        "workspace-write".to_string(),
-    ]
-}
-
-/// Structural minimum args required for non-interactive JSON communication.
-/// Sandbox settings are intentionally excluded — callers supply those
-/// from frontmatter or config.
-pub fn structural_base_args() -> Vec<String> {
-    vec!["exec".to_string(), "--json".to_string()]
 }
 
 impl Codex {

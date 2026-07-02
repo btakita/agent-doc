@@ -3661,13 +3661,9 @@ scratch
         )
         .unwrap();
 
-        let outcome = guard_visible_write_reconcile_with_target(
-            &doc,
-            "test_replica_churn",
-            expected,
-            None,
-        )
-        .expect("replica churn must not fail closed");
+        let outcome =
+            guard_visible_write_reconcile_with_target(&doc, "test_replica_churn", expected, None)
+                .expect("replica churn must not fail closed");
         assert!(
             matches!(outcome, VisibleWriteReconcile::Clean),
             "disk matches the merge baseline, so replica churn reconciles Clean"
@@ -3770,13 +3766,9 @@ scratch
         )
         .unwrap();
 
-        let err = guard_visible_write_reconcile_with_target(
-            &doc,
-            "test_operator_edit",
-            expected,
-            None,
-        )
-        .expect_err("a genuine unsaved operator edit must fail closed");
+        let err =
+            guard_visible_write_reconcile_with_target(&doc, "test_operator_edit", expected, None)
+                .expect_err("a genuine unsaved operator edit must fail closed");
         assert!(
             err.to_string().contains("visible editor buffer"),
             "expected fail-closed live-buffer guard error: {err}"

@@ -320,6 +320,8 @@ mod tests {
     }
 
     fn add_submodule(repo: &Path, origin: &Path, target: &str, msg: &str) {
+        git(repo, &["config", "user.email", "test@test.com"]);
+        git(repo, &["config", "user.name", "Test"]);
         let url = format!("file://{}", origin.display());
         git(
             repo,

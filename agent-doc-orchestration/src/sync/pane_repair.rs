@@ -2,21 +2,6 @@
 
 use super::*;
 
-pub(crate) fn auto_start_candidate_files(col_args: &[String]) -> Vec<PathBuf> {
-    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    let mut out: Vec<PathBuf> = Vec::new();
-    for path in col_args
-        .iter()
-        .flat_map(|arg| arg.split(','))
-        .map(|s| PathBuf::from(s.trim()))
-    {
-        if seen.insert(path.clone()) {
-            out.push(path);
-        }
-    }
-    out
-}
-
 #[derive(Default)]
 pub(crate) struct SyncProofCache {
     pub(crate) actor_records:
@@ -133,20 +118,6 @@ pub(crate) fn open_cycle_protected_pane_state(
 ) -> Option<OpenCycleProtectedPaneState> {
     let file = registered_file_for_pane(tmux, pane_id)?;
     open_cycle_protected_file_state(&file)
-}
-
-pub(crate) fn projected_sync_pane_count(col_args: &[String]) -> usize {
-    col_args
-        .iter()
-        .flat_map(|arg| arg.split(','))
-        .map(str::trim)
-        .filter(|file| !file.is_empty())
-        .map(|file| {
-            let path = PathBuf::from(file);
-            path.canonicalize().unwrap_or(path)
-        })
-        .collect::<HashSet<_>>()
-        .len()
 }
 
 pub(crate) fn select_visible_focus_pane_if_present(
@@ -1133,41 +1104,6 @@ mod tests {
             ordered,
             vec![root_pane, child_pane],
             "focusing the child document must not invert cross-root pane ownership"
-        );
-    }
-    #[test]
-    fn auto_start_candidate_files_dedupes_repeated_documents_preserving_order() {
-        // A document requested in more than one column must yield a single
-        // auto-start candidate so the pre-sync pass cannot start two editor
-        // panes for it ("3 tmux panes with 2 editor panes" regression).
-        let col_args = vec![
-            "editor.md,notes.md".to_string(),
-            "editor.md".to_string(), // same document requested again in a second column
-            "other.md, notes.md".to_string(), // whitespace + repeat
-        ];
-        let files = auto_start_candidate_files(&col_args);
-        assert_eq!(
-            files,
-            vec![
-                PathBuf::from("editor.md"),
-                PathBuf::from("notes.md"),
-                PathBuf::from("other.md"),
-            ],
-            "duplicate document requests must collapse to one first-seen auto-start candidate"
-        );
-    }
-    #[test]
-    fn auto_start_candidate_files_keeps_distinct_documents() {
-        let col_args = vec!["a.md".to_string(), "b.md".to_string(), "c.md".to_string()];
-        let files = auto_start_candidate_files(&col_args);
-        assert_eq!(
-            files,
-            vec![
-                PathBuf::from("a.md"),
-                PathBuf::from("b.md"),
-                PathBuf::from("c.md"),
-            ],
-            "distinct documents must each remain an auto-start candidate"
         );
     }
     #[test]

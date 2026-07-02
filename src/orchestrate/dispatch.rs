@@ -3,7 +3,8 @@
 use super::*;
 use agent_doc_turn_executor::codex_launch::{
     CODEX_SANDBOX_NETWORK_DISABLED_ENV, apply_codex_network_access_env_overrides,
-    codex_network_status_from_overrides, resolve_codex_network_access,
+    codex_network_status_from_overrides, default_base_args as codex_default_base_args,
+    resolve_codex_network_access, structural_base_args as codex_structural_base_args,
 };
 
 fn parent_codex_network_disabled() -> bool {
@@ -72,7 +73,7 @@ pub(crate) fn build_effective_agent_config(
     if let Some(args_str) = resolved_args {
         let mut args = match agent_name {
             "claude" => agent::claude::structural_base_args(),
-            "codex" => agent::codex::structural_base_args(),
+            "codex" => codex_structural_base_args(),
             _ => Vec::new(),
         };
         args.extend(args_str.split_whitespace().map(String::from));
@@ -149,7 +150,7 @@ pub(crate) fn run_ordered_task_step(
         apply_codex_network_access_env_overrides(&mut launch_env, codex_network_access);
         let sandbox_args = agent_config
             .map(|cfg| cfg.args.clone())
-            .unwrap_or_else(agent::codex::default_base_args);
+            .unwrap_or_else(codex_default_base_args);
         let status = codex_network_status_from_overrides(
             &sandbox_args,
             codex_network_access,

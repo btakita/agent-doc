@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-boundary-io",
  "agent-doc-callback-io",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-boundary-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element-boundary",
  "agent-doc-fs",
@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-callback-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-fs",
  "agent-doc-hash",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-config"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-model-tier",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-controller"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-fs",
@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-debounce"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-hash",
  "agent-doc-log-time",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-diff"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
@@ -189,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-document"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-element",
@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-document-realtime"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-document",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-element"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "anyhow",
  "pulldown-cmark",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-element-backlog"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-frontmatter",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-element-boundary"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "anyhow",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-element-done"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-element-exchange"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-element",
@@ -282,14 +282,14 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-element-icebox"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
 ]
 
 [[package]]
 name = "agent-doc-element-queue"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "lazily 0.13.1",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-element-registry"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
@@ -315,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-element-review"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
@@ -325,28 +325,28 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-element-signals"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
 ]
 
 [[package]]
 name = "agent-doc-element-status"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
 ]
 
 [[package]]
 name = "agent-doc-element-unknown"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
 ]
 
 [[package]]
 name = "agent-doc-ffi"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-frontmatter",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-flow"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "serde",
  "serde_json",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-frontmatter"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-model-tier",
  "anyhow",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-frontmatter-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-fs",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-fs"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-hash",
  "anyhow",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-git"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-document",
@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-git-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-git",
  "agent-doc-hash",
@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-harness"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-config",
  "agent-doc-frontmatter",
@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-hash"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "hex",
  "sha2 0.11.0",
@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-ipc-protocol"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-hash",
  "agent-doc-markdown-ast",
@@ -461,15 +461,15 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-lease"
-version = "0.34.66"
+version = "0.34.67"
 
 [[package]]
 name = "agent-doc-log-time"
-version = "0.34.66"
+version = "0.34.67"
 
 [[package]]
 name = "agent-doc-markdown-ast"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "serde_json",
  "tree-sitter",
@@ -479,7 +479,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-memory"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-hash",
@@ -489,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-merge"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-queue",
@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-model-tier"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-markdown-ast",
  "anyhow",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-orchestration"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-callback-io",
  "agent-doc-config",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-owner-pane-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-fs",
  "agent-doc-turn",
@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-plugin-owner"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-lease",
@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-project-config-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-fs",
@@ -653,7 +653,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-prompt-cache"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "hex",
  "serde",
@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-prompt-cache-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-prompt-cache",
  "anyhow",
@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-prompt-context"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-element",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-prompt-contract"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-frontmatter",
@@ -698,14 +698,14 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-prompt-lines"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element-backlog",
 ]
 
 [[package]]
 name = "agent-doc-queue"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-document",
@@ -727,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-queue-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-fs",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-response-toc"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "anyhow",
@@ -751,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-response-toc-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-response-toc",
  "agent-doc-sqlite",
@@ -763,14 +763,14 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-secret-redact"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "agent-doc-session-accretion"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-log-time",
@@ -779,7 +779,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-sqlite"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-topic",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-state-backbone"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-turn",
  "lazily 0.13.1",
@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-state-wire"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-state-backbone",
  "agent-doc-turn",
@@ -814,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-supervisor"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-element",
@@ -833,7 +833,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-supervisor-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-config",
  "agent-doc-frontmatter",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-supervisor-process"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-supervisor",
  "alacritty_terminal",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-sync"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-fs",
  "anyhow",
@@ -874,7 +874,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-syntax"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "serde",
@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-template"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-document",
  "agent-doc-element",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-tmux"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "lazily 0.13.1",
  "serde",
@@ -903,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-tmux-commands"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "hex",
  "serde",
@@ -912,18 +912,18 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-tmux-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-tmux-commands",
 ]
 
 [[package]]
 name = "agent-doc-topic"
-version = "0.34.66"
+version = "0.34.67"
 
 [[package]]
 name = "agent-doc-turn"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-document",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-turn-executor"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-hash",
@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-turn-executor-tmux"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-tmux",
  "agent-doc-turn-executor",
@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-turn-scope-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-fs",
  "agent-doc-turn",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-turn-status-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-fs",
  "agent-doc-turn",
@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-watch-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "anyhow",
  "tempfile",
@@ -995,7 +995,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-work-graph"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-workflow"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-element-backlog",
@@ -1025,7 +1025,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc-workflow-io"
-version = "0.34.66"
+version = "0.34.67"
 dependencies = [
  "agent-doc-hash",
  "anyhow",

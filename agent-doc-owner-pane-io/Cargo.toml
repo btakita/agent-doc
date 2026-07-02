@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-owner-pane-io"
-version = "0.34.66"
+version = "0.34.67"
 edition = "2024"
 description = "Owner-pane wedge sidecar I/O for agent-doc"
 license = "MIT"
@@ -10,8 +10,8 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_owner_pane_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.66" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.66" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 anyhow = "1"
 serde_json = "1"
 

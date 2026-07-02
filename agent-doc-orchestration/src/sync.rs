@@ -216,7 +216,8 @@ use agent_doc_sync::{
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
-    associated_pane_candidates_detail, parse_pane_inventory_line, resolve_associated_panes,
+    associated_pane_candidates_detail, auto_start_candidate_files, parse_pane_inventory_line,
+    projected_sync_pane_count, resolve_associated_panes,
 };
 use tmux_router::{PaneMoveOp, Tmux};
 

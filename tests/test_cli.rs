@@ -11818,6 +11818,8 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     }
     for required_snippet in [
         "pub const CODEX_SANDBOX_NETWORK_DISABLED_ENV",
+        "pub fn default_base_args(",
+        "pub fn structural_base_args(",
         "pub enum CodexResumeRestartArgsError",
         "pub struct CodexNetworkPolicyStatus",
         "pub fn resolve_codex_network_access(",
@@ -11867,7 +11869,11 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             "agent-doc-turn-executor should own Codex launch/transport policy directly: {required_snippet}"
         );
     }
-    for required_snippet in ["pub fn claude_streaming_args("] {
+    for required_snippet in [
+        "pub fn claude_json_args(",
+        "pub fn claude_streaming_args(",
+        "fn append_claude_session_args(",
+    ] {
         assert!(
             executor_claude_launch.contains(required_snippet),
             "agent-doc-turn-executor should own Claude launch argv policy directly: {required_snippet}"
@@ -12142,6 +12148,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "fn transcript_has_required_ssh_failure(",
         "fn transcript_proves_required_ssh_success(",
         "fn format_required_ssh_failure(",
+        "pub fn default_base_args(",
+        "pub fn structural_base_args(",
+        "pub use agent_doc_turn_executor::codex_launch",
         "pub fn managed_capability_contract_required(",
     ] {
         assert!(
@@ -12183,6 +12192,11 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "agent::codex should call focused Codex launch/transport policy directly"
     );
     assert!(
+        codex.contains("default_base_args")
+            && !codex.contains("pub use agent_doc_turn_executor::codex_launch"),
+        "agent::codex should import focused Codex default launch args privately, not re-export them"
+    );
+    assert!(
         codex.contains(
             "agent_doc_harness::managed_capability::managed_capability_contract_required("
         ),
@@ -12207,6 +12221,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let stream =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
     for forbidden_snippet in [
+        "args.push(\"--append-system-prompt\".to_string())",
         "fn build_streaming_args(",
         "streaming_args_replace_output_format_and_preserve_add_dir",
         "streaming_args_includes_verbose",
@@ -12217,7 +12232,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         );
     }
     assert!(
-        claude.contains("use agent_doc_turn_executor::claude_launch::claude_streaming_args;")
+        claude.contains(
+            "use agent_doc_turn_executor::claude_launch::{claude_json_args, claude_streaming_args};"
+        ) && claude.contains("claude_json_args(&self.base_args, session_id, fork, model)")
             && claude.contains("claude_streaming_args(&self.base_args, session_id, fork, model)"),
         "agent::claude should call focused Claude launch argv policy directly"
     );
@@ -12298,6 +12315,8 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "project_controller/rpc.rs should import focused binary launch resolution directly"
     );
     let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
+    let orchestrate_dispatch_source =
+        fs::read_to_string(manifest_dir.join("src/orchestrate/dispatch.rs")).unwrap();
     for forbidden_snippet in [
         "fn resolve_agent_doc_binary_from_env(",
         "fn launchable_file(",
@@ -12313,6 +12332,14 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         orchestrate_source
             .contains("binary::{current_agent_doc_binary, internal_command_spawn_context}"),
         "src/orchestrate.rs should call focused binary launch resolution directly"
+    );
+    assert!(
+        orchestrate_dispatch_source.contains("default_base_args as codex_default_base_args")
+            && orchestrate_dispatch_source
+                .contains("structural_base_args as codex_structural_base_args")
+            && orchestrate_dispatch_source.contains("codex_structural_base_args()")
+            && orchestrate_dispatch_source.contains("unwrap_or_else(codex_default_base_args)"),
+        "orchestrate dispatch should call focused Codex base-arg helpers directly"
     );
 
     let executor_manifest =
@@ -13365,7 +13392,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     assert!(
         supervisor_lib.contains("pub mod detection;")
-            && start_detection.contains("use agent_doc_supervisor::detection as supervisor_detection;")
+            && start_detection
+                .contains("use agent_doc_supervisor::detection as supervisor_detection;")
             && start_detection.contains("supervisor_detection::idle_queue_prompt_visibility")
             && start_detection.contains("supervisor_detection::ready_busy_blocker_reason")
             && start_detection.contains("supervisor_detection::pane_dispatch_ready")
@@ -14911,18 +14939,50 @@ fn test_agent_doc_tmux_owns_editor_column_split_policy() {
         tmux_source.contains("pub fn is_first_column("),
         "agent-doc-tmux should own editor column split policy"
     );
+    for required in [
+        "pub fn auto_start_candidate_files(",
+        "pub fn projected_sync_pane_count(",
+    ] {
+        assert!(
+            tmux_source.contains(required),
+            "agent-doc-tmux should own editor sync column-list policy: {required}"
+        );
+    }
 
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let sync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    let pane_repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/pane_repair.rs"))
+            .unwrap();
     for forbidden in ["pub fn is_first_column(", "fn is_first_column("] {
         assert!(
             !route_source.contains(forbidden),
             "route.rs must not re-own editor column split policy: {forbidden}"
         );
     }
+    for forbidden in [
+        "pub(crate) fn auto_start_candidate_files(",
+        "fn auto_start_candidate_files(",
+        "pub(crate) fn projected_sync_pane_count(",
+        "fn projected_sync_pane_count(",
+        "pub(crate) use agent_doc_tmux::{auto_start_candidate_files",
+    ] {
+        assert!(
+            !sync_source.contains(forbidden) && !pane_repair_source.contains(forbidden),
+            "sync modules must not re-own or facade editor sync column-list policy: {forbidden}"
+        );
+    }
     assert!(
         route_source.contains("use agent_doc_tmux::is_first_column;"),
         "route.rs should import editor column split policy from agent-doc-tmux directly"
+    );
+    assert!(
+        sync_source.contains("auto_start_candidate_files")
+            && sync_source.contains("projected_sync_pane_count")
+            && sync_source.contains("use agent_doc_tmux::{"),
+        "sync.rs should import editor sync column-list policy from agent-doc-tmux directly"
     );
 }
 

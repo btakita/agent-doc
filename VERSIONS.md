@@ -4,6 +4,21 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.67
+
+- **More launch and sync policy moved out of orchestration.** Claude JSON argv
+  construction and Codex default/structural launch argv now live in
+  `agent-doc-turn-executor`, while editor sync column-list projection now lives
+  in `agent-doc-tmux`. Orchestration imports those focused owners directly and
+  keeps only backend process spawning, pane/file IO, and sync adapters. The
+  Codex default remains behavior-preserving (`exec --json -s workspace-write`),
+  and boundary tests now guard against reintroducing orchestration facades.
+
+- **GitHub Actions nested-submodule test setup is deterministic.** The
+  `agent-doc-git-io` submodule test helper configures a local test author before
+  committing submodule additions, so CI runners without global git identity no
+  longer fail `external_git_dirs_for_submodule_include_nested_submodule_gitdirs`.
+
 ## 0.34.66
 
 - **JetBrains `Compact Exchange` no longer leaves an uncommitted summary

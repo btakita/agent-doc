@@ -106,6 +106,35 @@ pub fn is_first_column(file: &Path, col_args: &[String]) -> bool {
         .is_some_and(|first_col| first_col.split(',').any(|f| f.trim() == file_str.as_ref()))
 }
 
+pub fn auto_start_candidate_files(col_args: &[String]) -> Vec<PathBuf> {
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut out: Vec<PathBuf> = Vec::new();
+    for path in col_args
+        .iter()
+        .flat_map(|arg| arg.split(','))
+        .map(|s| PathBuf::from(s.trim()))
+    {
+        if seen.insert(path.clone()) {
+            out.push(path);
+        }
+    }
+    out
+}
+
+pub fn projected_sync_pane_count(col_args: &[String]) -> usize {
+    col_args
+        .iter()
+        .flat_map(|arg| arg.split(','))
+        .map(str::trim)
+        .filter(|file| !file.is_empty())
+        .map(|file| {
+            let path = PathBuf::from(file);
+            path.canonicalize().unwrap_or(path)
+        })
+        .collect::<HashSet<_>>()
+        .len()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PanePosition {
@@ -1052,6 +1081,57 @@ mod tests {
 
         assert_eq!(columns[0], layout_col("plain.md", None));
         assert_eq!(columns[1], layout_col("left.md,right.md", Some("right.md")));
+    }
+
+    #[test]
+    fn auto_start_candidate_files_dedupes_repeated_documents_preserving_order() {
+        let col_args = vec![
+            "editor.md,notes.md".to_string(),
+            "editor.md".to_string(),
+            "other.md, notes.md".to_string(),
+        ];
+        let files = auto_start_candidate_files(&col_args);
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from("editor.md"),
+                PathBuf::from("notes.md"),
+                PathBuf::from("other.md"),
+            ],
+            "duplicate document requests must collapse to one first-seen auto-start candidate"
+        );
+    }
+
+    #[test]
+    fn auto_start_candidate_files_keeps_distinct_documents() {
+        let col_args = vec!["a.md".to_string(), "b.md".to_string(), "c.md".to_string()];
+        let files = auto_start_candidate_files(&col_args);
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from("a.md"),
+                PathBuf::from("b.md"),
+                PathBuf::from("c.md"),
+            ],
+            "distinct documents must each remain an auto-start candidate"
+        );
+    }
+
+    #[test]
+    fn projected_sync_pane_count_dedupes_canonical_files_and_ignores_empty_entries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        std::fs::write(&file, "# doc\n").unwrap();
+        let col_args = vec![
+            format!("{}, ,missing.md", file.display()),
+            file.display().to_string(),
+        ];
+
+        assert_eq!(
+            projected_sync_pane_count(&col_args),
+            2,
+            "existing paths should canonicalize for dedupe while missing paths fall back to the original path"
+        );
     }
 
     #[test]

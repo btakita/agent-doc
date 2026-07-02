@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-backlog"
-version = "0.34.66"
+version = "0.34.67"
 edition = "2024"
 description = "Backlog element model and descriptor for agent-doc"
 license = "MIT"
@@ -10,9 +10,9 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_element_backlog"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.66" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.66" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.67" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"

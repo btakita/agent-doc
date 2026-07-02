@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -170,7 +170,30 @@ Option D (flip it to them):
 I'm flexible on rate for the right fit — what range is budgeted for this role?
 
 Tell me which one (and W2 vs 1099/C2C) and I'll drop it into the message.
-<!-- agent:boundary:02b09c09 -->
+
+### Re: budget likely under $100 — should I offer $75/hr? — opus-4-8
+
+My recommendation: don't lead with a hard $75 — it caps you at your floor. For a State of Connecticut contract routed through a staffing firm (the firm takes a margin off an already-capped government budget), $75/hr is a reasonable floor and sits above your W2 range ($60–70), but stating a flat low number removes your negotiating room and signals it's your ceiling.
+
+Two things to weigh:
+
+1. Engagement type changes the number. $75 W2 is not the same as $75 1099/C2C — a 1099/C2C rate should be higher to cover self-employment tax and the lack of benefits/PTO. Confirm which the role is before committing to a figure.
+
+2. Anchor slightly above your walk-away, or signal flexibility, so $75 becomes your fallback rather than your opener.
+
+Pick a rate line (all plain text, drop into the message where the rate sentence is):
+
+Option A — flexible range (recommended): "My rate is flexible depending on scope and engagement type; for a role like this I'd be in the $75–90/hr range."
+
+Option B — open slightly high, $75 as fallback: "My expected rate is $85/hr, and I'm flexible for the right long-term fit."
+
+Option C — flat, budget-friendly: "My expected rate is $75/hr."
+
+Option D — flip it to them: "I'm flexible on rate for the right fit — what range is budgeted for this role?"
+
+Tell me A/B/C/D (or a number) and I'll drop it into the LinkedIn message.
+$75-$90/hr range is ok.
+<!-- agent:boundary:ecda1d7f -->
 <!-- /agent:exchange -->
 
 ## Queue

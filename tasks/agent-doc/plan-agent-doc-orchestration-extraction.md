@@ -366,6 +366,17 @@ seams:
   policy moved from orchestration autofix to
   `agent-doc-workflow::invariants::RemediationAction`; orchestration keeps
   doctor/proof-ledger IO, command execution, and report rendering.
+- Workflow autofix report/step planning moved from orchestration autofix to
+  `agent-doc-workflow::autofix`; orchestration now gathers doctor facts,
+  proof-ledger history, and project roots, then calls `plan_autofix_steps`
+  before performing whitelisted effects and report rendering.
+- Claude streaming argv normalization moved from `agent/claude.rs` to
+  `agent-doc-turn-executor::claude_launch`; the orchestration backend now only
+  supplies base args/session/model facts and spawns the child process.
+- Supervisor terminal/prompt detection predicates moved from
+  `start/detection.rs` to `agent-doc-supervisor::detection`; orchestration keeps
+  recent-output buffers, actor-state projection, and live tmux captures while
+  calling focused visibility, blocker, help-screen, and pane-readiness policy.
 
 The no-shim policy remains active for these layer extractions: old helper names
 were removed or confined to static test strings, and boundary tests now assert

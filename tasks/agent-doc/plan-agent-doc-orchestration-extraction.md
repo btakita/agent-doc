@@ -1144,6 +1144,21 @@ the owning crates expose the policy while orchestration does not re-own it.
   each focused helper directly and keeps only timing/logging, closeout-drift
   detection, Stop-hook/file/session effects, proof-ledger IO, command execution,
   and report rendering.
+- The latest fan-out/local pass extracted five more pure/helper seams without
+  compatibility shims. `agent-doc-turn::codex_stop_continuation` now owns Codex
+  Stop-hook continuation instruction rendering from primitive facts; the hook
+  keeps MCP/config/session/file effects. `agent-doc-turn-executor::codex_launch`
+  now owns ETXTBSY/text-file-busy launch retry classification and backoff
+  timing; the Codex backend keeps process spawning and sleep/retry effects.
+  `agent-doc-controller::timeout` now owns project-controller IO timeout
+  classification; RPC serving keeps socket/client loop effects.
+  `agent-doc-harness::timeout` now owns direct-run harness timeout
+  classification over error chains; run orchestration keeps cycle recovery and
+  diagnostics. `agent-doc-ipc-protocol::build_ipc_node_patches_json` now owns
+  node-keyed IPC patch diff construction; write/realtime/IPC adapters call the
+  protocol crate directly and keep file reads, boundary placement, socket/file
+  delivery, and snapshot effects. Focused tests plus `make check` passed for the
+  batch, and no old orchestration wrappers were retained.
 
 ### Earlier closure finding
 

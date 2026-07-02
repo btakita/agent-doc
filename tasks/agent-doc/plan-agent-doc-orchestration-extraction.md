@@ -283,6 +283,10 @@ seams:
   `dispatch_only_starting_pane_not_ready_message`,
   `dispatch_only_recycle_inflight_message`, and
   `dispatch_only_blocker_recovery_hint`.
+- Route defer-to-boundary-restart recovery hint policy moved from
+  `route/authoritative_actor.rs` to `agent-doc-supervisor::route_runtime`; route
+  keeps document-path command rendering and passes supervisor health, actor
+  state, and queue-pause facts to `defer_to_boundary_restart_recovery_hint`.
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.

@@ -216,7 +216,8 @@ should be deleted during extraction.
 The legacy migration-wave labels are superseded. Current work is in the
 domain-policy layer of Option B: orchestration remains the effect coordinator,
 while pure decisions move into the crate that owns the vocabulary. As of the
-2026-07-01 fan-out batch, the current layer has extracted the following seams:
+2026-07-02 fan-out batches, the current layer has extracted the following
+seams:
 
 - Route-owned cycle change/completion policy moved from `start.rs` to
   `agent-doc-supervisor::route_owned`; orchestration now only converts
@@ -233,6 +234,20 @@ while pure decisions move into the crate that owns the vocabulary. As of the
 - Codex-network-access-on-non-Codex warning construction moved from
   `preflight/run.rs` to `agent-doc-model-tier`; preflight supplies document and
   active-harness facts.
+- Routed dispatch-start proof classification moved from `route.rs` to
+  `agent-doc-controller::dispatch`; route now adapts hook/tmux/session facts and
+  calls `classify_codex_routed_dispatch_start_proof` or
+  `opencode_pane_state_changed_from_idle` directly.
+- Auto-trigger outcome and capability-proof gate wire-state policy moved from
+  `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
+  cancellation, process IO, and send effects.
+- Response-capture repairability moved from `repair.rs` to
+  `agent-doc-workflow::capture`; repair now filters active captures through
+  `capture_state_is_repairable`.
+- Stuck-`Preparing` controller threshold parsing/defaulting moved from
+  `project_controller.rs` to `agent-doc-controller::status`; project-controller
+  keeps only environment IO and passes the raw override value to the focused
+  policy.
 
 The no-shim policy remains active for these layer extractions: old helper names
 were removed or confined to static test strings, and boundary tests now assert

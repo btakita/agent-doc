@@ -225,9 +225,17 @@ seams:
 - Starting-pane recovery target selection moved from `route.rs` to
   `agent-doc-supervisor::startup_miss`; route keeps tmux/session-registry
   probing and calls the focused policy directly.
+- Route pane snapshot diagnostic formatting moved from `route.rs` to
+  `agent-doc-tmux-commands::input_diag`; route keeps redaction, timestamping,
+  file writes, ops-log emission, and stderr output while calling the focused
+  filename/log/hint formatters directly.
 - Controller self-watchdog and stranded handoff-replacement policy moved from
   `project_controller/rpc.rs` to `agent-doc-controller::status`; orchestration
   now supplies bootstrap/socket/time facts.
+- Sessions projection entry selection moved from `project_controller.rs` to
+  `agent-doc-controller::status`; project-controller keeps SQLite reads,
+  tmux-router registry adaptation, supervisor lease lookup, and projection file
+  writes.
 - Visible-write reconcile loop policy moved from `write.rs` to
   `agent-doc-document-realtime::write_policy`; orchestration keeps file,
   live-buffer, log, and mutation effects.
@@ -241,6 +249,10 @@ seams:
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.
+- Supervisor child-exit provenance formatting moved from `start.rs` to
+  `agent-doc-supervisor::crash_policy`; start keeps the `portable_pty`
+  `ExitStatus` adapter and passes rendered status/success facts to the focused
+  formatter.
 - Response-capture repairability moved from `repair.rs` to
   `agent-doc-workflow::capture`; repair now filters active captures through
   `capture_state_is_repairable`.
@@ -261,6 +273,10 @@ seams:
 - Stale response-capture retirement decisions moved from `repair.rs` to
   `agent-doc-workflow::capture`; repair now gathers file-backed drift/body/heading
   evidence and calls `decide_stale_capture_retirement`.
+- Repair-template change aggregation moved from `repair.rs` to
+  `agent-doc-workflow::capture`; repair now gathers the individual repair facts,
+  then uses `RepairTemplateChanges` for persist and ordered log decisions while
+  keeping file/snapshot IO and ops-log effects.
 
 The no-shim policy remains active for these layer extractions: old helper names
 were removed or confined to static test strings, and boundary tests now assert

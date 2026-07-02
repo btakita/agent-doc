@@ -30,7 +30,7 @@ batch/async is good. I want to work on the AI...perhaps where the AI signals com
 
 ❯ Regenerate the linkedin response.
 
-### Re: Regenerated — reactive-data reframe folded in — opus-4-8 (HEAD)
+### Re: Regenerated — reactive-data reframe folded in — opus-4-8
 
 > **Queue prompt:** Regenerate the linkedin response.
 
@@ -82,7 +82,6 @@ The line to hold: **share the engines, keep their schemas, templates, business r
 **On your other note (batch/async is fine, you want the AI, maybe signals / MLPs):** worth being clear-eyed here. REItrades' AI need is almost entirely **LLM extraction and generation** (structured data out of documents, teaser/OM copy), not model-building. There's little call for custom MLPs or signal-processing models in their stack. So if what you actually want is to build reactive-signal or MLP systems, this engagement won't scratch that itch — it'd be LLM-plumbing work. That's not a reason to skip it (it pays and it's real), but don't take it expecting an ML-modeling playground. If the signals/MLP direction is where you want to steer your work, that's a bigger conversation about which clients/problems fit it, and I'm happy to dig into that separately.
 
 Want me to turn the top three into a short "here's what I'd bring off the shelf" paragraph for Artur once he responds?
-<!-- agent:boundary:5588e027 -->
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
@@ -95,6 +94,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/reitrades.md source=socket_already_applied patch_id=d26f0b3e-f6a3-47d3-b731-ef2b5bca4f21 invariant=disk_missing_response_probe recovery=content_ours_snapshot_visible_response_repair response_sha256=def071b2208e0feb8e168601b8a10bf4c94a91949106a8202479aa70c83ae832 current_len=6153 current_hash=6def72e3c5ae01bf68223b16cd3f3cc5deb574842ff6a2c242cdc83c9d305482 repaired_len=9277 repaired_hash=db23647a2addfcc45a44f132b773225c773d47fa736070278a8b38db955911b5 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782948994082
 ```
+<!-- agent:boundary:f4e30ee8 -->
 <!-- /agent:exchange -->
 
 ## Queue

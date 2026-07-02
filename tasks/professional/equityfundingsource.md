@@ -25,7 +25,6 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -46,7 +45,7 @@ I loaded the local workflow, ran preflight/plan, reset sidecars with `--preserve
 No EFS code, tests, commits, pushes, or deploys were run. The document also has `queue: stop`, so the Messages-tab URL and `deploy` queue lines are inactive residue.
 
 To unblock: resolve/save the live editor buffer for [equityfundingsource.md](/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md:1), then I can retry `agent-doc write --commit`; or explicitly authorize `--force-disk`.
-<!-- agent:boundary:6ff8842e -->
+<!-- agent:boundary:52baba7f -->
 <!-- /agent:exchange -->
 ###
 <!--

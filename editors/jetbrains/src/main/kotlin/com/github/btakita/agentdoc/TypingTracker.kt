@@ -120,6 +120,14 @@ object TypingTracker : DocumentListener {
     private val pendingContentReports = ConcurrentHashMap<String, ScheduledFuture<*>>()
     private val pendingEditorOps = ConcurrentHashMap<String, MutableList<PendingEditorOp>>()
 
+    // #falsetyping-guard: paths with an unsaved *local operator* edit ahead of
+    // disk. Set when a non-remoteCrdtApply document change lands; cleared whenever
+    // the document is observed clean (fully flushed to disk) or closed. The CLI
+    // visible-write guard re-merges on replica churn only when the reporting
+    // editor proves there is no unsaved operator text — otherwise it fails closed
+    // so operator text stays authoritative.
+    private val unsyncedLocalEditPaths = ConcurrentHashMap.newKeySet<String>()
+
     override fun documentChanged(event: DocumentEvent) {
         val vFile = FileDocumentManager.getInstance().getFile(event.document) ?: return
         if (!vFile.name.endsWith(".md")) return
@@ -137,6 +145,10 @@ object TypingTracker : DocumentListener {
         val remoteCrdtApply = CrdtReplicaManager.isApplyingRemote(filePath)
         if (!remoteCrdtApply) {
             lastChangeMs = System.currentTimeMillis()
+            // #falsetyping-guard: a genuine local operator edit is now ahead of
+            // disk until saved. A remoteCrdtApply is replica churn, not operator
+            // text, so it must NOT set this flag.
+            unsyncedLocalEditPaths.add(filePath)
         }
 
         val lib = AgentDocLib.get()
@@ -196,6 +208,10 @@ object TypingTracker : DocumentListener {
 
     fun clearOpenDocumentReport(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
+        // #falsetyping-guard: a closed document has no unsaved operator edits to
+        // protect; drop any stale local-edit marker so a reopened buffer starts
+        // from the conservative-but-current provenance.
+        unsyncedLocalEditPaths.remove(file.path)
         val lib = AgentDocLib.get() ?: return
         try {
             lib.agent_doc_document_closed_for_editor(file.path, EditorIdentity.id)
@@ -260,26 +276,31 @@ object TypingTracker : DocumentListener {
         return try {
             val text = com.intellij.openapi.application.ApplicationManager.getApplication()
                 .runReadAction<String> { document.text }
+            // #falsetyping-guard: derive replica-churn provenance. A document that
+            // is fully flushed to disk has no unsaved edits at all, so clear any
+            // stale local-edit marker. Otherwise the buffer is unsaved: the edits
+            // are operator text only if a local (non-remoteCrdtApply) change landed
+            // since the last clean observation.
+            val unsaved = FileDocumentManager.getInstance().isDocumentUnsaved(document)
+            if (!unsaved) {
+                unsyncedLocalEditPaths.remove(filePath)
+            }
+            val noUnsavedOperatorEdits = !unsaved || filePath !in unsyncedLocalEditPaths
             val reported = try {
-                lib.agent_doc_document_changed_digest_content_for_editor_v2(
+                lib.agent_doc_document_changed_digest_content_for_editor_v3(
                     filePath,
                     text,
                     EditorIdentity.id,
                     "jetbrains",
                     pluginVersion(),
                     OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                    if (noUnsavedOperatorEdits) 1 else 0,
                 )
                 true
             } catch (_: UnsatisfiedLinkError) {
-                if (requireAuthority) false else {
-                    reportLiveBufferContentV1(lib, filePath, text)
-                    true
-                }
+                reportLiveBufferContentV2OrV1(lib, filePath, text, requireAuthority)
             } catch (_: NoSuchMethodError) {
-                if (requireAuthority) false else {
-                    reportLiveBufferContentV1(lib, filePath, text)
-                    true
-                }
+                reportLiveBufferContentV2OrV1(lib, filePath, text, requireAuthority)
             }
             if (!reported) return false
             LOG.debug("[native] document_changed content reported: $filePath")
@@ -297,6 +318,42 @@ object TypingTracker : DocumentListener {
         } catch (e: Throwable) {
             LOG.debug("[native] content report skipped: ${e.message}")
             false
+        }
+    }
+
+    /**
+     * #falsetyping-guard: fall back from the v3 (replica-churn provenance) content
+     * report to v2, then to v1, when running against an older cdylib that lacks
+     * the newer symbol. Returns whether a report was delivered. Older binaries
+     * simply omit the provenance flag (conservative fail-closed default), so this
+     * degrades safely.
+     */
+    private fun reportLiveBufferContentV2OrV1(
+        lib: AgentDocLib,
+        filePath: String,
+        text: String,
+        requireAuthority: Boolean,
+    ): Boolean {
+        return try {
+            lib.agent_doc_document_changed_digest_content_for_editor_v2(
+                filePath,
+                text,
+                EditorIdentity.id,
+                "jetbrains",
+                pluginVersion(),
+                OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            )
+            true
+        } catch (_: UnsatisfiedLinkError) {
+            if (requireAuthority) false else {
+                reportLiveBufferContentV1(lib, filePath, text)
+                true
+            }
+        } catch (_: NoSuchMethodError) {
+            if (requireAuthority) false else {
+                reportLiveBufferContentV1(lib, filePath, text)
+                true
+            }
         }
     }
 

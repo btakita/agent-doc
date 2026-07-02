@@ -169,6 +169,7 @@ function resetBindings(): void {
     _document_changed_digest_for_editor = null;
     _document_changed_digest_content_for_editor = null;
     _document_changed_digest_content_for_editor_v2 = null;
+    _document_changed_digest_content_for_editor_v3 = null;
     _document_closed_for_editor = null;
     _plugin_owner_try_acquire = null;
     _plugin_owner_release = null;
@@ -191,7 +192,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 const EDITOR_PLUGIN_KIND = 'vscode';
-const EDITOR_PLUGIN_VERSION = '0.2.34';
+const EDITOR_PLUGIN_VERSION = '0.2.38';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 
 function findLibrary(projectRoot?: string): string | null {
@@ -294,6 +295,7 @@ let _document_changed_digest_content: any = null;
 let _document_changed_digest_for_editor: any = null;
 let _document_changed_digest_content_for_editor: any = null;
 let _document_changed_digest_content_for_editor_v2: any = null;
+let _document_changed_digest_content_for_editor_v3: any = null;
 let _document_closed_for_editor: any = null;
 let _plugin_owner_try_acquire: any = null;
 let _plugin_owner_release: any = null;
@@ -424,6 +426,18 @@ function bindFunctions(): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] live-buffer capability ABI unavailable: ${e.message}`);
         _document_changed_digest_content_for_editor_v2 = null;
+    }
+    try {
+        // #falsetyping-guard: v3 adds the replica-churn provenance flag
+        // (no_unsaved_operator_edits) as a trailing int.
+        _document_changed_digest_content_for_editor_v3 = lib.func(
+            'agent_doc_document_changed_digest_content_for_editor_v3',
+            'void',
+            ['str', 'str', 'str', 'str', 'str', 'str', 'int'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] live-buffer provenance ABI unavailable: ${e.message}`);
+        _document_changed_digest_content_for_editor_v3 = null;
     }
     try {
         _plugin_owner_try_acquire = lib.func(
@@ -1514,10 +1528,25 @@ export function documentChangedDigestContent(
     content: string,
     projectRoot?: string,
     editorId?: string,
+    noUnsavedOperatorEdits?: boolean,
 ): void {
     if (!ensureLoaded(projectRoot)) return;
     bindFunctions();
-    if (editorId && _document_changed_digest_content_for_editor_v2) {
+    // #falsetyping-guard: prefer the v3 entrypoint carrying replica-churn
+    // provenance so the CLI re-merges on replica churn instead of failing the
+    // visible-write guard closed. Fall back to v2/v1 against older cdylibs, which
+    // omit the flag and keep the conservative fail-closed default.
+    if (editorId && _document_changed_digest_content_for_editor_v3) {
+        _document_changed_digest_content_for_editor_v3(
+            filePath,
+            content,
+            editorId,
+            EDITOR_PLUGIN_KIND,
+            EDITOR_PLUGIN_VERSION,
+            OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            noUnsavedOperatorEdits ? 1 : 0,
+        );
+    } else if (editorId && _document_changed_digest_content_for_editor_v2) {
         _document_changed_digest_content_for_editor_v2(
             filePath,
             content,

@@ -1775,6 +1775,8 @@ class PatchWatcher implements vscode.Disposable {
     private liveBufferSignalWatcher: vscode.FileSystemWatcher | undefined;
     private typingListener: vscode.Disposable | undefined;
     private openListener: vscode.Disposable | undefined;
+    private saveListener: vscode.Disposable | undefined;
+    private closeListener: vscode.Disposable | undefined;
     private crdtReplicas: CrdtReplicaManager | undefined;
     private patchesDir: string | undefined;
     private outputChannel: vscode.OutputChannel;
@@ -1784,6 +1786,15 @@ class PatchWatcher implements vscode.Disposable {
     private pendingPatchRetries = new Set<string>();
     /** Documents for which this VS Code instance has published plugin-owner proof. */
     private ownedDocs = new Set<string>();
+    /**
+     * #falsetyping-guard: paths with an unsaved *local operator* edit ahead of
+     * disk. Set when a non-remoteCrdtApply text change lands; cleared when the
+     * document is saved or closed. Lets the live-buffer report tell the CLI that a
+     * buffer divergence is replica-driven (a remoteCrdtApply) rather than operator
+     * text, so the visible-write guard re-merges on replica churn instead of
+     * failing closed. Absent from the set = no unsaved operator edits.
+     */
+    private unsyncedLocalEditDocs = new Set<string>();
     /** Coalesced full-buffer live reports; never run from onDidChangeTextDocument. */
     private liveBufferReportTimers = new Map<string, ReturnType<typeof setTimeout>>();
     /** Native typing markers are queued off the text-change listener path. */
@@ -1870,6 +1881,10 @@ class PatchWatcher implements vscode.Disposable {
                 const remoteCrdtApply = this.crdtReplicas?.isApplyingRemote(fsPath) ?? false;
                 if (!remoteCrdtApply) {
                     this.lastTypingTime.set(fsPath, Date.now());
+                    // #falsetyping-guard: a genuine local operator edit is now
+                    // ahead of disk until saved. A remoteCrdtApply is replica
+                    // churn, not operator text, and must NOT set this.
+                    this.unsyncedLocalEditDocs.add(fsPath);
                 }
                 const eventProjectRoot = this.patchesDir
                     ? path.dirname(path.dirname(this.patchesDir))
@@ -1888,6 +1903,16 @@ class PatchWatcher implements vscode.Disposable {
                     this.scheduleEditorOpReport(fsPath, e.contentChanges, eventProjectRoot);
                 }
             }
+        });
+
+        // #falsetyping-guard: a saved or closed document has no unsaved operator
+        // edits ahead of disk to protect, so drop its local-edit marker. This lets
+        // replica churn after a save/submit reconcile instead of staying wedged.
+        this.saveListener = vscode.workspace.onDidSaveTextDocument((document) => {
+            this.unsyncedLocalEditDocs.delete(document.uri.fsPath);
+        });
+        this.closeListener = vscode.workspace.onDidCloseTextDocument((document) => {
+            this.unsyncedLocalEditDocs.delete(document.uri.fsPath);
         });
 
         this.outputChannel.appendLine(`PatchWatcher: watching ${patchesDir}`);
@@ -2527,7 +2552,15 @@ class PatchWatcher implements vscode.Disposable {
         }
         const text = document.getText();
         seedEditorOpShadow(fsPath, text);
-        native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID);
+        // #falsetyping-guard: a clean (fully saved) document has no unsaved edits
+        // at all, so clear any stale local-edit marker. Otherwise the buffer is
+        // dirty: the edits are operator text only if a local (non-remoteCrdtApply)
+        // change is still pending since the last save.
+        if (!document.isDirty) {
+            this.unsyncedLocalEditDocs.delete(fsPath);
+        }
+        const noUnsavedOperatorEdits = !document.isDirty || !this.unsyncedLocalEditDocs.has(fsPath);
+        native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID, noUnsavedOperatorEdits);
     }
 
     private scheduleEditorOpReport(
@@ -2878,6 +2911,8 @@ class PatchWatcher implements vscode.Disposable {
         this.liveBufferSignalWatcher?.dispose();
         this.typingListener?.dispose();
         this.openListener?.dispose();
+        this.saveListener?.dispose();
+        this.closeListener?.dispose();
         for (const filePath of this.ownedDocs) {
             native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
         }

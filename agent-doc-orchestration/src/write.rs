@@ -2247,6 +2247,34 @@ fn guard_visible_write_reconcile_with_target(
                     live.timestamp_ms
                 ),
             );
+        } else if live.no_unsaved_operator_edits {
+            // #falsetyping-guard: the editor-visible buffer diverges from both the
+            // expected merge baseline and current disk, but the reporting editor
+            // has proven the divergence is replica-driven — a `remoteCrdtApply`
+            // (CRDT-replica churn) moved the buffer and there are NO unsaved local
+            // operator edits ahead of disk. This is the false-positive the old
+            // guard failed closed on ("buffer differs; save or discard"), wedging
+            // finalize/write while the realtime replica kept reconciling. Route to
+            // the reconcile path instead of bailing: fall through to the
+            // disk-vs-expected decision below (Clean when disk still matches the
+            // baseline, or DiskDrifted so the caller re-merges the captured
+            // response against fresh disk). Genuine unsaved operator edits carry
+            // `no_unsaved_operator_edits == false` and still fail closed above.
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "visible_write_replica_churn_reconcile file={} source={} expected_len={} expected_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
+                    file.display(),
+                    source,
+                    expected_current.len(),
+                    agent_doc_hash::content_hash(expected_current),
+                    actual_current.len(),
+                    disk_hash,
+                    live.len,
+                    live.hash,
+                    live.timestamp_ms
+                ),
+            );
         } else {
             crate::flow::proof::log_flow_event(
                 file,
@@ -3596,6 +3624,174 @@ scratch
         }
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("visible_write_disk_drift_reconcilable"));
+    }
+    #[test]
+    fn visible_write_reconcile_replica_churn_does_not_fail_closed() {
+        // #falsetyping-guard: the editor buffer diverges from both `expected` and
+        // the on-disk content because a `remoteCrdtApply` (CRDT-replica churn)
+        // moved the buffer — NOT because the operator has unsaved edits. The plugin
+        // stamps `no_unsaved_operator_edits = true`. Disk still equals the merge
+        // baseline, so the guard must NOT fail closed with "buffer differs; save or
+        // discard"; it routes to the reconcile path (Clean here) so the response
+        // lands instead of wedging finalize/write.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+### Re: x
+<!-- /agent:exchange -->
+";
+        // Disk matches the merge baseline (`expected`). The editor buffer is ahead
+        // with a remote replica's converged content that is neither `expected` nor
+        // anything the operator typed.
+        fs::write(&doc, expected).unwrap();
+        let replica_ahead = expected.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: from-another-replica\n<!-- /agent:exchange -->",
+        );
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+            &doc_str,
+            &replica_ahead,
+            "jetbrains-42-test",
+            "jetbrains",
+            "0.2.205",
+            &["operator_text_authority_v1"],
+            true, // no unsaved operator edits — divergence is replica-driven
+        )
+        .unwrap();
+
+        let outcome = guard_visible_write_reconcile_with_target(
+            &doc,
+            "test_replica_churn",
+            expected,
+            None,
+        )
+        .expect("replica churn must not fail closed");
+        assert!(
+            matches!(outcome, VisibleWriteReconcile::Clean),
+            "disk matches the merge baseline, so replica churn reconciles Clean"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_replica_churn_reconcile"),
+            "expected replica-churn reconcile marker: {log}"
+        );
+        assert!(
+            log.contains("source=test_replica_churn"),
+            "marker must identify the write source: {log}"
+        );
+        assert!(
+            !log.contains("visible_write_deferred_live_buffer_changed"),
+            "replica churn must not trip the fail-closed live-buffer block: {log}"
+        );
+    }
+    #[test]
+    fn visible_write_reconcile_replica_churn_with_disk_drift_remerges() {
+        // #falsetyping-guard: replica churn AND a foreign disk append at the same
+        // time. Provenance proves no unsaved operator edits, so instead of failing
+        // closed the guard reports the reconcilable DiskDrifted case (re-merge the
+        // response against fresh disk).
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+### Re: x
+<!-- /agent:exchange -->
+";
+        let drifted = expected.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: foreign-append\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &drifted).unwrap();
+        let replica_ahead = expected.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: from-another-replica\n<!-- /agent:exchange -->",
+        );
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+            &doc_str,
+            &replica_ahead,
+            "jetbrains-43-test",
+            "jetbrains",
+            "0.2.205",
+            &["operator_text_authority_v1"],
+            true,
+        )
+        .unwrap();
+
+        let outcome = guard_visible_write_reconcile_with_target(
+            &doc,
+            "test_replica_churn_drift",
+            expected,
+            None,
+        )
+        .expect("replica churn with disk drift must not fail closed");
+        match outcome {
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                assert_eq!(fresh_current, drifted);
+            }
+            VisibleWriteReconcile::Clean => panic!("expected DiskDrifted, got Clean"),
+        }
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("visible_write_replica_churn_reconcile"));
+    }
+    #[test]
+    fn visible_write_reconcile_genuine_operator_edit_still_fails_closed() {
+        // #falsetyping-guard invariant: a genuine unsaved operator edit
+        // (`no_unsaved_operator_edits = false`, the conservative default) must
+        // STILL fail closed. Operator text is authoritative and must never be
+        // dropped by a stale-merge write.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+### Re: x
+<!-- /agent:exchange -->
+";
+        fs::write(&doc, expected).unwrap();
+        let operator_typed = expected.replace(
+            "<!-- /agent:exchange -->",
+            "❯ operator is typing an unsaved question\n<!-- /agent:exchange -->",
+        );
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+            &doc_str,
+            &operator_typed,
+            "jetbrains-44-test",
+            "jetbrains",
+            "0.2.205",
+            &["operator_text_authority_v1"],
+            false, // unsaved operator edit present — must fail closed
+        )
+        .unwrap();
+
+        let err = guard_visible_write_reconcile_with_target(
+            &doc,
+            "test_operator_edit",
+            expected,
+            None,
+        )
+        .expect_err("a genuine unsaved operator edit must fail closed");
+        assert!(
+            err.to_string().contains("visible editor buffer"),
+            "expected fail-closed live-buffer guard error: {err}"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_deferred_live_buffer_changed"),
+            "operator-edit divergence must record the fail-closed block: {log}"
+        );
+        assert!(
+            !log.contains("visible_write_replica_churn_reconcile"),
+            "operator-edit divergence must NOT be treated as replica churn: {log}"
+        );
     }
     #[test]
     fn capture_locked_pre_response_reads_live_content_after_lock_wait() {

@@ -281,6 +281,23 @@ interface AgentDocLib : Library {
         editor_version: String,
         capabilities_csv: String,
     )
+
+    /**
+     * #falsetyping-guard: per-editor full-content report carrying replica-churn
+     * provenance. `no_unsaved_operator_edits` is 1 when the buffer holds no
+     * unsaved local operator edits ahead of disk (any divergence is a
+     * `remoteCrdtApply`), letting the CLI re-merge on replica churn instead of
+     * failing the visible-write guard closed. 0 keeps operator text authoritative.
+     */
+    fun agent_doc_document_changed_digest_content_for_editor_v3(
+        file_path: String,
+        content: String,
+        editor_id: String,
+        editor_kind: String,
+        editor_version: String,
+        capabilities_csv: String,
+        no_unsaved_operator_edits: Int,
+    )
     fun agent_doc_document_synced_digest_content_for_editor_v2(
         file_path: String,
         content: String,

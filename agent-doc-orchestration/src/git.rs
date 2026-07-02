@@ -4535,6 +4535,7 @@ Duplicate replay should stay live.
             editor_version: Some("test".to_string()),
             capabilities: vec![agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY.to_string()],
             content: Some(editor.to_string()),
+            no_unsaved_operator_edits: false,
         };
 
         assert!(

@@ -255,6 +255,16 @@ pub struct LiveBufferSnapshot {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// #falsetyping-guard provenance: `true` when the reporting editor has no
+    /// unsaved *local operator* edits ahead of disk — any divergence between the
+    /// editor buffer and disk is then purely replica-driven (a `remoteCrdtApply`
+    /// moved the buffer), not a genuine operator edit. The visible-write guard
+    /// uses this to re-merge on replica churn instead of failing closed with
+    /// "buffer differs; save or discard". Older sidecars (and any report that has
+    /// not proven the buffer clean of operator edits) default to `false`, which is
+    /// the conservative fail-closed behavior: operator text stays authoritative.
+    #[serde(default)]
+    pub no_unsaved_operator_edits: bool,
 }
 
 impl LiveBufferSnapshot {
@@ -279,6 +289,8 @@ struct LiveBufferSnapshotMetadata<'a> {
     editor_kind: Option<&'a str>,
     editor_version: Option<&'a str>,
     capabilities: &'a [&'a str],
+    /// See [`LiveBufferSnapshot::no_unsaved_operator_edits`].
+    no_unsaved_operator_edits: bool,
 }
 
 /// Cross-process editor sync status derived from durable live-buffer sidecars.
@@ -510,6 +522,7 @@ pub fn record_live_buffer_digest_for_editor(
             editor_kind: None,
             editor_version: None,
             capabilities: &[],
+            no_unsaved_operator_edits: false,
         },
         false,
     )
@@ -539,6 +552,7 @@ pub fn record_live_buffer_digest_content_for_editor(
             editor_kind: None,
             editor_version: None,
             capabilities: &[],
+            no_unsaved_operator_edits: false,
         },
         false,
     )
@@ -552,6 +566,35 @@ pub fn record_live_buffer_digest_content_for_editor_with_capabilities(
     editor_version: &str,
     capabilities: &[&str],
 ) -> std::io::Result<()> {
+    record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+        file,
+        content,
+        editor_id,
+        editor_kind,
+        editor_version,
+        capabilities,
+        false,
+    )
+}
+
+/// Record the latest editor-visible full buffer content with capabilities and
+/// #falsetyping-guard replica-churn provenance.
+///
+/// `no_unsaved_operator_edits` is `true` when the reporting editor knows the
+/// buffer holds no unsaved local operator edits ahead of disk — any divergence
+/// is replica-driven (a `remoteCrdtApply`). See
+/// [`LiveBufferSnapshot::no_unsaved_operator_edits`]. Older plugins call the
+/// non-`_v2` function and therefore report `false` (conservative fail-closed).
+#[allow(clippy::too_many_arguments)]
+pub fn record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+    file: &str,
+    content: &str,
+    editor_id: &str,
+    editor_kind: &str,
+    editor_version: &str,
+    capabilities: &[&str],
+    no_unsaved_operator_edits: bool,
+) -> std::io::Result<()> {
     write_live_buffer_snapshot_with_metadata(
         file,
         content.len(),
@@ -562,6 +605,7 @@ pub fn record_live_buffer_digest_content_for_editor_with_capabilities(
             editor_kind: Some(editor_kind),
             editor_version: Some(editor_version),
             capabilities,
+            no_unsaved_operator_edits,
         },
         false,
     )
@@ -591,6 +635,9 @@ pub fn record_live_buffer_synced_content_for_editor_with_capabilities(
             editor_kind: Some(editor_kind),
             editor_version: Some(editor_version),
             capabilities,
+            // A synced/proven buffer equals disk, so there are no unsaved local
+            // operator edits ahead of disk (#falsetyping-guard).
+            no_unsaved_operator_edits: true,
         },
         true,
     )
@@ -660,6 +707,7 @@ fn write_live_buffer_snapshot_with_metadata(
             .map(ToString::to_string)
             .collect(),
         content,
+        no_unsaved_operator_edits: metadata.no_unsaved_operator_edits,
     };
     let encoded = serde_json::to_string(&snapshot)?;
     std::fs::write(&live_path, encoded)
@@ -1982,6 +2030,7 @@ mod tests {
                 editor_kind: Some("jetbrains"),
                 editor_version: Some("test"),
                 capabilities: &[OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                no_unsaved_operator_edits: false,
             },
             false,
         )
@@ -2083,6 +2132,59 @@ mod tests {
             !snap.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY),
             "a capability-less legacy report must not inherit stale authority proof"
         );
+    }
+
+    #[test]
+    fn no_unsaved_operator_edits_provenance_roundtrips_and_defaults_false() {
+        // #falsetyping-guard: the replica-churn provenance flag must survive a
+        // serialize/deserialize round-trip, default to `false` on legacy sidecars
+        // (older plugins that never stamped it), and be settable to `true` via the
+        // `_v2` recording path.
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("prov-roundtrip.md");
+        std::fs::write(&doc, "hello").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // Legacy (non-v2) content report: conservative default, no provenance.
+        record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            "hello ahead",
+            "jetbrains-9-test",
+            "jetbrains",
+            "0.2.204",
+            &[OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+        let snap = live_buffer_snapshot(&doc_str).expect("snapshot recorded");
+        assert!(
+            !snap.no_unsaved_operator_edits,
+            "legacy report must default to conservative fail-closed provenance"
+        );
+
+        // v2 report stamps replica-churn provenance (no unsaved operator edits).
+        record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+            &doc_str,
+            "hello ahead again",
+            "jetbrains-9-test",
+            "jetbrains",
+            "0.2.205",
+            &[OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            true,
+        )
+        .unwrap();
+        let snap = live_buffer_snapshot(&doc_str).expect("snapshot recorded");
+        assert!(
+            snap.no_unsaved_operator_edits,
+            "v2 report must carry the replica-churn provenance flag"
+        );
+
+        // A JSON sidecar written by an older plugin (field absent) still
+        // deserializes with the field defaulting to false.
+        let legacy_json = r#"{"path":"P","len":5,"hash":"abc","timestamp_ms":1}"#
+            .replace('P', &doc_str.replace('\\', "\\\\"));
+        let decoded: LiveBufferSnapshot = serde_json::from_str(&legacy_json).unwrap();
+        assert!(!decoded.no_unsaved_operator_edits);
     }
 
     #[test]

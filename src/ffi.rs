@@ -491,6 +491,92 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2
     }
 }
 
+/// Record a document change plus full visible buffer content for one editor
+/// instance, with capabilities AND #falsetyping-guard replica-churn provenance.
+///
+/// Identical to [`agent_doc_document_changed_digest_content_for_editor_v2`] but
+/// carries `no_unsaved_operator_edits`: pass `1` when the editor has proven the
+/// buffer holds no unsaved *local operator* edits ahead of disk (any divergence
+/// is replica-driven — a `remoteCrdtApply`), so the binary re-merges on replica
+/// churn instead of failing the visible-write guard closed. Pass `0` (the
+/// conservative default older plugins imply via the `_v2` entrypoint) when there
+/// may be unsaved operator text, which keeps operator text authoritative by
+/// failing closed.
+///
+/// # Safety
+///
+/// `file_path`, `content`, `editor_id`, `editor_kind`, `editor_version`, and
+/// `capabilities_csv` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3(
+    file_path: *const c_char,
+    content: *const c_char,
+    editor_id: *const c_char,
+    editor_kind: *const c_char,
+    editor_version: *const c_char,
+    capabilities_csv: *const c_char,
+    no_unsaved_operator_edits: i32,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+        Ok(text) => text,
+        Err(_) => return,
+    };
+    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+        Ok(editor) => editor,
+        Err(_) => return,
+    };
+    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
+        Ok(kind) => kind,
+        Err(_) => return,
+    };
+    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
+        Ok(version) => version,
+        Err(_) => return,
+    };
+    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
+        Ok(capabilities) => capabilities,
+        Err(_) => return,
+    };
+    let capabilities: Vec<&str> = capabilities_raw
+        .split(',')
+        .map(str::trim)
+        .filter(|capability| !capability.is_empty())
+        .collect();
+    agent_doc_debounce::document_changed(path);
+    if let Err(err) =
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+            path,
+            text,
+            editor,
+            kind,
+            version,
+            &capabilities,
+            no_unsaved_operator_edits != 0,
+        )
+    {
+        eprintln!("[ffi] live-buffer v3 write failed for {path}: {err}");
+    }
+    match agent_doc_orchestration::realtime_model::broadcast_editor_change(
+        Path::new(path),
+        editor,
+        text,
+    ) {
+        Ok(deliveries) if !deliveries.is_empty() => {
+            eprintln!(
+                "[ffi] realtime broadcast queued {} peer patch(es) for editor_id {}",
+                deliveries.len(),
+                editor
+            );
+        }
+        Ok(_) => {}
+        Err(err) => eprintln!("[ffi] realtime broadcast failed for {path}: {err}"),
+    }
+}
+
 /// Record a supervisor-origin editor buffer proof as already synced.
 ///
 /// Used by editor IPC ack-content paths after the Document API has proven the

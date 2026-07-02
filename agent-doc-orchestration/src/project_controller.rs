@@ -752,31 +752,16 @@ impl Drop for LaunchLock {
 
 pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>> {
     let path = state_path(project_root);
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
-        return Ok(None);
-    };
     // A truncated/0-byte or otherwise unparseable controller-state.json (e.g. an
     // interrupted auto_install_reexec recycle killed mid-write before atomic
-    // writes landed) must not hard-error and wedge every future launch. Treat
-    // corrupt bootstrap state as absent so the controller re-bootstraps cleanly;
-    // warn (never silently swallow) so the recovery is visible.
-    if content.trim().is_empty() {
-        eprintln!(
-            "[agent-doc] warning: empty controller bootstrap state {}; treating as absent (will re-bootstrap)",
-            path.display()
-        );
-        return Ok(None);
-    }
-    match serde_json::from_str(&content) {
-        Ok(bootstrap) => Ok(Some(bootstrap)),
-        Err(err) => {
-            eprintln!(
-                "[agent-doc] warning: unparseable controller bootstrap state {} ({err}); treating as absent (will re-bootstrap)",
-                path.display()
-            );
-            Ok(None)
-        }
-    }
+    // writes landed) must not hard-error and wedge every future launch. Quarantine
+    // the corrupt file aside and re-bootstrap cleanly (#corrupt-state-quarantine):
+    // this automates the manual "move controller-state.json aside" recovery so a
+    // lingering bad file cannot keep confusing later reads/forensics. The quarantine
+    // helper warns (never silently swallows) so the recovery is visible.
+    agent_doc_fs::read_valid_or_quarantine(&path, |content| {
+        serde_json::from_str::<ControllerBootstrap>(content).ok()
+    })
 }
 
 pub(crate) fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
@@ -2379,6 +2364,16 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"").unwrap();
         assert!(read_bootstrap(dir.path()).unwrap().is_none());
+        // #corrupt-state-quarantine: the bad file is moved aside, not left to
+        // linger and confuse later reads/forensics.
+        assert!(!path.exists(), "0-byte state must be quarantined");
+        assert!(
+            std::fs::read_dir(path.parent().unwrap())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .any(|e| e.file_name().to_string_lossy().contains(".corrupt-")),
+            "a quarantine sibling must exist"
+        );
     }
 
     #[test]
@@ -2388,6 +2383,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"{ partial-write not valid json").unwrap();
         assert!(read_bootstrap(dir.path()).unwrap().is_none());
+        assert!(!path.exists(), "corrupt state must be quarantined aside");
     }
 
     #[test]

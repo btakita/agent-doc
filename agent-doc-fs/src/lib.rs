@@ -400,6 +400,64 @@ where
     }
 }
 
+/// Read `path` and parse it with `parse`. Missing → `Ok(None)`. If the file
+/// exists but is empty / whitespace-only / fails to parse (a *corrupt* state
+/// file — e.g. a 0-byte `controller-state.json` left by a pre-[`write_atomic`]
+/// interrupted write or an external truncation), quarantine the bad file by
+/// renaming it aside and return `Ok(None)` so the caller reboots from a clean
+/// slate instead of wedging on every future read.
+///
+/// This is the read counterpart to [`write_atomic`] (`#corrupt-state-quarantine`):
+/// `write_atomic` stops *new* 0-byte files; this recovers automatically from an
+/// *already-corrupt* one, so a partial write no longer manifests as the manual
+/// `start "timed out waiting for project controller"` move-aside dance.
+pub fn read_valid_or_quarantine<T, F>(path: &Path, parse: F) -> Result<Option<T>>
+where
+    F: FnOnce(&str) -> Option<T>,
+{
+    let Some(text) = read_optional_text(path)? else {
+        return Ok(None);
+    };
+    if !text.trim().is_empty() {
+        if let Some(parsed) = parse(&text) {
+            return Ok(Some(parsed));
+        }
+    }
+    quarantine_corrupt_file(path)?;
+    Ok(None)
+}
+
+/// Rename a corrupt state file aside to a sibling `<name>.corrupt-<pid>-<seq>`
+/// so it stops wedging reads while remaining available for forensics. A file
+/// that raced away (already removed) is treated as success.
+pub fn quarantine_corrupt_file(path: &Path) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("agent-doc-state");
+    let seq = ATOMIC_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let quarantine =
+        path.with_file_name(format!("{file_name}.corrupt-{}-{seq}", std::process::id()));
+    match std::fs::rename(path, &quarantine) {
+        Ok(()) => {
+            eprintln!(
+                "[agent-doc] quarantined corrupt state file {} -> {}",
+                path.display(),
+                quarantine.display()
+            );
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| {
+            format!(
+                "failed to quarantine corrupt state file {} -> {}",
+                path.display(),
+                quarantine.display()
+            )
+        }),
+    }
+}
+
 fn first_component(path: &Path) -> Option<Component<'_>> {
     path.components().next()
 }
@@ -473,9 +531,9 @@ mod tests {
         baseline_overlay_path_for, baseline_path_for, crdt_flock_path_for, crdt_path_for,
         cycle_state_path_for, document_state_hash, document_state_hash_from_str, inode_of_path,
         multinode_crdt_path_for, overlay_crdt_path_for, pending_response_path_for,
-        pre_response_path_for, read_optional, referenced_markdown_path,
-        referenced_markdown_path_checked, rewrite_start_path, running_exe_inode_for_pid,
-        same_document_path, snapshot_flock_path_for, snapshot_path_for,
+        pre_response_path_for, quarantine_corrupt_file, read_optional, read_valid_or_quarantine,
+        referenced_markdown_path, referenced_markdown_path_checked, rewrite_start_path,
+        running_exe_inode_for_pid, same_document_path, snapshot_flock_path_for, snapshot_path_for,
         startup_document_lock_path_for, startup_session_lock_name, startup_session_lock_path_for,
         startup_starting_dir_for, state_lock_path_for, turn_scope_path_for, write_atomic,
     };
@@ -487,6 +545,60 @@ mod tests {
         let path = tmp.path().join("nested/dir/state.json");
         write_atomic(&path, b"{\"k\":1}").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"k\":1}");
+    }
+
+    // #corrupt-state-quarantine
+
+    #[test]
+    fn read_valid_or_quarantine_missing_is_none_no_side_effect() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("controller-state.json");
+        let got: Option<String> = read_valid_or_quarantine(&path, |s| Some(s.to_string())).unwrap();
+        assert!(got.is_none());
+        assert!(std::fs::read_dir(tmp.path()).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn read_valid_or_quarantine_valid_returns_parsed_and_keeps_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("controller-state.json");
+        std::fs::write(&path, "42").unwrap();
+        let got: Option<u32> = read_valid_or_quarantine(&path, |s| s.trim().parse().ok()).unwrap();
+        assert_eq!(got, Some(42));
+        assert!(path.exists(), "valid file must be left intact");
+    }
+
+    #[test]
+    fn read_valid_or_quarantine_zero_byte_quarantines_and_returns_none() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("controller-state.json");
+        std::fs::write(&path, "").unwrap(); // 0-byte, the classic wedge
+        let got: Option<u32> = read_valid_or_quarantine(&path, |s| s.trim().parse().ok()).unwrap();
+        assert!(got.is_none(), "empty state must not parse");
+        assert!(!path.exists(), "0-byte file must be moved aside");
+        let quarantined: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt-"))
+            .collect();
+        assert_eq!(quarantined.len(), 1, "exactly one quarantine sibling");
+    }
+
+    #[test]
+    fn read_valid_or_quarantine_unparseable_quarantines() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("controller-state.json");
+        std::fs::write(&path, "{not json").unwrap();
+        let got: Option<u32> = read_valid_or_quarantine(&path, |s| s.trim().parse().ok()).unwrap();
+        assert!(got.is_none());
+        assert!(!path.exists(), "corrupt file must be moved aside");
+    }
+
+    #[test]
+    fn quarantine_corrupt_file_missing_is_ok() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // A file that raced away is treated as success (idempotent recovery).
+        quarantine_corrupt_file(&tmp.path().join("gone.json")).unwrap();
     }
 
     #[test]

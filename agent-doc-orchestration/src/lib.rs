@@ -70,6 +70,7 @@ pub mod run;
 pub mod session_accretion;
 pub mod session_actor;
 pub mod session_check;
+pub mod session_liveness;
 pub mod sessions;
 pub mod start;
 pub mod stream;

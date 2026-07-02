@@ -533,7 +533,7 @@ fn validate_file_claim(file: &Path) {
                     window: &entry.window,
                 },
                 agent_doc_git_io::dirs::resolve_canonical_or_absolute_file_path,
-            ) && !tmux.pane_alive(&entry.pane)
+            ) && !crate::session_liveness::pane_owns_live_agent(&tmux, &entry.pane)
         })
         .map(|(k, e)| (k.clone(), e.pane.clone()))
         .collect();
@@ -546,7 +546,7 @@ fn validate_file_claim(file: &Path) {
     let mut registry = registry;
     for (key, pane) in &stale_keys {
         eprintln!(
-            "stale claim: {} was bound to dead pane {}, replacing",
+            "stale claim: {} was bound to pane {} with no live agent, replacing",
             file_str, pane
         );
         registry.remove(key);

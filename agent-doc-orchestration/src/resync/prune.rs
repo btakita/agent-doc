@@ -38,8 +38,11 @@ pub(crate) fn prune_targeted_in(
     let registry_path = agent_doc_session_registry_io::registry_path_in(base_dir);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = agent_doc_session_registry_io::load_in(base_dir)?;
+    // `#adsessreap1`: prune an entry whose pane degraded `claude → zsh`. The
+    // pane is still alive to tmux but owns no agent, so the stale registry entry
+    // must be removed like a dead-pane entry.
     let removed = prune_dead_entries_for_target_in_registry(&mut registry, target, |pane| {
-        tmux.pane_alive(pane)
+        crate::session_liveness::pane_owns_live_agent(tmux, pane)
     });
     if !removed.is_empty() {
         agent_doc_session_registry_io::save_in(base_dir, &registry)?;

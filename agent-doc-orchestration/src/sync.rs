@@ -3981,7 +3981,13 @@ fn find_alive_pane_via_open_session_log(
         return None;
     }
     let pane_id = status.latest_start_pane.as_deref()?;
-    if excluded_pane == Some(pane_id) || !tmux.pane_alive(pane_id) {
+    // `#adsessreap2`: an open session-log means "the document is open in an
+    // editor," not "the agent session still owns this pane." A pane that dropped
+    // `claude → zsh` must not be re-owned off a stale session-log — treat it as
+    // ownerless so the editor's live-buffer sync stays a separate lifecycle.
+    if excluded_pane == Some(pane_id)
+        || !crate::session_liveness::pane_owns_live_agent(tmux, pane_id)
+    {
         return None;
     }
 

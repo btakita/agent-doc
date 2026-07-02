@@ -1278,8 +1278,11 @@ pub fn close_stale_starting_actors(
 /// this helper transitions the record to `Closed` and clears the pane/window
 /// projection through the same actor-store CAS used by manual admin reaps.
 ///
-/// `pane_alive` is injected so tests can stay deterministic and callers can use
-/// the same liveness backend they already trust for actor diagnostics.
+/// The injected predicate reports whether the pane still *owns a live agent*
+/// (`#adsessreap1`), not merely whether tmux can address it: a pane that dropped
+/// `claude → zsh` is alive but ownerless, and its record is reaped like a dead
+/// pane. The closure is injected so tests can stay deterministic and callers can
+/// use the same liveness backend they already trust for actor diagnostics.
 pub fn close_stale_dead_pane_actors_for_caller<F>(
     project_root: &Path,
     mut pane_alive: F,
@@ -1383,7 +1386,10 @@ pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
     }
     close_stale_dead_pane_actors_for_caller(
         project_root,
-        |pane| tmux.pane_alive(pane),
+        // `#adsessreap1`: reap a record whose pane degraded `claude → zsh`. A
+        // bare-shell pane is alive but no longer owns the agent, so it must
+        // transition the actor to `Closed`, not be kept as false-alive.
+        |pane| crate::session_liveness::pane_owns_live_agent(&tmux, pane),
         dry_run,
         caller,
         reason,

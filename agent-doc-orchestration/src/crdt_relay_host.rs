@@ -973,7 +973,8 @@ mod tests {
     }
 
     #[test]
-    fn editor_sync_barrier_timeout_falls_back_to_publish_live_buffer_file_signal_without_listener() {
+    fn editor_sync_barrier_timeout_falls_back_to_publish_live_buffer_file_signal_without_listener()
+    {
         // `#vscodepublishparity` — a VS Code (or pluginless / file-IPC) session runs
         // NO socket listener. The editor-sync-barrier timeout flush must still reach
         // that editor by writing `.agent-doc/patches/publish-live-buffer.signal`

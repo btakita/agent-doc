@@ -136,7 +136,7 @@ Some of the work overlaps tooling I already build and maintain — and since it'
 That earns the Rust mention as a fit/cost benefit without ever saying "I want to use Rust." I'd keep Vue out of the written note (it's implied by "generalist") and hold it for the call.
 
 Want me to fold that line into the full draft and reprint it?
-<!-- agent:boundary:92cf31b3 -->
+<!-- agent:boundary:21cf3c53 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -371,6 +371,38 @@ pub fn associated_pane_candidates_detail<'a>(
         .join(", ")
 }
 
+fn missing_pane_manual_repair_detail(phase: &str) -> &'static str {
+    match phase {
+        "preflight_started" => "stale preflight state is still open",
+        "response_captured" => "a captured response still needs explicit closeout recovery",
+        "write_applied" => "the write reached disk but the commit boundary is still open",
+        _ => "manual repair is still required",
+    }
+}
+
+pub fn format_missing_pane_manual_repair_reason(
+    file_display: impl fmt::Display,
+    phase: &str,
+) -> String {
+    let file_display = file_display.to_string();
+    let detail = missing_pane_manual_repair_detail(phase);
+    format!(
+        "normal sync will not auto-repair {phase} for {file_display} ({detail}). Run `agent-doc repair {file_display}` or `agent-doc session doctor {file_display} --repair` before syncing again"
+    )
+}
+
+pub fn format_missing_pane_closeout_block_reason(
+    file_display: impl fmt::Display,
+    phase: &str,
+    error_detail: Option<&str>,
+) -> String {
+    let file_display = file_display.to_string();
+    let detail = error_detail.unwrap_or("unknown");
+    format!(
+        "closeout recovery for {phase} failed and needs manual repair ({detail}). Re-run `agent-doc repair {file_display}` before syncing again"
+    )
+}
+
 pub fn format_associated_pane_resolution_error(
     file_display: impl fmt::Display,
     candidates: &[AssociatedPaneCandidate],
@@ -1363,6 +1395,46 @@ mod tests {
         assert_eq!(
             associated_pane_candidates_detail([&active, &stashed]),
             "%419:agent-doc:@3:registered,supervisor-pid, %417:stash:@9:process-tree"
+        );
+    }
+
+    #[test]
+    fn missing_pane_manual_repair_reason_formats_phase_specific_detail() {
+        assert_eq!(
+            format_missing_pane_manual_repair_reason("tasks/left.md", "response_captured"),
+            "normal sync will not auto-repair response_captured for tasks/left.md (a captured response still needs explicit closeout recovery). Run `agent-doc repair tasks/left.md` or `agent-doc session doctor tasks/left.md --repair` before syncing again"
+        );
+        assert_eq!(
+            format_missing_pane_manual_repair_reason("tasks/left.md", "write_applied"),
+            "normal sync will not auto-repair write_applied for tasks/left.md (the write reached disk but the commit boundary is still open). Run `agent-doc repair tasks/left.md` or `agent-doc session doctor tasks/left.md --repair` before syncing again"
+        );
+    }
+
+    #[test]
+    fn missing_pane_manual_repair_reason_formats_unknown_phase_fallback() {
+        assert_eq!(
+            format_missing_pane_manual_repair_reason("tasks/left.md", "custom_phase"),
+            "normal sync will not auto-repair custom_phase for tasks/left.md (manual repair is still required). Run `agent-doc repair tasks/left.md` or `agent-doc session doctor tasks/left.md --repair` before syncing again"
+        );
+    }
+
+    #[test]
+    fn missing_pane_closeout_block_reason_formats_error_detail() {
+        assert_eq!(
+            format_missing_pane_closeout_block_reason(
+                "tasks/left.md",
+                "response_captured",
+                Some("pending/backlog patch changed non-list content"),
+            ),
+            "closeout recovery for response_captured failed and needs manual repair (pending/backlog patch changed non-list content). Re-run `agent-doc repair tasks/left.md` before syncing again"
+        );
+    }
+
+    #[test]
+    fn missing_pane_closeout_block_reason_formats_unknown_error_fallback() {
+        assert_eq!(
+            format_missing_pane_closeout_block_reason("tasks/left.md", "write_applied", None),
+            "closeout recovery for write_applied failed and needs manual repair (unknown). Re-run `agent-doc repair tasks/left.md` before syncing again"
         );
     }
 

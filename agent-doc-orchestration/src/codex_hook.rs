@@ -43,6 +43,10 @@ use agent_doc_model_tier::context_transcript_io::{
     latest_codex_transcript, transcript_context_pct,
 };
 use agent_doc_model_tier::context_usage::{Harness, clear_decision};
+use agent_doc_turn::response_text::{
+    first_nonempty_prompt_line, is_committed_prompt_diff_interruption,
+    prompt_target_from_interruption_reason,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -361,17 +365,6 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
     }))
 }
 
-fn is_committed_prompt_diff_interruption(reason: &str) -> bool {
-    reason.contains("is `committed`")
-        && reason.contains("prompt_target:")
-        && (reason.contains("unresolved prompt-bearing user changes")
-            || reason.contains(
-                "active harness session changed this document after the last committed closeout",
-            ))
-        && (reason.contains("no new agent-doc cycle started")
-            || reason.contains("without reopening the binary-owned write/commit path"))
-}
-
 fn active_session_prompt_requires_writeback(
     file: &Path,
     state: &SessionState,
@@ -423,21 +416,6 @@ fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
         return None;
     }
     Some(prompt)
-}
-
-fn prompt_target_from_interruption_reason(reason: &str) -> Option<String> {
-    let marker = "prompt_target:";
-    let tail = reason.split_once(marker)?.1.trim();
-    (!tail.is_empty()).then(|| tail.to_string())
-}
-
-fn first_nonempty_prompt_line(prompt: &str) -> String {
-    prompt
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or(prompt)
-        .trim()
-        .to_string()
 }
 
 fn agent_doc_mcp_configured_for(file: &Path) -> bool {

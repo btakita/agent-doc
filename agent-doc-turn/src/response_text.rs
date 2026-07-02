@@ -47,6 +47,32 @@ pub fn response_prompt_target_from_re_heading(response_body: &str) -> Option<Str
     None
 }
 
+pub fn is_committed_prompt_diff_interruption(reason: &str) -> bool {
+    reason.contains("is `committed`")
+        && reason.contains("prompt_target:")
+        && (reason.contains("unresolved prompt-bearing user changes")
+            || reason.contains(
+                "active harness session changed this document after the last committed closeout",
+            ))
+        && (reason.contains("no new agent-doc cycle started")
+            || reason.contains("without reopening the binary-owned write/commit path"))
+}
+
+pub fn prompt_target_from_interruption_reason(reason: &str) -> Option<String> {
+    let marker = "prompt_target:";
+    let tail = reason.split_once(marker)?.1.trim();
+    (!tail.is_empty()).then(|| tail.to_string())
+}
+
+pub fn first_nonempty_prompt_line(prompt: &str) -> String {
+    prompt
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(prompt)
+        .trim()
+        .to_string()
+}
+
 /// Summarize captured response text for external hook consumers. Agent-doc patch
 /// comments are metadata, not useful response content, so they are removed
 /// before the summary is bounded.
@@ -326,6 +352,55 @@ mod tests {
         assert_eq!(
             response_prompt_target_from_re_heading(response).as_deref(),
             Some("do [#tsiftmemhooks]")
+        );
+    }
+
+    #[test]
+    fn committed_prompt_diff_interruption_detects_unresolved_prompt_after_commit() {
+        let reason = "session-check: cycle is `committed`; unresolved prompt-bearing user changes found; no new agent-doc cycle started; prompt_target: do #deploy";
+
+        assert!(is_committed_prompt_diff_interruption(reason));
+    }
+
+    #[test]
+    fn committed_prompt_diff_interruption_detects_active_session_drift_after_commit() {
+        let reason = "session-check: cycle is `committed`; active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path; prompt_target: do #repair";
+
+        assert!(is_committed_prompt_diff_interruption(reason));
+    }
+
+    #[test]
+    fn committed_prompt_diff_interruption_rejects_open_cycle_reason() {
+        let reason = "session-check: cycle is `preflight_started`; unresolved prompt-bearing user changes found; no new agent-doc cycle started; prompt_target: do #deploy";
+
+        assert!(!is_committed_prompt_diff_interruption(reason));
+    }
+
+    #[test]
+    fn prompt_target_from_interruption_reason_returns_trimmed_tail() {
+        let reason =
+            "session-check: committed prompt diff; prompt_target: \n\n do [#seopdp] deploy page ";
+
+        assert_eq!(
+            prompt_target_from_interruption_reason(reason).as_deref(),
+            Some("do [#seopdp] deploy page")
+        );
+    }
+
+    #[test]
+    fn prompt_target_from_interruption_reason_ignores_missing_or_empty_target() {
+        assert_eq!(prompt_target_from_interruption_reason("no target"), None);
+        assert_eq!(
+            prompt_target_from_interruption_reason("prompt_target:   "),
+            None
+        );
+    }
+
+    #[test]
+    fn first_nonempty_prompt_line_skips_blank_lines_and_trims() {
+        assert_eq!(
+            first_nonempty_prompt_line("\n\n  do [#seopdp] deploy page  \nmore"),
+            "do [#seopdp] deploy page"
         );
     }
 

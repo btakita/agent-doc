@@ -17,8 +17,7 @@ use agent_doc_workflow::doctor::{
     WorkflowDoctorOutcome, WorkflowDoctorReport, WorkflowInvariantResult,
 };
 use agent_doc_workflow::invariants::{
-    RemediationAction, RemediationStep, WorkflowInvariantCatalog, WorkflowInvariantId,
-    workflow_invariant_catalog,
+    RemediationStep, WorkflowInvariantCatalog, WorkflowInvariantId, workflow_invariant_catalog,
 };
 use agent_doc_workflow_io::proof_ledger::{
     OperationProofInput, OperationProofRecord, ProofEvidenceKind, ProofOperationKind, ProofOutcome,
@@ -214,7 +213,7 @@ fn plan_autofix_steps(
                     let command = repair_command(result, remediation, file);
                     let executable = command
                         .as_deref()
-                        .is_some_and(|command| is_whitelisted_autofix(remediation.action, command));
+                        .is_some_and(|command| remediation.action.accepts_autofix_command(command));
                     let (status, reason) = if executable {
                         (
                             WorkflowAutofixStepStatus::Planned,
@@ -229,7 +228,7 @@ fn plan_autofix_steps(
                     steps.push(build_step(
                         result,
                         Some(remediation),
-                        action_name(remediation.action),
+                        remediation.action.as_str(),
                         status,
                         command,
                         reason,
@@ -254,7 +253,7 @@ fn plan_autofix_steps(
                     steps.push(build_step(
                         result,
                         Some(remediation),
-                        action_name(remediation.action),
+                        remediation.action.as_str(),
                         WorkflowAutofixStepStatus::OperatorGated,
                         result.operator_actions.first().cloned(),
                         "operator-gated remediation requires explicit human proof",
@@ -381,21 +380,6 @@ fn apply_step(step: &mut WorkflowAutofixStep, file: &Path) -> Result<()> {
     Ok(())
 }
 
-fn is_whitelisted_autofix(action: RemediationAction, command: &str) -> bool {
-    match action {
-        RemediationAction::RestartSupervisorOnce => {
-            command == "agent-doc admin recycle --all-projects --json"
-        }
-        RemediationAction::FinalizeOrWriteCommit => {
-            command.starts_with("agent-doc write --commit ")
-                && !command.contains("&&")
-                && !command.contains('<')
-                && !command.contains('>')
-        }
-        _ => false,
-    }
-}
-
 fn proof_record(step: &WorkflowAutofixStep) -> Result<OperationProofRecord> {
     OperationProofRecord::new(OperationProofInput {
         operation_id: step.operation_id.clone(),
@@ -444,20 +428,6 @@ fn truncate_output(output: &std::process::Output) -> String {
         text.push_str("...");
     }
     text
-}
-
-fn action_name(action: RemediationAction) -> &'static str {
-    match action {
-        RemediationAction::ContinueQueueDrain => "continue_queue_drain",
-        RemediationAction::RestartSupervisorOnce => "restart_supervisor_once",
-        RemediationAction::FinalizeOrWriteCommit => "finalize_or_write_commit",
-        RemediationAction::UseEditorIpcWriteback => "use_editor_ipc_writeback",
-        RemediationAction::RetryOnCurrentGeneration => "retry_on_current_generation",
-        RemediationAction::CommitParentGitlink => "commit_parent_gitlink",
-        RemediationAction::AskOperatorLiveEditorProof => "ask_operator_live_editor_proof",
-        RemediationAction::AskOperatorResolveGitState => "ask_operator_resolve_git_state",
-        RemediationAction::AskOperatorResolveConflict => "ask_operator_resolve_conflict",
-    }
 }
 
 fn now_millis() -> u64 {

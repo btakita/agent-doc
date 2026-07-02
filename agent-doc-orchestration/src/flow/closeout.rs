@@ -1,4 +1,7 @@
-use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_flow::{
+    closeout::closeout_latency_message,
+    types::{FlowEvent, FlowName, FlowOutcome, FlowStage},
+};
 use agent_doc_turn::closeout_guard::CloseoutGuardReason;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryCommandInput, CloseoutRecoveryCycleInput, CloseoutRecoveryDecision,
@@ -1272,20 +1275,6 @@ impl<'a> CloseoutTimer<'a> {
     }
 }
 
-fn closeout_latency_message(file: &Path, total_ms: u128, phases: &[(String, u128)]) -> String {
-    let phase_text = phases
-        .iter()
-        .map(|(phase, elapsed)| format!("{phase}:{elapsed}ms"))
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "closeout_latency file={} total_ms={} phases={}",
-        file.display(),
-        total_ms,
-        phase_text
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1323,21 +1312,6 @@ mod tests {
             event.reason.as_deref(),
             Some("review_done_source_not_reviewed")
         );
-    }
-
-    #[test]
-    fn closeout_latency_message_lists_phase_timings() {
-        let message = closeout_latency_message(
-            Path::new("tasks/doc.md"),
-            300,
-            &[
-                ("git_commit".to_string(), 12),
-                ("session_check".to_string(), 4),
-            ],
-        );
-
-        assert!(message.contains("closeout_latency file=tasks/doc.md total_ms=300"));
-        assert!(message.contains("git_commit:12ms,session_check:4ms"));
     }
 
     fn setup_git_project_with_doc(base: &str) -> (tempfile::TempDir, std::path::PathBuf) {

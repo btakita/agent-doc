@@ -161,6 +161,37 @@ pub enum RemediationAction {
     AskOperatorResolveConflict,
 }
 
+impl RemediationAction {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ContinueQueueDrain => "continue_queue_drain",
+            Self::RestartSupervisorOnce => "restart_supervisor_once",
+            Self::FinalizeOrWriteCommit => "finalize_or_write_commit",
+            Self::UseEditorIpcWriteback => "use_editor_ipc_writeback",
+            Self::RetryOnCurrentGeneration => "retry_on_current_generation",
+            Self::CommitParentGitlink => "commit_parent_gitlink",
+            Self::AskOperatorLiveEditorProof => "ask_operator_live_editor_proof",
+            Self::AskOperatorResolveGitState => "ask_operator_resolve_git_state",
+            Self::AskOperatorResolveConflict => "ask_operator_resolve_conflict",
+        }
+    }
+
+    pub fn accepts_autofix_command(self, command: &str) -> bool {
+        match self {
+            Self::RestartSupervisorOnce => {
+                command == "agent-doc admin recycle --all-projects --json"
+            }
+            Self::FinalizeOrWriteCommit => {
+                command.starts_with("agent-doc write --commit ")
+                    && !command.contains("&&")
+                    && !command.contains('<')
+                    && !command.contains('>')
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegressionCoverage {
     pub kind: RegressionCoverageKind,
@@ -860,6 +891,39 @@ mod tests {
                 invariant.id
             );
         }
+    }
+
+    #[test]
+    fn remediation_actions_render_stable_names_and_autofix_whitelist() {
+        assert_eq!(
+            RemediationAction::ContinueQueueDrain.as_str(),
+            "continue_queue_drain"
+        );
+        assert_eq!(
+            RemediationAction::RestartSupervisorOnce.as_str(),
+            "restart_supervisor_once"
+        );
+        assert_eq!(
+            RemediationAction::AskOperatorResolveConflict.as_str(),
+            "ask_operator_resolve_conflict"
+        );
+
+        assert!(
+            RemediationAction::RestartSupervisorOnce
+                .accepts_autofix_command("agent-doc admin recycle --all-projects --json")
+        );
+        assert!(
+            RemediationAction::FinalizeOrWriteCommit
+                .accepts_autofix_command("agent-doc write --commit /tmp/session.md")
+        );
+        assert!(
+            !RemediationAction::FinalizeOrWriteCommit
+                .accepts_autofix_command("agent-doc write --commit /tmp/session.md && rm -rf /")
+        );
+        assert!(
+            !RemediationAction::ContinueQueueDrain
+                .accepts_autofix_command("agent-doc drain-claim /tmp/session.md")
+        );
     }
 
     #[test]

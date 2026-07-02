@@ -348,40 +348,6 @@ pub(crate) fn pending_missing_pane_repair_phase(file: &Path) -> Option<&'static 
     }
 }
 
-pub(crate) fn missing_pane_manual_repair_reason(file: &Path, phase: &str) -> String {
-    if let Ok(Some(message)) = crate::session_check::detect_uncommitted_closeout_drift(file) {
-        return message;
-    }
-    let detail = match phase {
-        "preflight_started" => "stale preflight state is still open",
-        "response_captured" => "a captured response still needs explicit closeout recovery",
-        "write_applied" => "the write reached disk but the commit boundary is still open",
-        _ => "manual repair is still required",
-    };
-    format!(
-        "normal sync will not auto-repair {phase} for {} ({}). Run `agent-doc repair {}` or `agent-doc session doctor {} --repair` before syncing again",
-        file.display(),
-        detail,
-        file.display(),
-        file.display()
-    )
-}
-
-pub(crate) fn missing_pane_closeout_block_reason(
-    file: &Path,
-    phase: &str,
-    error: Option<&str>,
-) -> String {
-    if let Ok(Some(message)) = crate::session_check::detect_uncommitted_closeout_drift(file) {
-        return message;
-    }
-    let detail = error.unwrap_or("unknown");
-    format!(
-        "closeout recovery for {phase} failed and needs manual repair ({detail}). Re-run `agent-doc repair {}` before syncing again",
-        file.display()
-    )
-}
-
 pub(crate) fn repair_missing_registered_pane(
     tmux: &Tmux,
     file: &Path,
@@ -427,17 +393,31 @@ pub(crate) fn repair_missing_registered_pane(
         MissingRegisteredPaneRepairMode::ExplicitRepair => false,
     };
     let block_auto_start_reason = match mode {
-        MissingRegisteredPaneRepairMode::InspectOnly => closeout_recovery_phase
-            .as_deref()
-            .map(|phase| missing_pane_manual_repair_reason(file, phase)),
+        MissingRegisteredPaneRepairMode::InspectOnly => {
+            closeout_recovery_phase.as_deref().map(|phase| {
+                match crate::session_check::detect_uncommitted_closeout_drift(file) {
+                    Ok(Some(message)) => message,
+                    _ => agent_doc_tmux::format_missing_pane_manual_repair_reason(
+                        file.display(),
+                        phase,
+                    ),
+                }
+            })
+        }
         MissingRegisteredPaneRepairMode::ExplicitRepair
             if closeout_recovery_phase.is_some() && closeout_recovery_outcome.is_none() =>
         {
-            Some(missing_pane_closeout_block_reason(
-                file,
-                closeout_recovery_phase.as_deref().unwrap_or("unknown"),
-                closeout_recovery_error.as_deref(),
-            ))
+            let phase = closeout_recovery_phase.as_deref().unwrap_or("unknown");
+            Some(
+                match crate::session_check::detect_uncommitted_closeout_drift(file) {
+                    Ok(Some(message)) => message,
+                    _ => agent_doc_tmux::format_missing_pane_closeout_block_reason(
+                        file.display(),
+                        phase,
+                        closeout_recovery_error.as_deref(),
+                    ),
+                },
+            )
         }
         MissingRegisteredPaneRepairMode::ExplicitRepair => None,
     };

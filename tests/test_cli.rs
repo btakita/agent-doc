@@ -4179,11 +4179,15 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
     let flow_outcome_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow/src/outcome.rs")).unwrap();
+    let flow_closeout_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-flow/src/closeout.rs")).unwrap();
     let flow_lib = fs::read_to_string(manifest_dir.join("agent-doc-flow/src/lib.rs")).unwrap();
     let orchestration_flow_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     assert!(
-        flow_lib.contains("pub mod types;") && flow_lib.contains("pub mod outcome;"),
+        flow_lib.contains("pub mod types;")
+            && flow_lib.contains("pub mod outcome;")
+            && flow_lib.contains("pub mod closeout;"),
         "agent-doc-flow should expose focused flow vocabulary and outcome contracts"
     );
     assert!(
@@ -4196,6 +4200,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             && flow_outcome_source.contains("pub struct BinaryOutcome"),
         "agent-doc-flow must own typed user-facing and binary outcome contracts"
     );
+    assert!(
+        flow_closeout_source.contains("pub fn closeout_latency_message"),
+        "agent-doc-flow must own closeout flow latency formatting"
+    );
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     for forbidden in [
@@ -4203,6 +4211,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "impl CloseoutGuardReason",
         "pub fn closeout_state_from_cycle_phase",
         "pub fn terminal_guard_outcome",
+        "fn closeout_latency_message(",
     ] {
         assert!(
             !closeout_source.contains(forbidden),
@@ -4216,6 +4225,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     assert!(
         closeout_source.contains("use agent_doc_turn::closeout_guard::CloseoutGuardReason;"),
         "flow::closeout should adapt focused closeout guard reasons into flow events"
+    );
+    assert!(
+        closeout_source.contains("closeout::closeout_latency_message"),
+        "flow::closeout should call focused flow latency formatting directly"
     );
     for relative in [
         "agent-doc-orchestration/src/flow/mod.rs",
@@ -4873,6 +4886,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for required in [
         "pub fn response_prompt_target_from_re_heading",
         "pub fn summarize_response_for_hook",
+        "pub fn is_committed_prompt_diff_interruption",
+        "pub fn prompt_target_from_interruption_reason",
+        "pub fn first_nonempty_prompt_line",
         "fn truncate_response_summary",
     ] {
         assert!(
@@ -5059,11 +5075,20 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
     let hooks_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/hooks.rs")).unwrap();
+    let codex_hook_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
     assert!(
         hooks_source.contains("agent_doc_turn::response_text::{")
             && hooks_source.contains("response_prompt_target_from_re_heading")
             && hooks_source.contains("summarize_response_for_hook"),
         "orchestration hooks should call focused response text projection directly"
+    );
+    assert!(
+        codex_hook_source.contains("use agent_doc_turn::response_text::{")
+            && codex_hook_source.contains("is_committed_prompt_diff_interruption")
+            && codex_hook_source.contains("prompt_target_from_interruption_reason")
+            && codex_hook_source.contains("first_nonempty_prompt_line"),
+        "Codex stop hook should call focused response-text interruption parsing directly"
     );
     for forbidden in [
         "fn extract_agent_doc_prompt_target",
@@ -5073,6 +5098,16 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         assert!(
             !hooks_source.contains(forbidden),
             "orchestration hooks must not re-own hook response projection policy: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "fn is_committed_prompt_diff_interruption(",
+        "fn prompt_target_from_interruption_reason(",
+        "fn first_nonempty_prompt_line(",
+    ] {
+        assert!(
+            !codex_hook_source.contains(forbidden),
+            "Codex stop hook must not re-own response-text interruption parsing: {forbidden}"
         );
     }
     let write_normalize =
@@ -8136,6 +8171,8 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub enum WorkflowInvariantId",
         "pub enum FactSourceKind",
         "pub enum RemediationAction",
+        "pub const fn as_str(self) -> &'static str",
+        "pub fn accepts_autofix_command(self, command: &str) -> bool",
         "pub fn workflow_invariant_catalog",
         "pub fn workflow_invariant_catalog_json",
     ] {
@@ -8261,6 +8298,17 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             && orchestration_autofix.contains("read_operation_proofs"),
         "orchestration autofix should consume focused workflow proof ledger IO directly"
     );
+    for forbidden in [
+        "fn is_whitelisted_autofix(",
+        "fn action_name(",
+        "RemediationAction::RestartSupervisorOnce =>",
+        "RemediationAction::FinalizeOrWriteCommit =>",
+    ] {
+        assert!(
+            !orchestration_autofix.contains(forbidden),
+            "orchestration autofix must not re-own workflow remediation action policy: {forbidden}"
+        );
+    }
 
     let flow_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
@@ -14835,6 +14883,43 @@ fn test_agent_doc_tmux_owns_destructive_repair_policy() {
             "agent-doc-tmux destructive repair policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_tmux_owns_missing_pane_repair_message_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn format_missing_pane_manual_repair_reason(",
+        "pub fn format_missing_pane_closeout_block_reason(",
+    ] {
+        assert!(
+            tmux_source.contains(required),
+            "agent-doc-tmux must own missing-pane repair message policy: {required}"
+        );
+    }
+
+    let pane_repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/pane_repair.rs"))
+            .unwrap();
+    for forbidden in [
+        "fn missing_pane_manual_repair_reason(",
+        "fn missing_pane_closeout_block_reason(",
+        "\"stale preflight state is still open\"",
+        "\"a captured response still needs explicit closeout recovery\"",
+        "\"the write reached disk but the commit boundary is still open\"",
+    ] {
+        assert!(
+            !pane_repair_source.contains(forbidden),
+            "sync pane repair must not re-own missing-pane repair message policy: {forbidden}"
+        );
+    }
+    assert!(
+        pane_repair_source.contains("agent_doc_tmux::format_missing_pane_manual_repair_reason")
+            && pane_repair_source
+                .contains("agent_doc_tmux::format_missing_pane_closeout_block_reason"),
+        "sync pane repair should call focused tmux missing-pane repair message helpers directly"
+    );
 }
 
 #[test]

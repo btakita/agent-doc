@@ -318,7 +318,17 @@ Git daily, GitHub/GitHub Actions, Jira and similar issue trackers, and earlier C
 ---
 
 Two housekeeping notes: the `go` queue head still points at `#fcmm`, which isn't in the backlog (dangling — nothing drainable), so remove it or tell me what it should be. And preflight flags a stale `agent-doc` install; I left it alone mid-session since this is a doc turn, not code. Want these answers dropped into a `mail/contacts/laura-s/` file for the reply, or tightened further?
-<!-- agent:boundary:b0283c67 -->
+❯ For "6. Oracle PL/SQL, MS SQL, Cosmos.", I also worked with SQL Server at Pivotal Labs & menu.com.
+
+### Re: Answer 6 revised — added Pivotal Labs + menu.com MS SQL — opus-4.8
+
+Good catch — that broadens the MS SQL story past the early-career DBA years. Revised answer 6:
+
+**6. Oracle PL/SQL, MS SQL, Cosmos.**
+I've worked with MS SQL Server across my career — SQL Server DBA at NASPP, ASP/SQL Server at Flextronics, and again on projects at Pivotal Labs and menu.com. My recent data work is Postgres, TimescaleDB, and SQLite/D1; I haven't shipped Oracle PL/SQL or Cosmos directly, but the relational-at-scale and document-store patterns transfer and I ramp quickly.
+
+That keeps MS SQL as a genuine through-line rather than a one-off, while staying honest on the Oracle/Cosmos gap. Want me to fold this into 6a as well (production procedures/queries), or drop the full answer set into a `mail/contacts/laura-s/` file for the reply?
+<!-- agent:boundary:8c10e2a7 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -345,7 +345,18 @@ Drafted the reply as a corky draft. I could **not** read/reply directly through 
 2. Confirm **`btak.dev@gmail.com`** is the right send-from address (that's where the LSAC thread is under `u/1`).
 
 Once re-authed, say the word and I'll thread + push it to your Drafts for a final look. Want me to bump the draft `status: review` now, or leave it?
-<!-- agent:boundary:505e6bbf -->
+I used brian.takita@gmail.com by accident. It should be btak.dev@gmail.com.
+
+### Re: Account fixed + draft pushed to Gmail — opus-4.8
+
+The draft's `from` was already `btak.dev@gmail.com`, so your correction is satisfied — no `brian.takita` reference in it. Your browser re-auth landed too (corky doctor shows both accounts valid until 23:11 UTC), so I pushed it.
+
+**Pushed to Gmail Drafts** (`btak.dev@gmail.com`, **not sent**) → to `ldancovici@lsac.org`, subject "Re: Engineer Lead at LSAC — answers to your questions", all 11 answers. Open your Drafts to review and send.
+
+**One caveat — it's a standalone draft, not threaded to Laura's message.** I couldn't locate the original in corky to set reply headers: the web-UI id from your search URL (`FMfcgz…`) doesn't resolve via the Gmail API, and a full `btak.dev` sync didn't surface it (not `ldancovici@lsac.org`, `@lsac.org`, `jobs/1736`, or any question text) — so the LSAC email is in a label corky doesn't sync, or the questions came via LinkedIn rather than email. If in-thread threading matters, send me the raw Gmail **thread id** (the `th=…` hex, or from "Show original") and I'll re-push with `--thread-id`; otherwise you can just reply from Gmail or send the standalone draft as-is.
+
+Source draft: `mail/drafts/2026-07-02-re-engineer-lead-at-lsac-answers-to-your-questions.md` (`mail` `0860085`, local). Want me to bump it to `status: review`, or leave it?
+<!-- agent:boundary:c435469f -->
 <!-- /agent:exchange -->
 
 ## Queue

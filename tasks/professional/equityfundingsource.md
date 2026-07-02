@@ -92,6 +92,8 @@ Shipped `#spec-test-commit-push-deploy`: EFS `eec3c4e` (pushed), superproject gi
 
 Persisted via force-disk (editor still closed).
 
+https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=lender fields should be laid out like a card. Make the dialog wider
+
 ### Re: lender dialog — fields as cards + wider — opus-4-8
 
 Done. The admin lender-pipeline lender dialog (`dialog=lender`) now:

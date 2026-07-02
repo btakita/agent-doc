@@ -11,6 +11,9 @@ name = "agent_doc_state_backbone"
 
 [dependencies]
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
-lazily = { version = "0.18", features = ["thread-safe", "statechart"] }
+# Typed state-chart builder + ThreadSafeStateChart (lazily 0.20). The chart
+# engine is core as of 0.20, so only `thread-safe` is needed (for the
+# cross-thread status-observation variant); no `statechart`/`statechart-json`.
+lazily = { version = "0.20", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -32,7 +32,7 @@
 //! closeout guard, fold-in of the `#mergestatemachine3` merge-ownership FSM)
 //! are tracked in `tasks/agent-doc/prd-adstatechart-local-process-statechart.md`.
 
-use lazily::{ChartDef, StateChart};
+use lazily::{ChartBuilder, ChartDef, StateBuilder, StateChart, ThreadSafeStateChart};
 use serde::{Deserialize, Serialize};
 
 /// Raw per-process facts the named guards are computed from. These are the only
@@ -93,8 +93,8 @@ pub fn commit_allowed(facts: &ChartFacts) -> bool {
 }
 
 /// Resolve every named guard the chart references for one `send`. Names must
-/// match the `guard` fields in [`CHART_DEF_JSON`]. Any name the chart references
-/// but this map omits fails closed inside `StateChart::send`.
+/// match the guard names wired in [`adstatechart_def`]. Any name the chart
+/// references but this map omits fails closed inside `StateChart::send`.
 pub fn guard_map(facts: &ChartFacts) -> std::collections::HashMap<String, bool> {
     let mut g = std::collections::HashMap::new();
     g.insert("editor_synced".to_string(), editor_synced(facts));
@@ -108,7 +108,9 @@ pub fn guard_map(facts: &ChartFacts) -> std::collections::HashMap<String, bool> 
     g
 }
 
-/// The declarative Harel chart: four orthogonal regions under a parallel root.
+/// The declarative Harel chart: four orthogonal regions under a parallel root,
+/// assembled with the typed lazily 0.19 [`ChartBuilder`] (Phase E rung 3 typed
+/// migration; the definition-equivalent of the former `CHART_DEF_JSON`).
 ///
 /// - `transport`:   `socket → degraded → file_fallback` (+ recovery back)
 /// - `editor_sync`: `synced → editor_ahead → publishing`
@@ -116,79 +118,109 @@ pub fn guard_map(facts: &ChartFacts) -> std::collections::HashMap<String, bool> 
 /// - `supervisor`:  `sup_idle / sup_busy / sup_stale → sup_recycle`
 ///
 /// The `closeout.written --commit--> committed` edge carries guard
-/// `editor_synced`, making commit-while-editor-ahead a rejected edge.
-pub const CHART_DEF_JSON: &str = r#"{
-  "initial": "root",
-  "states": {
-    "root": { "parallel": true },
-
-    "transport": { "parent": "root", "initial": "socket" },
-    "socket": { "parent": "transport", "on": {
-      "send_timeout": { "target": "degraded" },
-      "no_ack": { "target": "degraded" },
-      "no_ipc_listener": { "target": "file_fallback" }
-    } },
-    "degraded": { "parent": "transport", "on": {
-      "no_ipc_listener": { "target": "file_fallback" },
-      "socket_recovered": { "target": "socket" }
-    } },
-    "file_fallback": { "parent": "transport", "on": {
-      "socket_recovered": { "target": "socket" }
-    } },
-
-    "editor_sync": { "parent": "root", "initial": "synced" },
-    "synced": { "parent": "editor_sync", "on": {
-      "editor_edited": { "target": "editor_ahead", "guard": "editor_ahead" }
-    } },
-    "editor_ahead": { "parent": "editor_sync", "on": {
-      "publish_started": { "target": "publishing" },
-      "editor_resynced": { "target": "synced", "guard": "editor_synced" }
-    } },
-    "publishing": { "parent": "editor_sync", "on": {
-      "publish_acked": { "target": "synced", "guard": "editor_synced" }
-    } },
-
-    "closeout": { "parent": "root", "initial": "idle" },
-    "idle": { "parent": "closeout", "on": {
-      "write": { "target": "written" }
-    } },
-    "written": { "parent": "closeout", "on": {
-      "commit": { "target": "committed", "guard": "editor_synced" }
-    } },
-    "committed": { "parent": "closeout", "on": {
-      "session_check_ok": { "target": "session_ok" }
-    } },
-    "session_ok": { "parent": "closeout", "kind": "final" },
-
-    "supervisor": { "parent": "root", "initial": "sup_idle" },
-    "sup_idle": { "parent": "supervisor", "on": {
-      "turn_started": { "target": "sup_busy" },
-      "stale_observed": { "target": "sup_stale", "guard": "supervisor_stale" }
-    } },
-    "sup_busy": { "parent": "supervisor", "on": {
-      "turn_ended": { "target": "sup_idle" },
-      "stale_observed": { "target": "sup_stale", "guard": "supervisor_stale" }
-    } },
-    "sup_stale": { "parent": "supervisor", "on": {
-      "recycle_requested": { "target": "sup_recycle" }
-    } },
-    "sup_recycle": { "parent": "supervisor", "on": {
-      "recycled": { "target": "sup_idle" }
-    } }
-  }
-}"#;
-
-/// Parse [`CHART_DEF_JSON`] into a [`ChartDef`]. Returns the parser error string
-/// on a malformed chart or an unsupported feature (`run` action / `expr` guard).
+/// `editor_synced`, making commit-while-editor-ahead a rejected edge. State
+/// insertion order (first parent-less state = root) fixes deterministic
+/// parallel-region descent, exactly as JSON key order did.
 pub fn adstatechart_def() -> Result<ChartDef, String> {
-    let value: serde_json::Value = serde_json::from_str(CHART_DEF_JSON)
-        .map_err(|e| format!("adstatechart CHART_DEF_JSON is not valid JSON: {e}"))?;
-    ChartDef::from_json(&value)
+    ChartBuilder::new()
+        .state(StateBuilder::parallel("root"))
+        // transport region
+        .state(StateBuilder::compound("transport", "socket").parent("root"))
+        .state(
+            StateBuilder::atomic("socket")
+                .parent("transport")
+                .on("send_timeout", "degraded")
+                .on("no_ack", "degraded")
+                .on("no_ipc_listener", "file_fallback"),
+        )
+        .state(
+            StateBuilder::atomic("degraded")
+                .parent("transport")
+                .on("no_ipc_listener", "file_fallback")
+                .on("socket_recovered", "socket"),
+        )
+        .state(
+            StateBuilder::atomic("file_fallback")
+                .parent("transport")
+                .on("socket_recovered", "socket"),
+        )
+        // editor_sync region
+        .state(StateBuilder::compound("editor_sync", "synced").parent("root"))
+        .state(
+            StateBuilder::atomic("synced")
+                .parent("editor_sync")
+                .on_guarded("editor_edited", "editor_ahead", "editor_ahead"),
+        )
+        .state(
+            StateBuilder::atomic("editor_ahead")
+                .parent("editor_sync")
+                .on("publish_started", "publishing")
+                .on_guarded("editor_resynced", "synced", "editor_synced"),
+        )
+        .state(
+            StateBuilder::atomic("publishing")
+                .parent("editor_sync")
+                .on_guarded("publish_acked", "synced", "editor_synced"),
+        )
+        // closeout region
+        .state(StateBuilder::compound("closeout", "idle").parent("root"))
+        .state(
+            StateBuilder::atomic("idle")
+                .parent("closeout")
+                .on("write", "written"),
+        )
+        .state(
+            StateBuilder::atomic("written")
+                .parent("closeout")
+                .on_guarded("commit", "committed", "editor_synced"),
+        )
+        .state(
+            StateBuilder::atomic("committed")
+                .parent("closeout")
+                .on("session_check_ok", "session_ok"),
+        )
+        .state(StateBuilder::final_state("session_ok").parent("closeout"))
+        // supervisor region
+        .state(StateBuilder::compound("supervisor", "sup_idle").parent("root"))
+        .state(
+            StateBuilder::atomic("sup_idle")
+                .parent("supervisor")
+                .on("turn_started", "sup_busy")
+                .on_guarded("stale_observed", "sup_stale", "supervisor_stale"),
+        )
+        .state(
+            StateBuilder::atomic("sup_busy")
+                .parent("supervisor")
+                .on("turn_ended", "sup_idle")
+                .on_guarded("stale_observed", "sup_stale", "supervisor_stale"),
+        )
+        .state(
+            StateBuilder::atomic("sup_stale")
+                .parent("supervisor")
+                .on("recycle_requested", "sup_recycle"),
+        )
+        .state(
+            StateBuilder::atomic("sup_recycle")
+                .parent("supervisor")
+                .on("recycled", "sup_idle"),
+        )
+        .build()
 }
 
 /// Build a fresh [`StateChart`] over `ctx` in its initial configuration.
 pub fn new_adstatechart(ctx: &lazily::Context) -> Result<StateChart, String> {
     Ok(StateChart::new(ctx, adstatechart_def()?))
+}
+
+/// Build a fresh [`ThreadSafeStateChart`] over `ctx` — same chart semantics as
+/// [`new_adstatechart`], but `Send + Sync` so a status-observer thread can read
+/// [`ThreadSafeStateChart::configuration`] while another thread drives
+/// [`ThreadSafeStateChart::send`]. This is the cross-thread status-observation
+/// path Phase E rung 3 wires the supervisor/session status reader through.
+pub fn new_adstatechart_threadsafe(
+    ctx: &lazily::ThreadSafeContext,
+) -> Result<ThreadSafeStateChart, String> {
+    Ok(ThreadSafeStateChart::new(ctx, adstatechart_def()?))
 }
 
 // ------------------------------------------------------- observability read
@@ -244,64 +276,55 @@ fn region_label(leaf: &str) -> String {
     format!("{region}.{leaf}")
 }
 
-/// Drive a fresh chart from `facts` + `observed` and return the advisory named
-/// snapshot: the active leaf of each region, ordered
-/// `transport.x editor_sync.x closeout.x supervisor.x`.
-///
-/// Read-only observability (`#adstatechart2`): builds its own chart and never
-/// touches the live closeout path. The regions are orthogonal, so events are
-/// applied independently; the closeout `commit` edge carries the real
-/// `editor_synced` guard, so a `Committed`/`SessionOk` observation while
-/// `editor_ahead` holds is faithfully reported as still `closeout.written`
-/// (the guard rejects the edge) rather than the caller's optimistic phase.
-pub fn configuration_snapshot(facts: &ChartFacts, observed: &ObservedPhases) -> String {
-    let ctx = lazily::Context::new();
-    let Ok(chart) = new_adstatechart(&ctx) else {
-        return "adstatechart.unavailable".to_string();
-    };
-    let g = guard_map(facts);
+/// The ordered events that drive a fresh chart to the configuration implied by
+/// `facts` + `observed`. Shared by the single-threaded and thread-safe snapshot
+/// paths so both project identical state — the chart type differs, the driving
+/// sequence does not. Regions are orthogonal, so per-region events are
+/// independent; the closeout `commit` edge still carries the real `editor_synced`
+/// guard, so an editor-ahead `commit` is rejected regardless of the caller's
+/// claimed phase.
+fn snapshot_events(facts: &ChartFacts, observed: &ObservedPhases) -> Vec<&'static str> {
+    let mut events = Vec::new();
 
     // transport region
     if transport_no_listener(facts) {
-        chart.send(&ctx, "no_ipc_listener", &g);
+        events.push("no_ipc_listener");
     } else if transport_degraded(facts) {
-        chart.send(&ctx, "send_timeout", &g);
+        events.push("send_timeout");
     }
 
     // editor_sync region
     if editor_ahead(facts) {
-        chart.send(&ctx, "editor_edited", &g);
+        events.push("editor_edited");
     }
 
     // supervisor region — staleness wins over busy.
     if supervisor_stale(facts) {
-        chart.send(&ctx, "stale_observed", &g);
+        events.push("stale_observed");
     } else if observed.supervisor_busy {
-        chart.send(&ctx, "turn_started", &g);
+        events.push("turn_started");
     }
 
-    // closeout region — walk the lifecycle up to the observed phase. Each edge
-    // is guarded exactly as the live path, so an editor-ahead `commit` stalls at
-    // `written` no matter what phase the caller claims.
+    // closeout region — walk the lifecycle up to the observed phase.
     if !matches!(observed.closeout, CloseoutPhase::Idle) {
-        chart.send(&ctx, "write", &g);
+        events.push("write");
     }
     if matches!(
         observed.closeout,
         CloseoutPhase::Committed | CloseoutPhase::SessionOk
     ) {
-        chart.send(&ctx, "commit", &g);
+        events.push("commit");
     }
     if matches!(observed.closeout, CloseoutPhase::SessionOk) {
-        chart.send(&ctx, "session_check_ok", &g);
+        events.push("session_check_ok");
     }
 
-    let mut labels: Vec<String> = chart
-        .active_leaves(&ctx)
-        .iter()
-        .map(|leaf| region_label(leaf))
-        .collect();
-    // Deterministic region order for a stable advisory line.
+    events
+}
+
+/// Format active leaves as the stable advisory line
+/// `transport.x editor_sync.x closeout.x supervisor.x`.
+fn format_leaves(leaves: Vec<String>) -> String {
     fn region_rank(label: &str) -> u8 {
         match label.split('.').next().unwrap_or("") {
             "transport" => 0,
@@ -311,8 +334,43 @@ pub fn configuration_snapshot(facts: &ChartFacts, observed: &ObservedPhases) -> 
             _ => 4,
         }
     }
+    let mut labels: Vec<String> = leaves.iter().map(|leaf| region_label(leaf)).collect();
     labels.sort_by_key(|l| region_rank(l));
     labels.join(" ")
+}
+
+/// Drive a fresh chart from `facts` + `observed` and return the advisory named
+/// snapshot: the active leaf of each region, ordered
+/// `transport.x editor_sync.x closeout.x supervisor.x`.
+///
+/// Read-only observability (`#adstatechart2`): builds its own chart and never
+/// touches the live closeout path.
+pub fn configuration_snapshot(facts: &ChartFacts, observed: &ObservedPhases) -> String {
+    let ctx = lazily::Context::new();
+    let Ok(chart) = new_adstatechart(&ctx) else {
+        return "adstatechart.unavailable".to_string();
+    };
+    let g = guard_map(facts);
+    for event in snapshot_events(facts, observed) {
+        chart.send(&ctx, event, &g);
+    }
+    format_leaves(chart.active_leaves(&ctx))
+}
+
+/// Thread-safe twin of [`configuration_snapshot`], driving a
+/// [`ThreadSafeStateChart`] over a [`lazily::ThreadSafeContext`]. Projects the
+/// identical snapshot (same [`snapshot_events`]), but is usable from a status
+/// observer thread — the cross-thread status-observation path for Phase E rung 3.
+pub fn configuration_snapshot_threadsafe(facts: &ChartFacts, observed: &ObservedPhases) -> String {
+    let ctx = lazily::ThreadSafeContext::new();
+    let Ok(chart) = new_adstatechart_threadsafe(&ctx) else {
+        return "adstatechart.unavailable".to_string();
+    };
+    let g = guard_map(facts);
+    for event in snapshot_events(facts, observed) {
+        chart.send(&ctx, event, &g);
+    }
+    format_leaves(chart.active_leaves(&ctx))
 }
 
 #[cfg(test)]
@@ -568,6 +626,68 @@ mod tests {
             regions,
             ["transport", "editor_sync", "closeout", "supervisor"]
         );
+    }
+
+    /// The typed [`ChartBuilder`] migration is behavior-preserving: the
+    /// thread-safe chart projects the identical snapshot as the single-threaded
+    /// one across a spread of fact/phase combinations.
+    #[test]
+    fn threadsafe_snapshot_matches_single_threaded() {
+        let stale = ChartFacts {
+            running_build_id: Some("old".into()),
+            installed_build_id: Some("new".into()),
+            ..facts_synced()
+        };
+        let cases = [
+            (facts_synced(), ObservedPhases::default()),
+            (
+                facts_editor_ahead(),
+                ObservedPhases {
+                    closeout: CloseoutPhase::Committed,
+                    ..Default::default()
+                },
+            ),
+            (
+                ChartFacts {
+                    ipc_no_listener: true,
+                    ..facts_synced()
+                },
+                ObservedPhases {
+                    closeout: CloseoutPhase::SessionOk,
+                    supervisor_busy: true,
+                },
+            ),
+            (
+                stale,
+                ObservedPhases {
+                    supervisor_busy: true,
+                    ..Default::default()
+                },
+            ),
+        ];
+        for (facts, observed) in cases {
+            assert_eq!(
+                configuration_snapshot(&facts, &observed),
+                configuration_snapshot_threadsafe(&facts, &observed),
+                "single-threaded and thread-safe snapshots must agree for {facts:?} {observed:?}"
+            );
+        }
+    }
+
+    /// A [`ThreadSafeStateChart`] built from the typed def is `Send + Sync`: an
+    /// observer thread can read `configuration()` after another drives `send()`.
+    #[test]
+    fn threadsafe_chart_observes_config_across_threads() {
+        use lazily::ThreadSafeContext;
+        let ctx = ThreadSafeContext::new();
+        let chart = new_adstatechart_threadsafe(&ctx).expect("threadsafe chart builds");
+        // Drive the closeout region forward on this thread.
+        let g = guard_map(&facts_synced());
+        assert!(chart.send(&ctx, "write", &g));
+        // Read the configuration from a separate observer thread.
+        let observed =
+            std::thread::scope(|s| s.spawn(|| chart.matches(&ctx, "written")).join().unwrap());
+        assert!(observed, "observer thread must see closeout.written");
     }
 
     #[test]

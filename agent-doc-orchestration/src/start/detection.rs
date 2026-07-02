@@ -2,7 +2,7 @@
 
 use super::*;
 use agent_doc_controller::dispatch::dispatch_payload_pending_in_current_input;
-use agent_doc_supervisor::idle_reconcile::recoverable_ready_busy_blocker_reason;
+use agent_doc_supervisor::detection as supervisor_detection;
 
 pub(crate) fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
     if bytes.is_empty() {
@@ -39,14 +39,15 @@ pub(crate) fn child_output_for_detection(shared: &SupervisorShared) -> String {
 
 pub(crate) fn prompt_visible_requires_ready_transition(shared: &SupervisorShared) -> bool {
     let first_prompt_for_child = !shared.prompt_visible_once.swap(true, Ordering::Relaxed);
-    if first_prompt_for_child {
-        return true;
-    }
-    shared
+    let actor_known_non_ready = shared
         .actor_state
         .lock()
         .unwrap()
-        .is_some_and(|state| state != agent_doc_sqlite::state_store::ActorState::Ready)
+        .is_some_and(|state| state != agent_doc_sqlite::state_store::ActorState::Ready);
+    supervisor_detection::prompt_visible_requires_ready_transition(
+        first_prompt_for_child,
+        actor_known_non_ready,
+    )
 }
 
 pub(crate) fn current_child_prompt_visible(
@@ -62,40 +63,20 @@ pub(crate) fn idle_queue_prompt_visible(
     harness: &agent_doc_harness::HarnessConfig,
 ) -> bool {
     let output = child_output_for_detection(shared);
-    if harness.dispatch_blocker_reason(&output).is_some() {
-        return false;
+    let actor_ready = actor_state_is_ready(shared);
+    match supervisor_detection::idle_queue_prompt_visibility(&output, harness, actor_ready) {
+        supervisor_detection::IdleQueuePromptVisibility::Visible => true,
+        supervisor_detection::IdleQueuePromptVisibility::Hidden => false,
+        // `#runexitrestart`: when the actor is not yet Ready but the
+        // edge-triggered PTY buffer shows a weak prompt glyph, re-check the live
+        // tmux pane for a dispatch-ready prompt before letting the idle queue
+        // drain. Failed/absent capture falls back to the prior PTY signal.
+        supervisor_detection::IdleQueuePromptVisibility::NeedsLivePaneDispatchReady => {
+            supervisor_detection::idle_queue_prompt_visible_after_live_pane_dispatch_ready(
+                supervisor_pane_dispatch_ready(shared, harness),
+            )
+        }
     }
-    if shared
-        .actor_state
-        .lock()
-        .unwrap()
-        .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
-    {
-        return true;
-    }
-    // `#runexitrestart`: the actor is NOT yet `Ready` (e.g. `Starting` right
-    // after a session restart / "Press Enter to restart" / supervisor re-exec).
-    // The edge-triggered pty `terminal_screen` buffer can show a prompt *glyph*
-    // (`matches_prompt`) while the freshly-restarted harness composer is not yet
-    // submit-ready — the same cold-start dispatch race the route auto-start gate
-    // (`#jbtsiftnosub`) closes, but here in the supervisor idle-watch drain loop.
-    // Treating that transient glyph as dispatchable lets the per-tick drain
-    // re-inject the `agent-doc <FILE>` trigger into a not-yet-ready composer (the
-    // Enter never submits), and each idle tick stacks another un-submitted copy
-    // (the operator-observed ~7 duplicate triggers with no submit). Before the
-    // weak pty-buffer signal is trusted off the `Ready` fast path, re-verify
-    // against a *fresh* tmux capture using the same `agent_doc_harness::ready_prompt_candidate`
-    // dispatch-ready predicate the route gate uses. A fresh capture that cannot
-    // prove a submit-ready prompt fails closed (defers the drain this tick); a
-    // failed/absent capture (`None`) falls back to the pty-buffer signal so an
-    // unreadable pane never permanently suppresses a legitimate drain.
-    if !harness.output_prompt_visible(&output) {
-        return false;
-    }
-    // A fresh capture proving submit-ready dispatches; one that is only a
-    // not-yet-ready glyph fails closed (defers); an unreadable/absent capture
-    // (`None`) conservatively falls back to the prior pty-buffer signal.
-    supervisor_pane_dispatch_ready(shared, harness).unwrap_or(true)
 }
 
 pub(crate) fn actor_state_is_ready(shared: &SupervisorShared) -> bool {
@@ -111,9 +92,7 @@ pub(crate) fn ready_busy_blocker_reason(
     harness: &agent_doc_harness::HarnessConfig,
 ) -> Option<String> {
     let output = child_output_for_detection(shared);
-    harness
-        .dispatch_blocker_reason(&output)
-        .filter(|reason| recoverable_ready_busy_blocker_reason(reason))
+    supervisor_detection::ready_busy_blocker_reason(&output, harness)
 }
 
 /// `#runexitrestart`: fresh-tmux-capture dispatch-ready evidence for the
@@ -137,7 +116,7 @@ pub(crate) fn supervisor_pane_dispatch_ready(
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
     let tmux = tmux_router::Tmux::default_server();
     let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
-    Some(agent_doc_harness::ready_prompt_candidate(&content, harness).is_some())
+    Some(supervisor_detection::pane_dispatch_ready(&content, harness))
 }
 
 /// Whether the authoritative in-memory actor state is `busy` or `starting` —
@@ -171,7 +150,7 @@ pub(crate) fn supervisor_pane_has_busy_cue(
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
     let tmux = tmux_router::Tmux::default_server();
     let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
-    Some(harness.has_busy_cue(&content))
+    Some(supervisor_detection::pane_has_busy_cue(&content, harness))
 }
 
 /// `#qflood2` pre-send dedup: capture the supervisor's owned pane fresh and
@@ -220,7 +199,7 @@ pub(crate) fn is_help_screen_visible(
     shared: &SupervisorShared,
     harness: &agent_doc_harness::HarnessConfig,
 ) -> bool {
-    harness.is_help_screen_output(&child_output_for_detection(shared))
+    supervisor_detection::help_screen_visible(&child_output_for_detection(shared), harness)
 }
 
 #[cfg(test)]

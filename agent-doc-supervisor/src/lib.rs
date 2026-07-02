@@ -12,6 +12,7 @@ pub mod auto_trigger;
 pub mod claim_binding;
 pub mod config;
 pub mod crash_policy;
+pub mod detection;
 pub mod handoff;
 pub mod heartbeat;
 pub mod idle_reconcile;

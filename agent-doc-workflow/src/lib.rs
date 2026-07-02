@@ -5,6 +5,7 @@
 //! is deliberately side-effect free so those paths can converge on a single
 //! evidence -> decision -> mutation -> proof boundary.
 
+pub mod autofix;
 pub mod capture;
 pub mod doctor;
 pub mod doctor_json;

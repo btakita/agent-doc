@@ -9,6 +9,7 @@ pub mod agent_stream;
 pub mod binary;
 pub mod capability_proof;
 pub mod capture;
+pub mod claude_launch;
 pub mod codex_launch;
 
 use serde::{Deserialize, Serialize};

@@ -8068,6 +8068,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     let workflow_source =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/lib.rs")).unwrap();
     for required in [
+        "pub mod autofix;",
         "pub mod invariants;",
         "pub mod doctor;",
         "pub mod doctor_json;",
@@ -8284,13 +8285,31 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     );
     let orchestration_autofix =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/autofix.rs")).unwrap();
+    let workflow_autofix =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/autofix.rs")).unwrap();
+    for required in [
+        "WORKFLOW_AUTOFIX_SCHEMA_VERSION",
+        "pub struct WorkflowAutofixReport",
+        "pub enum WorkflowAutofixStepStatus",
+        "pub struct WorkflowAutofixStep",
+        "pub fn operation_key(&self) -> String",
+        "pub fn plan_autofix_steps(",
+        "fn build_step(",
+        "fn repair_command(",
+        "accepts_autofix_command",
+    ] {
+        assert!(
+            workflow_autofix.contains(required),
+            "agent-doc-workflow must own pure workflow autofix planning: {required}"
+        );
+    }
     assert!(
-        orchestration_autofix.contains("use agent_doc_workflow::doctor::{")
-            && orchestration_autofix.contains("WorkflowDoctorOutcome")
-            && orchestration_autofix.contains("WorkflowDoctorReport")
-            && orchestration_autofix.contains("WorkflowInvariantResult")
-            && orchestration_autofix.contains("WorkflowDoctorFacts, evaluate_catalog"),
-        "orchestration autofix should consume focused workflow doctor policy directly"
+        orchestration_autofix.contains("use agent_doc_workflow::autofix::{")
+            && orchestration_autofix.contains("WorkflowAutofixReport")
+            && orchestration_autofix.contains("WorkflowAutofixStep")
+            && orchestration_autofix.contains("WorkflowAutofixStepStatus")
+            && orchestration_autofix.contains("plan_autofix_steps"),
+        "orchestration autofix should consume focused workflow autofix planning directly"
     );
     assert!(
         orchestration_autofix.contains("use agent_doc_workflow_io::proof_ledger::{")
@@ -8301,6 +8320,13 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     for forbidden in [
         "fn is_whitelisted_autofix(",
         "fn action_name(",
+        "pub struct WorkflowAutofixReport",
+        "pub enum WorkflowAutofixStepStatus",
+        "pub struct WorkflowAutofixStep",
+        "fn plan_autofix_steps(",
+        "fn build_step(",
+        "fn repair_command(",
+        "WorkflowDoctorFacts, evaluate_catalog",
         "RemediationAction::RestartSupervisorOnce =>",
         "RemediationAction::FinalizeOrWriteCommit =>",
     ] {
@@ -11761,6 +11787,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let executor_codex_launch =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/codex_launch.rs"))
             .unwrap();
+    let executor_claude_launch =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/claude_launch.rs"))
+            .unwrap();
     let executor_agent_stream =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/agent_stream.rs"))
             .unwrap();
@@ -11830,6 +11859,12 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         assert!(
             executor_codex_launch.contains(required_snippet),
             "agent-doc-turn-executor should own Codex launch/transport policy directly: {required_snippet}"
+        );
+    }
+    for required_snippet in ["pub fn claude_streaming_args("] {
+        assert!(
+            executor_claude_launch.contains(required_snippet),
+            "agent-doc-turn-executor should own Claude launch argv policy directly: {required_snippet}"
         );
     }
     for required_snippet in [
@@ -11919,6 +11954,10 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     }
     let executor_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/lib.rs")).unwrap();
+    assert!(
+        executor_lib.contains("pub mod claude_launch;"),
+        "agent-doc-turn-executor should expose Claude launch argv policy directly"
+    );
     assert!(
         !executor_lib.contains("pub mod auto_trigger;")
             && !manifest_dir
@@ -12161,6 +12200,21 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             .unwrap();
     let stream =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn build_streaming_args(",
+        "streaming_args_replace_output_format_and_preserve_add_dir",
+        "streaming_args_includes_verbose",
+    ] {
+        assert!(
+            !claude.contains(forbidden_snippet),
+            "agent::claude must not re-own Claude streaming argv policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        claude.contains("use agent_doc_turn_executor::claude_launch::claude_streaming_args;")
+            && claude.contains("claude_streaming_args(&self.base_args, session_id, fork, model)"),
+        "agent::claude should call focused Claude launch argv policy directly"
+    );
     for (name, source) in [
         ("agent/streaming.rs", streaming.as_str()),
         ("agent/codex.rs", codex.as_str()),
@@ -12316,6 +12370,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-supervisor/src/detection.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure supervisor terminal/detection policy"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-supervisor/src/idle_watch.rs")
             .exists(),
         "agent-doc-supervisor must own pure supervisor idle-watch policy"
@@ -12446,6 +12506,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/startup_miss.rs")).unwrap();
     let supervisor_idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/idle_watch.rs")).unwrap();
+    let supervisor_detection =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/detection.rs")).unwrap();
     let supervisor_auto_trigger =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/auto_trigger.rs")).unwrap();
     let supervisor_terminal_filter =
@@ -13269,12 +13331,42 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub(crate) fn ready_busy_conflict_reconcile_decision(",
         "pub(crate) fn stale_busy_idle_reconcile_decision(",
         "pub(crate) fn reconcile_stale_busy_idle_queue_state(",
+        "recoverable_ready_busy_blocker_reason",
+        "harness.dispatch_blocker_reason(&output)",
+        "agent_doc_harness::ready_prompt_candidate(&content, harness).is_some()",
+        "harness.has_busy_cue(&content)",
+        "harness.is_help_screen_output(",
     ] {
         assert!(
             !start_detection.contains(forbidden_snippet),
-            "start::detection must not re-own pure supervisor reconcile policy: {forbidden_snippet}"
+            "start::detection must not re-own pure supervisor reconcile/detection policy: {forbidden_snippet}"
         );
     }
+    for required_snippet in [
+        "pub enum IdleQueuePromptVisibility",
+        "pub fn prompt_visible_requires_ready_transition(",
+        "pub fn idle_queue_prompt_visibility(",
+        "pub fn idle_queue_prompt_visible_after_live_pane_dispatch_ready(",
+        "pub fn ready_busy_blocker_reason(",
+        "pub fn help_screen_visible(",
+        "pub fn pane_dispatch_ready(",
+        "pub fn pane_has_busy_cue(",
+    ] {
+        assert!(
+            supervisor_detection.contains(required_snippet),
+            "agent-doc-supervisor must own pure terminal/detection policy: {required_snippet}"
+        );
+    }
+    assert!(
+        supervisor_lib.contains("pub mod detection;")
+            && start_detection.contains("use agent_doc_supervisor::detection as supervisor_detection;")
+            && start_detection.contains("supervisor_detection::idle_queue_prompt_visibility")
+            && start_detection.contains("supervisor_detection::ready_busy_blocker_reason")
+            && start_detection.contains("supervisor_detection::pane_dispatch_ready")
+            && start_detection.contains("supervisor_detection::pane_has_busy_cue")
+            && start_detection.contains("supervisor_detection::help_screen_visible"),
+        "start::detection should adapt live buffers and call focused supervisor detection policy directly"
+    );
     let idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
             .unwrap();

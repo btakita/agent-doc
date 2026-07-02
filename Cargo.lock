@@ -819,6 +819,7 @@ dependencies = [
  "agent-doc-diff",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-lease",
  "agent-doc-log-time",

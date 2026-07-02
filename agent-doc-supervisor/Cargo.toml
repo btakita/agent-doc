@@ -13,6 +13,7 @@ name = "agent_doc_supervisor"
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.66" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.66" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.66" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.66" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.66" }
 agent-doc-lease = { path = "../agent-doc-lease", version = "0.34.66" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.66" }

@@ -11,6 +11,7 @@ const TURN_SCOPE_DIR: &str = ".agent-doc/turn-scope";
 const CRDT_DIR: &str = ".agent-doc/crdt";
 const PRE_RESPONSE_DIR: &str = ".agent-doc/pre-response";
 const CYCLE_STATE_DIR: &str = ".agent-doc/state/cycles";
+const RECOVERY_DIR: &str = ".agent-doc/recovery";
 const STARTING_DIR: &str = ".agent-doc/starting";
 const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
 
@@ -418,10 +419,10 @@ where
     let Some(text) = read_optional_text(path)? else {
         return Ok(None);
     };
-    if !text.trim().is_empty() {
-        if let Some(parsed) = parse(&text) {
-            return Ok(Some(parsed));
-        }
+    if !text.trim().is_empty()
+        && let Some(parsed) = parse(&text)
+    {
+        return Ok(Some(parsed));
     }
     quarantine_corrupt_file(path)?;
     Ok(None)
@@ -456,6 +457,21 @@ pub fn quarantine_corrupt_file(path: &Path) -> Result<()> {
             )
         }),
     }
+}
+
+/// Preserve a buffer the merge is about to drop to a durable recovery sidecar at
+/// `<project_root>/.agent-doc/recovery/<hash>.<pid>-<seq>.md`, so concurrent
+/// operator text is recoverable instead of silently lost (`#qftlossdelta`).
+/// Written atomically; returns the sidecar path. Best-effort by the caller —
+/// this is a safety net alongside, not a replacement for, the merge decision.
+pub fn preserve_dropped_operator_buffer(doc: &Path, content: &str) -> Result<PathBuf> {
+    let (root, hash) = state_root_and_hash(doc)?;
+    let seq = ATOMIC_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = root
+        .join(RECOVERY_DIR)
+        .join(format!("{hash}.{}-{seq}.md", std::process::id()));
+    write_atomic(&path, content.as_bytes())?;
+    Ok(path)
 }
 
 fn first_component(path: &Path) -> Option<Component<'_>> {
@@ -531,9 +547,10 @@ mod tests {
         baseline_overlay_path_for, baseline_path_for, crdt_flock_path_for, crdt_path_for,
         cycle_state_path_for, document_state_hash, document_state_hash_from_str, inode_of_path,
         multinode_crdt_path_for, overlay_crdt_path_for, pending_response_path_for,
-        pre_response_path_for, quarantine_corrupt_file, read_optional, read_valid_or_quarantine,
-        referenced_markdown_path, referenced_markdown_path_checked, rewrite_start_path,
-        running_exe_inode_for_pid, same_document_path, snapshot_flock_path_for, snapshot_path_for,
+        pre_response_path_for, preserve_dropped_operator_buffer, quarantine_corrupt_file,
+        read_optional, read_valid_or_quarantine, referenced_markdown_path,
+        referenced_markdown_path_checked, rewrite_start_path, running_exe_inode_for_pid,
+        same_document_path, snapshot_flock_path_for, snapshot_path_for,
         startup_document_lock_path_for, startup_session_lock_name, startup_session_lock_path_for,
         startup_starting_dir_for, state_lock_path_for, turn_scope_path_for, write_atomic,
     };
@@ -599,6 +616,26 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         // A file that raced away is treated as success (idempotent recovery).
         quarantine_corrupt_file(&tmp.path().join("gone.json")).unwrap();
+    }
+
+    #[test]
+    fn preserve_dropped_operator_buffer_writes_recovery_sidecar() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+        let path =
+            preserve_dropped_operator_buffer(&doc, "operator text that would be lost").unwrap();
+        assert!(path.exists(), "recovery sidecar must be written");
+        assert!(
+            path.to_string_lossy().contains("/.agent-doc/recovery/"),
+            "sidecar under .agent-doc/recovery: {}",
+            path.display()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "operator text that would be lost"
+        );
     }
 
     #[test]

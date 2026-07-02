@@ -752,6 +752,42 @@ pub fn dropped_prompt_lines_after_content_ours(
         .collect()
 }
 
+/// True when persisting `content_ours` over `candidate` (the live/final buffer)
+/// would drop operator-authored exchange text present in `candidate` but absent
+/// from `content_ours` — covering both new prompts (`PromptTarget`) and edits to
+/// existing operator text (`ContentEdit`).
+///
+/// This is the trigger for a durable recovery sidecar so concurrent operator
+/// text is never silently lost when the operator-wins merge selects the agent
+/// candidate (`#qftlossdelta`): broader than
+/// [`dropped_prompt_lines_after_content_ours`], which only enumerates single-line
+/// prompt targets for display.
+pub fn content_ours_drops_operator_text(
+    baseline: &str,
+    candidate: &str,
+    content_ours: &str,
+) -> bool {
+    let baseline_ex = exchange_component_text(baseline);
+    let candidate_ex = exchange_component_text(candidate);
+    let content_ours_ex = exchange_component_text(content_ours);
+
+    let candidate_changes = prompt_bearing_user_changes_between(&baseline_ex, &candidate_ex);
+    if candidate_changes.is_empty() {
+        return false;
+    }
+    let owned_changes = prompt_bearing_user_changes_between(&baseline_ex, &content_ours_ex);
+    candidate_changes
+        .into_iter()
+        .filter(|change| {
+            matches!(
+                change.kind,
+                agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                    | agent_doc_diff::PromptBearingChangeKind::ContentEdit
+            )
+        })
+        .any(|change| !prompt_bearing_change_owned_by_content_ours(&change, &owned_changes))
+}
+
 fn normalized_prompt_line(line: &str) -> String {
     line.trim()
         .strip_prefix('❯')
@@ -3174,6 +3210,48 @@ Working.
 
         let dropped = dropped_prompt_lines_after_content_ours(baseline, &with_go, &with_go);
         assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn content_ours_drops_operator_text_true_when_candidate_has_unowned_prompt() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        // final buffer carries a concurrent operator prompt; content_ours does not.
+        let candidate = baseline.replace(
+            "<!-- agent:boundary:b0 -->",
+            "❯ concurrent operator prompt\n<!-- agent:boundary:b0 -->",
+        );
+        assert!(content_ours_drops_operator_text(
+            baseline, &candidate, baseline
+        ));
+    }
+
+    #[test]
+    fn content_ours_drops_operator_text_false_when_owned_or_unchanged() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let with_prompt = baseline.replace(
+            "<!-- agent:boundary:b0 -->",
+            "❯ concurrent operator prompt\n<!-- agent:boundary:b0 -->",
+        );
+        // content_ours already carries the same operator prompt → nothing dropped.
+        assert!(!content_ours_drops_operator_text(
+            baseline,
+            &with_prompt,
+            &with_prompt
+        ));
+        // candidate identical to baseline → no operator drift at all.
+        assert!(!content_ours_drops_operator_text(
+            baseline, baseline, baseline
+        ));
     }
 
     #[test]

@@ -1,14 +1,47 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use crate::template_io;
 use agent_doc_document_realtime::write_policy::{
-    snapshot_content_to_persist, snapshot_persist_mode, snapshot_persist_mode_with_current,
+    SnapshotPersistMode, content_ours_drops_operator_text, snapshot_content_to_persist,
+    snapshot_persist_mode, snapshot_persist_mode_with_current,
 };
 use agent_doc_element_exchange::extract_normalization_targets;
 use agent_doc_frontmatter::frontmatter::content_uses_crdt_write;
 use agent_doc_template::response_materialization::sanitize_template_patchback_response;
 use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;
+use agent_doc_template_io as template_io;
+
+/// `#qftlossdelta` safety net: when the operator-wins merge selects `ContentOurs`
+/// and doing so would drop operator-authored exchange text present in
+/// `final_content` but not in `content_ours`, persist `final_content` to a durable
+/// recovery sidecar so the concurrent operator text is recoverable instead of
+/// silently lost. Purely additive — it never changes the merge decision, it only
+/// guarantees a recoverable artifact at the one point where operator text could
+/// otherwise vanish. Best-effort: a sidecar write failure is warned, never fatal.
+fn preserve_dropped_operator_buffer_if_needed(
+    file: &Path,
+    mode: SnapshotPersistMode,
+    baseline: Option<&str>,
+    content_ours: &str,
+    final_content: &str,
+) {
+    if mode != SnapshotPersistMode::ContentOurs {
+        return;
+    }
+    if !content_ours_drops_operator_text(baseline.unwrap_or(""), final_content, content_ours) {
+        return;
+    }
+    match agent_doc_fs::preserve_dropped_operator_buffer(file, final_content) {
+        Ok(path) => eprintln!(
+            "[agent-doc] #qftlossdelta: operator-wins merge chose the agent candidate over a differing operator buffer; preserved the dropped buffer to recovery sidecar {}",
+            path.display()
+        ),
+        Err(err) => eprintln!(
+            "[agent-doc] warning: failed to preserve dropped operator buffer for {}: {err}",
+            file.display()
+        ),
+    }
+}
 
 /// Run the write command: append assistant response to document.
 ///
@@ -104,6 +137,13 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     );
     let snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
+    preserve_dropped_operator_buffer_if_needed(
+        file,
+        snapshot_mode,
+        baseline,
+        &content_ours,
+        &final_content,
+    );
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
@@ -278,13 +318,13 @@ pub fn run_template(
     let snapshot_doc = snapshot::load(file).ok().flatten();
 
     // Apply patches to baseline
-    let content_ours = template_io::apply_patches_with_overrides_with_context(
+    let content_ours = template_io::apply_patches_with_overrides_with_project_config(
         base,
         &patches,
         &unmatched,
         file,
         &mode_overrides,
-        Some(&rc),
+        Some(rc.project_config()),
     )
     .context("failed to apply template patches")?;
     let content_ours =
@@ -398,6 +438,13 @@ pub fn run_template(
     };
     let snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
+    preserve_dropped_operator_buffer_if_needed(
+        file,
+        snapshot_mode,
+        baseline,
+        &content_ours,
+        &final_content,
+    );
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
@@ -646,13 +693,13 @@ pub fn run_stream(
             let base = base_cow.as_ref();
             let ipc_baseline = baseline.map(|_| base);
             let t_apply = std::time::Instant::now();
-            let mut content_ours = template_io::apply_patches_with_overrides_with_context(
+            let mut content_ours = template_io::apply_patches_with_overrides_with_project_config(
                 base,
                 &patches,
                 &unmatched,
                 file,
                 &mode_overrides,
-                Some(&rc),
+                Some(rc.project_config()),
             )
             .context("failed to apply patches for snapshot")?;
             let elapsed_apply = t_apply.elapsed().as_millis();
@@ -694,13 +741,13 @@ pub fn run_stream(
                     ),
                 );
                 // Re-apply patches to the current file content instead of the stale baseline
-                content_ours = template_io::apply_patches_with_overrides_with_context(
+                content_ours = template_io::apply_patches_with_overrides_with_project_config(
                     &content_at_start,
                     &patches,
                     &unmatched,
                     file,
                     &mode_overrides,
-                    Some(&rc),
+                    Some(rc.project_config()),
                 )
                 .context("failed to apply patches with fresh baseline")?;
             }
@@ -784,7 +831,7 @@ pub fn run_stream(
                 let session_id =
                     agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_default();
                 crate::hooks::fire_post_write(file, &session_id, patches.len());
-                crate::hooks::fire_doc_event(file, "post_write");
+                agent_doc_hooks_io::fire_doc_event(file, "post_write");
                 drop(doc_lock);
                 repair::clear_pending(file)?;
                 return Ok(());
@@ -852,13 +899,13 @@ pub fn run_stream(
     // inline attr (patch=append on tag) > config.toml ([components] section) > built-in default.
     // The skill sends delta content for append-mode components.
     let t_apply2 = std::time::Instant::now();
-    let mut content_ours = template_io::apply_patches_with_overrides_with_context(
+    let mut content_ours = template_io::apply_patches_with_overrides_with_project_config(
         base,
         &patches,
         &unmatched,
         file,
         &mode_overrides,
-        Some(&rc),
+        Some(rc.project_config()),
     )
     .context("failed to apply template patches")?;
     let elapsed_apply2 = t_apply2.elapsed().as_millis();
@@ -1035,6 +1082,13 @@ pub fn run_stream(
     let mut final_content = final_content;
     let mut snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content).to_string();
+    preserve_dropped_operator_buffer_if_needed(
+        file,
+        snapshot_mode,
+        baseline,
+        &content_ours,
+        &final_content,
+    );
     let integrated_queue_plan = if flags.queue_completion_ids.is_empty() {
         None
     } else {
@@ -1283,13 +1337,13 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     })?;
     let base = base_cow.as_ref();
     let ipc_baseline = baseline.map(|_| base);
-    let content_ours = template_io::apply_patches_with_overrides_with_context(
+    let content_ours = template_io::apply_patches_with_overrides_with_project_config(
         base,
         &patches,
         &unmatched,
         file,
         &mode_overrides,
-        Some(&rc),
+        Some(rc.project_config()),
     )
     .context("failed to apply template patches for IPC node patch metadata")?;
     let content_ours =
@@ -1603,13 +1657,13 @@ pub fn apply_template_from_string_with_options(
 
     let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);
     let snapshot_doc = snapshot::load(file).ok().flatten();
-    let content_ours = template_io::apply_patches_with_overrides_with_context(
+    let content_ours = template_io::apply_patches_with_overrides_with_project_config(
         &content,
         &patches,
         &unmatched,
         file,
         &mode_overrides,
-        Some(&rc),
+        Some(rc.project_config()),
     )
     .context("failed to apply template patches")?;
     let content_ours =

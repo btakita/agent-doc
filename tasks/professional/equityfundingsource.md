@@ -91,7 +91,15 @@ Suite is green (**1376 pass, 0 fail**) and deployed. The 3 pre-existing failures
 Shipped `#spec-test-commit-push-deploy`: EFS `eec3c4e` (pushed), superproject gitlink `d7e1d4d45`. **Deployed to production** — worker version `d2788b20`, live HTTP 200 at https://equityfundingsource.brian-takita.workers.dev. This deploy also shipped the earlier lender-modal email-fit fix (`aab1c9c`) that was pending.
 
 Persisted via force-disk (editor still closed).
-<!-- agent:boundary:bc27572c -->
+
+### Re: lender dialog — fields as cards + wider — opus-4-8
+
+Done. The admin lender-pipeline lender dialog (`dialog=lender`) now:
+- **Fields as cards** — the eight lender fields (Lifecycle stage, Requirements, Lender account, Funding eligibility, Days since sign-up, Funded positions, Deal commitments, Deal follow-ups) render as boxed card tiles in a gapped responsive grid instead of a plain row list. Added a `card` variant to `ModalRow`, scoped to this dialog (the accreditation questionnaire rows are unchanged).
+- **Wider dialog** — bumped to `max-w-2xl` (from `max-w-xl`), and `max-w-3xl` when the documents panel is open.
+
+Long values still wrap (`overflow-wrap:anywhere`) so nothing clips. Tests updated + green (**1377 pass, 0 fail**), build passes. Shipped: EFS `f48347f` (pushed), superproject gitlink bumped. **Not deployed** — no deploy preset on this one; say the word (or add `#…-deploy`) and I'll push it live.
+<!-- agent:boundary:768ca82f -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -402,7 +402,7 @@ fn strike_answered_free_text_heads_at_commit_seam(file: &Path) {
 fn capture_response_body_for(file: &Path) -> Option<String> {
     let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
     let capture_id = state.capture_id?;
-    let record = crate::capture::load_by_id(file, &capture_id)
+    let record = agent_doc_capture_io::load_by_id(file, &capture_id)
         .ok()
         .flatten()?;
     Some(record.response_body)
@@ -1139,7 +1139,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             ) {
                 eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
             }
-            if let Err(e) = crate::capture::mark_committed(file) {
+            if let Err(e) = agent_doc_capture_io::mark_committed(file) {
                 eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
             }
             // `#qdurcrash`: a successful commit makes the queue state durable in
@@ -2004,7 +2004,7 @@ fn ensure_active_capture_materialized_for_commit(
     staged_content: Option<&str>,
     basis: &str,
 ) -> Result<()> {
-    let Some(capture) = crate::capture::load_active(file)? else {
+    let Some(capture) = agent_doc_capture_io::load_active(file)? else {
         return Ok(());
     };
     if matches!(
@@ -2217,7 +2217,7 @@ fn finalize_already_committed_noop(
     {
         eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
     }
-    if let Err(e) = crate::capture::mark_committed(file) {
+    if let Err(e) = agent_doc_capture_io::mark_committed(file) {
         eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
     }
     // Reconcile the durable auto-queue continuation marker on the
@@ -4120,7 +4120,7 @@ Duplicate replay should stay live.
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
 
-        let capture = crate::capture::load_active(&doc).unwrap();
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap();
         assert!(
             capture.is_none(),
             "already-committed no-op closeout should clear active capture state"
@@ -4437,7 +4437,7 @@ Duplicate replay should stay live.
         // blockquote, as the strike matcher requires).
         let response =
             "### Re: parser\n> **Queue prompt:** fix the parser bug in the lexer\n\nFixed.\n";
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
 
         strike_answered_free_text_heads_at_commit_seam(&doc);
 
@@ -4503,7 +4503,7 @@ Duplicate replay should stay live.
             "Recovered answer.\n",
             "<!-- /patch:exchange -->\n"
         );
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
 
         let head_before = Command::new("git")
             .current_dir(root)
@@ -4531,7 +4531,7 @@ Duplicate replay should stay live.
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
-        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Captured
@@ -4591,7 +4591,7 @@ Duplicate replay should stay live.
             "Recovered answer that must not be lost.\n",
             "<!-- /patch:exchange -->\n"
         );
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
 
         let stale_prompt_only = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",

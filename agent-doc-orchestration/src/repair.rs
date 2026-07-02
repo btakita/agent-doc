@@ -90,8 +90,8 @@ use crate::write;
 fn historical_committed_capture_replay(
     file: &Path,
     doc_content: &str,
-) -> Result<Option<crate::capture::CaptureRecord>> {
-    let Some(capture) = crate::capture::latest_committed(file)? else {
+) -> Result<Option<agent_doc_capture_io::CaptureRecord>> {
+    let Some(capture) = agent_doc_capture_io::latest_committed(file)? else {
         return Ok(None);
     };
     if response_replay::response_already_applied(doc_content, &capture.response_body) {
@@ -153,7 +153,7 @@ pub fn cancel_preflight_cycle(file: &Path) -> Result<CancelOutcome> {
     if !matches!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
         return Ok(CancelOutcome::Protected);
     }
-    if crate::capture::load_by_id(file, &state.cycle_id)?.is_some() {
+    if agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some() {
         return Ok(CancelOutcome::Protected);
     }
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
@@ -277,7 +277,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
             repaired_snapshot.as_deref(),
             Some(&file_content),
         )?;
-        crate::capture::mark_committed(file)?;
+        agent_doc_capture_io::mark_committed(file)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -316,7 +316,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         );
     }
 
-    let cycle_capture_exists = crate::capture::load_by_id(file, &state.cycle_id)?.is_some();
+    let cycle_capture_exists = agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some();
     let age_secs = stale_preflight_cycle_age_secs(state.started_at, state.updated_at, now_secs());
     if !cycle_capture_exists
         && let Some(change) = crate::session_check::first_unstarted_prompt_bearing_change(file)?
@@ -459,7 +459,7 @@ pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Optio
         repaired_snapshot.as_deref(),
         Some(&current_doc),
     )?;
-    crate::capture::mark_committed(file)?;
+    agent_doc_capture_io::mark_committed(file)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -943,7 +943,7 @@ fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> 
 fn retire_stale_capture_if_drifted(
     file: &Path,
     doc_content: &str,
-    capture: &crate::capture::CaptureRecord,
+    capture: &agent_doc_capture_io::CaptureRecord,
 ) -> Result<bool> {
     let captured_response_body_missing =
         !response_replay::response_already_applied(doc_content, &capture.response_body)
@@ -957,7 +957,7 @@ fn retire_stale_capture_if_drifted(
     .is_some_and(|heading| response_replay::live_exchange_answers_heading(doc_content, heading));
     let decision = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
         state: capture.state,
-        replay_baseline_drifted: crate::capture::replay_baseline_drifted(file, capture)?,
+        replay_baseline_drifted: agent_doc_capture_io::replay_baseline_drifted(file, capture)?,
         captured_response_body_missing,
         captured_response_heading_answered,
     });
@@ -1022,7 +1022,7 @@ fn retire_stale_capture_if_drifted(
 fn respect_manual_exchange_tail_removal_if_safe(
     file: &Path,
     doc_content: &str,
-    capture: &crate::capture::CaptureRecord,
+    capture: &agent_doc_capture_io::CaptureRecord,
 ) -> Result<bool> {
     let (fm, _) = frontmatter::parse(doc_content)
         .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
@@ -1065,7 +1065,7 @@ pub(crate) fn run_with_queue_completion_ids(
         .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
 
     let pending_path = agent_doc_fs::pending_response_path_for(&canonical)?;
-    let capture = crate::capture::load_active(&canonical)?
+    let capture = agent_doc_capture_io::load_active(&canonical)?
         .filter(|capture| capture_state_is_repairable(capture.state));
     let doc_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read document for repair {}", file.display()))?;
@@ -1154,7 +1154,7 @@ pub(crate) fn run_with_queue_completion_ids(
     if response.trim().is_empty() {
         // Empty pending file — just clean up
         let _ = std::fs::remove_file(&pending_path);
-        let _ = crate::capture::mark_discarded(&canonical);
+        let _ = agent_doc_capture_io::mark_discarded(&canonical);
         return Ok(RepairOutcome::Noop);
     }
 
@@ -1170,7 +1170,7 @@ pub(crate) fn run_with_queue_completion_ids(
             );
     if response_already_present {
         if let Some(ref capture) = capture {
-            crate::capture::validate_replay(&canonical, capture)?;
+            agent_doc_capture_io::validate_replay(&canonical, capture)?;
         }
         eprintln!(
             "[repair] Response already present in document — skipping apply, cleaning up pending file"
@@ -1224,7 +1224,7 @@ pub(crate) fn run_with_queue_completion_ids(
         if retire_stale_capture_if_drifted(&canonical, &doc_content, capture)? {
             return Ok(RepairOutcome::StaleCaptureRetired);
         }
-        crate::capture::validate_replay(&canonical, capture)?;
+        agent_doc_capture_io::validate_replay(&canonical, capture)?;
     }
 
     if replay_crdt_patchback_through_strict_write(
@@ -1326,7 +1326,7 @@ pub(crate) fn run_with_queue_completion_ids(
         eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
     }
     if historical_capture.is_none()
-        && let Err(e) = crate::capture::mark_replayed(&canonical)
+        && let Err(e) = agent_doc_capture_io::mark_replayed(&canonical)
     {
         eprintln!("[repair] capture-state update failed: {} (non-fatal)", e);
     }
@@ -1527,7 +1527,7 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
 /// This makes the response durable across context compaction.
 pub fn save_pending(file: &Path, response: &str) -> Result<()> {
     let response = write::canonicalize_response_for_capture(file, response)?;
-    crate::capture::capture_response(file, &response)?;
+    agent_doc_capture_io::capture_response(file, &response)?;
     let pending_path = agent_doc_fs::pending_response_path_for(file)?;
     if let Some(parent) = pending_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -1548,7 +1548,7 @@ pub fn clear_pending(file: &Path) -> Result<()> {
     if let Err(e) = agent_doc_snapshot_io::delete_pre_response(file) {
         eprintln!("[repair] warning: failed to delete pre-response: {}", e);
     }
-    if let Err(e) = crate::capture::mark_write_applied(file) {
+    if let Err(e) = agent_doc_capture_io::mark_write_applied(file) {
         eprintln!("[repair] warning: failed to update capture state: {}", e);
     }
     Ok(())
@@ -1674,7 +1674,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         // A response capture exists for this cycle → cancel must not discard it.
-        crate::capture::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n").unwrap();
+        agent_doc_capture_io::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n").unwrap();
 
         assert_eq!(
             cancel_preflight_cycle(&doc).unwrap(),
@@ -2300,7 +2300,7 @@ mod tests {
         let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(!pending.exists());
         // Re-arm capture as if the write never happened.
-        crate::capture::capture_response(&doc, "Recovered from capture.").unwrap();
+        agent_doc_capture_io::capture_response(&doc, "Recovered from capture.").unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::ReplayedResponse);
@@ -2557,8 +2557,8 @@ mod tests {
             "The new answer that got lost.\n",
             "<!-- /patch:exchange -->",
         );
-        crate::capture::capture_response(&doc, lost_response).unwrap();
-        crate::capture::mark_write_applied(&doc).unwrap();
+        agent_doc_capture_io::capture_response(&doc, lost_response).unwrap();
+        agent_doc_capture_io::mark_write_applied(&doc).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(&doc, "write_applied", Some(v1), Some(v1))
             .unwrap();
 
@@ -2592,7 +2592,7 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert!(!state.is_open(), "cycle must be closed after retire");
-        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Discarded
@@ -2630,7 +2630,7 @@ mod tests {
 
         let lost =
             "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost.\n<!-- /patch:exchange -->";
-        crate::capture::capture_response(&doc, lost).unwrap();
+        agent_doc_capture_io::capture_response(&doc, lost).unwrap();
         // NOTE: no mark_write_applied — capture stays `Captured`.
 
         let v2 = v1.replace("Prior.", "Prior, edited.");
@@ -2659,7 +2659,7 @@ mod tests {
 
         // Capture a response (never written) answering `### Re: new`.
         let lost = "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost duplicate.\n<!-- /patch:exchange -->";
-        let capture = crate::capture::capture_response(&doc, lost).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, lost).unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Captured
@@ -2684,7 +2684,7 @@ mod tests {
             "stale captured body must not be replayed:\n{result}"
         );
         // Orphan retired (Discarded); body preserved on disk for forensics.
-        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Discarded
@@ -2763,7 +2763,7 @@ mod tests {
         let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert_eq!(snap, repaired, "snapshot should follow the user repair");
 
-        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Discarded
@@ -2956,7 +2956,7 @@ mod tests {
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
 
         let mut writer =
-            crate::capture::PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
+            agent_doc_capture_io::PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
         assert!(writer.maybe_checkpoint("first partial").unwrap().is_some());
 
         let live = base.replace(
@@ -2974,7 +2974,7 @@ mod tests {
         assert_eq!(after.cycle_id, state.cycle_id);
         assert!(writer.maybe_checkpoint("second partial").unwrap().is_none());
 
-        let loaded = crate::capture::latest_partial_checkpoint(&doc)
+        let loaded = agent_doc_capture_io::latest_partial_checkpoint(&doc)
             .unwrap()
             .unwrap();
         assert_eq!(loaded.response_body, "first partial");
@@ -3270,8 +3270,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        crate::capture::capture_response(&doc, "Recovered answer.").unwrap();
-        crate::capture::mark_committed(&doc).unwrap();
+        agent_doc_capture_io::capture_response(&doc, "Recovered answer.").unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(
@@ -3303,8 +3303,8 @@ mod tests {
             "Recovered body.\n",
             "<!-- /patch:exchange -->\n"
         );
-        crate::capture::capture_response(&doc, response).unwrap();
-        crate::capture::mark_committed(&doc).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::ReplayedResponse);
@@ -3458,7 +3458,7 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 
-        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Committed

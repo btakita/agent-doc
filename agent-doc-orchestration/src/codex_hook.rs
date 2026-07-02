@@ -2528,7 +2528,7 @@ agent-doc {}\n",
         assert!(content.contains("### Re: #next-steps — gpt-5"));
         assert!(content.contains("[#bpcontract] Write the contract first."));
         assert!(content.contains("### 2. Later"));
-        let capture = crate::capture::latest_committed(&doc)
+        let capture = agent_doc_capture_io::latest_committed(&doc)
             .unwrap()
             .expect("committed capture should exist");
         assert!(

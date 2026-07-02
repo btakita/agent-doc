@@ -1340,7 +1340,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // an identical decision. Unproven IPC retries fail before this phase and do
     // not advance the queue.
     if write_result.is_ok() {
-        let response_body = crate::capture::load_active(file)?
+        let response_body = agent_doc_capture_io::load_active(file)?
             .map(|capture| capture.response_body)
             .unwrap_or_default();
         let mut queue_completion_ids = agent_doc_queue::queue_heads::explicit_queue_completion_ids(
@@ -3298,7 +3298,7 @@ mod tests {
         fs::write(&doc, &source).unwrap();
         agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&source), Some(&source)).unwrap();
-        crate::capture::capture_response(&doc, "Done.").unwrap();
+        agent_doc_capture_io::capture_response(&doc, "Done.").unwrap();
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());

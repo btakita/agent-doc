@@ -1318,7 +1318,7 @@ mod tests {
         fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         if had_pending_mutations {
             agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         }
@@ -1339,7 +1339,7 @@ mod tests {
             Some(&current),
         )
         .unwrap();
-        crate::capture::mark_committed(&doc).unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
         doc
     }
     // #codex-final-response-not-written: a committed turn that ran binary-owned
@@ -1360,8 +1360,11 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, &current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         if capture {
-            crate::capture::capture_response(&doc, "### Re: do #nsga4verify — gpt-5\n\nDone.")
-                .unwrap();
+            agent_doc_capture_io::capture_response(
+                &doc,
+                "### Re: do #nsga4verify — gpt-5\n\nDone.",
+            )
+            .unwrap();
         }
         if had_pending_mutations {
             agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
@@ -1397,7 +1400,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         // A response WAS captured/parsed this turn (capture_id set)...
-        crate::capture::capture_response(&doc, "### Re: do #x — gpt-5\n\nDone.").unwrap();
+        agent_doc_capture_io::capture_response(&doc, "### Re: do #x — gpt-5\n\nDone.").unwrap();
         agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         // ...and this is a queue-drain turn (a head was recorded).
         agent_doc_cycle_state_io::record_active_queue_heads(&doc, &["x".to_string()]).unwrap();
@@ -1453,7 +1456,7 @@ mod tests {
         fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         if !expect_ids.is_empty() {
             agent_doc_cycle_state_io::record_expect_done_or_gate_ids(
                 &doc,
@@ -1488,7 +1491,7 @@ mod tests {
             Some(&current),
         )
         .unwrap();
-        crate::capture::mark_committed(&doc).unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
         doc
     }
     // `#blocked-closeout-followup-capture`: a directed `do [#id]` cycle that
@@ -1528,7 +1531,7 @@ mod tests {
         fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, &current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         if !expect_ids.is_empty() {
             agent_doc_cycle_state_io::record_expect_done_or_gate_ids(
                 &doc,
@@ -1569,7 +1572,7 @@ mod tests {
             Some(&current),
         )
         .unwrap();
-        crate::capture::mark_committed(&doc).unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
         doc
     }
     const BLOCKED_RESPONSE: &str = "### Re: do #374n — gpt-5\n\nFound a blocker: Merchant Center still has 17 active legacy rows for #374n. Next steps to complete: remove/expire the rows, deliberately delete them through an approved path, or get approval that they are safe blanks.\n";
@@ -1882,7 +1885,7 @@ mod tests {
         agent_doc_cycle_state_io::record_active_queue_heads(doc, &heads).unwrap();
     }
     fn capture_test_response_and_commit(doc: &Path, response: &str) {
-        crate::capture::capture_response(doc, response).unwrap();
+        agent_doc_capture_io::capture_response(doc, response).unwrap();
         let content = fs::read_to_string(doc).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             doc,
@@ -1891,7 +1894,7 @@ mod tests {
             Some(&content),
         )
         .unwrap();
-        crate::capture::mark_committed(doc).unwrap();
+        agent_doc_capture_io::mark_committed(doc).unwrap();
     }
     // `#manual-queue-head-loss` — a fixture mirroring the sampleorders repro:
     // backlog keeps `#shipstationaudit` open; the committed queue does NOT contain

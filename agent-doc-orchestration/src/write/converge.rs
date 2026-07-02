@@ -211,7 +211,7 @@ fn active_capture_response_removed(file: &Path, snapshot_doc: &str, current_doc:
     if !state.is_open() {
         return false;
     }
-    let Ok(Some(capture)) = crate::capture::load_active(file) else {
+    let Ok(Some(capture)) = agent_doc_capture_io::load_active(file) else {
         return false;
     };
     !capture.response_body.trim().is_empty()
@@ -3642,7 +3642,7 @@ mod core_tests {
         fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
-        crate::capture::capture_response(&doc, &response_patch).unwrap();
+        agent_doc_capture_io::capture_response(&doc, &response_patch).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let rebased = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "commit")

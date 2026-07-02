@@ -19,7 +19,7 @@ pub(crate) fn check_expect_done_or_gate_guard(
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
 

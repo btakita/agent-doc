@@ -500,7 +500,9 @@ fn closeout_compact_with_commit(file: &Path) -> Result<()> {
 /// capture sidecars whose response body was just archived. Never fails the
 /// compaction — a discard error is logged and ignored.
 fn discard_archived_captures(file: &Path, archived_text: &str) {
-    if let Err(e) = crate::capture::discard_captures_for_archived_responses(file, archived_text) {
+    if let Err(e) =
+        agent_doc_capture_io::discard_captures_for_archived_responses(file, archived_text)
+    {
         eprintln!(
             "[compact] warning: failed to discard captures for archived responses in {}: {}",
             file.display(),

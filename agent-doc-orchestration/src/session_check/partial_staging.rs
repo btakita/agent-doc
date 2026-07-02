@@ -7,7 +7,7 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
 

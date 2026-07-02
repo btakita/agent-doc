@@ -181,7 +181,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let Some(capture) = crate::capture::load_active(file)? else {
+    let Some(capture) = agent_doc_capture_io::load_active(file)? else {
         return Ok(());
     };
     if capture
@@ -593,7 +593,7 @@ pub(crate) fn precommit_pending_done_check_with_options(
         return Ok(());
     };
 
-    let Some(capture) = crate::capture::load_active(file)? else {
+    let Some(capture) = agent_doc_capture_io::load_active(file)? else {
         return Ok(());
     };
     if agent_doc_turn::closeout_signal::pending_done_suppressed(&capture.response_body) {
@@ -922,7 +922,7 @@ mod precommit_pending_capture_tests {
         fs::write(&doc, &content).unwrap();
         agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         if had_pending_mutations {
             agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         }
@@ -978,7 +978,7 @@ mod precommit_pending_capture_tests {
         fs::write(&doc, &content).unwrap();
         agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         if !pending_done_ids.is_empty() {
             agent_doc_cycle_state_io::record_pending_done_ids(
                 &doc,

@@ -40,7 +40,6 @@ pub mod admit;
 pub mod adstatechart_snapshot;
 pub mod autofix;
 pub mod backlog_cmd;
-pub mod capture;
 pub mod claim;
 pub mod codex_hook;
 pub mod compact;
@@ -76,7 +75,7 @@ pub mod write_queue;
 fn load_active_capture_for_hooks(
     file: &std::path::Path,
 ) -> Result<Option<agent_doc_hooks_io::PostResponseCapture>, String> {
-    crate::capture::load_active(file)
+    agent_doc_capture_io::load_active(file)
         .map(|capture| {
             capture.map(|capture| agent_doc_hooks_io::PostResponseCapture {
                 capture_id: capture.capture_id,

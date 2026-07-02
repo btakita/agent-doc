@@ -798,7 +798,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
                 new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
             }
 
-            let response_first_line = crate::capture::load_active(file)
+            let response_first_line = agent_doc_capture_io::load_active(file)
                 .ok()
                 .flatten()
                 .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));
@@ -1094,7 +1094,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
     // and the snapshot, so the selective-commit boundary stays consistent) when
     // the prompt is not already present in the exchange. Fail-safe: any locator
     // miss leaves the content unchanged rather than risk corrupting the exchange.
-    let response_first_line = crate::capture::load_active(file)
+    let response_first_line = agent_doc_capture_io::load_active(file)
         .ok()
         .flatten()
         .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));

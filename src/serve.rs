@@ -876,18 +876,18 @@ fn doc_event_payload(doc: &Path, fingerprint: &DocFingerprint) -> serde_json::Va
 
 fn active_partial_response(
     doc: &Path,
-) -> Result<Option<agent_doc_orchestration::capture::PartialCaptureRecord>> {
+) -> Result<Option<agent_doc_capture_io::PartialCaptureRecord>> {
     let Some(state) = agent_doc_cycle_state_io::load(doc)? else {
         return Ok(None);
     };
     if !state.is_open() {
         return Ok(None);
     }
-    agent_doc_orchestration::capture::load_partial_by_cycle(doc, &state.cycle_id)
+    agent_doc_capture_io::load_partial_by_cycle(doc, &state.cycle_id)
 }
 
 fn partial_response_fingerprint(
-    record: &agent_doc_orchestration::capture::PartialCaptureRecord,
+    record: &agent_doc_capture_io::PartialCaptureRecord,
 ) -> PartialResponseFingerprint {
     PartialResponseFingerprint {
         cycle_id: record.cycle_id.clone(),
@@ -898,7 +898,7 @@ fn partial_response_fingerprint(
 }
 
 fn partial_response_payload(
-    record: &agent_doc_orchestration::capture::PartialCaptureRecord,
+    record: &agent_doc_capture_io::PartialCaptureRecord,
 ) -> serde_json::Value {
     serde_json::json!({
         "path": record.file,
@@ -1387,10 +1387,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        let mut writer = agent_doc_orchestration::capture::PartialCheckpointWriter::with_interval(
-            &doc,
-            Duration::ZERO,
-        );
+        let mut writer =
+            agent_doc_capture_io::PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
         writer
             .maybe_checkpoint("### Re: live — gpt-5\n\nPartial response")
             .unwrap();

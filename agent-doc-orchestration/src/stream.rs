@@ -392,7 +392,7 @@ fn stream_loop(
     // Main thread: consume chunks and accumulate in buffer
     let mut session_id = None;
     let mut chunk_count = 0;
-    let mut checkpoint_writer = crate::capture::PartialCheckpointWriter::new(file);
+    let mut checkpoint_writer = agent_doc_capture_io::PartialCheckpointWriter::new(file);
 
     for chunk_result in chunks {
         let chunk = chunk_result.context("stream chunk error")?;
@@ -828,12 +828,12 @@ mod tests {
 
         stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
 
-        let checkpoint = crate::capture::latest_partial_checkpoint(&doc)
+        let checkpoint = agent_doc_capture_io::latest_partial_checkpoint(&doc)
             .unwrap()
             .expect("partial checkpoint should be persisted");
         assert_eq!(checkpoint.response_body, "Partial checkpoint");
         assert_eq!(checkpoint.checkpoint_count, 1);
-        let active_capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        let active_capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert_eq!(active_capture.response_body, "Final response");
     }
 

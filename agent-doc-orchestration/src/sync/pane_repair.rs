@@ -217,7 +217,10 @@ pub(crate) fn recover_missing_pane_closeout(
         agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
         _ => return (None, None, None),
     };
-    let capture_present = crate::capture::load_active(file).ok().flatten().is_some();
+    let capture_present = agent_doc_capture_io::load_active(file)
+        .ok()
+        .flatten()
+        .is_some();
     let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
         file,
         session_id,
@@ -699,7 +702,7 @@ mod tests {
             Some(updated),
         )
         .unwrap();
-        crate::capture::mark_write_applied(&doc).unwrap();
+        agent_doc_capture_io::mark_write_applied(&doc).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
         std::fs::create_dir_all(&log_dir).unwrap();
@@ -862,7 +865,7 @@ mod tests {
             "not-a-list\n",
             "<!-- /patch:backlog -->\n"
         );
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         let pending_path = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         std::fs::create_dir_all(pending_path.parent().unwrap()).unwrap();
         std::fs::write(&pending_path, response).unwrap();

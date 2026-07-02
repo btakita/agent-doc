@@ -20,7 +20,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
     let content = std::fs::read_to_string(file)?;
@@ -91,7 +91,7 @@ pub(crate) fn check_gated_phase_split_guard(
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
 
@@ -175,7 +175,7 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
     match agent_doc_turn::closeout_signal::queue_audit_partial_completion_decision(

@@ -1460,7 +1460,7 @@ fn setup_baseline_drift_capture(
 ) -> (
     tempfile::TempDir,
     PathBuf,
-    agent_doc_orchestration::capture::CaptureRecord,
+    agent_doc_capture_io::CaptureRecord,
     SimWorld,
 ) {
     let dir = tempfile::TempDir::new().unwrap();
@@ -1470,7 +1470,7 @@ fn setup_baseline_drift_capture(
     world.apply(SimCommand::EditPrompt).unwrap();
     std::fs::write(&doc, &world.doc).unwrap();
     agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
-    let capture = agent_doc_orchestration::capture::capture_response(&doc, response).unwrap();
+    let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
     (dir, doc, capture, world)
 }
 
@@ -6146,12 +6146,10 @@ fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
     std::fs::write(&doc, &world.doc).unwrap();
     agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
 
-    agent_doc_orchestration::capture::validate_replay(&doc, &capture)
+    agent_doc_capture_io::validate_replay(&doc, &capture)
         .expect("benign user commit outside response must auto-refresh");
 
-    let refreshed = agent_doc_orchestration::capture::load_active(&doc)
-        .unwrap()
-        .unwrap();
+    let refreshed = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
     assert_eq!(
         refreshed.file_hash.as_deref(),
         Some(agent_doc_hash::content_hash(&world.doc).as_str()),
@@ -6182,7 +6180,7 @@ fn baseline_drift_user_edit_inside_committed_response_fails_closed() {
     std::fs::write(&doc, &world.doc).unwrap();
     agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
 
-    let err = agent_doc_orchestration::capture::validate_replay(&doc, &capture)
+    let err = agent_doc_capture_io::validate_replay(&doc, &capture)
         .expect_err("editing the committed response body must fail closed");
     assert!(
         err.to_string().contains("baseline no longer matches")
@@ -6203,12 +6201,10 @@ fn baseline_drift_user_edit_matches_normalized_response_adopts() {
     std::fs::write(&doc, &world.doc).unwrap();
     agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
 
-    agent_doc_orchestration::capture::validate_replay(&doc, &capture)
+    agent_doc_capture_io::validate_replay(&doc, &capture)
         .expect("user-normalized response body should be adopted");
 
-    let refreshed = agent_doc_orchestration::capture::load_active(&doc)
-        .unwrap()
-        .unwrap();
+    let refreshed = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
     assert_eq!(
         refreshed.file_hash.as_deref(),
         Some(agent_doc_hash::content_hash(&world.doc).as_str()),

@@ -4841,11 +4841,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let (_dir, doc) = clear_reclaim_project();
         let content = std::fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
-        agent_doc_orchestration::capture::capture_response(
-            &doc,
-            "### Re: do — opus-4-8\n\nDone.\n",
-        )
-        .unwrap();
+        agent_doc_capture_io::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n").unwrap();
 
         // A cycle that owns a captured response must not be discarded by clear.
         assert_eq!(

@@ -262,7 +262,7 @@ pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
     if state.phase != agent_doc_turn::CyclePhase::PreflightStarted {
         return Ok(());
     }
-    if agent_doc_orchestration::capture::load_by_id(file, &state.cycle_id)?.is_some() {
+    if agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some() {
         return Ok(());
     }
 
@@ -351,8 +351,7 @@ pub(crate) fn stream_step_response(
 ) -> Result<StreamStepResult> {
     let mut response = String::new();
     let mut last_streamed_response = None;
-    let mut checkpoint_writer =
-        agent_doc_orchestration::capture::PartialCheckpointWriter::new(file);
+    let mut checkpoint_writer = agent_doc_capture_io::PartialCheckpointWriter::new(file);
 
     for chunk_result in chunks {
         let chunk = chunk_result.context("stream chunk error")?;

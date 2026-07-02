@@ -20,7 +20,7 @@ pub(crate) fn check_pending_capture_guard(
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
     if capture.state != agent_doc_workflow::capture::CaptureState::Committed {
@@ -221,7 +221,7 @@ pub(crate) fn check_pending_done_guard(
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
     if capture.state != agent_doc_workflow::capture::CaptureState::Committed {

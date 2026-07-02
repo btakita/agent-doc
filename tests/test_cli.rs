@@ -2509,7 +2509,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
     }
     for required in [
         "pub(crate) fn post_response_hook_effects() -> impl agent_doc_hooks_io::PostResponseHookEffects",
-        "crate::capture::load_active(file)",
+        "agent_doc_capture_io::load_active(file)",
         "agent_doc_memory_io::closeout::capture_tsift_memory_closeout",
         "agent_doc_lease_io::local_model::reap_local_model_leases",
         "agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file",
@@ -4795,7 +4795,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "route should call focused turn blocked-recovery projection directly, not re-own the parser"
     );
     for relative in [
-        "agent-doc-orchestration/src/capture.rs",
+        "agent-doc-capture-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -5607,7 +5607,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "session_check/detect.rs should call focused response replay classifiers directly"
     );
     for relative in [
-        "agent-doc-orchestration/src/capture.rs",
+        "agent-doc-capture-io/src/lib.rs",
         "agent-doc-orchestration/src/flow/closeout.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -18535,7 +18535,7 @@ fn test_agent_doc_archive_io_owns_head_compact_archive_reads() {
 }
 
 #[test]
-fn test_agent_doc_capture_io_owns_response_capture_paths() {
+fn test_agent_doc_capture_io_owns_response_capture_ledger() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();
@@ -18581,33 +18581,30 @@ fn test_agent_doc_capture_io_owns_response_capture_paths() {
 
     let capture_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-capture-io/src/lib.rs")).unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
         capture_io_source.contains("pub fn capture_dir_for(")
             && capture_io_source.contains("pub fn capture_path_for(")
             && capture_io_source.contains("pub fn partial_capture_path_for(")
+            && capture_io_source.contains("pub fn capture_response(")
+            && capture_io_source.contains("pub fn load_active(")
+            && capture_io_source.contains("pub fn validate_replay(")
             && capture_io_source.contains(".agent-doc/captures")
             && capture_io_source
                 .contains("agent_doc_project_root_io::project_root_or_file_parent("),
-        "agent-doc-capture-io should own response capture ledger path resolution"
+        "agent-doc-capture-io should own the response capture ledger"
     );
 
-    let capture_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/capture.rs")).unwrap();
-    for forbidden in [
-        "fn capture_path_for(file:",
-        "fn partial_capture_path_for(file:",
-        "agent_doc_fs::find_project_root(",
-    ] {
-        assert!(
-            !capture_source.contains(forbidden),
-            "capture.rs must not re-own response capture path resolution: {forbidden}"
-        );
-    }
     assert!(
-        capture_source.contains("agent_doc_capture_io::capture_dir_for(")
-            && capture_source.contains("agent_doc_capture_io::capture_path_for(")
-            && capture_source.contains("agent_doc_capture_io::partial_capture_path_for("),
-        "capture.rs should adapt capture records through focused response capture IO paths"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/capture.rs")
+            .exists(),
+        "orchestration capture facade should be deleted once capture IO owns the response capture ledger"
+    );
+    assert!(
+        !orchestration_lib.contains("pub mod capture;"),
+        "orchestration must not expose a public capture facade"
     );
 }
 

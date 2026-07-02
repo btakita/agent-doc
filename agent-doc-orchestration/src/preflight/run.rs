@@ -2810,7 +2810,7 @@ mod tests {
             "<!-- /patch:exchange -->\n"
         );
         crate::repair::save_pending(&doc, response).unwrap();
-        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         let pending_path = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(
             pending_path.exists(),
@@ -2869,7 +2869,7 @@ mod tests {
             crate::session_check::SessionCheckStatus::Ok(_)
         ));
 
-        let refreshed = crate::capture::load_by_id(&doc, &capture.capture_id)
+        let refreshed = agent_doc_capture_io::load_by_id(&doc, &capture.capture_id)
             .unwrap()
             .unwrap();
         let snapshot_content = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
@@ -3151,7 +3151,7 @@ mod tests {
             "❯ Submodule pointer updated.\n",
             "<!-- /patch:exchange -->\n"
         );
-        let capture = crate::capture::capture_response(&doc, response).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
 
         let current = original
             .replace(
@@ -3185,7 +3185,7 @@ mod tests {
 
         run(&doc).unwrap();
 
-        let refreshed = crate::capture::load_by_id(&doc, &capture.capture_id)
+        let refreshed = agent_doc_capture_io::load_by_id(&doc, &capture.capture_id)
             .unwrap()
             .unwrap();
         assert_eq!(

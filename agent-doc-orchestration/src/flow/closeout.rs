@@ -208,7 +208,7 @@ pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
         return None;
     }
     let capture_id = state.capture_id.as_deref()?;
-    let capture = match crate::capture::load_by_id(file, capture_id) {
+    let capture = match agent_doc_capture_io::load_by_id(file, capture_id) {
         Ok(Some(capture)) => capture,
         Ok(None) => return None,
         Err(err) => {
@@ -272,7 +272,7 @@ pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
 /// same capture would flag stuck again and re-suggest a `write --commit` that
 /// would re-inject an already-archived response. Marking the capture `Discarded`
 /// (the same terminal state `compact` assigns via
-/// [`crate::capture::discard_captures_for_archived_responses`]) settles it once
+/// [`agent_doc_capture_io::discard_captures_for_archived_responses`]) settles it once
 /// so the false positive cannot resurface.
 ///
 /// `mark_discarded` advances the *active* capture, and the active capture is
@@ -288,7 +288,7 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(false);
     };
-    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
         return Ok(false);
     };
     if capture.cycle_id != state.cycle_id {
@@ -322,7 +322,7 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
     if !response_materialized_in_head_compact_archive(file, &capture.response_body, &head) {
         return Ok(false);
     }
-    crate::capture::mark_discarded(file)?;
+    agent_doc_capture_io::mark_discarded(file)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -680,7 +680,7 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
             file.display()
         )
     })?;
-    let visible_markdown_hash = crate::capture::replay_file_hash(&visible);
+    let visible_markdown_hash = agent_doc_capture_io::replay_file_hash(&visible);
     let snapshot = agent_doc_snapshot_io::load(file)?;
     let snapshot_hash = snapshot.as_deref().map(agent_doc_hash::content_hash);
     let cycle = agent_doc_cycle_state_io::load(file)?;
@@ -688,7 +688,7 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
         cycle_id: state.cycle_id.clone(),
         phase: state.phase,
     });
-    let capture = crate::capture::load_active(file)?;
+    let capture = agent_doc_capture_io::load_active(file)?;
     let active_capture = capture.as_ref().map(|capture| CloseoutCaptureEvidence {
         capture_id: capture.capture_id.clone(),
         cycle_id: capture.cycle_id.clone(),
@@ -723,7 +723,7 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
 
 fn closeout_response_body_evidence(
     visible: &str,
-    capture: Option<&crate::capture::CaptureRecord>,
+    capture: Option<&agent_doc_capture_io::CaptureRecord>,
 ) -> CloseoutResponseBodyEvidence {
     let Some(capture) = capture else {
         return CloseoutResponseBodyEvidence::NoActiveCapture;
@@ -762,7 +762,7 @@ fn closeout_queue_only_drift_evidence(
     snapshot: Option<&str>,
     visible_hash: &str,
     snapshot_hash: Option<&str>,
-    capture: Option<&crate::capture::CaptureRecord>,
+    capture: Option<&agent_doc_capture_io::CaptureRecord>,
 ) -> Result<Option<CloseoutQueueOnlyDriftEvidence>> {
     let Some(capture) = capture else {
         return Ok(None);
@@ -771,7 +771,7 @@ fn closeout_queue_only_drift_evidence(
     let snapshot_hash_mismatch = capture.snapshot_hash.as_deref() != snapshot_hash;
     let proven_queue_only = file_hash_mismatch
         && !snapshot_hash_mismatch
-        && crate::capture::live_drift_is_queue_only_against_snapshot(visible, snapshot)?;
+        && agent_doc_capture_io::live_drift_is_queue_only_against_snapshot(visible, snapshot)?;
     Ok(Some(CloseoutQueueOnlyDriftEvidence {
         file_hash_mismatch,
         snapshot_hash_mismatch,
@@ -911,7 +911,7 @@ pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
 /// snapshots / CRDT / capture state slightly differently.
 pub enum CloseoutRecoveryMutation<'a> {
     RefreshReplayBaseline {
-        capture: &'a crate::capture::CaptureRecord,
+        capture: &'a agent_doc_capture_io::CaptureRecord,
         current_file_hash: &'a str,
         current_snapshot_hash: Option<&'a str>,
         reason: CloseoutRecoveryMutationReason,
@@ -941,7 +941,7 @@ pub fn apply_closeout_recovery_mutation(
             current_snapshot_hash,
             reason,
         } => {
-            let changed = crate::capture::refresh_replay_baseline_for_recovery(
+            let changed = agent_doc_capture_io::refresh_replay_baseline_for_recovery(
                 file,
                 capture,
                 current_file_hash,
@@ -987,7 +987,7 @@ pub fn apply_closeout_recovery_mutation(
             {
                 eprintln!("[repair] warning: failed to delete pre-response: {}", e);
             }
-            crate::capture::mark_discarded(file)?;
+            agent_doc_capture_io::mark_discarded(file)?;
             if let Some(content) = content {
                 rebuild_sidecars_from_content(file, content)?;
             }
@@ -1295,7 +1295,7 @@ mod tests {
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let response = "<!-- patch:exchange -->\n### Re: close the loop — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->";
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
             .unwrap();
 
@@ -1474,7 +1474,7 @@ mod tests {
 
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        let capture = crate::capture::capture_response(&doc, response).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
         crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
             .unwrap();
 
@@ -1503,7 +1503,7 @@ mod tests {
         let (dir, doc) = setup_git_project_with_doc(base);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
 
         // Materialize the response into HEAD with the queue-prompt echo inserted
         // between the heading and body, exactly as queue consumption writes it.
@@ -1543,7 +1543,7 @@ mod tests {
         let (dir, doc) = setup_git_project_with_doc(base);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
         agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
@@ -1576,7 +1576,7 @@ mod tests {
         let (dir, doc) = setup_git_project_with_doc(base);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::capture::capture_response(&doc, captured).unwrap();
+        agent_doc_capture_io::capture_response(&doc, captured).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
         agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
@@ -1642,7 +1642,7 @@ mod tests {
         let response = "### Re: user prompt — gpt-5\n\nDone.\n";
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        let capture = crate::capture::capture_response(&doc, response).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
         let visible = format!("{base}\n{response}");
         std::fs::write(&doc, &visible).unwrap();
         let canonical = doc.canonicalize().unwrap();
@@ -1655,7 +1655,7 @@ mod tests {
         let evidence = gather_closeout_recovery_evidence(&doc).unwrap();
         assert_eq!(
             evidence.visible_markdown_hash,
-            crate::capture::replay_file_hash(&visible)
+            agent_doc_capture_io::replay_file_hash(&visible)
         );
         assert_eq!(
             evidence.snapshot_hash.as_deref(),
@@ -1711,7 +1711,7 @@ mod tests {
         );
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::capture::capture_response(
+        agent_doc_capture_io::capture_response(
             &doc,
             "<!-- patch:exchange -->\n### Re: first head — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
         )
@@ -1744,7 +1744,7 @@ mod tests {
         );
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        let capture = crate::capture::capture_response(
+        let capture = agent_doc_capture_io::capture_response(
             &doc,
             "### Re: repeated prompt — gpt-5\n\nCaptured but stale.\n",
         )
@@ -2187,7 +2187,7 @@ mod tests {
         let response = "### Re: hello — gpt-5\n\nCaptured but never committed.\n";
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
             .unwrap();
         assert_eq!(
@@ -2203,7 +2203,7 @@ mod tests {
         let full_doc = format!("{base}\n{response}");
         let (dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
         agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
@@ -2300,7 +2300,7 @@ mod tests {
         let (dir, doc) = setup_git_project_with_doc(base);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, full_doc).unwrap();
         agent_doc_snapshot_io::save(&doc, full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
@@ -2351,7 +2351,7 @@ mod tests {
 
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &compacted).unwrap();
         agent_doc_snapshot_io::save(&doc, &compacted, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
@@ -2406,7 +2406,7 @@ mod tests {
         );
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::capture::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &compacted).unwrap();
         agent_doc_snapshot_io::save(&doc, &compacted, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
@@ -2424,7 +2424,7 @@ mod tests {
             reconcile_compacted_committed_capture(&doc).unwrap(),
             "expected reconciliation to settle the compacted committed capture"
         );
-        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert!(
             matches!(
                 capture.state,

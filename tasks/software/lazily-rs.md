@@ -177,7 +177,39 @@ Full Harel semantics are present (compound/parallel/history states, guards, acti
 - **No superproject push** — the shared superproject has documented concurrent-session force-push collision risk, and other panes are active (acadian, EFS, agent-doc-bugs2). The commit is local; say the word to push.
 - **No registry publishes** — the `release + publish` queue heads stay operator-gated (interactive 2FA, irreversible).
 - **Stale agent-doc install** — preflight flags `~/.cargo/bin/agent-doc` + cdylib predate the latest local source edit. Unrelated to lazily; noting it, not acting mid-session.
-<!-- agent:boundary:3facb411 -->
+
+### Re: Update lazily-js README with latest lazily-spec + family docs — gpt-5
+
+> **Queue prompt:** Update lazily-js README with the latest docs using the latest changes using lazily-spec + the lazily family.
+
+Done.
+
+Updated `src/lazily-js/README.md` to match the current `lazily-spec` and family state:
+
+- Reframed `@lazily-hub/lazily-js` as the current full JS/TS binding, distinct from the old `@lazily-hub/js` state-projection-only package.
+- Expanded the package-entry table for the current exports: reactive graph, state machine, statechart, collections, sem-tree, sequence/text CRDTs, stable IDs, IPC, permissions, capability negotiation, and state projection.
+- Added current statechart docs: declarative `ChartDef.fromChart`, typed `ChartBuilder` / `StateBuilder`, guard fail-closed behavior, full Harel/SCXML feature list, and the “compute, not protocol” boundary from `lazily-spec`.
+- Added concrete IPC / permission examples using `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage`, `PeerPermissions`, and `RemoteOp`.
+- Clarified `BINDING_CAPABILITIES`: JS ships the reactive/spec/CRDT/statechart layers, advertises `ffi = none`, and does not ship async context, signaling, or WebRTC transports.
+- Added the current lazily family table, including `lazily-dart`, `lazily-spec`, and `lazily-formal`.
+
+Verification:
+
+- README example smoke script against local source: passed.
+- `make check`: passed (`npm run build`, Lean `lazily-formal` build, and 169 Node tests).
+- `gh run list --workflow CI --limit 1`: no `CI` workflow exists in `lazily-js`.
+- `git diff --check`: clean.
+
+Committed and pushed in `src/lazily-js`:
+
+- `ce619d9 docs: refresh lazily-js README`
+
+Recorded the submodule pointer in the superproject:
+
+- `ad4d651b4 lazily-js: refresh README docs`
+
+No registry publish was attempted; the publish/release queue heads remain operator-gated.
+<!-- agent:boundary:51921da9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -185,12 +217,11 @@ Full Harel semantics are present (compound/parallel/history states, guards, acti
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" stop -->
 - ~~Update lazily-py README with the latest docs using the latest changes using lazily-spec + the lazily family.~~
-- ~~Update lazily-zig README with the latest docs using the latest changes using lazily-spec + the lazily family.~~ — auto-struck: answered this cycle (#ftstrike)
-- Update lazily-js README with the latest docs using the latest changes using lazily-spec + the lazily family.
+- ~~Update lazily-zig README with the latest docs using the latest changes using lazily-spec + the lazily family.~~
+- ~~Update lazily-js README with the latest docs using the latest changes using lazily-spec + the lazily family.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Update lazily-py README with the latest docs using the latest changes using lazily-spec + the lazily family.~~
-- Update lazily-zig README with the latest docs using the latest changes using lazily-spec + the lazily family.
 <!-- /agent:queue -->
 
 ## Backlog

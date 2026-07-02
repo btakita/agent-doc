@@ -5,11 +5,13 @@ use super::*;
 use agent_doc_controller::dispatch::{
     AutoStartDispatchBlock, AutoStartDispatchReadyFacts, DeadHarnessShellDispatchFacts,
     DirectPaneFullResendFacts, DirectPaneNotDispatchedFacts, DispatchInjectLogFacts,
-    DispatchTargetBindFacts, DispatchTargetMatchFacts, classify_auto_start_dispatch_ready_block,
+    DispatchTargetBindFacts, DispatchTargetMatchFacts, FreshDispatchTargetAfterReadyWaitDecision,
+    FreshDispatchTargetAfterReadyWaitFacts, classify_auto_start_dispatch_ready_block,
     classify_dead_harness_shell_dispatch_block, classify_dispatch_target_bind,
-    classify_dispatch_target_match, direct_pane_can_full_resend_not_landed,
-    direct_pane_fast_accept_on_processing, direct_pane_not_dispatched, dispatch_inject_log_line,
-    recent_lines_contain_trigger, route_trigger_visible_in_current_draft,
+    classify_dispatch_target_match, decide_fresh_dispatch_target_after_ready_wait,
+    direct_pane_can_full_resend_not_landed, direct_pane_fast_accept_on_processing,
+    direct_pane_not_dispatched, dispatch_inject_log_line, recent_lines_contain_trigger,
+    route_trigger_visible_in_current_draft,
 };
 use agent_doc_harness::{pane_idle_dispatch_ready, protected_prompt_draft_preview};
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
@@ -1292,11 +1294,9 @@ pub(crate) fn resolve_fresh_dispatch_target_after_ready_wait(
             registry_base_dir.display()
         )
     })?;
-    if pane_registration_matches_file(&registry, pane, file_path) {
-        return Ok(pane.to_string());
-    }
-
     let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    let requested_display = requested.display().to_string();
+    let pane_matches_file = pane_registration_matches_file(&registry, pane, file_path);
     let handoff_target = registry
         .values()
         .find(|entry| {
@@ -1305,29 +1305,37 @@ pub(crate) fn resolve_fresh_dispatch_target_after_ready_wait(
                 && entry.pane != pane
                 && canonical_registered_file(entry) == requested
         })
-        .map(|entry| entry.pane.clone());
-    if let Some(entry) = registry.values().find(|entry| entry.pane == pane) {
-        if let Some(handoff_pane) = handoff_target {
-            eprintln!(
-                "[route] fresh restart re-bound {} away from pane {} and onto authoritative pane {} before retry",
-                file_path, pane, handoff_pane
-            );
-            return Ok(handoff_pane);
+        .map(|entry| entry.pane.as_str());
+    let registered_display = registry
+        .values()
+        .find(|entry| entry.pane == pane)
+        .map(canonical_registered_file)
+        .map(|path| path.display().to_string());
+    match decide_fresh_dispatch_target_after_ready_wait(FreshDispatchTargetAfterReadyWaitFacts {
+        requested_pane: pane,
+        dispatch_file_display: file_path,
+        requested_file_display: &requested_display,
+        pane_matches_file,
+        same_session_rebound_pane: handoff_target,
+        registered_file_display: registered_display.as_deref(),
+    }) {
+        FreshDispatchTargetAfterReadyWaitDecision::KeepRequestedPane => Ok(pane.to_string()),
+        FreshDispatchTargetAfterReadyWaitDecision::UseReboundPane { pane, log_line } => {
+            eprintln!("{log_line}");
+            Ok(pane.to_string())
         }
-        anyhow::bail!(
-            "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
-            pane,
-            canonical_registered_file(entry).display(),
-            requested.display()
-        );
+        FreshDispatchTargetAfterReadyWaitDecision::RejectCrossFile { message } => {
+            anyhow::bail!(message)
+        }
+        FreshDispatchTargetAfterReadyWaitDecision::RegisterRequestedPane => {
+            // A fresh route already created `pane` deliberately. If some concurrent
+            // sync/layout path rebinds the same document session back to another pane
+            // during the ready wait, keep the fresh pane authoritative instead of
+            // handing dispatch back to the older pane and making the new pane disposable.
+            register_dispatch_target(tmux, session_id, pane, file_path)?;
+            Ok(pane.to_string())
+        }
     }
-
-    // A fresh route already created `pane` deliberately. If some concurrent
-    // sync/layout path rebinds the same document session back to another pane
-    // during the ready wait, keep the fresh pane authoritative instead of
-    // handing dispatch back to the older pane and making the new pane disposable.
-    register_dispatch_target(tmux, session_id, pane, file_path)?;
-    Ok(pane.to_string())
 }
 
 pub(crate) fn send_command_checked(

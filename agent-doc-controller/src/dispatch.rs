@@ -1227,6 +1227,50 @@ pub fn classify_dispatch_target_match(facts: DispatchTargetMatchFacts<'_>) -> Op
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FreshDispatchTargetAfterReadyWaitFacts<'a> {
+    pub requested_pane: &'a str,
+    pub dispatch_file_display: &'a str,
+    pub requested_file_display: &'a str,
+    pub pane_matches_file: bool,
+    pub same_session_rebound_pane: Option<&'a str>,
+    pub registered_file_display: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FreshDispatchTargetAfterReadyWaitDecision<'a> {
+    KeepRequestedPane,
+    UseReboundPane { pane: &'a str, log_line: String },
+    RejectCrossFile { message: String },
+    RegisterRequestedPane,
+}
+
+pub fn decide_fresh_dispatch_target_after_ready_wait(
+    facts: FreshDispatchTargetAfterReadyWaitFacts<'_>,
+) -> FreshDispatchTargetAfterReadyWaitDecision<'_> {
+    if facts.pane_matches_file {
+        return FreshDispatchTargetAfterReadyWaitDecision::KeepRequestedPane;
+    }
+    if let Some(registered_file_display) = facts.registered_file_display {
+        if let Some(pane) = facts.same_session_rebound_pane {
+            return FreshDispatchTargetAfterReadyWaitDecision::UseReboundPane {
+                pane,
+                log_line: format!(
+                    "[route] fresh restart re-bound {} away from pane {} and onto authoritative pane {} before retry",
+                    facts.dispatch_file_display, facts.requested_pane, pane
+                ),
+            };
+        }
+        return FreshDispatchTargetAfterReadyWaitDecision::RejectCrossFile {
+            message: format!(
+                "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
+                facts.requested_pane, registered_file_display, facts.requested_file_display
+            ),
+        };
+    }
+    FreshDispatchTargetAfterReadyWaitDecision::RegisterRequestedPane
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FreshStartAckOutcome {
     CycleAcknowledged,
     IdleNoOpKeep,
@@ -3485,6 +3529,69 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 "route dispatch target %1 is not registered for /tmp/current.md; refusing unbound dispatch"
                     .to_string()
             )
+        );
+    }
+
+    #[test]
+    fn fresh_dispatch_target_after_ready_wait_selects_effect_free_outcome() {
+        assert_eq!(
+            decide_fresh_dispatch_target_after_ready_wait(FreshDispatchTargetAfterReadyWaitFacts {
+                requested_pane: "%1",
+                dispatch_file_display: "current.md",
+                requested_file_display: "/tmp/current.md",
+                pane_matches_file: true,
+                same_session_rebound_pane: Some("%2"),
+                registered_file_display: Some("/tmp/current.md"),
+            },),
+            FreshDispatchTargetAfterReadyWaitDecision::KeepRequestedPane
+        );
+
+        assert_eq!(
+            decide_fresh_dispatch_target_after_ready_wait(
+                FreshDispatchTargetAfterReadyWaitFacts {
+                    requested_pane: "%1",
+                    dispatch_file_display: "current.md",
+                    requested_file_display: "/tmp/current.md",
+                    pane_matches_file: false,
+                    same_session_rebound_pane: Some("%2"),
+                    registered_file_display: Some("/tmp/other.md"),
+                },
+            ),
+            FreshDispatchTargetAfterReadyWaitDecision::UseReboundPane {
+                pane: "%2",
+                log_line: "[route] fresh restart re-bound current.md away from pane %1 and onto authoritative pane %2 before retry"
+                    .to_string(),
+            }
+        );
+
+        assert_eq!(
+            decide_fresh_dispatch_target_after_ready_wait(
+                FreshDispatchTargetAfterReadyWaitFacts {
+                    requested_pane: "%1",
+                    dispatch_file_display: "current.md",
+                    requested_file_display: "/tmp/current.md",
+                    pane_matches_file: false,
+                    same_session_rebound_pane: None,
+                    registered_file_display: Some("/tmp/other.md"),
+                },
+            ),
+            FreshDispatchTargetAfterReadyWaitDecision::RejectCrossFile {
+                message: "route dispatch target %1 is registered for /tmp/other.md, not /tmp/current.md; refusing cross-file dispatch"
+                    .to_string(),
+            }
+        );
+
+        assert_eq!(
+            decide_fresh_dispatch_target_after_ready_wait(FreshDispatchTargetAfterReadyWaitFacts {
+                requested_pane: "%1",
+                dispatch_file_display: "current.md",
+                requested_file_display: "/tmp/current.md",
+                pane_matches_file: false,
+                same_session_rebound_pane: Some("%2"),
+                registered_file_display: None,
+            },),
+            FreshDispatchTargetAfterReadyWaitDecision::RegisterRequestedPane,
+            "without a cross-file row on the requested pane, orchestration keeps the fresh pane authoritative"
         );
     }
 

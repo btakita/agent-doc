@@ -10849,6 +10849,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn classify_dispatch_target_bind(",
         "pub struct DispatchTargetMatchFacts",
         "pub fn classify_dispatch_target_match(",
+        "pub struct FreshDispatchTargetAfterReadyWaitFacts",
+        "pub enum FreshDispatchTargetAfterReadyWaitDecision",
+        "pub fn decide_fresh_dispatch_target_after_ready_wait(",
         "pub enum DirectPaneSubmitStatus",
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
@@ -11199,6 +11202,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn classify_dead_harness_shell_dispatch_block(",
         "fn classify_dispatch_target_bind(",
         "fn classify_dispatch_target_match(",
+        "fn decide_fresh_dispatch_target_after_ready_wait(",
+        "fresh restart re-bound",
         "fn resubmit_result_label(",
         "fn route_submit_resubmit_proof_line(",
         "fn routed_trigger_payload(",
@@ -11230,6 +11235,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("classify_dispatch_target_bind(")
             && route_dispatch_source.contains("DispatchTargetMatchFacts")
             && route_dispatch_source.contains("classify_dispatch_target_match(")
+            && route_dispatch_source.contains("FreshDispatchTargetAfterReadyWaitFacts")
+            && route_dispatch_source.contains("FreshDispatchTargetAfterReadyWaitDecision")
+            && route_dispatch_source.contains("decide_fresh_dispatch_target_after_ready_wait(")
             && route_dispatch_source.contains("Some(harness.binary.as_str())")
             && route_dispatch_source.contains("cfg!(test)")
             && route_dispatch_source.contains("RoutedTriggerPayloadFacts")

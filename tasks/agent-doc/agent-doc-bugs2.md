@@ -66,7 +66,21 @@ Each needs a *dedicated agent focused-cycle* (I can take one at a time — say w
 - `#qactsync`, `#claimnewpane`, `#cdtcutover`, `#coredecomp`, `#orchdecomp`, `#skillharnessplugin` — larger, each own cycle.
 
 Recommendation: run the operator-verify live proofs now (they only need your editor + a log grep), and pick **one** focused-cycle code item for me to actually implement + test in isolation. I did not edit the queue (supervisor is active — avoiding go-queue churn).
-<!-- agent:boundary:db6bae54 -->
+
+### Re: wedge root cause + "should we retry until states match?" — opus-4-8
+
+
+**Short answer: no, not a blind retry loop.** The states diverged because the stale JB cdylib produced a bad CRDT merge — first duplicating the prompt 10×, then scrambling my response's bullets *into* the compacted Session Summary instead of appending a clean `### Re:` block. Retrying `finalize` against that corrupt live buffer merges *more* onto a corrupt base; CRDT retries accrete rather than converge (that is exactly how the 10× dup grew). The clean, complete response was already in the capture ledger — the fix was to replace the corrupt base and write once, not to regenerate.
+
+**Root cause:** stale install. The controller (pid 986050) and the JB cdylib were the 0.34.66 build from 19:57, behind the committed source, so the plugin ran old CRDT-apply code that corrupts the live buffer. JB restart/reopen can't fix this (reloads the same stale cdylib) — only a fresh `make install` (or `--force-disk`) resolves it.
+
+**What I did to fix it:**
+1. `make install` in `src/agent-doc` — rebuilt binary + cdylib (fresh 22:41 build); `lib-install` updated the cdylib symlink so JB hot-reloads it. Auto-recycle marked 2 controllers + 3 route-owned supervisors to recycle at their idle boundary.
+2. `agent-doc admin recycle` for this project's controller.
+3. Recovered this document: `git checkout HEAD` (discarded only the scrambled response + queue-reconcile churn — no operator content; your prompt was safe in HEAD), reset sidecars from the clean base, moved the stuck `response_captured` cycle-state aside, and wrote this response via `--force-disk`.
+
+**Heads-up — the extractor is still running.** After my install, 10 `src/agent-doc` source files are already newer than it and 4 are uncommitted (route/dispatch/maintenance), so the `stale_install` warning has reappeared. Those are route/dispatch files, *not* the CRDT-apply path, so they didn't cause this wedge — but the install will keep re-staling until the extractor finishes. I used `--force-disk` deliberately to bypass the flaky editor-IPC/CRDT path during that churn; a clean IPC-path validation (your "retry until it converges" as a live proof that the fresh cdylib fixed it) should wait until the extractor settles and one more `make install` + recycle lands.
+<!-- agent:boundary:9e73bfea -->
 <!-- /agent:exchange -->
 ## Queue
 

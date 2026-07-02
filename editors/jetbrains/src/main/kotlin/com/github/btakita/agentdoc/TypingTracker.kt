@@ -33,8 +33,14 @@ internal data class PreparedEditorOp(
 
 private const val OPERATOR_TEXT_AUTHORITY_CAPABILITY = "operator_text_authority_v1"
 
+// #stale-plugin-detect: report the real plugin version over FFI so the binary's
+// stale-plugin detection is not blind. The IntelliJ plugin descriptor (patched
+// plugin.xml <version>) is the reliable source; the jar-manifest read is a
+// fallback for contexts where the descriptor is unavailable.
 private fun pluginVersion(): String =
-    TypingTracker::class.java.`package`?.implementationVersion ?: "unknown"
+    com.intellij.ide.plugins.PluginManager.getPluginByClass(TypingTracker::class.java)?.version
+        ?: TypingTracker::class.java.`package`?.implementationVersion
+        ?: "unknown"
 
 internal fun prepareEditorOpReports(
     finalText: String,

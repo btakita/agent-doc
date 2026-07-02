@@ -232,8 +232,13 @@ internal object RunAgentDocAttemptLedger {
         }
     }
 
+    // #stale-plugin-detect: prefer the IntelliJ plugin descriptor (patched
+    // plugin.xml <version>) so the reported version is real, not "unknown".
     private fun pluginVersion(): String =
-        RunAgentDocAttemptLedger::class.java.`package`?.implementationVersion ?: "unknown"
+        com.intellij.ide.plugins.PluginManager
+            .getPluginByClass(RunAgentDocAttemptLedger::class.java)?.version
+            ?: RunAgentDocAttemptLedger::class.java.`package`?.implementationVersion
+            ?: "unknown"
 
     private fun escape(value: String): String =
         value.replace("\r", "\\r").replace("\n", "\\n")

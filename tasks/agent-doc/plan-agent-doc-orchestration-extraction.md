@@ -243,6 +243,10 @@ seams:
 - Visible-write reconcile loop policy moved from `write.rs` to
   `agent-doc-document-realtime::write_policy`; orchestration keeps file,
   live-buffer, log, and mutation effects.
+- Snapshot-vs-HEAD and snapshot-vs-visible closeout drift classifiers moved
+  from `flow/closeout.rs` to `agent-doc-turn::closeout_recovery`; closeout keeps
+  cycle-state, git, sidecar, and working-tree evidence gathering while calling
+  `classify_snapshot_head_drift` and `classify_snapshot_visible_drift`.
 - Codex-network-access-on-non-Codex warning construction moved from
   `preflight/run.rs` to `agent-doc-model-tier`; preflight supplies document and
   active-harness facts.

@@ -2595,6 +2595,12 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
             .any(|member| member.as_str() == Some("agent-doc-state-backbone")),
         "agent-doc-state-backbone must stay a first-class workspace crate"
     );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-state-observer-io")),
+        "agent-doc-state-observer-io must stay a first-class workspace crate"
+    );
 
     let root_dependencies = workspace["dependencies"].as_table().unwrap();
     let root_dependency = root_dependencies["agent-doc-state-backbone"]
@@ -2608,6 +2614,21 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
         root_dependency.get("version").and_then(toml::Value::as_str),
         package_version
     );
+    let root_observer_dependency = root_dependencies["agent-doc-state-observer-io"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        root_observer_dependency
+            .get("path")
+            .and_then(toml::Value::as_str),
+        Some("agent-doc-state-observer-io")
+    );
+    assert_eq!(
+        root_observer_dependency
+            .get("version")
+            .and_then(toml::Value::as_str),
+        package_version
+    );
 
     let state_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-state-backbone/Cargo.toml")).unwrap();
@@ -2616,6 +2637,16 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
     assert!(
         !state_dependencies.contains_key("agent-doc-orchestration"),
         "state backbone must stay free of orchestration/effect dependencies"
+    );
+    let observer_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-state-observer-io/Cargo.toml")).unwrap();
+    let observer_crate: toml::Value = toml::from_str(&observer_manifest).unwrap();
+    let observer_dependencies = observer_crate["dependencies"].as_table().unwrap();
+    assert!(
+        observer_dependencies.contains_key("agent-doc-state-backbone")
+            && observer_dependencies.contains_key("agent-doc-ops-log-io")
+            && !observer_dependencies.contains_key("agent-doc-orchestration"),
+        "state observer IO should adapt focused state backbone facts to ops-log output without depending on orchestration"
     );
 
     let orchestration_manifest =
@@ -2636,6 +2667,22 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
             .and_then(toml::Value::as_str),
         package_version
     );
+    let orchestration_observer_dependency =
+        orchestration["dependencies"]["agent-doc-state-observer-io"]
+            .as_table()
+            .unwrap();
+    assert_eq!(
+        orchestration_observer_dependency
+            .get("path")
+            .and_then(toml::Value::as_str),
+        Some("../agent-doc-state-observer-io")
+    );
+    assert_eq!(
+        orchestration_observer_dependency
+            .get("version")
+            .and_then(toml::Value::as_str),
+        package_version
+    );
 
     assert!(
         !manifest_dir
@@ -2643,11 +2690,21 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
             .exists(),
         "orchestration must not keep a state_backbone source module facade"
     );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/adstatechart_snapshot.rs")
+            .exists(),
+        "orchestration must not keep an adstatechart_snapshot observer facade"
+    );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
         !orchestration_lib.contains("pub mod state_backbone"),
         "orchestration must not re-export state_backbone as a compatibility facade"
+    );
+    assert!(
+        !orchestration_lib.contains("pub mod adstatechart_snapshot"),
+        "orchestration must not re-export adstatechart observer IO as a compatibility facade"
     );
 
     for relative_path in [
@@ -17478,7 +17535,7 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
         "agent-doc-orchestration/src/sync/registry.rs",
         "agent-doc-orchestration/src/sync/layout.rs",
         "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/prompt.rs",
+        "agent-doc-prompt-io/src/lib.rs",
     ];
     for relative_path in direct_call_sources {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
@@ -17773,7 +17830,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let session_actor_cmd_source =
         fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
     let prompt_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-io/src/lib.rs")).unwrap();
     let watch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
     let sync_source =
@@ -17896,8 +17953,8 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
         );
     }
 
-    let orchestration_prompt_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt.rs")).unwrap();
+    let prompt_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-io/src/lib.rs")).unwrap();
     for forbidden in [
         "pub struct PromptInfo",
         "pub struct PromptOption",
@@ -17909,13 +17966,25 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
         "fn opencode_selected_option_from_ansi(",
     ] {
         assert!(
-            !orchestration_prompt_source.contains(forbidden),
-            "orchestration prompt command must stay an effect adapter, not re-own parser policy: {forbidden}"
+            !prompt_io_source.contains(forbidden),
+            "prompt IO command adapter must not re-own parser policy: {forbidden}"
         );
     }
     assert!(
-        orchestration_prompt_source.contains("use agent_doc_turn_executor_tmux::prompt::{"),
-        "orchestration prompt adapter should call the focused prompt parser directly"
+        prompt_io_source.contains("use agent_doc_turn_executor_tmux::prompt::{"),
+        "prompt IO adapter should call the focused prompt parser directly"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/prompt.rs")
+            .exists(),
+        "orchestration prompt facade should be deleted once prompt IO owns the command adapter"
+    );
+    assert!(
+        !orchestration_lib.contains("pub mod prompt;"),
+        "orchestration must not expose a public prompt facade"
     );
 
     let harness_source =

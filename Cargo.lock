@@ -78,6 +78,7 @@ dependencies = [
  "agent-doc-prompt-context",
  "agent-doc-prompt-context-io",
  "agent-doc-prompt-contract",
+ "agent-doc-prompt-io",
  "agent-doc-queue",
  "agent-doc-queue-io",
  "agent-doc-repair-io",
@@ -91,6 +92,7 @@ dependencies = [
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-state-observer-io",
  "agent-doc-state-wire",
  "agent-doc-status-io",
  "agent-doc-supervisor",
@@ -859,6 +861,7 @@ dependencies = [
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-state-observer-io",
  "agent-doc-status-io",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
@@ -1031,6 +1034,22 @@ dependencies = [
  "anyhow",
  "indexmap",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-prompt-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-frontmatter",
+ "agent-doc-ops-log-io",
+ "agent-doc-session-registry-io",
+ "agent-doc-tmux-io",
+ "agent-doc-turn-executor-tmux",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tmux-router",
 ]
 
 [[package]]
@@ -1223,6 +1242,22 @@ dependencies = [
  "lazily 0.20.0",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "agent-doc-state-observer-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-cycle-state-io",
+ "agent-doc-debounce",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-ipc-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-root-io",
+ "agent-doc-state-backbone",
+ "agent-doc-supervisor",
+ "agent-doc-turn",
 ]
 
 [[package]]

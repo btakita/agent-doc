@@ -179,7 +179,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
     // markers. Never gates closeout — emitted regardless of the check outcome.
-    crate::adstatechart_snapshot::log_advisory_snapshot(file);
+    agent_doc_state_observer_io::log_advisory_snapshot(file);
     let report = inspect_with_warnings(file)?;
     for warning in &report.warnings {
         eprintln!("{}", warning);

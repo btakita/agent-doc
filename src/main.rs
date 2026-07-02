@@ -14,7 +14,7 @@
 //!   authoritative layout path.
 //! - `Write` auto-detects the write strategy from frontmatter when no `--template`/`--stream`
 //!   flag is given; CRDT-mode documents use `agent_doc_orchestration::write::run_stream`, others use `agent_doc_orchestration::write::run`.
-//! - `Prompt --all` runs `agent_doc_orchestration::prompt::run_all()`; otherwise `FILE` is required.
+//! - `Prompt --all` runs `agent_doc_prompt_io::run_all()`; otherwise `FILE` is required.
 //! - `History --restore <commit>` calls `history::restore`; bare `History` calls `history::list`.
 //! - `Watch` dispatches to `agent_doc_orchestration::watch::stop`, `agent_doc_orchestration::watch::status`, or `agent_doc_orchestration::watch::start` based on flags.
 //! - `Skill install --reload` prints `SKILL_RELOAD=compact` or `SKILL_RELOAD=restart` when the
@@ -33,7 +33,7 @@
 //! - dispatch_run: `agent-doc run <file>` → `agent_doc_orchestration::run::run` called with correct args
 //! - dispatch_write_crdt_autodetect: CRDT frontmatter + no flags → `agent_doc_orchestration::write::run_stream` selected
 //! - dispatch_write_inline_autodetect: inline frontmatter + no flags → `agent_doc_orchestration::write::run` selected
-//! - dispatch_prompt_all: `--all` → `agent_doc_orchestration::prompt::run_all`, no FILE required
+//! - dispatch_prompt_all: `--all` → `agent_doc_prompt_io::run_all`, no FILE required
 //! - dispatch_history_restore: `--restore <sha>` → `history::restore` called
 //! - dispatch_watch_stop: `--stop` flag → `agent_doc_orchestration::watch::stop` called
 //! - dispatch_skill_install_reload: skill updated + `--reload compact` → prints `SKILL_RELOAD=compact`
@@ -2504,12 +2504,12 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Prompt { file, answer, all } => {
             if all {
-                return agent_doc_orchestration::prompt::run_all();
+                return agent_doc_prompt_io::run_all();
             }
             let file = file.context("FILE required when not using --all")?;
             match answer {
-                Some(option) => agent_doc_orchestration::prompt::answer(&file, option),
-                None => agent_doc_orchestration::prompt::run(&file),
+                Some(option) => agent_doc_prompt_io::answer(&file, option),
+                None => agent_doc_prompt_io::run(&file),
             }
         }
         Commands::Commit { file } => agent_doc_orchestration::git::commit(&file).map(|_| ()),

@@ -1,0 +1,24 @@
+[package]
+name = "agent-doc-prompt-io"
+version = "0.34.67"
+edition = "2024"
+description = "Tmux permission prompt command I/O for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_prompt_io"
+
+[dependencies]
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.67" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+
+[dev-dependencies]
+tempfile = "3"

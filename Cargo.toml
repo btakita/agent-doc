@@ -50,6 +50,7 @@ members = [
     "agent-doc-prompt-contract",
     "agent-doc-prompt-context",
     "agent-doc-prompt-context-io",
+    "agent-doc-prompt-io",
     "agent-doc-prompt-lines",
     "agent-doc-repair-io",
     "agent-doc-response-toc",
@@ -85,6 +86,7 @@ members = [
     "agent-doc-workflow-io",
     "agent-doc-work-graph",
     "agent-doc-state-backbone",
+    "agent-doc-state-observer-io",
     "agent-doc-state-wire",
     "agent-doc-status-io",
     "agent-doc-turn",
@@ -187,6 +189,7 @@ agent-doc-project-root-io = { path = "agent-doc-project-root-io", version = "0.3
 agent-doc-prompt-context = { path = "agent-doc-prompt-context", version = "0.34.67" }
 agent-doc-prompt-context-io = { path = "agent-doc-prompt-context-io", version = "0.34.67" }
 agent-doc-prompt-contract = { path = "agent-doc-prompt-contract", version = "0.34.67" }
+agent-doc-prompt-io = { path = "agent-doc-prompt-io", version = "0.34.67" }
 agent-doc-queue = { path = "agent-doc-queue", version = "0.34.67" }
 agent-doc-queue-io = { path = "agent-doc-queue-io", version = "0.34.67" }
 agent-doc-repair-io = { path = "agent-doc-repair-io", version = "0.34.67" }
@@ -200,6 +203,7 @@ agent-doc-session-registry-io = { path = "agent-doc-session-registry-io", versio
 agent-doc-snapshot-io = { path = "agent-doc-snapshot-io", version = "0.34.67" }
 agent-doc-sqlite = { path = "agent-doc-sqlite", version = "0.34.67" }
 agent-doc-state-backbone = { path = "agent-doc-state-backbone", version = "0.34.67" }
+agent-doc-state-observer-io = { path = "agent-doc-state-observer-io", version = "0.34.67" }
 agent-doc-state-wire = { path = "agent-doc-state-wire", version = "0.34.67" }
 agent-doc-status-io = { path = "agent-doc-status-io", version = "0.34.67" }
 agent-doc-supervisor = { path = "agent-doc-supervisor", version = "0.34.67" }

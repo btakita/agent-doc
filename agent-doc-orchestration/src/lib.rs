@@ -37,7 +37,6 @@
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod admin;
 pub mod admit;
-pub mod adstatechart_snapshot;
 pub mod autofix;
 pub mod backlog_cmd;
 pub mod claim;
@@ -54,7 +53,6 @@ pub mod graph;
 pub(crate) mod pipeline_frontmatter;
 pub mod preflight;
 pub mod project_controller;
-pub mod prompt;
 pub mod queue_cmd;
 pub mod queue_continuation;
 pub mod realtime_model;

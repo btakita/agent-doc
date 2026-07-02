@@ -254,16 +254,21 @@ mod tests {
     use super::*;
     use agent_doc_turn_executor_tmux::prompt::PromptOption;
     use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, MutexGuard};
     use std::time::{Duration, Instant};
+
+    static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct ScopedCurrentDir {
         prev_cwd: PathBuf,
-        _env_guard: crate::test_support::ProcessGlobalLockGuard,
+        _env_guard: MutexGuard<'static, ()>,
     }
 
     impl ScopedCurrentDir {
         fn set(path: &Path) -> Self {
-            let env_guard = crate::test_support::env_lock();
+            let env_guard = TEST_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let prev_cwd = std::env::current_dir()
                 .ok()
                 .filter(|cwd| cwd.exists())

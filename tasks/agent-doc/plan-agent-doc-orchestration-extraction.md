@@ -901,6 +901,13 @@ the owning crates expose the policy while orchestration does not re-own it.
   and streaming effects while importing the focused `claude_launch` helpers
   directly; the old local `agent::claude` base-args helpers were deleted rather
   than kept as facades.
+- `agent-doc-turn-executor` now owns OpenCode launch-argument policy: default
+  `opencode run`, session resume/fork flags, model selection, and prompt
+  argument placement live in focused `opencode_launch` helpers. Orchestration
+  keeps child-process execution, env mutation, timeout, stderr logging, and
+  response validation while importing the focused helpers directly; the old
+  local `agent::opencode` argv builder and tests were deleted instead of kept
+  as wrappers.
 - `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
   focus-only expansion policy: restoring remembered sibling panes, preserving
   duplicate-column layout state, returning restoration/expansion events for

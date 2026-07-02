@@ -177,6 +177,26 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     total_deleted += blocked_stop_deleted;
     total_skipped += blocked_stop_kept;
 
+    // Reap orphaned IPC patch files (>1 hour). The file-IPC write path drops a
+    // `<patch-id>.json` for the editor plugin to apply-and-delete as its ACK; on
+    // a `no_ack` timeout the patch is deliberately left "for editor retry", but
+    // when the editor never returns it orphans forever (#patchgc). Bounds
+    // unbounded accumulation and removes the stale-replay hazard of a plugin
+    // re-applying superseded content over a newer buffer.
+    let (patch_deleted, patch_kept) = clean_stale_patch_files(
+        &agent_doc_dir.join("patches"),
+        Duration::from_secs(3600),
+        dry_run,
+    )?;
+    if patch_deleted > 0 {
+        eprintln!(
+            "[gc] patches: {} orphaned IPC patches deleted, {} kept",
+            patch_deleted, patch_kept
+        );
+    }
+    total_deleted += patch_deleted;
+    total_skipped += patch_kept;
+
     // Close stale starting actor projections (>1 hour, no fresh supervisor lease)
     let (actors_closed, actors_kept) = crate::project_controller::close_stale_starting_actors(
         &project_root,
@@ -637,6 +657,61 @@ fn clean_stale_ephemeral_files(
     Ok((deleted, kept))
 }
 
+/// Reap orphaned IPC patch files (`.agent-doc/patches/<patch-id>.json`) older
+/// than `max_age`.
+///
+/// The file-IPC write path drops `<patch-id>.json` for the editor plugin to
+/// apply-and-delete as its ACK. On a `no_ack` timeout the patch is deliberately
+/// left for editor retry (see `run_ipc` in `write/run_entry.rs`), but when the
+/// editor never returns the file orphans forever — accumulating without bound
+/// and risking a stale replay if a plugin later re-scans the directory and
+/// applies superseded content over a newer buffer. Only `*.json` protocol files
+/// are reaped; `*.signal` control files (e.g. `vcs-refresh.signal`,
+/// `publish-live-buffer.signal`) have their own consume-and-delete lifecycle and
+/// are left untouched. `max_age` is chosen well beyond any real editor
+/// ACK/reconnect delay so a briefly-unavailable editor can still consume a fresh
+/// patch (#patchgc).
+fn clean_stale_patch_files(
+    dir: &Path,
+    max_age: Duration,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    if !dir.is_dir() {
+        return Ok((0, 0));
+    }
+
+    let mut deleted = 0;
+    let mut kept = 0;
+
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+
+        let is_stale = std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .map(|age| age > max_age)
+            .unwrap_or(false);
+
+        if is_stale {
+            if dry_run {
+                eprintln!("[gc] would delete stale IPC patch: {}", path.display());
+            } else {
+                let _ = std::fs::remove_file(&path);
+            }
+            deleted += 1;
+        } else {
+            kept += 1;
+        }
+    }
+
+    Ok((deleted, kept))
+}
+
 /// Check if a process with the given PID is alive.
 fn pid_alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
@@ -762,6 +837,48 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry};
+
+    #[test]
+    fn clean_stale_patch_files_reaps_old_json_keeps_fresh_and_signals() {
+        // #patchgc: a file-IPC `no_ack` timeout leaves `<patch-id>.json` for
+        // editor retry; when the editor never returns it orphans forever. The
+        // reaper must remove stale `*.json` patches, keep fresh ones (the editor
+        // may still consume them), and never touch `*.signal` control files.
+        let dir = TempDir::new().unwrap();
+        let patches = dir.path().join("patches");
+        std::fs::create_dir_all(&patches).unwrap();
+
+        // Stale orphaned patch (mtime 2 hours ago) — should be reaped.
+        let stale = patches.join("a59a2904-8926-4d93-bfc8-00d20b88e1db.json");
+        std::fs::write(&stale, r#"{"patch_id":"a59a2904"}"#).unwrap();
+        let old_time = std::time::SystemTime::now() - Duration::from_secs(2 * 3600);
+        filetime::set_file_mtime(&stale, filetime::FileTime::from_system_time(old_time)).unwrap();
+
+        // Fresh in-flight patch — must be kept (editor may still consume it).
+        let fresh = patches.join("bbbbbbbb-1111-2222-3333-444444444444.json");
+        std::fs::write(&fresh, r#"{"patch_id":"bbbb"}"#).unwrap();
+
+        // Stale signal control file — must NOT be reaped (own lifecycle).
+        let stale_signal = patches.join("vcs-refresh.signal");
+        std::fs::write(&stale_signal, "").unwrap();
+        filetime::set_file_mtime(
+            &stale_signal,
+            filetime::FileTime::from_system_time(old_time),
+        )
+        .unwrap();
+
+        let (deleted, kept) =
+            clean_stale_patch_files(&patches, Duration::from_secs(3600), false).unwrap();
+
+        assert_eq!(deleted, 1, "only the stale orphaned patch json should be reaped");
+        assert_eq!(kept, 1, "the fresh patch json should be kept");
+        assert!(!stale.exists(), "stale orphaned patch must be removed");
+        assert!(fresh.exists(), "fresh patch must be kept for editor retry");
+        assert!(
+            stale_signal.exists(),
+            "signal control file must not be reaped by the patch gc"
+        );
+    }
 
     #[test]
     fn gc_removes_orphaned_snapshots() {

@@ -87,21 +87,18 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         warnings.push(warning);
     }
 
-    if initial_frontmatter.codex_network_access.is_some()
-        && agent_doc_model_tier::canonical_harness_name(&active_harness).as_deref() != Some("codex")
-    {
-        let msg = format!(
-            "{}: `codex_network_access` is Codex-specific and has no effect when the active harness is {}. \
-             Either remove it from the document frontmatter or switch the agent to codex.",
-            file.display(),
-            active_harness
-        );
-        eprintln!("[preflight] warning: {msg}");
+    if let Some(warning) = agent_doc_model_tier::codex_network_access_non_codex_harness_warning(
+        &file.display().to_string(),
+        initial_frontmatter.agent.as_deref(),
+        &active_harness,
+        initial_frontmatter.codex_network_access.is_some(),
+    ) {
+        eprintln!("[preflight] warning: {}", warning.message);
         warnings.push(PreflightWarning {
-            code: "codex_network_access_non_codex_harness".to_string(),
-            message: msg,
-            document_agent: initial_frontmatter.agent.as_deref().map(|s| s.to_string()),
-            active_harness: Some(active_harness.to_string()),
+            code: warning.code.to_string(),
+            message: warning.message,
+            document_agent: warning.document_agent,
+            active_harness: Some(warning.active_harness),
         });
     }
 

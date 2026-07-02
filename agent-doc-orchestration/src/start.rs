@@ -159,7 +159,8 @@ use agent_doc_supervisor::input::{
 };
 use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse, submit_bytes};
 use agent_doc_supervisor::route_owned::{
-    RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapPolicy,
+    RouteOwnedCycleFacts, RouteOwnedCyclePhase, RouteOwnedLivenessReason, RouteOwnedReapDecision,
+    RouteOwnedReapPolicy, route_owned_cycle_committed_since_start,
     route_owned_liveness_reason_for_content, route_owned_reap_decision,
 };
 use agent_doc_supervisor::session_owner::ExistingSessionPaneAction;
@@ -591,33 +592,28 @@ fn prompt_for_restart_or_quit(
     }
 }
 
-fn route_owned_cycle_changed_after_start(
-    current: &crate::cycle_state::CycleState,
-    baseline: Option<&crate::cycle_state::CycleState>,
-) -> bool {
-    match baseline {
-        None => true,
-        Some(previous) if previous.is_open() => {
-            current.cycle_id != previous.cycle_id
-                || current.updated_at != previous.updated_at
-                || current.phase != previous.phase
-                || current.last_event != previous.last_event
-        }
-        Some(previous) => current.cycle_id != previous.cycle_id,
+fn route_owned_facts_from_cycle_state(
+    state: &crate::cycle_state::CycleState,
+) -> RouteOwnedCycleFacts {
+    let phase = if state.phase == agent_doc_turn::CyclePhase::Committed {
+        RouteOwnedCyclePhase::Committed
+    } else if state.is_open() {
+        RouteOwnedCyclePhase::Open
+    } else {
+        RouteOwnedCyclePhase::Closed
+    };
+    RouteOwnedCycleFacts {
+        cycle_id: state.cycle_id.clone(),
+        phase,
+        updated_at: state.updated_at,
+        last_event: state.last_event.clone(),
+        committed_file_hash: state.file_hash.clone(),
     }
-}
-
-fn route_owned_cycle_completed_after_start(
-    current: &crate::cycle_state::CycleState,
-    baseline: Option<&crate::cycle_state::CycleState>,
-) -> bool {
-    route_owned_cycle_changed_after_start(current, baseline)
-        && current.phase == agent_doc_turn::CyclePhase::Committed
 }
 
 fn route_owned_liveness_reason_for_file(
     file: &Path,
-    state: &crate::cycle_state::CycleState,
+    facts: &RouteOwnedCycleFacts,
 ) -> Option<RouteOwnedLivenessReason> {
     let content = match std::fs::read_to_string(file) {
         Ok(content) => content,
@@ -627,7 +623,7 @@ fn route_owned_liveness_reason_for_file(
             )));
         }
     };
-    route_owned_liveness_reason_for_content(&content, state.file_hash.as_deref())
+    route_owned_liveness_reason_for_content(&content, facts.committed_file_hash.as_deref())
 }
 
 fn route_owned_live_pane_busy_reason(
@@ -681,18 +677,27 @@ fn spawn_route_owned_completion_thread(
         .spawn(move || {
             let RouteOwnedCompletionConfig {
                 file,
-                mut baseline,
+                baseline,
                 reap_policy,
                 harness,
             } = config;
+            let mut baseline = baseline
+                .as_ref()
+                .map(route_owned_facts_from_cycle_state);
             let mut logged_busy_cycle: Option<String> = None;
             let mut ready_busy_ticks: u32 = 0;
             let mut ready_busy_key: Option<(String, String)> = None;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
             while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
                 if let Ok(Some(state)) = crate::cycle_state::load(&file)
-                    && route_owned_cycle_completed_after_start(&state, baseline.as_ref())
                 {
+                    let facts = route_owned_facts_from_cycle_state(&state);
+                    if !route_owned_cycle_committed_since_start(&facts, baseline.as_ref()) {
+                        if !sleep_with_stop(&stop, ROUTE_OWNED_COMPLETION_POLL_INTERVAL) {
+                            return;
+                        }
+                        continue;
+                    }
                     let actor_ready = actor_state_is_ready(&shared);
                     let ready_busy_reason = if actor_ready {
                         ready_busy_blocker_reason(&shared, &harness)
@@ -748,7 +753,7 @@ fn spawn_route_owned_completion_thread(
                     } else {
                         route_owned_reap_decision(
                             reap_policy,
-                            route_owned_liveness_reason_for_file(&file, &state),
+                            route_owned_liveness_reason_for_file(&file, &facts),
                         )
                     };
                     let event = format!(
@@ -774,7 +779,7 @@ fn spawn_route_owned_completion_thread(
                         logged_busy_cycle = Some(state.cycle_id.clone());
                     } else {
                         logged_busy_cycle = None;
-                        baseline = Some(state);
+                        baseline = Some(facts);
                     }
                 }
                 if !sleep_with_stop(&stop, ROUTE_OWNED_COMPLETION_POLL_INTERVAL) {
@@ -2623,43 +2628,13 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
     }
     #[test]
-    fn route_owned_cycle_completion_ignores_unchanged_committed_baseline() {
-        let baseline = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
-        let current = baseline.clone();
-
-        assert!(
-            !route_owned_cycle_completed_after_start(&current, Some(&baseline)),
-            "a stale committed cycle from before route-owned start must not reap the pane"
-        );
-    }
-    #[test]
-    fn route_owned_cycle_completion_detects_new_committed_cycle() {
-        let baseline = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
-        let current = test_cycle("cycle-2", agent_doc_turn::CyclePhase::Committed, 20);
-
-        assert!(
-            route_owned_cycle_completed_after_start(&current, Some(&baseline)),
-            "a newer committed cycle should stop and reap a route-owned pane"
-        );
-    }
-    #[test]
-    fn route_owned_cycle_completion_waits_while_new_cycle_open() {
-        let baseline = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
-        let current = test_cycle("cycle-2", agent_doc_turn::CyclePhase::WriteApplied, 20);
-
-        assert!(
-            !route_owned_cycle_completed_after_start(&current, Some(&baseline)),
-            "route-owned panes should stay alive for debugging until the new cycle commits"
-        );
-    }
-
-    #[test]
     fn route_owned_liveness_file_adapter_maps_read_failure() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
+        let facts = route_owned_facts_from_cycle_state(&state);
         let missing = tmp.path().join("missing.md");
 
-        let reason = route_owned_liveness_reason_for_file(&missing, &state)
+        let reason = route_owned_liveness_reason_for_file(&missing, &facts)
             .expect("missing file should be an adapter-failure liveness signal");
         assert!(
             reason.as_str().starts_with("read_failed:"),

@@ -63,6 +63,54 @@ pub fn decide_visible_write_after_typing(facts: VisibleWriteTypingFacts) -> Visi
     }
 }
 
+/// Outcome of reconciling the visible-write guard with the on-disk state.
+///
+/// The caller owns IO and live-buffer inspection. This policy value only
+/// distinguishes a clean write from reconcilable disk drift that should trigger
+/// a re-merge before retrying the visible write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VisibleWriteReconcile {
+    /// Disk and the live editor buffer agree with the expected content; the
+    /// caller may write its computed payload.
+    Clean,
+    /// The on-disk file drifted after the response merge was computed, but the
+    /// live editor buffer did not diverge. Carries the fresh disk content so the
+    /// caller can re-merge the captured response against it and retry.
+    DiskDrifted { fresh_current: String },
+}
+
+/// Drive the visible-write reconcile policy.
+///
+/// Starting from `initial_current`/`initial_payload`, repeatedly consult
+/// `guard`. On [`VisibleWriteReconcile::Clean`], the current payload is safe to
+/// write and `(current, payload)` is returned. On reconcilable disk drift,
+/// `recompute` re-merges against the fresh disk content and the guard is retried
+/// up to `max_attempts`. If drift never settles, `fail_closed` is invoked so the
+/// orchestration layer can return its normal retry/error path.
+pub fn reconcile_visible_write<C: ?Sized, T>(
+    context: &C,
+    initial_current: String,
+    initial_payload: T,
+    max_attempts: usize,
+    mut guard: impl FnMut(&C, &str, &T) -> Result<VisibleWriteReconcile>,
+    mut recompute: impl FnMut(&str) -> Result<T>,
+    fail_closed: impl FnOnce(&C, &str, &T) -> Result<()>,
+) -> Result<(String, T)> {
+    let mut current = initial_current;
+    let mut payload = initial_payload;
+    for _ in 0..max_attempts {
+        match guard(context, &current, &payload)? {
+            VisibleWriteReconcile::Clean => return Ok((current, payload)),
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                current = fresh_current;
+                payload = recompute(&current)?;
+            }
+        }
+    }
+    fail_closed(context, &current, &payload)?;
+    Ok((current, payload))
+}
+
 /// Decide whether a direct disk fallback must be refused after an editor IPC
 /// delivery attempt already failed.
 ///
@@ -2402,6 +2450,85 @@ Working.
         });
 
         assert_eq!(decision, VisibleWriteDecision::Apply);
+    }
+
+    #[test]
+    fn reconcile_visible_write_remerges_foreign_append_then_lands_clean() {
+        let base = "BASE";
+        let foreign = "BASE+FOREIGN";
+        let guard_calls = std::cell::RefCell::new(0usize);
+        let recompute_calls = std::cell::RefCell::new(0usize);
+
+        let guard =
+            |_context: &&str, expected: &str, _payload: &String| -> Result<VisibleWriteReconcile> {
+                let mut n = guard_calls.borrow_mut();
+                *n += 1;
+                if *n == 1 {
+                    assert_eq!(expected, base);
+                    Ok(VisibleWriteReconcile::DiskDrifted {
+                        fresh_current: foreign.to_string(),
+                    })
+                } else {
+                    assert_eq!(expected, foreign);
+                    Ok(VisibleWriteReconcile::Clean)
+                }
+            };
+        let recompute = |current: &str| -> Result<String> {
+            *recompute_calls.borrow_mut() += 1;
+            Ok(format!("{current}+RESPONSE"))
+        };
+        let fail_closed = |_context: &&str, _current: &str, _payload: &String| -> Result<()> {
+            panic!("must not fail closed on reconcilable disk drift");
+        };
+
+        let (current, payload) = reconcile_visible_write(
+            &"doc",
+            base.to_string(),
+            format!("{base}+RESPONSE"),
+            3,
+            guard,
+            recompute,
+            fail_closed,
+        )
+        .unwrap();
+
+        assert_eq!(current, foreign);
+        assert_eq!(payload, "BASE+FOREIGN+RESPONSE");
+        assert_eq!(*guard_calls.borrow(), 2);
+        assert_eq!(*recompute_calls.borrow(), 1);
+    }
+
+    #[test]
+    fn reconcile_visible_write_falls_back_to_fail_closed_when_drift_never_settles() {
+        let counter = std::cell::RefCell::new(0usize);
+        let guard = |_context: &&str,
+                     _expected: &str,
+                     _payload: &String|
+         -> Result<VisibleWriteReconcile> {
+            let mut n = counter.borrow_mut();
+            *n += 1;
+            Ok(VisibleWriteReconcile::DiskDrifted {
+                fresh_current: format!("drift-{n}"),
+            })
+        };
+        let recompute = |current: &str| -> Result<String> { Ok(current.to_string()) };
+        let fail_closed = |_context: &&str, _current: &str, _payload: &String| -> Result<()> {
+            anyhow::bail!("document still changing");
+        };
+
+        let err = reconcile_visible_write(
+            &"doc",
+            "start".to_string(),
+            "start".to_string(),
+            3,
+            guard,
+            recompute,
+            fail_closed,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("document still changing"));
+        assert_eq!(*counter.borrow(), 3);
     }
 
     #[test]

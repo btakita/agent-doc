@@ -349,6 +349,49 @@ pub fn preparing_controller_is_stale(
     now.saturating_sub(started) > stale_after.as_secs()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ControllerWatchdogFacts {
+    pub handoff_state: ControllerHandoffState,
+    pub handoff_started_at: Option<u64>,
+    pub now: u64,
+    pub stale_after: Duration,
+    pub is_handoff_replacement: bool,
+    pub handoff_replacement_socket_exists: bool,
+    pub launched_elapsed: Duration,
+}
+
+/// Pure self-watchdog policy for a controller process.
+///
+/// A controller should exit when its in-memory handoff state is wedged past the
+/// threshold, or when a handoff replacement has been promoted in memory but is
+/// still stranded on its temporary socket past the same threshold. Callers own
+/// collecting runtime/IO facts such as wall-clock time and socket existence.
+pub fn controller_watchdog_should_suicide(facts: ControllerWatchdogFacts) -> bool {
+    preparing_controller_is_stale(
+        facts.handoff_state,
+        facts.handoff_started_at,
+        facts.now,
+        facts.stale_after,
+    ) || handoff_replacement_is_stranded(
+        facts.is_handoff_replacement,
+        facts.handoff_replacement_socket_exists,
+        facts.launched_elapsed,
+        facts.stale_after,
+    )
+}
+
+/// Pure structural predicate for a promoted-but-stranded handoff replacement.
+/// Runtime code supplies whether this process is a handoff replacement and
+/// whether its temporary socket still exists.
+pub fn handoff_replacement_is_stranded(
+    is_handoff_replacement: bool,
+    handoff_replacement_socket_exists: bool,
+    launched_elapsed: Duration,
+    stale_after: Duration,
+) -> bool {
+    is_handoff_replacement && handoff_replacement_socket_exists && launched_elapsed > stale_after
+}
+
 pub fn supervisor_lease_is_fresh_and_alive(
     last_heartbeat: Option<u64>,
     supervisor_process_alive: bool,
@@ -902,6 +945,76 @@ mod tests {
             None,
             now,
             stale_after,
+        ));
+    }
+
+    #[test]
+    fn handoff_replacement_stranded_policy_requires_replacement_socket_and_age() {
+        let stale_after = Duration::from_secs(45);
+
+        assert!(handoff_replacement_is_stranded(
+            true,
+            true,
+            Duration::from_secs(46),
+            stale_after,
+        ));
+        assert!(!handoff_replacement_is_stranded(
+            false,
+            true,
+            Duration::from_secs(46),
+            stale_after,
+        ));
+        assert!(!handoff_replacement_is_stranded(
+            true,
+            false,
+            Duration::from_secs(46),
+            stale_after,
+        ));
+        assert!(!handoff_replacement_is_stranded(
+            true,
+            true,
+            Duration::from_secs(45),
+            stale_after,
+        ));
+    }
+
+    #[test]
+    fn controller_watchdog_policy_combines_handoff_and_stranded_replacement() {
+        let stale_after = Duration::from_secs(45);
+        let now = 10_000u64;
+        let base = ControllerWatchdogFacts {
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            now,
+            stale_after,
+            is_handoff_replacement: false,
+            handoff_replacement_socket_exists: false,
+            launched_elapsed: Duration::from_secs(0),
+        };
+
+        assert!(!controller_watchdog_should_suicide(base));
+        assert!(controller_watchdog_should_suicide(
+            ControllerWatchdogFacts {
+                handoff_state: ControllerHandoffState::Preparing,
+                handoff_started_at: Some(now - 100),
+                ..base
+            }
+        ));
+        assert!(controller_watchdog_should_suicide(
+            ControllerWatchdogFacts {
+                is_handoff_replacement: true,
+                handoff_replacement_socket_exists: true,
+                launched_elapsed: Duration::from_secs(46),
+                ..base
+            }
+        ));
+        assert!(!controller_watchdog_should_suicide(
+            ControllerWatchdogFacts {
+                is_handoff_replacement: true,
+                handoff_replacement_socket_exists: false,
+                launched_elapsed: Duration::from_secs(46),
+                ..base
+            }
         ));
     }
 

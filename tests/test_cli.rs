@@ -1137,7 +1137,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // 4 -> 2 (#transient-marker-document-policy): realtime write policy now
         // imports transient marker normalization from agent-doc-document instead
         // of carrying duplicate guard-marker stripping helpers.
-        ("agent-doc-document-realtime/src/write_policy.rs", "guard_") => 2,
+        // 2 -> 5 (#visible-write-reconcile-policy-extract): the visible-write
+        // reconcile loop moved here from orchestration. These are the existing
+        // visible-write guard vocabulary and focused policy tests, now owned by
+        // the realtime write policy crate.
+        ("agent-doc-document-realtime/src/write_policy.rs", "guard_") => 5,
         // Commit normalization is now pure document policy, not an
         // orchestration guard boundary.
         ("agent-doc-document/src/commit_normalization.rs", "guard_") => 0,
@@ -1471,12 +1475,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // must use the same visible editor drift guard as active-head queue consume.
         // +2 for the audited explicit-baseline replay guard: one guard function and
         // one strict write call site reject stale-baseline responses after commit.
-        // +10 for the audited #ipc-drift-visbuf-reconcile foreign-disk-write
-        // reconcile path: the `guard_visible_write_reconcile` function plus its
-        // production call sites in `run_template`/`run_stream`, the
-        // `reconcile_visible_write` loop helper references, and the
-        // deterministic reconcile unit tests. A clean CRDT merge that hits a
-        // foreign agent-doc disk append re-merges instead of failing closed.
+        // +7 for the audited #ipc-drift-visbuf-reconcile foreign-disk-write
+        // reconcile path after `reconcile_visible_write` moved to
+        // `agent-doc-document-realtime`: orchestration keeps the
+        // `guard_visible_write_reconcile` effect adapter plus its production
+        // call sites/tests, while the loop policy and unit tests live in the
+        // realtime write-policy crate. A clean CRDT merge that hits a foreign
+        // agent-doc disk append re-merges instead of failing closed.
         // +1 (#nm1x) for the audited `guard_visible_write_reconcile` call in the
         // `visible_write_reconcile_treats_editor_matching_disk_as_reconcilable_drift`
         // regression test: a live-buffer divergence whose editor digest equals the
@@ -1524,7 +1529,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `guard_visible_write_idle_current_or_target` /
         // `guard_visible_write_reconcile_with_target` rather than introducing a
         // new write authority.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 50,
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 47,
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
         // 3 -> 1 (#template-materialization-policy): raw-response probe
         // construction now lives in `agent-doc-template::response_materialization`,
@@ -2669,6 +2674,9 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         "pub const HARNESS_MISMATCH_WARNING_CODE",
         "pub struct HarnessMismatchWarning",
         "pub fn harness_mismatch_warning(",
+        "pub const CODEX_NETWORK_ACCESS_NON_CODEX_HARNESS_WARNING_CODE",
+        "pub struct CodexNetworkAccessNonCodexHarnessWarning",
+        "pub fn codex_network_access_non_codex_harness_warning(",
         "pub fn short_model_name(",
         "pub fn resolve_agent_model(",
     ] {
@@ -2735,6 +2743,7 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
     for forbidden_snippet in [
         "fn canonical_harness_name(",
         "fn harness_mismatch_warning(",
+        "fn codex_network_access_non_codex_harness_warning(",
         "fn short_model_name(",
         "fn resolve_agent_model(",
     ] {
@@ -2742,12 +2751,21 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
             !preflight_source.contains(forbidden_snippet),
             "preflight.rs must not re-own model-tier attribution or harness policy: {forbidden_snippet}"
         );
+        assert!(
+            !preflight_run_source.contains(forbidden_snippet),
+            "preflight/run.rs must not re-own model-tier attribution or harness policy: {forbidden_snippet}"
+        );
     }
     assert!(
         preflight_run_source.contains("agent_doc_model_tier::harness_mismatch_warning(")
-            && preflight_run_source.contains("agent_doc_model_tier::canonical_harness_name(")
+            && preflight_run_source
+                .contains("agent_doc_model_tier::codex_network_access_non_codex_harness_warning(")
             && preflight_run_source.contains("agent_doc_model_tier::resolve_agent_model("),
         "preflight/run.rs should adapt preflight facts into focused model-tier policy directly"
+    );
+    assert!(
+        preflight_source.contains("agent_doc_model_tier::canonical_harness_name("),
+        "preflight tests should call focused model-tier canonical harness policy directly"
     );
     for forbidden_snippet in [
         "pub enum Harness",
@@ -10327,20 +10345,35 @@ fn test_agent_doc_controller_owns_handoff_staleness_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let controller_status =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/status.rs")).unwrap();
-    assert!(
-        controller_status.contains("pub fn preparing_controller_is_stale("),
-        "agent-doc-controller status must own pure controller handoff staleness policy"
-    );
+    for required in [
+        "pub fn preparing_controller_is_stale(",
+        "pub struct ControllerWatchdogFacts",
+        "pub fn controller_watchdog_should_suicide(",
+        "pub fn handoff_replacement_is_stranded(",
+    ] {
+        assert!(
+            controller_status.contains(required),
+            "agent-doc-controller status must own pure controller handoff/watchdog policy: {required}"
+        );
+    }
 
     for relative_path in [
         "agent-doc-orchestration/src/project_controller.rs",
         "agent-doc-orchestration/src/project_controller/rpc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
-        assert!(
-            !source.contains("fn preparing_controller_is_stale("),
-            "{relative_path} must not re-own controller handoff staleness policy"
-        );
+        for forbidden in [
+            "fn preparing_controller_is_stale(",
+            "fn controller_watchdog_should_suicide(",
+            "fn handoff_replacement_is_stranded(",
+            "fn controller_handoff_replacement_is_stranded(",
+            "pub(crate) fn controller_handoff_replacement_is_stranded(",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative_path} must not re-own controller handoff/watchdog policy: {forbidden}"
+            );
+        }
     }
 
     let project_controller =
@@ -10352,8 +10385,9 @@ fn test_agent_doc_controller_owns_handoff_staleness_policy() {
     .unwrap();
     assert!(
         project_controller.contains("preparing_controller_is_stale")
-            && project_controller_rpc.contains("status::preparing_controller_is_stale"),
-        "orchestration should call focused controller handoff staleness policy directly"
+            && project_controller_rpc.contains("status::controller_watchdog_should_suicide")
+            && project_controller_rpc.contains("status::ControllerWatchdogFacts"),
+        "orchestration should call focused controller handoff/watchdog policy directly"
     );
 }
 
@@ -12337,6 +12371,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn session_log_status_from_content(",
         "pub fn is_harness_run_start_event(",
         "pub fn event_reason(",
+        "pub enum StartingPaneRecoveryTarget",
+        "pub fn starting_pane_recovery_target(",
         "pub fn recent_session_loss_window_at(",
         "pub fn latest_log_anchor(",
     ] {
@@ -12380,6 +12416,23 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
                 .contains("supervisor_session_log_path(file, session_id)?")
             && orchestration_startup_miss.contains("startup_miss_project_root(file)"),
         "orchestration startup_miss should call focused supervisor policy and IO directly"
+    );
+    let orchestration_route =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    for forbidden_snippet in [
+        "enum StartingPaneRecoveryTarget",
+        "fn starting_pane_generation_changed(",
+        "fn starting_pane_recovery_target(",
+    ] {
+        assert!(
+            !orchestration_route.contains(forbidden_snippet),
+            "route.rs must not re-own supervisor startup-miss recovery policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_route.contains("use agent_doc_supervisor::startup_miss::{")
+            && orchestration_route.contains("starting_pane_recovery_target("),
+        "route.rs should gather runtime facts and call focused startup-miss recovery policy directly"
     );
     for required_snippet in [
         "pub struct AgentLaunchArgsSources",
@@ -12658,7 +12711,11 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum RouteOwnedReapPolicy",
         "pub enum RouteOwnedLivenessReason",
         "pub struct RouteOwnedReapDecision",
+        "pub struct RouteOwnedCycleFacts",
+        "pub enum RouteOwnedCyclePhase",
         "pub fn route_owned_reap_decision(",
+        "pub fn route_owned_cycle_changed_since_start(",
+        "pub fn route_owned_cycle_committed_since_start(",
         "pub fn route_owned_file_dirty_after_commit(",
         "pub fn route_owned_liveness_reason_for_content(",
         "pub fn route_owned_backlog_has_live_items(",
@@ -12675,6 +12732,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum RouteOwnedLivenessReason",
         "struct RouteOwnedReapDecision",
         "fn route_owned_reap_decision(",
+        "fn route_owned_cycle_changed_after_start(",
+        "fn route_owned_cycle_completed_after_start(",
+        "fn route_owned_cycle_changed_since_start(",
+        "fn route_owned_cycle_committed_since_start(",
         "fn route_owned_file_dirty_after_commit(",
         "fn route_owned_liveness_reason_for_content(",
         "fn route_owned_reap_decision_for_file(",
@@ -12691,6 +12752,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     for required_snippet in [
         "route_owned_liveness_reason_for_content",
         "route_owned_reap_decision(",
+        "route_owned_cycle_committed_since_start(",
         "RouteOwnedLivenessReason::AdapterFailure",
     ] {
         assert!(
@@ -17378,9 +17440,11 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             .unwrap();
     for required_snippet in [
         "pub enum SnapshotPersistMode",
+        "pub enum VisibleWriteReconcile",
         "pub fn snapshot_persist_mode",
         "pub fn snapshot_persist_mode_with_current",
         "pub fn snapshot_content_to_persist",
+        "pub fn reconcile_visible_write<",
         "pub fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight",
         "pub fn response_target_disjoint_from_user_edit",
         "pub fn dropped_prompt_lines_after_content_ours",
@@ -17416,6 +17480,9 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "fn latest_exchange_response_block(",
         "fn exchange_content(",
         "fn first_response_heading(",
+        "pub enum VisibleWriteReconcile",
+        "pub fn reconcile_visible_write<",
+        "fn reconcile_visible_write<",
         "pub use agent_doc_document_realtime::write_policy::{",
     ] {
         assert!(
@@ -17440,6 +17507,12 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             && write_run_entry.contains("snapshot_persist_mode_with_current")
             && write_run_entry.contains("snapshot_content_to_persist"),
         "write/run_entry.rs should import focused realtime snapshot persistence policy directly"
+    );
+    assert!(
+        write_source.contains("agent_doc_document_realtime::write_policy::{")
+            && write_source.contains("VisibleWriteReconcile")
+            && write_source.contains("reconcile_visible_write"),
+        "write.rs should adapt visible-write effects into focused realtime reconcile policy directly"
     );
     assert!(
         write_ipc.contains("agent_doc_document_realtime::write_policy::{")

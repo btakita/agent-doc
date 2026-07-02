@@ -232,7 +232,9 @@ use agent_doc_document::write_normalization::{
     lift_pending_from_exchange, splice_pending_component,
     splice_response_block_into_current_exchange, strip_boundary_for_dedup,
 };
-use agent_doc_document_realtime::write_policy::response_already_in_current;
+use agent_doc_document_realtime::write_policy::{
+    VisibleWriteReconcile, reconcile_visible_write, response_already_in_current,
+};
 use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,
@@ -2134,23 +2136,6 @@ fn guard_visible_write_idle_with_budget(
     )
 }
 
-/// Outcome of reconciling the visible-write guard with the on-disk state.
-///
-/// Distinguishes a *pending user edit in the editor* (which must still fail
-/// closed) from a *foreign agent-doc disk write* that landed after the response
-/// merge was computed (which is CRDT-reconcilable via a re-merge instead of
-/// stranding the captured response outside HEAD — `#ipc-drift-visbuf-reconcile`).
-pub(crate) enum VisibleWriteReconcile {
-    /// Disk and the live editor buffer agree with the expected content; the
-    /// caller may write its computed `final_content`.
-    Clean,
-    /// The on-disk file drifted to a foreign agent-doc write *after* the
-    /// response merge was computed, but the live editor buffer did NOT diverge
-    /// (no pending user edit). Carries the fresh disk content so the caller can
-    /// re-merge the captured response against it and retry.
-    DiskDrifted { fresh_current: String },
-}
-
 pub(crate) fn guard_visible_write_idle_and_current(
     file: &Path,
     source: &str,
@@ -2317,44 +2302,6 @@ fn live_buffer_snapshot_matches_content(
         && snapshot
             .hash
             .eq_ignore_ascii_case(&agent_doc_hash::content_hash(content))
-}
-
-/// Drive the visible-write reconcile loop (#ipc-drift-visbuf-reconcile).
-///
-/// Starting from `initial_current`/`initial_payload` (the merge computed against
-/// the first disk read), repeatedly consult `guard`. On a [`VisibleWriteReconcile::Clean`]
-/// outcome the merge is safe to write and `(current, payload)` is returned. On a
-/// [`VisibleWriteReconcile::DiskDrifted`] outcome — a foreign agent-doc write that
-/// landed after the merge — re-merge via `recompute` against the fresh disk content
-/// and retry, up to `max_attempts`. If the document keeps drifting past that bound,
-/// fall back to `fail_closed` (which fails the cycle so the operator retries).
-///
-/// Factored out so the loop logic is unit-testable with injected guard/recompute
-/// closures, without needing a mid-write disk mutation race.
-fn reconcile_visible_write<T>(
-    file: &Path,
-    initial_current: String,
-    initial_payload: T,
-    max_attempts: usize,
-    mut guard: impl FnMut(&Path, &str, &T) -> Result<VisibleWriteReconcile>,
-    mut recompute: impl FnMut(&str) -> Result<T>,
-    fail_closed: impl FnOnce(&Path, &str, &T) -> Result<()>,
-) -> Result<(String, T)> {
-    let mut current = initial_current;
-    let mut payload = initial_payload;
-    for _ in 0..max_attempts {
-        match guard(file, &current, &payload)? {
-            VisibleWriteReconcile::Clean => return Ok((current, payload)),
-            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
-                current = fresh_current;
-                payload = recompute(&current)?;
-            }
-        }
-    }
-    // Document kept changing under us across every reconcile attempt; fall back
-    // to the fail-closed guard so the operator retries.
-    fail_closed(file, &current, &payload)?;
-    Ok((current, payload))
 }
 
 mod converge;
@@ -3649,93 +3596,6 @@ scratch
         }
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("visible_write_disk_drift_reconcilable"));
-    }
-    #[test]
-    fn reconcile_visible_write_remerges_foreign_append_then_lands_clean() {
-        // The first guard call sees a foreign disk append; the loop must re-merge
-        // the captured response against the fresh disk content and then succeed
-        // without failing closed and stranding the response (#ipc-drift-visbuf-reconcile).
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "seed\n").unwrap();
-
-        let base = "BASE";
-        let foreign = "BASE+FOREIGN";
-        let guard_calls = std::cell::RefCell::new(0usize);
-        let recompute_calls = std::cell::RefCell::new(0usize);
-
-        let guard =
-            |_f: &Path, expected: &str, _payload: &String| -> Result<VisibleWriteReconcile> {
-                let mut n = guard_calls.borrow_mut();
-                *n += 1;
-                if *n == 1 {
-                    assert_eq!(expected, base);
-                    Ok(VisibleWriteReconcile::DiskDrifted {
-                        fresh_current: foreign.to_string(),
-                    })
-                } else {
-                    assert_eq!(expected, foreign);
-                    Ok(VisibleWriteReconcile::Clean)
-                }
-            };
-        let recompute = |current: &str| -> Result<String> {
-            *recompute_calls.borrow_mut() += 1;
-            // The re-merge incorporates the foreign disk content + the response.
-            Ok(format!("{current}+RESPONSE"))
-        };
-        let fail_closed = |_f: &Path, _c: &str, _payload: &String| -> Result<()> {
-            panic!("must not fail closed on a reconcilable foreign append");
-        };
-
-        let (current, payload) = reconcile_visible_write(
-            &doc,
-            base.to_string(),
-            format!("{base}+RESPONSE"),
-            3,
-            guard,
-            recompute,
-            fail_closed,
-        )
-        .unwrap();
-
-        assert_eq!(current, foreign);
-        assert_eq!(payload, "BASE+FOREIGN+RESPONSE");
-        assert_eq!(*guard_calls.borrow(), 2);
-        assert_eq!(*recompute_calls.borrow(), 1);
-    }
-    #[test]
-    fn reconcile_visible_write_falls_back_to_fail_closed_when_drift_never_settles() {
-        // A document that keeps drifting past the attempt bound must fall back to
-        // the fail-closed guard so the operator retries instead of looping forever.
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "seed\n").unwrap();
-
-        let counter = std::cell::RefCell::new(0usize);
-        let guard = |_f: &Path, _e: &str, _payload: &String| -> Result<VisibleWriteReconcile> {
-            let mut n = counter.borrow_mut();
-            *n += 1;
-            Ok(VisibleWriteReconcile::DiskDrifted {
-                fresh_current: format!("drift-{n}"),
-            })
-        };
-        let recompute = |current: &str| -> Result<String> { Ok(current.to_string()) };
-        let fail_closed = |_f: &Path, _c: &str, _payload: &String| -> Result<()> {
-            anyhow::bail!("document still changing");
-        };
-
-        let err = reconcile_visible_write(
-            &doc,
-            "start".to_string(),
-            "start".to_string(),
-            3,
-            guard,
-            recompute,
-            fail_closed,
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("document still changing"));
-        assert_eq!(*counter.borrow(), 3);
     }
     #[test]
     fn capture_locked_pre_response_reads_live_content_after_lock_wait() {

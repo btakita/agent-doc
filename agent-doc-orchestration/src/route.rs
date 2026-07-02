@@ -222,6 +222,9 @@ use agent_doc_supervisor::route_runtime::{
     authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
     effective_authoritative_actor_state,
 };
+use agent_doc_supervisor::startup_miss::{
+    StartingPaneRecoveryTarget, starting_pane_recovery_target,
+};
 use agent_doc_tmux::is_first_column;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
@@ -2559,57 +2562,6 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
             cfg!(test),
         )
     })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum StartingPaneRecoveryTarget {
-    SamePane,
-    DifferentPane(String),
-}
-
-fn starting_pane_generation_changed(
-    initial_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
-    current_status: &agent_doc_supervisor::startup_miss::SessionLogStatus,
-    pane: &str,
-) -> bool {
-    if current_status.latest_start_pane.as_deref() != Some(pane)
-        || !current_status.latest_session_open()
-    {
-        return false;
-    }
-
-    let Some(initial_status) = initial_status else {
-        return false;
-    };
-
-    current_status.latest_start_timestamp != initial_status.latest_start_timestamp
-        || current_status.latest_run_timestamp != initial_status.latest_run_timestamp
-        || current_status.latest_run_event != initial_status.latest_run_event
-}
-
-fn starting_pane_recovery_target(
-    initial_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
-    current_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
-    current_pane: &str,
-    registered_pane: Option<&str>,
-) -> Option<StartingPaneRecoveryTarget> {
-    let current_status = current_status?;
-
-    if let Some(registered_pane) = registered_pane
-        && registered_pane != current_pane
-        && current_status.latest_start_pane.as_deref() == Some(registered_pane)
-        && current_status.latest_session_open()
-    {
-        return Some(StartingPaneRecoveryTarget::DifferentPane(
-            registered_pane.to_string(),
-        ));
-    }
-
-    if starting_pane_generation_changed(initial_status, current_status, current_pane) {
-        return Some(StartingPaneRecoveryTarget::SamePane);
-    }
-
-    None
 }
 
 fn wait_for_starting_pane_recovery_target(
@@ -6552,92 +6504,6 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             &HarnessConfig::opencode(),
             Some("agent-doc tasks/bugs.md")
         ));
-    }
-    #[test]
-    fn starting_pane_recovery_target_follows_same_file_handoff() {
-        let initial = agent_doc_supervisor::startup_miss::SessionLogStatus {
-            latest_start_pane: Some("%151".to_string()),
-            latest_start_timestamp: Some(10),
-            latest_run_timestamp: Some(11),
-            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_committed_cycle_after_latest_run: false,
-            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_process_exit_after_latest_start: false,
-            saw_session_end_after_latest_start: false,
-            saw_process_exit_after_latest_run: false,
-            saw_session_end_after_latest_run: false,
-        };
-        let handed_off = agent_doc_supervisor::startup_miss::SessionLogStatus {
-            latest_start_pane: Some("%183".to_string()),
-            latest_start_timestamp: Some(20),
-            latest_run_timestamp: Some(21),
-            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_committed_cycle_after_latest_run: false,
-            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_process_exit_after_latest_start: false,
-            saw_session_end_after_latest_start: false,
-            saw_process_exit_after_latest_run: false,
-            saw_session_end_after_latest_run: false,
-        };
-
-        assert_eq!(
-            starting_pane_recovery_target(Some(&initial), Some(&handed_off), "%151", Some("%183")),
-            Some(StartingPaneRecoveryTarget::DifferentPane(
-                "%183".to_string()
-            ))
-        );
-    }
-    #[test]
-    fn starting_pane_recovery_target_retries_same_pane_after_new_generation() {
-        let initial = agent_doc_supervisor::startup_miss::SessionLogStatus {
-            latest_start_pane: Some("%151".to_string()),
-            latest_start_timestamp: Some(10),
-            latest_run_timestamp: Some(11),
-            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_committed_cycle_after_latest_run: false,
-            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_process_exit_after_latest_start: false,
-            saw_session_end_after_latest_start: false,
-            saw_process_exit_after_latest_run: false,
-            saw_session_end_after_latest_run: false,
-        };
-        let restarted = agent_doc_supervisor::startup_miss::SessionLogStatus {
-            latest_start_pane: Some("%151".to_string()),
-            latest_start_timestamp: Some(12),
-            latest_run_timestamp: Some(13),
-            latest_run_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
-            saw_committed_cycle_after_latest_run: false,
-            last_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
-            saw_process_exit_after_latest_start: false,
-            saw_session_end_after_latest_start: false,
-            saw_process_exit_after_latest_run: false,
-            saw_session_end_after_latest_run: false,
-        };
-
-        assert_eq!(
-            starting_pane_recovery_target(Some(&initial), Some(&restarted), "%151", Some("%151")),
-            Some(StartingPaneRecoveryTarget::SamePane)
-        );
-    }
-    #[test]
-    fn starting_pane_recovery_target_ignores_unchanged_open_start() {
-        let initial = agent_doc_supervisor::startup_miss::SessionLogStatus {
-            latest_start_pane: Some("%151".to_string()),
-            latest_start_timestamp: Some(10),
-            latest_run_timestamp: Some(11),
-            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_committed_cycle_after_latest_run: false,
-            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_process_exit_after_latest_start: false,
-            saw_session_end_after_latest_start: false,
-            saw_process_exit_after_latest_run: false,
-            saw_session_end_after_latest_run: false,
-        };
-
-        assert_eq!(
-            starting_pane_recovery_target(Some(&initial), Some(&initial), "%151", Some("%151")),
-            None
-        );
     }
     #[test]
     fn busy_existing_pane_auto_fix_outcome_restarts_fresh_for_healthy_authoritative_session_without_changes()

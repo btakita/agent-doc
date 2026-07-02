@@ -2106,13 +2106,12 @@ pub(crate) fn serve_with_options(
                 // `promote_handoff` (flipping in-memory state to `Stable`, invisible
                 // to the predicate) but whose client died before renaming its temp
                 // socket onto the public path — detected structurally below.
-                if controller_self_watchdog_should_suicide(&runtime, watchdog_threshold)
-                    || controller_handoff_replacement_is_stranded(
-                        handoff_temp_socket.as_deref(),
-                        controller_launched_at.elapsed(),
-                        watchdog_threshold,
-                    )
-                {
+                if controller_self_watchdog_should_suicide(
+                    &runtime,
+                    handoff_temp_socket.as_deref(),
+                    controller_launched_at.elapsed(),
+                    watchdog_threshold,
+                ) {
                     controller_self_watchdog_suicide(&runtime, watchdog_threshold);
                     should_stop.store(true, Ordering::SeqCst);
                     break;
@@ -2153,50 +2152,28 @@ pub(crate) fn serve_with_options(
     Ok(())
 }
 
-/// M1 (#stuckhandoff2) — pure predicate: should the serving controller self-terminate?
-/// Reads the controller's own live bootstrap snapshot and applies the same staleness
-/// rule the external reaper uses. Side-effect free for deterministic unit tests; a
-/// poisoned bootstrap lock is treated as "do not suicide" (the next external reaper
-/// pass still covers it).
+/// M1/M1b (#stuckhandoff2) — runtime adapter for the pure controller watchdog policy.
+/// Reads the controller's own live bootstrap snapshot and supplies wall-clock/socket
+/// facts. A poisoned bootstrap lock is treated as "do not suicide" (the next external
+/// reaper pass still covers it).
 pub(crate) fn controller_self_watchdog_should_suicide(
     runtime: &ControllerRuntime,
+    handoff_temp_socket: Option<&Path>,
+    launched_elapsed: Duration,
     threshold: Duration,
 ) -> bool {
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
         return false;
     };
-    status::preparing_controller_is_stale(
-        bootstrap.handoff_state,
-        bootstrap.handoff_started_at,
-        timestamp_secs(),
-        threshold,
-    )
-}
-
-/// M1b (#stuckhandoff2 reopen) — structural self-watchdog for a promoted-but-stranded
-/// handoff *replacement*. The in-memory predicate above only sees `Preparing`/`Promoted`,
-/// but `promote_handoff` flips a replacement straight to `Stable` (`handoff_started_at`
-/// cleared) the instant the client asks — so a client that dies *after* `promote_handoff`
-/// but *before* `std::fs::rename(temp_sock → public_sock)` (`handoff_stale_controller`)
-/// leaves a `Stable`-in-memory controller stranded on its temp socket, invisible to the
-/// predicate. That was the dominant orphan the slow gc/M5 cmdline sweep cleaned up at
-/// 7–21 minutes while M1 logged nothing.
-///
-/// Detect it structurally, independent of in-memory `handoff_state`: a replacement was
-/// launched on a `controller-handoff-*` temp socket (`handoff_temp_socket`); a *completed*
-/// handoff removes that path via the promote rename, so a temp socket that still exists
-/// past the threshold proves the promotion never finished. The `launched_elapsed >
-/// threshold` guard spares a healthy young handoff (which completes the rename in well
-/// under a second).
-pub(crate) fn controller_handoff_replacement_is_stranded(
-    handoff_temp_socket: Option<&Path>,
-    launched_elapsed: Duration,
-    threshold: Duration,
-) -> bool {
-    let Some(temp) = handoff_temp_socket else {
-        return false;
-    };
-    launched_elapsed > threshold && temp.exists()
+    status::controller_watchdog_should_suicide(status::ControllerWatchdogFacts {
+        handoff_state: bootstrap.handoff_state,
+        handoff_started_at: bootstrap.handoff_started_at,
+        now: timestamp_secs(),
+        stale_after: threshold,
+        is_handoff_replacement: handoff_temp_socket.is_some(),
+        handoff_replacement_socket_exists: handoff_temp_socket.is_some_and(|temp| temp.exists()),
+        launched_elapsed,
+    })
 }
 
 /// M1 (#stuckhandoff2) — supersede the wedged in-memory + on-disk bootstrap with

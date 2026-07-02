@@ -5611,7 +5611,12 @@ agent:queue\n\
             Some(timestamp_secs()),
         ));
         assert!(
-            !controller_self_watchdog_should_suicide(&runtime, Duration::from_secs(45)),
+            !controller_self_watchdog_should_suicide(
+                &runtime,
+                None,
+                Duration::ZERO,
+                Duration::from_secs(45),
+            ),
             "a controller mid-handoff (fresh handoff_started_at) must not self-terminate"
         );
     }
@@ -5625,7 +5630,12 @@ agent:queue\n\
             None,
         ));
         assert!(
-            !controller_self_watchdog_should_suicide(&runtime, Duration::from_secs(0)),
+            !controller_self_watchdog_should_suicide(
+                &runtime,
+                None,
+                Duration::ZERO,
+                Duration::from_secs(0),
+            ),
             "a Stable controller must never self-terminate, even at a zero threshold"
         );
     }
@@ -5640,7 +5650,12 @@ agent:queue\n\
         let runtime = runtime_for_bootstrap(bootstrap);
 
         assert!(
-            controller_self_watchdog_should_suicide(&runtime, Duration::from_secs(45)),
+            controller_self_watchdog_should_suicide(
+                &runtime,
+                None,
+                Duration::ZERO,
+                Duration::from_secs(45),
+            ),
             "a controller wedged in Preparing past the threshold must self-terminate"
         );
         controller_self_watchdog_suicide(&runtime, Duration::from_secs(45));
@@ -5660,55 +5675,46 @@ agent:queue\n\
     }
     // ---- M1b (#stuckhandoff2 reopen): stranded post-promote replacement ----
     #[test]
-    fn handoff_replacement_stranded_when_temp_socket_persists_past_threshold() {
+    fn self_watchdog_suicides_when_replacement_temp_socket_persists_past_threshold() {
         let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let temp = dir.path().join("controller-handoff-1234-9.sock");
         std::fs::write(&temp, b"").unwrap();
         // Promotion's rename never removed the temp socket and the threshold elapsed:
         // a stranded replacement, even though its in-memory state may read `Stable`.
-        assert!(controller_handoff_replacement_is_stranded(
+        let runtime = runtime_for_bootstrap(preparing_runtime_bootstrap(
+            dir.path(),
+            ControllerHandoffState::Stable,
+            None,
+        ));
+        assert!(controller_self_watchdog_should_suicide(
+            &runtime,
             Some(temp.as_path()),
             Duration::from_secs(600),
             Duration::from_secs(45),
         ));
     }
     #[test]
-    fn handoff_replacement_not_stranded_after_promote_rename_removes_temp_socket() {
+    fn self_watchdog_keeps_replacement_after_promote_rename_removes_temp_socket() {
         let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         // A completed handoff renamed temp -> public, so the temp path is gone.
         let temp = dir.path().join("controller-handoff-1234-9.sock");
         assert!(!temp.exists());
+        let runtime = runtime_for_bootstrap(preparing_runtime_bootstrap(
+            dir.path(),
+            ControllerHandoffState::Stable,
+            None,
+        ));
         assert!(
-            !controller_handoff_replacement_is_stranded(
+            !controller_self_watchdog_should_suicide(
+                &runtime,
                 Some(temp.as_path()),
                 Duration::from_secs(600),
                 Duration::from_secs(45),
             ),
             "a promoted+renamed replacement (temp socket gone) is authoritative, never stranded"
         );
-    }
-    #[test]
-    fn handoff_replacement_not_stranded_within_threshold() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let temp = dir.path().join("controller-handoff-1234-9.sock");
-        std::fs::write(&temp, b"").unwrap();
-        assert!(
-            !controller_handoff_replacement_is_stranded(
-                Some(temp.as_path()),
-                Duration::from_secs(1),
-                Duration::from_secs(45),
-            ),
-            "a young in-flight handoff (temp socket still present) must not self-terminate"
-        );
-    }
-    #[test]
-    fn handoff_replacement_none_socket_is_never_stranded() {
-        // The initial controller serves on the public socket (handoff_temp_socket=None).
-        assert!(!controller_handoff_replacement_is_stranded(
-            None,
-            Duration::from_secs(600),
-            Duration::from_secs(45),
-        ));
     }
     #[test]
     fn self_watchdog_suicide_marks_failed_for_stranded_stable_replacement() {

@@ -103,6 +103,55 @@ pub struct RouteOwnedReapDecision {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteOwnedCyclePhase {
+    Open,
+    Committed,
+    Closed,
+}
+
+impl RouteOwnedCyclePhase {
+    pub const fn is_open(self) -> bool {
+        matches!(self, Self::Open)
+    }
+
+    pub const fn is_committed(self) -> bool {
+        matches!(self, Self::Committed)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteOwnedCycleFacts {
+    pub cycle_id: String,
+    pub phase: RouteOwnedCyclePhase,
+    pub updated_at: u64,
+    pub last_event: String,
+    pub committed_file_hash: Option<String>,
+}
+
+pub fn route_owned_cycle_changed_since_start(
+    current: &RouteOwnedCycleFacts,
+    baseline: Option<&RouteOwnedCycleFacts>,
+) -> bool {
+    match baseline {
+        None => true,
+        Some(previous) if previous.phase.is_open() => {
+            current.cycle_id != previous.cycle_id
+                || current.updated_at != previous.updated_at
+                || current.phase != previous.phase
+                || current.last_event != previous.last_event
+        }
+        Some(previous) => current.cycle_id != previous.cycle_id,
+    }
+}
+
+pub fn route_owned_cycle_committed_since_start(
+    current: &RouteOwnedCycleFacts,
+    baseline: Option<&RouteOwnedCycleFacts>,
+) -> bool {
+    route_owned_cycle_changed_since_start(current, baseline) && current.phase.is_committed()
+}
+
 pub fn route_owned_reap_decision(
     policy: RouteOwnedReapPolicy,
     liveness_reason: Option<RouteOwnedLivenessReason>,
@@ -297,6 +346,84 @@ mod tests {
                 reason: "explicit_keep_alive".to_string()
             }
         );
+    }
+
+    fn cycle(id: &str, phase: RouteOwnedCyclePhase, updated_at: u64) -> RouteOwnedCycleFacts {
+        RouteOwnedCycleFacts {
+            cycle_id: id.to_string(),
+            phase,
+            updated_at,
+            last_event: format!("{phase:?}"),
+            committed_file_hash: None,
+        }
+    }
+
+    #[test]
+    fn route_owned_cycle_policy_treats_missing_baseline_as_changed() {
+        let current = cycle("cycle-1", RouteOwnedCyclePhase::Committed, 10);
+
+        assert!(route_owned_cycle_changed_since_start(&current, None));
+        assert!(route_owned_cycle_committed_since_start(&current, None));
+    }
+
+    #[test]
+    fn route_owned_cycle_policy_ignores_unchanged_committed_baseline() {
+        let baseline = cycle("cycle-1", RouteOwnedCyclePhase::Committed, 10);
+        let current = baseline.clone();
+
+        assert!(!route_owned_cycle_changed_since_start(
+            &current,
+            Some(&baseline)
+        ));
+        assert!(!route_owned_cycle_committed_since_start(
+            &current,
+            Some(&baseline)
+        ));
+    }
+
+    #[test]
+    fn route_owned_cycle_policy_detects_new_committed_cycle() {
+        let baseline = cycle("cycle-1", RouteOwnedCyclePhase::Committed, 10);
+        let current = cycle("cycle-2", RouteOwnedCyclePhase::Committed, 20);
+
+        assert!(route_owned_cycle_changed_since_start(
+            &current,
+            Some(&baseline)
+        ));
+        assert!(route_owned_cycle_committed_since_start(
+            &current,
+            Some(&baseline)
+        ));
+    }
+
+    #[test]
+    fn route_owned_cycle_policy_waits_while_new_cycle_is_open() {
+        let baseline = cycle("cycle-1", RouteOwnedCyclePhase::Committed, 10);
+        let current = cycle("cycle-2", RouteOwnedCyclePhase::Open, 20);
+
+        assert!(route_owned_cycle_changed_since_start(
+            &current,
+            Some(&baseline)
+        ));
+        assert!(!route_owned_cycle_committed_since_start(
+            &current,
+            Some(&baseline)
+        ));
+    }
+
+    #[test]
+    fn route_owned_cycle_policy_tracks_open_baseline_updates() {
+        let baseline = cycle("cycle-1", RouteOwnedCyclePhase::Open, 10);
+        let current = cycle("cycle-1", RouteOwnedCyclePhase::Open, 11);
+
+        assert!(route_owned_cycle_changed_since_start(
+            &current,
+            Some(&baseline)
+        ));
+        assert!(!route_owned_cycle_committed_since_start(
+            &current,
+            Some(&baseline)
+        ));
     }
 
     #[test]

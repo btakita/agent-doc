@@ -245,6 +245,8 @@ pub fn canonical_harness_name(value: &str) -> Option<String> {
 }
 
 pub const HARNESS_MISMATCH_WARNING_CODE: &str = "harness_mismatch";
+pub const CODEX_NETWORK_ACCESS_NON_CODEX_HARNESS_WARNING_CODE: &str =
+    "codex_network_access_non_codex_harness";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarnessMismatchWarning {
@@ -275,6 +277,37 @@ pub fn harness_mismatch_warning(
         ),
         document_agent: declared_raw.to_string(),
         active_harness: active,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexNetworkAccessNonCodexHarnessWarning {
+    pub code: &'static str,
+    pub message: String,
+    pub document_agent: Option<String>,
+    pub active_harness: String,
+}
+
+pub fn codex_network_access_non_codex_harness_warning(
+    file_display: &str,
+    document_agent: Option<&str>,
+    active_harness: &str,
+    codex_network_access_configured: bool,
+) -> Option<CodexNetworkAccessNonCodexHarnessWarning> {
+    if !codex_network_access_configured
+        || canonical_harness_name(active_harness).as_deref() == Some("codex")
+    {
+        return None;
+    }
+
+    Some(CodexNetworkAccessNonCodexHarnessWarning {
+        code: CODEX_NETWORK_ACCESS_NON_CODEX_HARNESS_WARNING_CODE,
+        message: format!(
+            "{file_display}: `codex_network_access` is Codex-specific and has no effect when the active harness is {active_harness}. \
+             Either remove it from the document frontmatter or switch the agent to codex."
+        ),
+        document_agent: document_agent.map(str::to_string),
+        active_harness: active_harness.to_string(),
     })
 }
 
@@ -803,6 +836,52 @@ mod tests {
     fn harness_mismatch_warning_skips_unknown_active_harness() {
         assert!(harness_mismatch_warning(Some("codex"), "default").is_none());
         assert!(harness_mismatch_warning(None, "claude-code").is_none());
+    }
+
+    #[test]
+    fn codex_network_access_warning_fires_for_non_codex_harness() {
+        let warning = codex_network_access_non_codex_harness_warning(
+            "tasks/session.md",
+            Some("opencode"),
+            "opencode",
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(
+            warning.code,
+            CODEX_NETWORK_ACCESS_NON_CODEX_HARNESS_WARNING_CODE
+        );
+        assert_eq!(warning.document_agent.as_deref(), Some("opencode"));
+        assert_eq!(warning.active_harness, "opencode");
+        assert!(warning.message.contains("tasks/session.md"));
+        assert!(
+            warning
+                .message
+                .contains("`codex_network_access` is Codex-specific")
+        );
+    }
+
+    #[test]
+    fn codex_network_access_warning_skips_codex_and_unconfigured() {
+        assert!(
+            codex_network_access_non_codex_harness_warning(
+                "tasks/session.md",
+                Some("codex"),
+                "codex-cli",
+                true,
+            )
+            .is_none()
+        );
+        assert!(
+            codex_network_access_non_codex_harness_warning(
+                "tasks/session.md",
+                Some("opencode"),
+                "opencode",
+                false,
+            )
+            .is_none()
+        );
     }
 
     #[test]

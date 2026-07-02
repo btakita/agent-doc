@@ -50,6 +50,12 @@ pub struct StartupMissSupersession {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartingPaneRecoveryTarget {
+    SamePane,
+    DifferentPane(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentSessionLossWindow {
     pub count: usize,
     pub first_timestamp: u64,
@@ -287,6 +293,51 @@ pub fn dispatch_only_requires_ready_probe(
         })
 }
 
+fn starting_pane_generation_changed(
+    initial_status: Option<&SessionLogStatus>,
+    current_status: &SessionLogStatus,
+    pane: &str,
+) -> bool {
+    if current_status.latest_start_pane.as_deref() != Some(pane)
+        || !current_status.latest_session_open()
+    {
+        return false;
+    }
+
+    let Some(initial_status) = initial_status else {
+        return false;
+    };
+
+    current_status.latest_start_timestamp != initial_status.latest_start_timestamp
+        || current_status.latest_run_timestamp != initial_status.latest_run_timestamp
+        || current_status.latest_run_event != initial_status.latest_run_event
+}
+
+pub fn starting_pane_recovery_target(
+    initial_status: Option<&SessionLogStatus>,
+    current_status: Option<&SessionLogStatus>,
+    current_pane: &str,
+    registered_pane: Option<&str>,
+) -> Option<StartingPaneRecoveryTarget> {
+    let current_status = current_status?;
+
+    if let Some(registered_pane) = registered_pane
+        && registered_pane != current_pane
+        && current_status.latest_start_pane.as_deref() == Some(registered_pane)
+        && current_status.latest_session_open()
+    {
+        return Some(StartingPaneRecoveryTarget::DifferentPane(
+            registered_pane.to_string(),
+        ));
+    }
+
+    if starting_pane_generation_changed(initial_status, current_status, current_pane) {
+        return Some(StartingPaneRecoveryTarget::SamePane);
+    }
+
+    None
+}
+
 pub fn latest_log_anchor(status: &SessionLogStatus) -> String {
     status
         .latest_run_event
@@ -414,6 +465,26 @@ pub fn recent_session_loss_window_at(
 mod tests {
     use super::*;
 
+    fn open_status(
+        pane: &str,
+        start_timestamp: u64,
+        run_timestamp: u64,
+        run_event: &str,
+    ) -> SessionLogStatus {
+        SessionLogStatus {
+            latest_start_pane: Some(pane.to_string()),
+            latest_start_timestamp: Some(start_timestamp),
+            latest_run_timestamp: Some(run_timestamp),
+            latest_run_event: Some(run_event.to_string()),
+            saw_committed_cycle_after_latest_run: false,
+            last_event: Some(run_event.to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
+        }
+    }
+
     #[test]
     fn harness_run_start_classification_accepts_start_and_restart() {
         assert!(is_harness_run_start_event("codex_start mode=fresh"));
@@ -486,6 +557,45 @@ mod tests {
                 "latest session log is still open or ambiguous (last_event=codex_start mode=fresh restart_count=0)"
                     .to_string()
             )
+        );
+    }
+
+    #[test]
+    fn starting_pane_recovery_target_follows_same_file_handoff() {
+        let initial = open_status("%151", 10, 11, "codex_start mode=fresh restart_count=0");
+        let handed_off = open_status("%183", 20, 21, "codex_start mode=fresh restart_count=0");
+
+        assert_eq!(
+            starting_pane_recovery_target(Some(&initial), Some(&handed_off), "%151", Some("%183")),
+            Some(StartingPaneRecoveryTarget::DifferentPane(
+                "%183".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn starting_pane_recovery_target_retries_same_pane_after_new_generation() {
+        let initial = open_status("%151", 10, 11, "codex_start mode=fresh restart_count=0");
+        let restarted = open_status(
+            "%151",
+            12,
+            13,
+            "codex_start mode=fresh_restart restart_count=1",
+        );
+
+        assert_eq!(
+            starting_pane_recovery_target(Some(&initial), Some(&restarted), "%151", Some("%151")),
+            Some(StartingPaneRecoveryTarget::SamePane)
+        );
+    }
+
+    #[test]
+    fn starting_pane_recovery_target_ignores_unchanged_open_start() {
+        let initial = open_status("%151", 10, 11, "codex_start mode=fresh restart_count=0");
+
+        assert_eq!(
+            starting_pane_recovery_target(Some(&initial), Some(&initial), "%151", Some("%151")),
+            None
         );
     }
 

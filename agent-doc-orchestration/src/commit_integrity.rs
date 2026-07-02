@@ -50,7 +50,11 @@ fn frontmatter_keys(content: &str) -> BTreeSet<String> {
 /// A non-empty result means the snapshot lost a key the operator still has and
 /// that was already committed — a corrupt drop, never a normal edit. Result is
 /// sorted (`BTreeSet` order) for stable diagnostics.
-pub fn dropped_committed_frontmatter_keys(to_commit: &str, head: &str, live_file: &str) -> Vec<String> {
+pub fn dropped_committed_frontmatter_keys(
+    to_commit: &str,
+    head: &str,
+    live_file: &str,
+) -> Vec<String> {
     let committed = frontmatter_keys(to_commit);
     let head_keys = frontmatter_keys(head);
     let live_keys = frontmatter_keys(live_file);
@@ -149,7 +153,10 @@ mod tests {
     #[test]
     fn overlay_noop_when_live_has_no_frontmatter() {
         let body_only = "## Exchange\n\ncontent\n";
-        assert_eq!(overlay_live_frontmatter(STRIPPED_FM, body_only), STRIPPED_FM);
+        assert_eq!(
+            overlay_live_frontmatter(STRIPPED_FM, body_only),
+            STRIPPED_FM
+        );
     }
 
     #[test]

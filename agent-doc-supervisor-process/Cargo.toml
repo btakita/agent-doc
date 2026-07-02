@@ -10,10 +10,18 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_supervisor_process"
 
 [dependencies]
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.67" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.67" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }
 alacritty_terminal = "0.26"
 anyhow = "1"
 libc = "0.2"
 portable-pty = "0.9"
 serde = { version = "1", features = ["derive"] }
 signal-hook = "0.4"
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+
+[dev-dependencies]
+tempfile = "3"

@@ -16,6 +16,7 @@ name = "agent_doc_orchestration"
 test-support = []
 
 [dependencies]
+agent-doc-agent-io = { path = "../agent-doc-agent-io", version = "0.34.67" }
 agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.34.67" }
 agent-doc-config = { path = "../agent-doc-config", version = "0.34.67" }
 agent-doc-callback-io = { path = "../agent-doc-callback-io", version = "0.34.67" }

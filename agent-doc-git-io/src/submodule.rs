@@ -87,11 +87,15 @@ mod tests {
         );
     }
 
-    fn init_repo(repo: &Path) {
-        git(repo, &["init"]);
+    fn configure_repo(repo: &Path) {
         git(repo, &["config", "user.email", "test@test.com"]);
         git(repo, &["config", "user.name", "Test"]);
         git(repo, &["config", "protocol.file.allow", "always"]);
+    }
+
+    fn init_repo(repo: &Path) {
+        git(repo, &["init"]);
+        configure_repo(repo);
     }
 
     fn commit_file(repo: &Path, rel: &str, content: &str, msg: &str) {
@@ -133,6 +137,7 @@ mod tests {
 
         add_submodule(outer, sub_origin, "src/sub", "add submodule");
         let submodule_root = outer.join("src/sub");
+        configure_repo(&submodule_root);
         let doc = submodule_root.join("session.md");
         fs::write(&doc, "body\n").unwrap();
         (outer_dir, submodule_root, doc)

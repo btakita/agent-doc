@@ -137,6 +137,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-agent-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-config",
+ "agent-doc-frontmatter",
+ "agent-doc-git-io",
+ "agent-doc-harness",
+ "agent-doc-turn-executor",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "agent-doc-archive-io"
 version = "0.34.67"
 dependencies = [
@@ -739,6 +753,7 @@ dependencies = [
 name = "agent-doc-orchestration"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-agent-io",
  "agent-doc-archive-io",
  "agent-doc-callback-io",
  "agent-doc-capture-io",
@@ -1235,13 +1250,19 @@ dependencies = [
 name = "agent-doc-supervisor-process"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-harness",
  "agent-doc-supervisor",
+ "agent-doc-tmux",
+ "agent-doc-tmux-commands",
+ "agent-doc-tmux-io",
  "alacritty_terminal",
  "anyhow",
  "libc",
  "portable-pty",
  "serde",
  "signal-hook",
+ "tempfile",
+ "tmux-router",
 ]
 
 [[package]]

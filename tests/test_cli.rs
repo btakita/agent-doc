@@ -1021,8 +1021,7 @@ fn process_global_test_mutations_share_session_check_lock() {
     );
 
     let pty =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/pty.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/pty.rs")).unwrap();
     assert!(
         pty.contains("struct EnvGuard")
             && pty.contains("AGENT_DOC_PTY_PARENT_LEAK")
@@ -1644,7 +1643,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // repair logs the existing disk-repair reason on successful editor IPC
         // convergence. This is diagnostic context for the existing recovery
         // path, not a new flow branch.
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 26,
+        // 26 -> 27 (#stale-already-applied): already-applied visible-buffer
+        // repair now logs the deferred visible-write guard reason before
+        // falling back to file-IPC instead of hard-erroring the closeout. The
+        // recovery still routes through the existing file-IPC fallback outcome.
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 27,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not
@@ -10820,8 +10823,8 @@ fn test_global_config_has_no_orchestration_facade() {
         "src/orchestrate.rs",
         "src/session_actor_cmd.rs",
         "src/terminal.rs",
-        "agent-doc-orchestration/src/agent/mod.rs",
-        "agent-doc-orchestration/src/agent/codex.rs",
+        "agent-doc-agent-io/src/agent/mod.rs",
+        "agent-doc-agent-io/src/agent/codex.rs",
         "agent-doc-orchestration/src/graph.rs",
         "agent-doc-harness/src/lib.rs",
         "agent-doc-orchestration/src/run.rs",
@@ -14033,7 +14036,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     );
 
     let agent_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/mod.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-agent-io/src/agent/mod.rs")).unwrap();
     for forbidden_snippet in [
         "pub struct ManagedProofPolicy",
         "pub enum ProofRetryDecision",
@@ -14218,8 +14221,8 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             .contains("use agent_doc_turn_executor::codex_launch::codex_resume_restart_args;"),
         "agent-doc-harness should call focused Codex resume launch policy directly"
     );
-    let codex = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/codex.rs"))
-        .unwrap();
+    let codex =
+        fs::read_to_string(manifest_dir.join("agent-doc-agent-io/src/agent/codex.rs")).unwrap();
     for forbidden_snippet in [
         "fn looks_like_codex_transport_403_429(",
         "fn append_resume_args(",
@@ -14327,7 +14330,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "codex probe tests should use the focused capability-proof defaults directly"
     );
     let agent_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/mod.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-agent-io/src/agent/mod.rs")).unwrap();
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/agent/streaming.rs")
@@ -14339,11 +14342,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "agent::mod must not expose an orchestration streaming facade"
     );
     let claude =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/claude.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-agent-io/src/agent/claude.rs")).unwrap();
     let opencode =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/opencode.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-agent-io/src/agent/opencode.rs")).unwrap();
     let stream =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
     for forbidden_snippet in [
@@ -14718,12 +14719,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let supervisor_io_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/ipc.rs")).unwrap();
     let supervisor_pty =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/pty.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/pty.rs")).unwrap();
+    let supervisor_in_process =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/in_process.rs"))
             .unwrap();
-    let supervisor_in_process = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/supervisor/in_process.rs"),
-    )
-    .unwrap();
     let orchestration_start =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
     let orchestration_start_run =
@@ -15400,7 +15399,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
 
     for relative in [
         "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/supervisor/in_process.rs",
+        "agent-doc-supervisor-process/src/in_process.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-harness/src/lib.rs",
@@ -15638,7 +15637,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
 
     for relative in [
         "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/supervisor/in_process.rs",
+        "agent-doc-supervisor-process/src/in_process.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -19536,7 +19535,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",
-        "agent-doc-orchestration/src/supervisor/pty.rs",
+        "agent-doc-supervisor-process/src/pty.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -19559,7 +19558,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",
-        "agent-doc-orchestration/src/supervisor/pty.rs",
+        "agent-doc-supervisor-process/src/pty.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -20818,7 +20817,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         );
     }
     let agent_mod_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/mod.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-agent-io/src/agent/mod.rs")).unwrap();
     assert!(
         !agent_mod_source.contains("pub fn append_workspace_access_args"),
         "orchestration agent module must not facade git workspace access arg assembly"

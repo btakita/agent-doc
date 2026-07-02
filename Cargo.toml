@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "agent-doc-agent-io",
     "agent-doc-hash",
     "agent-doc-archive-io",
     "agent-doc-boundary-io",

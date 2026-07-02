@@ -963,7 +963,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             &file_content,
         );
         if !dropped.is_empty() {
-            let corrected = crate::commit_integrity::overlay_live_frontmatter(snapshot, &file_content);
+            let corrected =
+                crate::commit_integrity::overlay_live_frontmatter(snapshot, &file_content);
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -978,9 +979,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             );
             // Best-effort snapshot-sidecar regeneration so recovery state matches
             // the corrected hot-path content; never blocks the commit.
-            if let Err(e) =
-                agent_doc_snapshot_io::save(file, &corrected, crate::ops_log::log_op)
-            {
+            if let Err(e) = agent_doc_snapshot_io::save(file, &corrected, crate::ops_log::log_op) {
                 eprintln!(
                     "[commit] warning: snapshot regenerate after frontmatter self-heal failed: {e} (non-fatal)"
                 );

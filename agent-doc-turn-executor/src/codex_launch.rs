@@ -16,6 +16,30 @@ pub const CODEX_SANDBOX_NETWORK_DISABLED_ENV: &str = "CODEX_SANDBOX_NETWORK_DISA
 pub const CODEX_CHILD_NETWORK_PROBE_MARKER: &str = "AGENT_DOC_NETWORK_PROBE_OK";
 pub const CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER: &str = "AGENT_DOC_WRITABLE_ROOT_PROBE_OK";
 pub const OPENCODE_CHILD_SSH_PROBE_MARKER: &str = "AGENT_DOC_OPENCODE_SSH_PROBE_OK";
+const CODEX_TEXT_FILE_BUSY_RETRIES: usize = 3;
+
+pub fn is_codex_text_file_busy_launch_error(err: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        err.raw_os_error() == Some(libc::ETXTBSY)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = err;
+        false
+    }
+}
+
+pub fn codex_text_file_busy_launch_retry_delay(
+    err: &std::io::Error,
+    attempt: usize,
+) -> Option<Duration> {
+    if is_codex_text_file_busy_launch_error(err) && attempt < CODEX_TEXT_FILE_BUSY_RETRIES {
+        Some(Duration::from_millis(25 * (attempt as u64 + 1)))
+    } else {
+        None
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodexResumeRestartArgsError {
@@ -1190,6 +1214,42 @@ mod tests {
 
         assert_eq!(map_status, override_status);
         assert!(!map_status.effective_disabled);
+    }
+
+    #[test]
+    fn text_file_busy_launch_error_matches_unix_os_error() {
+        #[cfg(unix)]
+        assert!(is_codex_text_file_busy_launch_error(
+            &std::io::Error::from_raw_os_error(libc::ETXTBSY)
+        ));
+        assert!(!is_codex_text_file_busy_launch_error(
+            &std::io::Error::from(std::io::ErrorKind::NotFound)
+        ));
+    }
+
+    #[test]
+    fn text_file_busy_launch_retry_delay_preserves_backoff_policy() {
+        #[cfg(unix)]
+        {
+            let err = std::io::Error::from_raw_os_error(libc::ETXTBSY);
+
+            assert_eq!(
+                codex_text_file_busy_launch_retry_delay(&err, 0),
+                Some(Duration::from_millis(25))
+            );
+            assert_eq!(
+                codex_text_file_busy_launch_retry_delay(&err, 1),
+                Some(Duration::from_millis(50))
+            );
+            assert_eq!(
+                codex_text_file_busy_launch_retry_delay(&err, 2),
+                Some(Duration::from_millis(75))
+            );
+            assert_eq!(codex_text_file_busy_launch_retry_delay(&err, 3), None);
+        }
+
+        let err = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(codex_text_file_busy_launch_retry_delay(&err, 0), None);
     }
 
     #[test]

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub mod closeout_guard;
 pub mod closeout_recovery;
 pub mod closeout_signal;
+pub mod codex_stop_continuation;
 pub mod cycle_ack;
 pub mod cycle_policy;
 pub mod document_drift;

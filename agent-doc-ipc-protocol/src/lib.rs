@@ -5,6 +5,7 @@
 //! documents.
 
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallbackRequest {
@@ -389,6 +390,179 @@ pub fn vcs_refresh_probe_message(probe: &str) -> serde_json::Value {
     })
 }
 
+/// Build node-keyed IPC patches that transform tracked markdown items from
+/// `before` to `after`.
+pub fn build_ipc_node_patches_json(
+    before: Option<&str>,
+    after: Option<&str>,
+) -> Vec<serde_json::Value> {
+    let (Some(before), Some(after)) = (before, after) else {
+        return Vec::new();
+    };
+    if before == after {
+        return Vec::new();
+    }
+
+    let mut component_names = BTreeSet::new();
+    for component in agent_doc_markdown_ast::overlay::components(before)
+        .into_iter()
+        .chain(agent_doc_markdown_ast::overlay::components(after))
+    {
+        if !component.items.is_empty() {
+            component_names.insert(component.name);
+        }
+    }
+
+    let mut node_patches = Vec::new();
+    for component in component_names {
+        let before_nodes =
+            agent_doc_markdown_ast::mutations::item_nodes(before, &component).unwrap_or_default();
+        let after_nodes =
+            agent_doc_markdown_ast::mutations::item_nodes(after, &component).unwrap_or_default();
+        if before_nodes.is_empty() && after_nodes.is_empty() {
+            continue;
+        }
+
+        let before_by_key: HashMap<&str, _> = before_nodes
+            .iter()
+            .map(|node| (node.node_key.as_str(), node))
+            .collect();
+        let after_by_key: HashMap<&str, _> = after_nodes
+            .iter()
+            .map(|node| (node.node_key.as_str(), node))
+            .collect();
+
+        for node in &before_nodes {
+            if !after_by_key.contains_key(node.node_key.as_str()) {
+                let before_source = ipc_node_source(before, node);
+                node_patches.push(serde_json::json!({
+                    "component": component.as_str(),
+                    "node_key": node.node_key.as_str(),
+                    "op": "remove",
+                    "content": before_source,
+                    "expected_content": before_source,
+                    "expected_content_hash": agent_doc_hash::content_hash(&before_source),
+                }));
+            }
+        }
+
+        for (index, node) in after_nodes.iter().enumerate() {
+            if before_by_key.contains_key(node.node_key.as_str()) {
+                continue;
+            }
+            let mut patch = serde_json::json!({
+                "component": component.as_str(),
+                "node_key": node.node_key.as_str(),
+                "op": "insert",
+                "content": ipc_node_source(after, node),
+            });
+            if let Some(anchor) = previous_existing_node_key(&after_nodes[..index], &before_by_key)
+            {
+                patch["after"] = serde_json::Value::String(anchor);
+            } else if let Some(anchor) =
+                next_existing_node_key(&after_nodes[index + 1..], &before_by_key)
+            {
+                patch["before"] = serde_json::Value::String(anchor);
+            }
+            node_patches.push(patch);
+        }
+
+        for node in &before_nodes {
+            let Some(after_node) = after_by_key.get(node.node_key.as_str()) else {
+                continue;
+            };
+            let before_source = ipc_node_source(before, node);
+            let after_source = ipc_node_source(after, after_node);
+            if before_source == after_source {
+                continue;
+            }
+            let op = if !node.item.struck && after_node.item.struck {
+                "strike"
+            } else if node.item.struck && !after_node.item.struck {
+                "unstrike"
+            } else {
+                "replace"
+            };
+            node_patches.push(serde_json::json!({
+                "component": component.as_str(),
+                "node_key": node.node_key.as_str(),
+                "op": op,
+                "content": after_source,
+                "expected_content": before_source,
+                "expected_content_hash": agent_doc_hash::content_hash(&before_source),
+            }));
+        }
+
+        let before_shared = before_nodes
+            .iter()
+            .filter(|node| after_by_key.contains_key(node.node_key.as_str()))
+            .map(|node| node.node_key.as_str())
+            .collect::<Vec<_>>();
+        let after_shared = after_nodes
+            .iter()
+            .filter(|node| before_by_key.contains_key(node.node_key.as_str()))
+            .map(|node| node.node_key.as_str())
+            .collect::<Vec<_>>();
+        if before_shared != after_shared {
+            for (index, node_key) in after_shared.iter().enumerate() {
+                if before_shared.get(index).copied() == Some(*node_key) {
+                    continue;
+                }
+                let mut patch = serde_json::json!({
+                    "component": component.as_str(),
+                    "node_key": *node_key,
+                    "op": "move",
+                });
+                if let Some(node) = before_by_key.get(*node_key) {
+                    let before_source = ipc_node_source(before, node);
+                    patch["expected_content"] = serde_json::Value::String(before_source.clone());
+                    patch["expected_content_hash"] =
+                        serde_json::Value::String(agent_doc_hash::content_hash(&before_source));
+                }
+                if let Some(anchor) = after_shared[..index].last() {
+                    patch["after"] = serde_json::Value::String((*anchor).to_string());
+                } else if let Some(anchor) = after_shared.get(index + 1) {
+                    patch["before"] = serde_json::Value::String((*anchor).to_string());
+                }
+                node_patches.push(patch);
+            }
+        }
+    }
+
+    node_patches
+}
+
+fn ipc_node_source(
+    source: &str,
+    node: &agent_doc_markdown_ast::mutations::MutationItemNode,
+) -> String {
+    source
+        .get(node.item.start_byte..node.item.end_byte)
+        .unwrap_or(&node.item.raw)
+        .to_string()
+}
+
+fn previous_existing_node_key(
+    nodes: &[agent_doc_markdown_ast::mutations::MutationItemNode],
+    existing: &HashMap<&str, &agent_doc_markdown_ast::mutations::MutationItemNode>,
+) -> Option<String> {
+    nodes
+        .iter()
+        .rev()
+        .find(|node| existing.contains_key(node.node_key.as_str()))
+        .map(|node| node.node_key.clone())
+}
+
+fn next_existing_node_key(
+    nodes: &[agent_doc_markdown_ast::mutations::MutationItemNode],
+    existing: &HashMap<&str, &agent_doc_markdown_ast::mutations::MutationItemNode>,
+) -> Option<String> {
+    nodes
+        .iter()
+        .find(|node| existing.contains_key(node.node_key.as_str()))
+        .map(|node| node.node_key.clone())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FullContentIpcMode {
@@ -412,15 +586,16 @@ impl FullContentIpcMode {
 #[cfg(test)]
 mod tests {
     use super::{
-        AckClassification, FullContentIpcMode, callback_request, callback_request_is_expired,
-        callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
-        classify_ack, early_ack_line, early_ack_ops_marker, early_ack_tagged_message,
-        effective_unmatched_for_patch_payload, existing_patch_is_reposition_only,
-        ipc_accept_thread_ops_marker, is_already_applied_ack_error_message,
-        is_socket_ack_timeout_error, is_socket_status_error, message_requests_early_ack,
-        normalization_repair_patch_message, patch_message, pending_callback_from_request,
-        publish_live_buffer_message, queue_convergence_message, refresh_content_message,
-        reposition_message, save_document_message, vcs_refresh_message, vcs_refresh_probe_message,
+        AckClassification, FullContentIpcMode, build_ipc_node_patches_json, callback_request,
+        callback_request_is_expired, callback_response, callback_response_matches_request,
+        callback_urgency_for_elapsed, classify_ack, early_ack_line, early_ack_ops_marker,
+        early_ack_tagged_message, effective_unmatched_for_patch_payload,
+        existing_patch_is_reposition_only, ipc_accept_thread_ops_marker,
+        is_already_applied_ack_error_message, is_socket_ack_timeout_error, is_socket_status_error,
+        message_requests_early_ack, normalization_repair_patch_message, patch_message,
+        pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
+        refresh_content_message, reposition_message, save_document_message, vcs_refresh_message,
+        vcs_refresh_probe_message,
     };
 
     #[test]
@@ -554,6 +729,55 @@ mod tests {
             "ops marker must carry the predicate token: {marker}"
         );
         assert!(!early_ack_line().contains("early_ack_pending"));
+    }
+
+    #[test]
+    fn build_ipc_node_patches_json_emits_stale_guarded_item_ops() {
+        let before = "\
+<!-- agent:queue -->
+- do [#alpha]
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let after = "\
+<!-- agent:queue -->
+- do [#alpha] updated
+- do [#gamma]
+<!-- /agent:queue -->
+";
+
+        let patches = build_ipc_node_patches_json(Some(before), Some(after));
+
+        assert!(patches.iter().any(|patch| {
+            let expected = patch["expected_content"].as_str().unwrap_or_default();
+            patch["component"] == "queue"
+                && patch["op"] == "remove"
+                && patch["content"]
+                    .as_str()
+                    .is_some_and(|text| text.trim_end() == "- do [#beta]")
+                && expected.trim_end() == "- do [#beta]"
+                && patch["expected_content_hash"] == agent_doc_hash::content_hash(expected)
+        }));
+        assert!(patches.iter().any(|patch| {
+            let expected = patch["expected_content"].as_str().unwrap_or_default();
+            patch["component"] == "queue"
+                && patch["op"] == "replace"
+                && patch["content"]
+                    .as_str()
+                    .is_some_and(|text| text.trim_end() == "- do [#alpha] updated")
+                && expected.trim_end() == "- do [#alpha]"
+                && patch["expected_content_hash"] == agent_doc_hash::content_hash(expected)
+        }));
+        assert!(patches.iter().any(|patch| {
+            patch["component"] == "queue"
+                && patch["op"] == "insert"
+                && patch["content"]
+                    .as_str()
+                    .is_some_and(|text| text.trim_end() == "- do [#gamma]")
+                && patch["after"]
+                    .as_str()
+                    .is_some_and(|anchor| anchor.contains("alpha"))
+        }));
     }
 
     #[test]

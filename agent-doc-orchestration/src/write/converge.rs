@@ -1605,7 +1605,7 @@ fn queue_consume_node_patches(
     if source != "queue_consume" {
         return Vec::new();
     }
-    build_ipc_node_patches_json(Some(current_content), Some(target))
+    agent_doc_ipc_protocol::build_ipc_node_patches_json(Some(current_content), Some(target))
         .into_iter()
         .filter(|patch| patch.get("component").and_then(|value| value.as_str()) == Some("queue"))
         .collect()

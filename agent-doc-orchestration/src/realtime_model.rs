@@ -353,7 +353,8 @@ fn broadcast_component_delta_for_peer(
     if peer.content == merged {
         return Ok(None);
     }
-    let node_patches = crate::write::build_ipc_node_patches_json(Some(&peer.content), Some(merged));
+    let node_patches =
+        agent_doc_ipc_protocol::build_ipc_node_patches_json(Some(&peer.content), Some(merged));
     let patches =
         agent_doc_document::component_patches::component_replace_patches(&peer.content, merged)?;
     let frontmatter = agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(merged)

@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 
 pub mod managed_capability;
 pub mod prompt_source;
+pub mod timeout;
 
 /// How the supervisor builds args on restart after a crash.
 #[derive(Debug, Clone, PartialEq)]

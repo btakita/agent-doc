@@ -219,12 +219,10 @@
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-
-use serde_json::Value;
 
 use agent_doc_document::write_normalization::{
     SplicePendingComponentWarning, cleanup_resolved_backlog_prompts_after_response,
@@ -4877,7 +4875,8 @@ scratch
 <!-- /agent:queue -->
 ";
 
-        let patches = build_ipc_node_patches_json(Some(before), Some(after));
+        let patches =
+            agent_doc_ipc_protocol::build_ipc_node_patches_json(Some(before), Some(after));
 
         assert!(patches.iter().any(|patch| {
             patch["component"] == "queue"
@@ -4914,7 +4913,8 @@ scratch
 <!-- /agent:queue -->
 ";
 
-        let patches = build_ipc_node_patches_json(Some(before), Some(after));
+        let patches =
+            agent_doc_ipc_protocol::build_ipc_node_patches_json(Some(before), Some(after));
 
         assert!(patches.iter().any(|patch| {
             patch["component"] == "queue"

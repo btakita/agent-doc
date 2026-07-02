@@ -1294,7 +1294,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     .context("failed to apply template patches for IPC node patch metadata")?;
     let content_ours =
         normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
-    let ipc_node_patches = build_ipc_node_patches_json(Some(base), Some(&content_ours));
+    let ipc_node_patches =
+        agent_doc_ipc_protocol::build_ipc_node_patches_json(Some(base), Some(&content_ours));
 
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),

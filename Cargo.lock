@@ -453,6 +453,8 @@ dependencies = [
 name = "agent-doc-ipc-protocol"
 version = "0.34.66"
 dependencies = [
+ "agent-doc-hash",
+ "agent-doc-markdown-ast",
  "serde",
  "serde_json",
 ]
@@ -945,6 +947,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-hash",
  "anyhow",
+ "libc",
  "serde",
  "serde_json",
 ]

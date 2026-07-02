@@ -72,17 +72,17 @@ use agent_doc_turn_executor::codex_launch::{
     classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
     classify_child_writable_root_probe_failure, codex_child_network_probe_prompt,
     codex_child_writable_roots_probe_prompt, codex_exec_args_for_probe, codex_resume_restart_args,
-    codex_transport_403_429_diagnostic, filter_codex_stderr_noise, format_required_ssh_failure,
-    looks_like_codex_transport_403_429, looks_like_local_browser_cdp_permission_denied,
-    looks_like_opencode_usage_output, looks_like_ssh_alias_config_failure,
-    looks_like_ssh_auth_failure, looks_like_ssh_dns_failure, looks_like_ssh_network_failure,
-    managed_network_child_proof_cache_key, normalized_writable_root_strings,
-    opencode_child_network_probe_prompt, opencode_child_required_ssh_probe_prompt,
-    opencode_run_args_for_probe, proof_status_label, resolve_codex_network_access,
-    resume_capability_drift_notice, transcript_has_required_ssh_failure,
-    transcript_proves_required_ssh_success, validate_codex_child_network_probe_output,
-    validate_codex_child_writable_root_probe_output, validate_opencode_child_probe_marker_output,
-    writable_root_contract_id,
+    codex_text_file_busy_launch_retry_delay, codex_transport_403_429_diagnostic,
+    filter_codex_stderr_noise, format_required_ssh_failure, looks_like_codex_transport_403_429,
+    looks_like_local_browser_cdp_permission_denied, looks_like_opencode_usage_output,
+    looks_like_ssh_alias_config_failure, looks_like_ssh_auth_failure, looks_like_ssh_dns_failure,
+    looks_like_ssh_network_failure, managed_network_child_proof_cache_key,
+    normalized_writable_root_strings, opencode_child_network_probe_prompt,
+    opencode_child_required_ssh_probe_prompt, opencode_run_args_for_probe, proof_status_label,
+    resolve_codex_network_access, resume_capability_drift_notice,
+    transcript_has_required_ssh_failure, transcript_proves_required_ssh_success,
+    validate_codex_child_network_probe_output, validate_codex_child_writable_root_probe_output,
+    validate_opencode_child_probe_marker_output, writable_root_contract_id,
 };
 
 #[derive(Clone)]
@@ -214,32 +214,20 @@ fn prove_dns_resolution() -> Result<()> {
     Ok(())
 }
 
-fn is_text_file_busy(err: &std::io::Error) -> bool {
-    #[cfg(unix)]
-    {
-        err.raw_os_error() == Some(libc::ETXTBSY)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = err;
-        false
-    }
-}
-
 fn spawn_agent_command(cmd: &mut Command) -> std::io::Result<std::process::Child> {
-    const TEXT_FILE_BUSY_RETRIES: usize = 3;
-
-    for attempt in 0..=TEXT_FILE_BUSY_RETRIES {
+    let mut attempt = 0usize;
+    loop {
         match cmd.spawn() {
             Ok(child) => return Ok(child),
-            Err(err) if is_text_file_busy(&err) && attempt < TEXT_FILE_BUSY_RETRIES => {
-                std::thread::sleep(Duration::from_millis(25 * (attempt as u64 + 1)));
+            Err(err) => {
+                let Some(delay) = codex_text_file_busy_launch_retry_delay(&err, attempt) else {
+                    return Err(err);
+                };
+                std::thread::sleep(delay);
+                attempt += 1;
             }
-            Err(err) => return Err(err),
         }
     }
-
-    unreachable!("spawn loop returns on success or final error")
 }
 
 fn wait_with_timeout(
@@ -1456,17 +1444,6 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
         (dir, dir_path)
-    }
-
-    #[test]
-    fn text_file_busy_detection_matches_unix_os_error() {
-        #[cfg(unix)]
-        assert!(is_text_file_busy(&std::io::Error::from_raw_os_error(
-            libc::ETXTBSY
-        )));
-        assert!(!is_text_file_busy(&std::io::Error::from(
-            std::io::ErrorKind::NotFound
-        )));
     }
 
     fn init_repo(root: &Path) {

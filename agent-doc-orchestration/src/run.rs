@@ -750,7 +750,7 @@ fn run_once(
     };
     let response = match response_result {
         Ok(response) => response,
-        Err(err) if is_timeout_error(&err) => {
+        Err(err) if agent_doc_harness::timeout::error_chain_is_timeout(&err) => {
             let diagnostic = run_dispatch_timeout_diagnostic(file, agent_name);
             record_run_preflight_timeout(file, "direct_invocation_timeout", &diagnostic)?;
             anyhow::bail!("{}\n\nsource: {}", diagnostic, err);
@@ -1176,15 +1176,6 @@ fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
 fn start_run_cycle(file: &Path) -> Result<()> {
     crate::admit::admit(file)?;
     Ok(())
-}
-
-fn is_timeout_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .downcast_ref::<std::io::Error>()
-            .is_some_and(|io| io.kind() == std::io::ErrorKind::TimedOut)
-            || cause.to_string().contains("timed out")
-    })
 }
 
 fn record_run_preflight_timeout(file: &Path, event: &str, diagnostic: &str) -> Result<()> {

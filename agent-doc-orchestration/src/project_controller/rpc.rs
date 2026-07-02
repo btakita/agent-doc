@@ -14,6 +14,7 @@ use agent_doc_controller::status;
 use agent_doc_controller::supervisor_replacement::{
     SupervisorReplacementRequestFields, parse_supervisor_replacement_request,
 };
+use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
@@ -2346,10 +2347,6 @@ pub(crate) fn serve_client(
             Err(err) => return Err(err).context("failed to read project controller request"),
         }
     }
-}
-
-pub(crate) fn is_timeout_error(err: &std::io::Error) -> bool {
-    matches!(err.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock)
 }
 
 #[cfg(any(test, feature = "test-support"))]

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -112,8 +112,31 @@ Reasoning:
 
 The current draft is deliberately **generalist → keep-systems-correct → AI-you-can-trust**. A language preference narrows that pitch and weakens it. Leave it out of the note.
 
-If you want, I can hold one optional low-key talking point for the *eventual technical conversation* (not this message) — something like: the shared libraries you'd bring are already in Rust, so they're proven and free to him. Want that as a call-ready line rather than part of the reply?
-<!-- agent:boundary:a1b72cfc -->
+❯ If you want, I can hold one optional low-key talking point for the *eventual technical conversation* (not this message) — something like: the shared libraries you'd bring are already in Rust, so they're proven and free to him. Want that as a call-ready line rather than part of the reply?
+❯ His platform is in Rust & Vue.
+### Re: His stack being Rust & Vue flips the Rust calculus — opus-4-8
+
+> **Queue prompt:** His platform is in Rust & Vue.
+
+That changes my earlier answer. Two of my three objections were premised on Rust being *your* preference introduced into *his* stack. If REItrades is already Rust & Vue, that premise is gone:
+
+1. **"Reads as risk / over-engineering / harder-to-hire stack"** — dead. It's his stack already. There's no new language, no adoption cost, no doubt to plant.
+2. **"Freelancer-centric itch"** — mostly dead. "My reusable libraries are already in Rust, so they drop straight into your codebase" is about *his* cost and speed, not your growth.
+
+So Rust is now safe to surface — but the frame still isn't "I want to work in Rust." It's **stack fit**: the off-the-shelf plumbing (items 1–4) is already Rust, so it's cheap, proven, and slots into his repo with zero integration tax. That's a real client benefit and worth one line in the note now, where before it wasn't.
+
+**Vue** matters too: it means the buyer-facing pieces are frontend work you can also cover as a generalist — reinforces the "keep the whole system correct" pitch rather than positioning you as backend-only.
+
+One light stack-fit line, dropped into the shared-libraries paragraph:
+
+```
+Some of the work overlaps tooling I already build and maintain — and since it's already Rust, it drops straight into your stack, so I can contribute those pieces at a low rate, open-sourced or licensed to you royalty-free.
+```
+
+That earns the Rust mention as a fit/cost benefit without ever saying "I want to use Rust." I'd keep Vue out of the written note (it's implied by "generalist") and hold it for the call.
+
+Want me to fold that line into the full draft and reprint it?
+<!-- agent:boundary:72c9f6c2 -->
 <!-- /agent:exchange -->
 
 ## Queue

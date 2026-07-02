@@ -53,7 +53,33 @@ To unblock: resolve/save the live editor buffer for [equityfundingsource.md](/ho
 Per the last call transcript (`src/equityfundingsource-dev/docs/calls/2026-06-30 13-20-29-compressed.transcript.md` — 88-min call with April Armas, Judith Krug, Robert Waldman), at the close of the call Robert said he'd be available **Wednesday afternoon, Central time**. He noted he has a **VA doctor's appointment Wednesday**, will be back in Texas afterward, and would try to do it "as early as I can" that afternoon before signing off with "talk to you soon."
 
 That Wednesday is **July 2, 2026** (today) — so reach out for the next call **Wednesday (7/2) afternoon Central**, ideally early-afternoon once he's back from the VA appointment.
-<!-- agent:boundary:192aa98d -->
+https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=lender modal header content is cut off due to a long email address. could we expand the modal to fit the content or make the modal full screen? The
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=665522f9-a59b-420b-a932-a84130671418 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782970465057
+```
+### Re: lender-pipeline modal header cut off by long email — opus-4-8
+
+Fixed. The admin lender-pipeline **lender card dialog** (`dialog=lender`) and the **advance-lender dialog** clipped long email addresses in the header and could push the header controls (status badge, Messages, ×) out of view.
+
+Changes in `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`:
+- Header's left column now has `min-width:0` so it shrinks inside the flex row instead of forcing the row wider.
+- Email (`.page-sub`) and title now use `overflow-wrap:anywhere`, so a long address wraps inside the modal instead of being cut off.
+- Widened the card dialog from `max-w-lg` to `max-w-xl` (still `max-w-2xl` with documents open) for breathing room.
+- Regression test added in `tests/admin-investor-pipeline.test.ts` (`#modal-email-fit`).
+
+I chose responsive-fit + wrap over full-screen — it handles any email length and keeps the dialog consistent with the other pipeline dialogs. Shipped: EFS `aab1c9c` (pushed), superproject gitlink `7a746bd75`. Not deployed (the `deploy` queue item is separate and needs your go).
+
+Note: the full EFS suite has 3 pre-existing failures unrelated to this change (`#multi-upload` accreditation multi-file, `#msgrt` PortalMessages WebSocket) — identical on the clean tree; this change adds none.
+<!-- agent:boundary:29aa8cee -->
 <!-- /agent:exchange -->
 ###
 <!--

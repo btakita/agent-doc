@@ -551,7 +551,7 @@ fn run_once(
 
     let backend = agent::resolve_for_file(agent_name, agent_config, expanded_env, file, &fm)?;
 
-    let session_accretion = crate::session_accretion::inspect(file).ok();
+    let session_accretion = agent_doc_session_accretion_io::inspect(file).ok();
     let prompt = build_prompt(
         file,
         run_mode,
@@ -1010,7 +1010,7 @@ fn should_continue_auto_queue(
     match active_queue_prompt_state(file)? {
         ActiveQueuePromptState::Ready { prompt } => {
             let force_fresh_agent_session =
-                match crate::session_accretion::queue_context_reset_reason_if_opted_in(
+                match agent_doc_session_accretion_io::queue_context_reset_reason_if_opted_in(
                     file,
                     last_context_clear_at,
                 ) {

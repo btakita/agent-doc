@@ -1350,7 +1350,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         &harness,
         &global_config.model,
     );
-    let session_accretion = crate::session_accretion::inspect(file)
+    let session_accretion = agent_doc_session_accretion_io::inspect(file)
         .ok()
         .filter(|report| !report.is_healthy());
 

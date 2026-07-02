@@ -192,7 +192,7 @@ pub fn run(
     let streaming_agent = resolve_streaming(agent_name, agent_config, expanded_env, file, &fm)?;
 
     // Build prompt
-    let session_accretion = crate::session_accretion::inspect(file).ok();
+    let session_accretion = agent_doc_session_accretion_io::inspect(file).ok();
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let ssh_context = rc.ssh_context();
     let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(

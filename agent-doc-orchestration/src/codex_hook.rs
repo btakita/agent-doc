@@ -469,7 +469,7 @@ pub(crate) fn codex_queue_context_reset_reason(
     file: &Path,
     last_context_clear_at: Option<u64>,
 ) -> Result<Option<String>> {
-    let mut reason = crate::session_accretion::queue_context_reset_reason_if_opted_in(
+    let mut reason = agent_doc_session_accretion_io::queue_context_reset_reason_if_opted_in(
         file,
         last_context_clear_at,
     )?;

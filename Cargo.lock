@@ -1133,11 +1133,14 @@ name = "agent-doc-session-accretion-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
  "agent-doc-fs",
  "agent-doc-log-time",
  "agent-doc-ops-log-io",
  "agent-doc-project-config-io",
  "agent-doc-session-accretion",
+ "agent-doc-supervisor",
+ "agent-doc-supervisor-io",
  "anyhow",
  "serde",
  "serde_json",

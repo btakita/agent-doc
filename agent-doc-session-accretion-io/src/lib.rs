@@ -5,9 +5,102 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use agent_doc_session_accretion::{
-    POST_COMPACTION_NOOP_GRACE_SECS, RECENT_WINDOW_SECS, recent_restart_count_from_session_log,
-    resolve_clear_threshold, resolve_queue_context_reset_opt_in,
+    POST_COMPACTION_NOOP_GRACE_SECS, RECENT_WINDOW_SECS, SessionAccretionInput,
+    SessionAccretionReport, context_reset_reason_for_recent_compaction,
+    context_reset_reason_for_report, evaluate_session_accretion, exchange_metrics,
+    recent_restart_count_from_session_log, resolve_clear_threshold,
+    resolve_queue_context_reset_opt_in,
 };
+
+/// Build a session-accretion report for a concrete document from local file
+/// state and binary-owned logs.
+pub fn inspect(file: &Path) -> Result<SessionAccretionReport> {
+    let content = std::fs::read_to_string(file)?;
+    inspect_at(file, &content, current_epoch_secs())
+}
+
+pub fn queue_context_reset_reason(
+    file: &Path,
+    last_context_clear_at: Option<u64>,
+) -> Result<Option<String>> {
+    if let Some(reason) = context_reset_reason_for_recent_compaction(
+        recent_exchange_compaction_timestamp(file)?,
+        last_context_clear_at,
+    ) {
+        return Ok(Some(reason));
+    }
+
+    let report = inspect(file)?;
+    Ok(context_reset_reason_for_report(&report))
+}
+
+/// Accretion-driven context-reset reason, gated on the
+/// `agent_doc_queue_context_reset` opt-in.
+pub fn queue_context_reset_reason_if_opted_in(
+    file: &Path,
+    last_context_clear_at: Option<u64>,
+) -> Result<Option<String>> {
+    if !queue_context_reset_opted_in(file) {
+        return Ok(None);
+    }
+    queue_context_reset_reason(file, last_context_clear_at)
+}
+
+fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionReport> {
+    Ok(evaluate_session_accretion(session_accretion_input(
+        file, content, now,
+    )?))
+}
+
+fn session_accretion_input(file: &Path, content: &str, now: u64) -> Result<SessionAccretionInput> {
+    let (exchange_lines, response_sections) = exchange_metrics(content);
+    let (recent_committed_cycles, recent_noop_closeouts) = recent_cycle_metrics(file, now)?;
+    let startup_miss_active =
+        agent_doc_supervisor_io::startup_miss::load_startup_miss(file)?.is_some();
+    let parsed_frontmatter = agent_doc_frontmatter_io::session::parse_for_file(content, file).ok();
+    let session_id = parsed_frontmatter
+        .as_ref()
+        .and_then(|(fm, _)| fm.session.as_ref().map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty());
+    let project_config = agent_doc_project_config_io::load_project_for_doc(file);
+    let auto_compact_opt_in = parsed_frontmatter
+        .as_ref()
+        .map(|(fm, _)| fm.auto_compact.is_some())
+        .unwrap_or(false)
+        || project_config.agent_doc_auto_compact.is_some();
+    let queue_active = parsed_frontmatter
+        .as_ref()
+        .map(|(fm, _)| fm.queue_active == Some(true))
+        .unwrap_or(false);
+    let recent_restart_count = session_id
+        .as_deref()
+        .map(|session_id| recent_restart_metrics(file, session_id, now))
+        .transpose()?
+        .unwrap_or(0);
+    let recent_session_loss_count = session_id
+        .as_deref()
+        .and_then(|session_id| {
+            agent_doc_supervisor_io::startup_miss::recent_session_loss_window(file, session_id)
+                .ok()
+                .flatten()
+                .map(|window| window.count)
+        })
+        .unwrap_or(0);
+
+    Ok(SessionAccretionInput {
+        document: file.display().to_string(),
+        exchange_lines,
+        response_sections,
+        recent_committed_cycles,
+        recent_noop_closeouts,
+        recent_restart_count,
+        recent_session_loss_count,
+        startup_miss_active,
+        clear_threshold: clear_threshold_for_doc(file),
+        auto_compact_opt_in,
+        queue_active,
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RecentExchangeCompaction {
@@ -210,7 +303,16 @@ fn current_epoch_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_session_accretion::SessionAccretionLevel;
     use std::io::Write;
+
+    fn setup_doc(content: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, content).unwrap();
+        (dir, doc)
+    }
 
     #[test]
     fn recent_exchange_compaction_marker_roundtrips() {
@@ -281,6 +383,16 @@ mod tests {
         for entry in entries {
             writeln!(file, "{}", serde_json::to_string(entry).unwrap()).unwrap();
         }
+    }
+
+    fn write_session_log(doc: &Path, session_id: &str, lines: &[String]) {
+        let log_path = doc
+            .parent()
+            .unwrap()
+            .join(".agent-doc/logs")
+            .join(format!("{session_id}.log"));
+        std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        std::fs::write(log_path, lines.join("\n")).unwrap();
     }
 
     #[test]
@@ -422,5 +534,134 @@ mod tests {
 
         assert_eq!(clear_threshold_for_doc(&doc_frontmatter), 70);
         assert_eq!(clear_threshold_for_doc(&doc_project), 100);
+    }
+
+    #[test]
+    fn inspect_warns_on_large_exchange() {
+        let exchange_lines = (0..170)
+            .map(|idx| format!("line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (_dir, doc) = setup_doc(&content);
+
+        let report = inspect(&doc).unwrap();
+
+        assert_eq!(report.level, SessionAccretionLevel::Warn);
+        assert!(report.exchange_lines >= 170);
+        assert!(
+            report
+                .guidance
+                .iter()
+                .any(|line| line.contains("agent-doc compact")),
+            "expected compact guidance, got {:?}",
+            report.guidance
+        );
+    }
+
+    #[test]
+    fn queue_context_reset_reason_if_opted_in_gates_context_reset() {
+        let exchange_lines = (0..170)
+            .map(|idx| format!("line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let off = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (_dir_off, doc_off) = setup_doc(&off);
+        assert!(
+            queue_context_reset_reason(&doc_off, None)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            queue_context_reset_reason_if_opted_in(&doc_off, None)
+                .unwrap()
+                .is_none()
+        );
+
+        let on = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\nagent_doc_queue_context_reset: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (_dir_on, doc_on) = setup_doc(&on);
+        let reason = queue_context_reset_reason_if_opted_in(&doc_on, None)
+            .unwrap()
+            .expect("explicit opt-in re-enables the accretion-driven reset");
+        assert!(reason.contains("session accretion is warn"), "{reason}");
+    }
+
+    #[test]
+    fn inspect_uses_project_config_auto_compact_opt_in() {
+        let exchange_lines = (0..170)
+            .map(|idx| format!("line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (dir, doc) = setup_doc(&content);
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "agent_doc_auto_compact = 180\n",
+        )
+        .unwrap();
+
+        let report = inspect(&doc).unwrap();
+
+        assert_eq!(report.level, SessionAccretionLevel::Warn);
+        assert!(
+            report
+                .guidance
+                .iter()
+                .any(|line| line.starts_with("Run `agent-doc compact")),
+            "expected imperative compact guidance, got {:?}",
+            report.guidance
+        );
+    }
+
+    #[test]
+    fn inspect_blocks_on_restart_heavy_churn_with_active_startup_miss() {
+        let now = 8_000;
+        let session_id = "session-123";
+        let content = format!(
+            "---\nagent_doc_session: {session_id}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n"
+        );
+        let (_dir, doc) = setup_doc(&content);
+        write_session_log(
+            &doc,
+            session_id,
+            &[
+                format!("[{}] session_start pane=%1", now - 120),
+                format!(
+                    "[{}] codex_start mode=fresh_restart restart_count=1",
+                    now - 90
+                ),
+                format!(
+                    "[{}] route_cycle_start_retry_fresh_restart_not_ready pane=%1",
+                    now - 60
+                ),
+                format!(
+                    "[{}] startup_miss_skip_autostart file=session.md pane=%1",
+                    now - 30
+                ),
+            ],
+        );
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
+            &doc,
+            "%1",
+            session_id,
+            "codex",
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
+            None,
+        )
+        .unwrap();
+
+        let report = inspect_at(&doc, &content, now).unwrap();
+
+        assert_eq!(report.level, SessionAccretionLevel::Block);
+        assert!(report.startup_miss_active);
+        assert!(report.recent_restart_count >= 3);
     }
 }

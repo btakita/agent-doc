@@ -63,7 +63,6 @@ pub mod repair;
 pub mod resync;
 pub mod route;
 pub mod run;
-pub mod session_accretion;
 pub mod session_actor;
 pub mod session_check;
 pub mod sessions;

@@ -5866,11 +5866,9 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
                 .unwrap(),
         ),
         (
-            "agent-doc-orchestration/src/session_accretion.rs",
-            fs::read_to_string(
-                manifest_dir.join("agent-doc-orchestration/src/session_accretion.rs"),
-            )
-            .unwrap(),
+            "agent-doc-session-accretion-io/src/lib.rs",
+            fs::read_to_string(manifest_dir.join("agent-doc-session-accretion-io/src/lib.rs"))
+                .unwrap(),
         ),
     ] {
         assert!(
@@ -6867,7 +6865,7 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
 
     for relative in [
         "agent-doc-ops-log-io/src/lib.rs",
-        "agent-doc-orchestration/src/session_accretion.rs",
+        "agent-doc-session-accretion-io/src/lib.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/sync.rs",
         "agent-doc-orchestration/src/write.rs",
@@ -6968,9 +6966,15 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         );
     }
 
-    let orchestration_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_accretion.rs"))
-            .unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod session_accretion")
+            && !manifest_dir
+                .join("agent-doc-orchestration/src/session_accretion.rs")
+                .exists(),
+        "orchestration must not keep a session_accretion facade module"
+    );
     for forbidden_snippet in [
         "pub enum SessionAccretionLevel",
         "pub struct SessionAccretionReport",
@@ -6999,44 +7003,19 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "unwrap_or(DEFAULT_CLEAR_THRESHOLD)",
         "pub use agent_doc_session_accretion",
         "type SessionAccretion",
-        "struct RecentExchangeCompaction",
-        "pub fn record_recent_exchange_compaction(",
-        "pub fn recent_exchange_compaction_timestamp(",
-        "fn recent_exchange_compaction_path(",
-        "fn load_recent_exchange_compaction(",
-        "fn cycles_log_path(",
-        "fn session_log_path(",
-        "fn relative_file_key(",
-        "fn recent_cycle_metrics(",
-        "fn recent_restart_metrics(",
-        "pub fn queue_context_reset_opted_in(",
-        "fn queue_context_reset_opted_in(",
-        "pub fn clear_threshold_for_doc(",
-        "fn clear_threshold_for_doc(",
-        "agent_doc_project_config_io::load_project_for_doc(file).agent_doc_queue_context_reset",
-        "agent_doc_project_config_io::load_project_for_doc(file).agent_doc_clear_threshold",
-        "serde_json::from_str::<crate::agent_doc_ops_log_io::CycleEntry>",
-        "agent_doc_log_time::parse_log_timestamp",
-        "agent_doc_fs::read_optional_text(",
     ] {
         assert!(
-            !orchestration_source.contains(forbidden_snippet),
+            !orchestration_lib.contains(forbidden_snippet),
             "orchestration must not re-own or facade pure session-accretion policy: {forbidden_snippet}"
         );
     }
     assert!(
-        orchestration_source.contains("evaluate_session_accretion(session_accretion_input(")
-            && orchestration_source.contains("SessionAccretionInput {"),
-        "orchestration session_accretion should gather IO facts then call focused policy directly"
-    );
-    assert!(
-        orchestration_source
-            .contains("agent_doc_session_accretion_io::queue_context_reset_opted_in(file)")
-            && orchestration_source
-                .contains("agent_doc_session_accretion_io::clear_threshold_for_doc(file)")
-            && orchestration_source.contains("context_reset_reason_for_recent_compaction(")
-            && orchestration_source.contains("context_reset_reason_for_report("),
-        "orchestration session_accretion should call focused IO and pure context-reset policy directly"
+        focused_io_source.contains("pub fn inspect(file: &Path)")
+            && focused_io_source.contains("evaluate_session_accretion(session_accretion_input(")
+            && focused_io_source.contains("SessionAccretionInput {")
+            && focused_io_source.contains("pub fn queue_context_reset_reason(")
+            && focused_io_source.contains("pub fn queue_context_reset_reason_if_opted_in("),
+        "agent-doc-session-accretion-io should own session-accretion fact gathering and context-reset adapter APIs"
     );
     for required_snippet in [
         "struct RecentExchangeCompaction",
@@ -7048,6 +7027,10 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "pub fn relative_file_key(",
         "pub fn recent_cycle_metrics(",
         "pub fn recent_restart_metrics(",
+        "pub fn inspect(file: &Path)",
+        "pub fn queue_context_reset_reason(",
+        "pub fn queue_context_reset_reason_if_opted_in(",
+        "fn session_accretion_input(",
         "pub fn queue_context_reset_opted_in(",
         "pub fn clear_threshold_for_doc(",
         "fn recent_exchange_compaction_path(",
@@ -7058,7 +7041,9 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "resolve_queue_context_reset_opt_in",
         "resolve_clear_threshold",
         "agent_doc_frontmatter::frontmatter::parse",
+        "agent_doc_frontmatter_io::session::parse_for_file(",
         "agent_doc_project_config_io::load_project_for_doc(file)",
+        "agent_doc_supervisor_io::startup_miss::load_startup_miss(file)",
         "serde_json::from_str::<agent_doc_ops_log_io::CycleEntry>",
         "agent_doc_log_time::parse_log_timestamp",
         "agent_doc_fs::read_optional_text(",
@@ -7071,10 +7056,12 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
     for required_dependency in [
         "agent-doc-fs",
         "agent-doc-frontmatter",
+        "agent-doc-frontmatter-io",
         "agent-doc-log-time",
         "agent-doc-ops-log-io",
         "agent-doc-project-config-io",
         "agent-doc-session-accretion",
+        "agent-doc-supervisor-io",
         "anyhow",
         "serde",
         "serde_json",
@@ -7085,16 +7072,11 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         );
     }
     assert!(
-        orchestration_source
-            .contains("agent_doc_session_accretion_io::recent_exchange_compaction_timestamp(")
-            && focused_io_source.contains("recent_exchange_compaction_timestamp_at(file, now)?"),
-        "orchestration session_accretion should consume focused recent-compaction marker IO"
-    );
-    assert!(
-        orchestration_source.contains("agent_doc_session_accretion_io::recent_cycle_metrics(")
-            && orchestration_source
-                .contains("agent_doc_session_accretion_io::recent_restart_metrics("),
-        "orchestration session_accretion should consume focused accretion log metric IO"
+        focused_io_source.contains("recent_exchange_compaction_timestamp(file)?")
+            && focused_io_source.contains("recent_exchange_compaction_timestamp_at(file, now)?")
+            && focused_io_source.contains("recent_cycle_metrics(file, now)?")
+            && focused_io_source.contains("recent_restart_metrics(file, session_id, now)"),
+        "agent-doc-session-accretion-io should consume focused recent-compaction and log metric IO"
     );
     for forbidden in [
         "agent-doc-core",
@@ -7130,7 +7112,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
     let stream_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
     assert!(
-        stream_source.contains("crate::session_accretion::inspect(file)")
+        stream_source.contains("agent_doc_session_accretion_io::inspect(file)")
             && stream_source
                 .contains("agent_doc_prompt_context_io::build_document_section_with_ssh_context"),
         "stream should gather session-accretion facts and delegate document-section rendering to focused IO directly"
@@ -10699,11 +10681,10 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         }
     }
     let session_accretion =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_accretion.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-accretion-io/src/lib.rs")).unwrap();
     assert!(
-        session_accretion.contains("rc.project_config().agent_doc_auto_compact"),
-        "session_accretion should consume project config through the RunContext graph cache"
+        session_accretion.contains("agent_doc_project_config_io::load_project_for_doc(file)"),
+        "session-accretion IO should consume project config through focused project-config IO"
     );
 
     let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();

@@ -118,7 +118,7 @@ pub(crate) fn run_ordered_task_step(
         .or(fm.resolve_harness_model(&harness))
         .map(|m| agent_doc_model_tier::canonical_model_name(m, &harness, &global_config.model));
     let model = resolved_model.as_deref();
-    let session_accretion = agent_doc_orchestration::session_accretion::inspect(file).ok();
+    let session_accretion = agent_doc_session_accretion_io::inspect(file).ok();
     let mut prompt = build_agent_prompt(
         file,
         mode,

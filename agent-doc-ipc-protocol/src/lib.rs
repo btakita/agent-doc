@@ -382,6 +382,20 @@ pub fn vcs_refresh_message() -> serde_json::Value {
     })
 }
 
+/// Build a read-only cdylib reload announcement payload.
+///
+/// Sent to editor plugins to tell them a freshly-installed `libagent_doc` cdylib
+/// is available so they force the existing native-reload path immediately instead
+/// of lazily reloading on the next FFI call. Read-only: carries no `patch_id`,
+/// `patches`, or `content` — the plugin reacts by reloading the shared library it
+/// already resolves, never by mutating a document.
+pub fn reload_lib_message(lib_version: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "reload_lib",
+        "lib_version": lib_version,
+    })
+}
+
 /// Build a VCS refresh probe payload.
 pub fn vcs_refresh_probe_message(probe: &str) -> serde_json::Value {
     serde_json::json!({
@@ -594,8 +608,8 @@ mod tests {
         is_already_applied_ack_error_message, is_socket_ack_timeout_error, is_socket_status_error,
         message_requests_early_ack, normalization_repair_patch_message, patch_message,
         pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
-        refresh_content_message, reposition_message, save_document_message, vcs_refresh_message,
-        vcs_refresh_probe_message,
+        refresh_content_message, reload_lib_message, reposition_message, save_document_message,
+        vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]
@@ -952,6 +966,18 @@ mod tests {
         assert_eq!(message["file"], "/tmp/plan.md");
         assert!(message.get("content").is_none());
         assert!(message.get("patches").is_none());
+    }
+
+    #[test]
+    fn reload_lib_message_is_typed_and_readonly() {
+        let message = reload_lib_message("0.34.68");
+
+        assert_eq!(message["type"], "reload_lib");
+        assert_eq!(message["lib_version"], "0.34.68");
+        assert!(message.get("patch_id").is_none());
+        assert!(message.get("patches").is_none());
+        assert!(message.get("content").is_none());
+        assert!(message.get("file").is_none());
     }
 
     #[test]

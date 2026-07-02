@@ -192,7 +192,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 const EDITOR_PLUGIN_KIND = 'vscode';
-const EDITOR_PLUGIN_VERSION = '0.2.38';
+const EDITOR_PLUGIN_VERSION = '0.2.39';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 
 function findLibrary(projectRoot?: string): string | null {
@@ -270,6 +270,52 @@ function ensureLoaded(projectRoot?: string): boolean {
         return true;
     } catch (e: any) {
         console.log(`[agent-doc/native] failed to load ${libPath}: ${e.message}`);
+        return false;
+    }
+}
+
+/**
+ * #cdylib-reload-broadcast: filename of the global reload-broadcast file, a
+ * sibling of the installed cdylib. `agent-doc lib-install` /
+ * `agent-doc admin reload-lib` write it; the extension watches it to force a
+ * reload immediately after an upgrade instead of lazily on the next FFI call.
+ */
+export const RELOAD_BROADCAST_FILENAME = 'agent-doc-reload-broadcast.json';
+
+/**
+ * Resolve the global reload-broadcast file path: a sibling of the resolved
+ * cdylib. Uses the already-loaded path when available. Returns null when no
+ * library path can be resolved.
+ */
+export function reloadBroadcastFile(projectRoot?: string): string | null {
+    const libPath = loadedPath ?? findLibrary(projectRoot);
+    if (!libPath) return null;
+    return path.join(path.dirname(libPath), RELOAD_BROADCAST_FILENAME);
+}
+
+/**
+ * #cdylib-reload-broadcast: force a fresh `koffi.load` of the current cdylib
+ * path, bypassing the lazy mtime-equality guard in [ensureLoaded]. Used by the
+ * broadcast watcher and the `reload_lib` signal so a freshly-installed (or
+ * re-announced) cdylib goes live immediately. Keeps the previous bindings on
+ * failure (the reason is logged, never swallowed silently).
+ */
+export function forceReloadLib(projectRoot?: string): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    const target = loadedPath;
+    if (!target || !koffi) return false;
+    try {
+        removePidLock();
+        resetBindings();
+        const currentMtime = fs.statSync(target).mtimeMs;
+        lib = koffi.load(shadowCopyForLoad(target, currentMtime));
+        loadedMtime = currentMtime;
+        writePidLock(target);
+        verifyVersion(target);
+        console.log(`[agent-doc/native] forceReload: reloaded from ${target}`);
+        return true;
+    } catch (e: any) {
+        console.log(`[agent-doc/native] forceReload failed, keeping previous: ${e.message}`);
         return false;
     }
 }

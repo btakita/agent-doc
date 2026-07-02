@@ -1576,6 +1576,19 @@ enum AdminAction {
         #[arg(long)]
         json: bool,
     },
+    /// Announce a freshly-installed `libagent_doc` cdylib to editor plugins by
+    /// writing the global reload-broadcast file (`#cdylib-reload-broadcast`). This
+    /// is the "recycle via API" counterpart to `admin recycle`: `lib-install`
+    /// broadcasts automatically, and this command lets an operator re-announce the
+    /// current cdylib on demand. JetBrains and VS Code plugins watch the broadcast
+    /// and force their existing native-reload path immediately instead of waiting
+    /// for the next lazy FFI call.
+    #[command(name = "reload-lib")]
+    ReloadLib {
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
     /// Kill the `start --route-owned` supervisor for a document: request a graceful
     /// idle-gated self-kill, then force-kill the verified pid after a grace window
     /// if it stays alive (`#supkill`). Refuses to kill the caller's own ancestor —
@@ -3485,6 +3498,31 @@ fn main() -> anyhow::Result<()> {
                             force,
                         )?;
                     }
+                }
+                Ok(())
+            }
+            AdminAction::ReloadLib { json } => {
+                // `#cdylib-reload-broadcast`: write the global reload-broadcast file
+                // for the currently-installed cdylib and report how many editor
+                // projects it could also signal. Deterministic logic lives in
+                // `lib_install::reload_lib_now`; main.rs only renders the report.
+                let report = lib_install::reload_lib_now()?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "broadcast_path": report.broadcast_path.display().to_string(),
+                            "lib_version": report.lib_version,
+                            "editor_projects": report.editor_projects,
+                        })
+                    );
+                } else {
+                    println!(
+                        "[admin] reload-lib: cdylib v{} reload announced to editor plugins ({}); {} editor project(s) could also be signaled directly",
+                        report.lib_version,
+                        report.broadcast_path.display(),
+                        report.editor_projects,
+                    );
                 }
                 Ok(())
             }

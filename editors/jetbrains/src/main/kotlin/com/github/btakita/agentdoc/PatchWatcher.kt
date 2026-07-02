@@ -175,6 +175,9 @@ class PatchWatcher(private val project: Project) : Disposable {
     fun start() {
         if (running) return
         running = true
+        // #cdylib-reload-broadcast: begin polling the global reload-broadcast file
+        // regardless of project layout so cdylib upgrades reload proactively.
+        scheduleLibReloadBroadcastPoll()
         val basePath = project.basePath ?: return
         registerRoot(basePath)
         // Scan for nested .agent-doc/ dirs under basePath (submodules, nested repos).
@@ -604,6 +607,20 @@ class PatchWatcher(private val project: Project) : Disposable {
             "vcs_refresh" -> {
                 recordProjectSurfaceOps("vcs_refresh", "refresh_vcs", "commit_vcs_refresh", "triggered")
                 refreshVcs()
+                APPLY_APPLIED
+            }
+            "reload_lib" -> {
+                // #cdylib-reload-broadcast: a fresh cdylib was installed/announced.
+                // Force the existing native-reload path immediately instead of
+                // waiting for the next lazy mtime-checked FFI call.
+                val libVersion = extractStringField(json, "lib_version") ?: "?"
+                LOG.info("[socket] reload_lib received (lib_version=$libVersion); forcing cdylib reload")
+                AgentDocLib.forceReload()
+                // Keep the broadcast poller baseline in sync so the file poll does
+                // not redundantly force a second reload for the same install.
+                AgentDocLib.reloadBroadcastFile()?.let { f ->
+                    if (f.exists()) lastLibReloadBroadcastMtime = f.lastModified()
+                }
                 APPLY_APPLIED
             }
             "save_document" -> {
@@ -1882,6 +1899,50 @@ class PatchWatcher(private val project: Project) : Disposable {
         }, VCS_REFRESH_DEBOUNCE_MS)
     }
 
+    /**
+     * `#cdylib-reload-broadcast`: poll the global reload-broadcast file written by
+     * `agent-doc lib-install` / `agent-doc admin reload-lib`. This is the
+     * proactive complement to the lazy mtime reload in [AgentDocLib.get]: when the
+     * broadcast mtime advances, force the existing native-reload path so a freshly
+     * installed cdylib goes live immediately without waiting for the next FFI call
+     * or a `reload_lib` socket message. Runs on a POOLED thread (file IO off EDT).
+     */
+    private val libReloadBroadcastAlarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, this)
+    private val LIB_RELOAD_BROADCAST_POLL_MS = 2000
+    @Volatile private var lastLibReloadBroadcastMtime = 0L
+
+    private fun scheduleLibReloadBroadcastPoll() {
+        if (!running) return
+        libReloadBroadcastAlarm.cancelAllRequests()
+        libReloadBroadcastAlarm.addRequest({
+            try {
+                pollLibReloadBroadcastOnce()
+            } catch (e: Exception) {
+                LOG.debug("[lib-reload] broadcast poll failed: ${e.message}")
+            } finally {
+                if (running) scheduleLibReloadBroadcastPoll()
+            }
+        }, LIB_RELOAD_BROADCAST_POLL_MS)
+    }
+
+    private fun pollLibReloadBroadcastOnce() {
+        val file = AgentDocLib.reloadBroadcastFile() ?: return
+        if (!file.exists()) return
+        val mtime = file.lastModified()
+        if (mtime == 0L) return
+        // First observation records the baseline without forcing a reload, so a
+        // stale broadcast from a prior install does not reload on every IDE start.
+        if (lastLibReloadBroadcastMtime == 0L) {
+            lastLibReloadBroadcastMtime = mtime
+            return
+        }
+        if (mtime != lastLibReloadBroadcastMtime) {
+            lastLibReloadBroadcastMtime = mtime
+            LOG.info("[lib-reload] broadcast changed (mtime=$mtime); forcing cdylib reload")
+            AgentDocLib.forceReload()
+        }
+    }
+
     private fun repositionBoundaryToEnd(
         doc: String,
         component: String,
@@ -1891,6 +1952,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     override fun dispose() {
         running = false
+        libReloadBroadcastAlarm.cancelAllRequests()
         val lib = AgentDocLib.get()
         // #8bfz / #fcconeowner: hand single-owner leases to a live sibling now
         // instead of waiting out the TTL.

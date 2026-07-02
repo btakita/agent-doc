@@ -760,6 +760,59 @@ interface AgentDocLib : Library {
             })
         }
 
+        /**
+         * `#cdylib-reload-broadcast`: filename of the global reload-broadcast file,
+         * a sibling of the installed cdylib. `agent-doc lib-install` /
+         * `agent-doc admin reload-lib` write it; the plugin watches it to force a
+         * reload immediately after an upgrade instead of lazily on the next FFI call.
+         */
+        const val RELOAD_BROADCAST_FILENAME = "agent-doc-reload-broadcast.json"
+
+        /**
+         * Resolve the global reload-broadcast file: a sibling of the resolved
+         * cdylib path. Uses the already-loaded path when available so it works
+         * before the first `agent-doc lib-path` call is needed.
+         */
+        fun reloadBroadcastFile(): File? {
+            val path = loadedPath ?: resolveLibPath() ?: return null
+            val dir = File(path).absoluteFile.parentFile ?: return null
+            return File(dir, RELOAD_BROADCAST_FILENAME)
+        }
+
+        /**
+         * `#cdylib-reload-broadcast`: force a fresh `Native.load` of the current
+         * cdylib path, bypassing the lazy mtime-equality guard in [get] / [reload].
+         * Used by the broadcast watcher and the `reload_lib` socket message so a
+         * freshly-installed (or re-announced) cdylib goes live immediately. Keeps
+         * the previous instance on failure (never swallows the reason — it is
+         * logged).
+         */
+        @Synchronized
+        fun forceReload(): AgentDocLib? {
+            val path = loadedPath ?: resolveLibPath() ?: run {
+                LOG.warn("[native] forceReload: no libagent_doc path to reload")
+                return null
+            }
+            loadedPath = path
+            return try {
+                removePidLock()
+                val currentMtime = File(path).lastModified()
+                val loadTarget = shadowCopyForLoad(path, currentMtime)
+                val newLib = Native.load(loadTarget, AgentDocLib::class.java)
+                instance = newLib
+                loadedMtime = currentMtime
+                loadError = null
+                writePidLock(path)
+                registerShutdownHook()
+                verifyVersion(newLib, path)
+                LOG.info("[native] forceReload: reloaded libagent_doc from $path")
+                newLib
+            } catch (e: Exception) {
+                LOG.warn("[native] forceReload failed, keeping previous instance: ${e.message}")
+                instance
+            }
+        }
+
         private fun resolveLibPath(): String? {
             try {
                 val process = ProcessBuilder("agent-doc", "lib-path")

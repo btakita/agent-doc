@@ -1804,6 +1804,14 @@ class PatchWatcher implements vscode.Disposable {
     /** Native editor-op writes are queued off the text-change listener path. */
     private pendingEditorOpReports: PendingEditorOpReport[] = [];
     private editorOpReportTimer: ReturnType<typeof setTimeout> | undefined;
+    /**
+     * #cdylib-reload-broadcast: poll timer + last-seen mtime for the global cdylib
+     * reload-broadcast file. When the broadcast mtime advances, force the native
+     * reload immediately instead of waiting for the next lazy mtime-checked FFI call.
+     */
+    private libReloadBroadcastTimer: ReturnType<typeof setInterval> | undefined;
+    private lastLibReloadBroadcastMtime = 0;
+    private static readonly LIB_RELOAD_BROADCAST_POLL_MS = 2000;
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Agent Doc Patches');
@@ -1855,6 +1863,9 @@ class PatchWatcher implements vscode.Disposable {
         this.liveBufferSignalWatcher.onDidChange(() => this.onPublishLiveBufferSignal(patchesDir));
 
         const projectRoot = path.dirname(path.dirname(patchesDir));
+        // #cdylib-reload-broadcast: poll the global reload-broadcast file so a
+        // cdylib upgrade reloads proactively (parity with the JetBrains poller).
+        this.startLibReloadBroadcastPoll(projectRoot);
         this.crdtReplicas = new CrdtReplicaManager({
             projectRoot,
             identity: EDITOR_ID,
@@ -2904,7 +2915,49 @@ class PatchWatcher implements vscode.Disposable {
         return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
+    /**
+     * #cdylib-reload-broadcast: start polling the global reload-broadcast file
+     * (a sibling of the installed cdylib). When its mtime advances, force the
+     * native reload immediately. Thin event -> reload, matching the JetBrains
+     * poller for shared-foundation parity.
+     */
+    private startLibReloadBroadcastPoll(projectRoot: string): void {
+        if (this.libReloadBroadcastTimer) return;
+        this.libReloadBroadcastTimer = setInterval(() => {
+            try {
+                this.pollLibReloadBroadcastOnce(projectRoot);
+            } catch (e: any) {
+                this.outputChannel.appendLine(`[lib-reload] broadcast poll failed: ${e?.message ?? e}`);
+            }
+        }, PatchWatcher.LIB_RELOAD_BROADCAST_POLL_MS);
+    }
+
+    private pollLibReloadBroadcastOnce(projectRoot: string): void {
+        const file = native.reloadBroadcastFile(projectRoot);
+        if (!file) return;
+        let mtime = 0;
+        try {
+            mtime = fs.statSync(file).mtimeMs;
+        } catch {
+            return; // not written yet
+        }
+        if (mtime <= 0) return;
+        // First observation records the baseline without forcing a reload, so a
+        // stale broadcast from a prior install does not reload on every startup.
+        if (this.lastLibReloadBroadcastMtime === 0) {
+            this.lastLibReloadBroadcastMtime = mtime;
+            return;
+        }
+        if (mtime !== this.lastLibReloadBroadcastMtime) {
+            this.lastLibReloadBroadcastMtime = mtime;
+            this.outputChannel.appendLine(`[lib-reload] broadcast changed (mtime=${mtime}); forcing cdylib reload`);
+            native.forceReloadLib(projectRoot);
+        }
+    }
+
     dispose(): void {
+        if (this.libReloadBroadcastTimer) clearInterval(this.libReloadBroadcastTimer);
+        this.libReloadBroadcastTimer = undefined;
         this.watcher?.dispose();
         this.signalWatcher?.dispose();
         this.saveSignalWatcher?.dispose();

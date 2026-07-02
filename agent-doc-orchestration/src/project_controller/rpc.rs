@@ -1691,6 +1691,41 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
     Ok((marked, skipped))
 }
 
+/// `#cdylib-reload-broadcast` — best-effort count of editor-connected project
+/// roots the global reload-lib broadcast could ALSO signal directly. There is no
+/// global registry of IDE-hosted IPC listeners, so this is intentionally a lower
+/// bound: it walks `/proc` for controller-serving project roots (the same
+/// enumeration [`recycle_controllers_all_projects_force`] uses) and keeps only
+/// those carrying an `.agent-doc/patches/` directory — the marker that an editor
+/// plugin is wired for that project. The written broadcast file remains the
+/// authoritative fan-out that every plugin watches.
+pub fn editor_broadcast_project_root_count() -> usize {
+    let self_pid = std::process::id();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return 0;
+    };
+    let mut roots: BTreeSet<PathBuf> = BTreeSet::new();
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        if let Some(root) = controller_serve_project_root(pid) {
+            let canon =
+                agent_doc_controller::command_line::canonical_path_for_command_line_compare(&root);
+            if canon.join(".agent-doc").join("patches").is_dir() {
+                roots.insert(canon);
+            }
+        }
+    }
+    roots.len()
+}
+
 /// M4 (#stuckhandoff2) — client handoff drop-guard. The two-phase handoff is
 /// driven by the invoking client: it launches a replacement controller in
 /// `Preparing`, then promotes it to `Stable` via `promote_handoff`. If the client

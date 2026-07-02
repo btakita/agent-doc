@@ -11,6 +11,7 @@ pub mod capability_proof;
 pub mod capture;
 pub mod claude_launch;
 pub mod codex_launch;
+pub mod opencode_launch;
 
 use serde::{Deserialize, Serialize};
 

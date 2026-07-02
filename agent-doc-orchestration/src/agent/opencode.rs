@@ -15,6 +15,7 @@
 //! - OpenCode's plain `run` output does not currently expose a stable session id in default
 //!   output, so `AgentResponse.session_id` is `None`.
 
+use agent_doc_turn_executor::opencode_launch::{default_base_args, opencode_run_args};
 use anyhow::Result;
 use std::process::Command;
 
@@ -24,35 +25,6 @@ pub struct OpenCode {
     command: String,
     base_args: Vec<String>,
     env: Vec<(String, Option<String>)>,
-}
-
-pub fn default_base_args() -> Vec<String> {
-    vec!["run".to_string()]
-}
-
-pub fn build_args(
-    base_args: &[String],
-    prompt: &str,
-    session_id: Option<&str>,
-    fork: bool,
-    model: Option<&str>,
-) -> Vec<String> {
-    let mut args = base_args.to_vec();
-    if let Some(sid) = session_id {
-        args.push("--session".to_string());
-        args.push(sid.to_string());
-    } else if fork {
-        args.push("--continue".to_string());
-        args.push("--fork".to_string());
-    }
-
-    if let Some(m) = model {
-        args.push("--model".to_string());
-        args.push(m.to_string());
-    }
-
-    args.push(prompt.to_string());
-    args
 }
 
 impl OpenCode {
@@ -80,7 +52,7 @@ impl Agent for OpenCode {
         fork: bool,
         model: Option<&str>,
     ) -> Result<AgentResponse> {
-        let args = build_args(&self.base_args, prompt, session_id, fork, model);
+        let args = opencode_run_args(&self.base_args, prompt, session_id, fork, model);
         let mut cmd = Command::new(&self.command);
         cmd.args(&args).env_remove("OPENCODE_CLIENT");
         for (k, v) in &self.env {
@@ -121,34 +93,5 @@ impl Agent for OpenCode {
             text,
             session_id: None,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_args_fresh_model() {
-        let args = build_args(
-            &default_base_args(),
-            "hello",
-            None,
-            false,
-            Some("zai/glm-5"),
-        );
-        assert_eq!(args, vec!["run", "--model", "zai/glm-5", "hello"]);
-    }
-
-    #[test]
-    fn build_args_session_resume() {
-        let args = build_args(&default_base_args(), "hello", Some("sess-1"), false, None);
-        assert_eq!(args, vec!["run", "--session", "sess-1", "hello"]);
-    }
-
-    #[test]
-    fn build_args_fork_last_session() {
-        let args = build_args(&default_base_args(), "hello", None, true, None);
-        assert_eq!(args, vec!["run", "--continue", "--fork", "hello"]);
     }
 }

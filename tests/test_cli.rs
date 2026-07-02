@@ -11796,6 +11796,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let executor_claude_launch =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/claude_launch.rs"))
             .unwrap();
+    let executor_opencode_launch =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/opencode_launch.rs"))
+            .unwrap();
     let executor_agent_stream =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/agent_stream.rs"))
             .unwrap();
@@ -11881,6 +11884,12 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             "agent-doc-turn-executor should own Claude launch argv policy directly: {required_snippet}"
         );
     }
+    for required_snippet in ["pub fn default_base_args(", "pub fn opencode_run_args("] {
+        assert!(
+            executor_opencode_launch.contains(required_snippet),
+            "agent-doc-turn-executor should own OpenCode launch argv policy directly: {required_snippet}"
+        );
+    }
     for required_snippet in [
         "pub struct StreamChunk",
         "pub fn parse_stream_line(",
@@ -11950,6 +11959,10 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             "agent::mod must not re-own capability-proof or Codex network launch policy: {forbidden_snippet}"
         );
     }
+    assert!(
+        agent_mod.contains("agent_doc_turn_executor::opencode_launch::default_base_args()"),
+        "agent::mod should call focused OpenCode default launch args directly"
+    );
 
     let start =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
@@ -11971,6 +11984,10 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     assert!(
         executor_lib.contains("pub mod claude_launch;"),
         "agent-doc-turn-executor should expose Claude launch argv policy directly"
+    );
+    assert!(
+        executor_lib.contains("pub mod opencode_launch;"),
+        "agent-doc-turn-executor should expose OpenCode launch argv policy directly"
     );
     assert!(
         !executor_lib.contains("pub mod auto_trigger;")
@@ -12220,6 +12237,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let claude =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/claude.rs"))
             .unwrap();
+    let opencode =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/opencode.rs"))
+            .unwrap();
     let stream =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
     for forbidden_snippet in [
@@ -12243,6 +12263,26 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && claude.contains("claude_json_args(&self.base_args, session_id, fork, model)")
             && claude.contains("claude_streaming_args(&self.base_args, session_id, fork, model)"),
         "agent::claude should call focused Claude launch argv policy directly"
+    );
+    for forbidden_snippet in [
+        "pub fn default_base_args(",
+        "pub fn build_args(",
+        "fn build_args_fresh_model(",
+        "fn build_args_session_resume(",
+        "fn build_args_fork_last_session(",
+    ] {
+        assert!(
+            !opencode.contains(forbidden_snippet),
+            "agent::opencode must not re-own OpenCode launch argv policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        opencode.contains("use agent_doc_turn_executor::opencode_launch::{")
+            && opencode.contains("default_base_args")
+            && opencode.contains("opencode_run_args")
+            && opencode
+                .contains("opencode_run_args(&self.base_args, prompt, session_id, fork, model)"),
+        "agent::opencode should call focused OpenCode launch argv policy directly"
     );
     for (name, source) in [
         ("agent/streaming.rs", streaming.as_str()),

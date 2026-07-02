@@ -129,7 +129,7 @@ fn build_backend_command(
         .unwrap_or_else(|| match name {
             "claude" => agent_doc_turn_executor::claude_launch::default_base_args(),
             "codex" => agent_doc_turn_executor::codex_launch::default_base_args(),
-            "opencode" => opencode::default_base_args(),
+            "opencode" => agent_doc_turn_executor::opencode_launch::default_base_args(),
             _ => Vec::new(),
         });
     if let Some(file) = file {

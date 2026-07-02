@@ -269,6 +269,9 @@ seams:
   `agent-doc-controller::dispatch`; route keeps registry loading, canonical
   path projection, and live-owner probing while calling
   `classify_dispatch_target_bind` and `classify_dispatch_target_match`.
+- Busy existing-pane auto-fix outcome policy now takes supervisor health facts
+  directly in `agent-doc-controller::dispatch`; `route/busy_pane.rs` constructs
+  `BusyPaneAutoFixFacts` and no longer keeps a local health-mapping wrapper.
 - Fresh-dispatch target selection after a ready wait moved from
   `route/dispatch.rs` to `agent-doc-controller::dispatch`; route keeps registry
   reads, canonical path projection, handoff logging, and registration effects
@@ -287,9 +290,16 @@ seams:
   `route/authoritative_actor.rs` to `agent-doc-supervisor::route_runtime`; route
   keeps document-path command rendering and passes supervisor health, actor
   state, and queue-pause facts to `defer_to_boundary_restart_recovery_hint`.
+- Prompt-bearing routed cycle-ack context moved from the route-local carrier to
+  `agent-doc-turn::cycle_ack::PromptBearingRouteContext`; route now consumes the
+  focused context directly instead of copying the same fields into a local type.
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.
+- Supervisor IPC capability-gate method classification moved from
+  `start/supervisor_io.rs` to `agent-doc-supervisor::ipc_protocol`; the
+  supervisor IO adapter now imports `ipc_method_requires_capability_gate`
+  beside the protocol types.
 - Idle-queue submit-mode diagnostics moved from `start.rs` to
   `agent-doc-supervisor::idle_watch`; orchestration now passes inject-pane
   presence and harness binary to `idle_queue_submit_mode` from both start and
@@ -325,6 +335,9 @@ seams:
   `agent-doc-workflow::capture`; repair now gathers the individual repair facts,
   then uses `RepairTemplateChanges` for persist and ordered log decisions while
   keeping file/snapshot IO and ops-log effects.
+- Queue node-key deduplication before queue maintenance moved from
+  `preflight/maintenance.rs` to `agent-doc-queue::queue_projection`; preflight
+  now calls `dedup_queue_nodes_by_key` directly before rebuilding queue state.
 - Non-exchange component drift blocking policy moved from `git.rs` to
   `agent-doc-git`; git orchestration keeps snapshot/HEAD/turn-scope IO and
   calls `has_blocking_non_exchange_component_drift` directly.

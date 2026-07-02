@@ -341,6 +341,18 @@ seams:
 - Non-exchange component drift blocking policy moved from `git.rs` to
   `agent-doc-git`; git orchestration keeps snapshot/HEAD/turn-scope IO and
   calls `has_blocking_non_exchange_component_drift` directly.
+- Blocked-closeout recovery command projection moved from route orchestration
+  to `agent-doc-turn::closeout_recovery`; route now passes the focused
+  copy-pasteable recovery command into controller outcome fields instead of
+  keeping a route-local parser.
+- Session actor closeout mutation construction moved from project-controller
+  orchestration to `agent-doc-sqlite::state_store`; project-controller keeps
+  cycle-state/file/DB transaction orchestration and calls the SQLite-owned
+  mutation builder beside the mutation type.
+- Supervisor replacement request parsing moved from project-controller RPC to
+  `agent-doc-controller::supervisor_replacement`; RPC now adapts raw controller
+  request fields into focused mode/force facts and keeps the background worker,
+  authorization, IPC, and cold-start effects.
 
 The no-shim policy remains active for these layer extractions: old helper names
 were removed or confined to static test strings, and boundary tests now assert
@@ -1098,6 +1110,16 @@ the owning crates expose the policy while orchestration does not re-own it.
   `build_reexec_candidates` owns the ordered, de-duplicated fresh/current/PATH
   candidate list, while `start.rs` only gathers current-exe and installed-binary
   facts before running the Unix `execve` adapter.
+- The latest fan-out/local pass extracted three small helper seams with no
+  compatibility shims. `agent-doc-turn::closeout_recovery` now owns blocked
+  recovery-command projection, including short `agent-doc ...` extraction from
+  long recommendations. `agent-doc-sqlite::state_store` now owns session actor
+  closeout mutation construction next to `SessionActorCloseoutMutation`.
+  `agent-doc-controller::supervisor_replacement` now owns supervisor
+  replacement request parsing, typed mode validation, diagnostic-payload mode
+  fallback, and force-flag resolution. Orchestration imports all three focused
+  helpers directly and keeps only file, DB, route-outcome, RPC authorization,
+  worker, IPC, and cold-start effects.
 
 ### Earlier closure finding
 

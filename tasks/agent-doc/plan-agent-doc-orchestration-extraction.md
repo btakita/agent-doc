@@ -250,6 +250,10 @@ seams:
   `agent-doc-controller::dispatch`; route now adapts hook/tmux/session facts and
   calls `classify_codex_routed_dispatch_start_proof` or
   `opencode_pane_state_changed_from_idle` directly.
+- Busy dispatch-start short-circuit outcome policy moved from
+  `route/dispatch.rs` to `agent-doc-controller::dispatch`; route keeps tmux pane
+  capture, the short proof probe, diagnostics, and ops-log effects while calling
+  `busy_dispatch_start_outcome` directly.
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.

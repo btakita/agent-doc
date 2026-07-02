@@ -54,8 +54,7 @@ Done. Restored VS Code parity for the editor-save / live-buffer flush, updated s
 - Install: `make install` (binary + cdylib @ 0.34.67); recycle marked 2 controllers + 3 route-owned supervisors at the idle boundary.
 
 **Residual parity (from a full JB↔VS Code diff).** Filed `#vscsaveproj` for the one remaining actionable gap: VS Code's `save_document` outcome only logs to the output channel, whereas JB records StateProjectionBridge surface ops (observability parity). Two divergences left intentionally: VS Code republishes the live buffer after a successful save (JB doesn't — harmless), and VS Code has no negative-ack channel for save failure (by design — the binary discovers it via ack-content poll timeout).
-<!-- agent:boundary:79dc58c4 -->
-### Re: restart bleed observation + VS Code parity + cdylib-recycles-on-upgrade — opus-4-8 (HEAD)
+### Re: restart bleed observation + VS Code parity + cdylib-recycles-on-upgrade — opus-4-8
 
 > **Queue prompt:** I saw serious bleeding into Claude Code during a previous restart. Also, a split pane was opened with Claude Code `/usage` somehow called.
 
@@ -71,6 +70,7 @@ The rest of this session's work, all committed:
 - **Recycle via API** — `agent-doc admin reload-lib [--json]` re-announces the cdylib (verified: `editor_projects: 2`). Skill/runbook `#staleloop-recycle-restart` guidance now points at the auto-broadcast + API instead of the manual install/recycle dance.
 
 `make check` green (6827 tests). Installed 0.34.67 (binary + cdylib) — this very finalize proves the fresh cdylib cleared the drift. **`[operator-verify]`:** install the new plugin builds (JB 0.2.206 / VS Code 0.2.39) and confirm a live IDE force-reloads the cdylib on the next `make install` broadcast (no lazy-FFI wait, no wedge).
+<!-- agent:boundary:6071ded5 -->
 <!-- /agent:exchange -->
 ## Queue
 

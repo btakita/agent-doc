@@ -102,45 +102,9 @@ pub(crate) fn open_cycle_protected_pane_state(
     open_cycle_protected_file_state(&file)
 }
 
-pub(crate) fn select_visible_focus_pane_if_present(
-    tmux: &Tmux,
-    window: &str,
-    focus: Option<&str>,
-) -> Option<String> {
-    let focus = focus?.trim();
-    if focus.is_empty() {
-        return None;
-    }
-    let focus_path = PathBuf::from(focus);
-    let canonical_focus = focus_path.canonicalize().unwrap_or(focus_path);
-    for pane in tmux.list_window_panes(window).unwrap_or_default() {
-        let Some(file) = registered_file_for_pane(tmux, &pane) else {
-            continue;
-        };
-        let canonical_file = file.canonicalize().unwrap_or(file);
-        if canonical_file != canonical_focus || !tmux.pane_alive(&pane) {
-            continue;
-        }
-        if let Err(err) = tmux.select_pane(&pane) {
-            let warning = agent_doc_sync::reselect_visible_focus_pane_failed_warning(
-                &pane,
-                &canonical_focus.display().to_string(),
-                &err.to_string(),
-            );
-            eprintln!("{}", warning);
-            sync_log(&warning);
-            return None;
-        }
-        return Some(pane);
-    }
-    None
-}
-
-pub(crate) fn emit_preserved_layout_focus_marker(pane: &str, reason: &str) {
-    let marker = agent_doc_sync::preserved_layout_focus_marker(pane, reason);
-    eprintln!("{}", marker);
-    sync_log(&marker);
-}
+// `#panefocussteal`: `select_visible_focus_pane_if_present` and
+// `emit_preserved_layout_focus_marker` were removed — a passive sync no longer
+// reselects any pane, so there is no focus pane to surface or mark.
 
 pub(crate) fn capture_dead_pane_diagnostics(
     tmux: &Tmux,

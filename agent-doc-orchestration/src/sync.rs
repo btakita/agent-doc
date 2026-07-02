@@ -202,7 +202,7 @@ use agent_doc_supervisor::startup_miss::unresolved_startup_miss_blocks_autostart
 use agent_doc_sync::{
     AutoStartMode, RENAME_DEBOUNCE_TTL_SECS, SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
     SYNC_LOCK_WAIT_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET, SYNC_OWNERSHIP_PROOF_BUDGET,
-    SYNC_PRELOCK_ACTOR_FOCUS_BUDGET, SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET,
+    SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET,
     SYNC_PRUNE_SUBPHASE_BUDGET, SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
     SYNC_WINDOW_RESOLUTION_BUDGET, WindowIndexNormalizationPlan, auto_started_panes_summary,
     effective_sync_columns, epoch_millis_now, is_file_rename, last_visible_excerpt,
@@ -227,8 +227,6 @@ use crate::{resync, route, sessions};
 
 use tmux_router::FileResolution;
 
-mod safe_passive;
-pub(crate) use safe_passive::*;
 mod layout;
 pub(crate) use layout::*;
 mod pane_repair;
@@ -1590,57 +1588,17 @@ fn check_build_stamp() {
     let _ = std::fs::write(&stamp_path, build_ts);
 }
 
-/// `#panefocussteal`: the single invariant that keeps a passive sync
-/// focus-neutral.
-///
-/// A passive sync (the JetBrains 5s layout poll or an editor tab-select) must
-/// reconcile tmux layout but must **never** move the operator's active pane — the
-/// operator may have deliberately switched to a non-agent-doc pane or window to
-/// do other work. The passive path has several entangled steps that select panes
-/// as a side effect (`safe_passive_prelock_actor_focus`,
-/// `safe_passive_postlock_actor_focus`, the tmux-router reconcile, the
-/// blocked-file reselect). Rather than gate each one, this guard captures the
-/// operator's active pane once at the top of the passive sync and restores it on
-/// every exit path. So the one fact an agent needs to hold across all steps is:
-/// *a passive sync ends where the operator's focus began.*
-///
-/// Deliberately moving tmux focus is a separate, explicit action — the
-/// `agent-doc focus <file>` command — never a side effect of `sync`.
-struct PassiveOperatorFocusGuard<'a> {
-    tmux: &'a Tmux,
-    operator_pane: Option<String>,
-}
-
-impl<'a> PassiveOperatorFocusGuard<'a> {
-    /// Capture the operator's current tmux active pane. `None` when it cannot be
-    /// read, in which case the guard is inert (never a false reselect).
-    fn capture(tmux: &'a Tmux) -> Self {
-        let operator_pane =
-            agent_doc_tmux_io::current_pane_id(tmux).filter(|pane| !pane.trim().is_empty());
-        Self {
-            tmux,
-            operator_pane,
-        }
-    }
-}
-
-impl Drop for PassiveOperatorFocusGuard<'_> {
-    fn drop(&mut self) {
-        let Some(operator_pane) = self.operator_pane.as_deref() else {
-            return;
-        };
-        // Skip the restore if the operator's pane died or was stashed out of view
-        // during the sync — never chase a stale selection into the stash window.
-        if !self.tmux.pane_alive(operator_pane) || pane_in_stash_window(self.tmux, operator_pane) {
-            return;
-        }
-        if self.tmux.select_pane(operator_pane).is_ok() {
-            sync_log(&format!(
-                "safe_passive_operator_focus_restored pane={operator_pane} (#panefocussteal)"
-            ));
-        }
-    }
-}
+// `#panefocussteal`: a passive sync (the JetBrains 5s layout poll or a
+// tab-select) reconciles tmux layout but must **never** select a pane. Moving
+// tmux focus is a separate, explicit action — the `agent-doc focus <file>`
+// command — which the plugin invokes only on a deliberate editor doc switch.
+//
+// An earlier attempt captured the operator's active pane and restored it after
+// the sync, but that cannot tell "stay put" (a background poll) from "follow the
+// switch" (a deliberate navigation): it either yanked the operator back off the
+// pane they just moved to, or — under back-to-back syncs — captured the already
+// stolen pane as the baseline and restored *that*. The only correct rule is that
+// `sync` never touches selection at all; hence there is nothing to restore.
 
 fn run_with_options_internal(
     col_args: &[String],
@@ -1661,26 +1619,9 @@ fn run_with_options_internal(
     );
     let sync_total_start = Instant::now();
 
-    // `#panefocussteal`: for a passive sync, capture the operator's active pane now
-    // — before any layout/focus step selects a pane — and restore it on every exit
-    // via Drop. This is the single point that makes the passive path focus-neutral;
-    // every step below may select panes freely for layout/provisioning without
-    // stealing the operator's focus. Explicit focus is the `agent-doc focus`
-    // command, not a side effect of sync.
-    let _operator_focus_guard = matches!(auto_start_mode, AutoStartMode::SafePassive)
-        .then(|| PassiveOperatorFocusGuard::capture(tmux));
-
-    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        let prelock_focus_start = Instant::now();
-        let _ = safe_passive_focus_actor_before_sync_lock(tmux, focus, window, col_args);
-        log_sync_latency(
-            focus,
-            "prelock_actor_focus",
-            prelock_focus_start.elapsed(),
-            SYNC_PRELOCK_ACTOR_FOCUS_BUDGET,
-            auto_start_mode,
-        );
-    }
+    // `#panefocussteal`: no pre-lock actor focus. A passive sync must not select
+    // the document pane — that is what stole the operator's focus on every poll.
+    // Deliberate focus movement is the `agent-doc focus` command.
 
     // Serialize sync calls via file lock. Concurrent syncs (from rapid tab switches)
     // race against each other's stash operations, causing pane bouncing. Contention
@@ -1908,17 +1849,10 @@ fn run_with_options_internal(
         SYNC_WINDOW_RESOLUTION_BUDGET,
         auto_start_mode,
     );
-    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        let focus_start = Instant::now();
-        let _ = safe_passive_focus_actor_after_sync_lock(tmux, focus, &proof_cache);
-        log_sync_latency(
-            focus,
-            "postlock_actor_focus",
-            focus_start.elapsed(),
-            SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
-            auto_start_mode,
-        );
-    }
+    // `#panefocussteal`: no post-lock actor focus. This `select_pane` was the live
+    // focus theft — it re-selected the document pane on every 5s poll, yanking the
+    // operator off whatever pane/window they were using. A passive sync is
+    // layout-only; `agent-doc focus` is the sole focus mover.
     let focus_only_mode = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
         agent_doc_tmux::TmuxFocusOnlyExpansionMode::SafePassive
     } else {
@@ -2906,11 +2840,8 @@ fn run_with_options_internal(
                 "[sync] safe passive sync preserved the current tmux layout because unresolved files remain blocked: {}",
                 blocked_summary
             );
-            if let Some(target_window) = window
-                && let Some(pane) = select_visible_focus_pane_if_present(tmux, target_window, focus)
-            {
-                emit_preserved_layout_focus_marker(&pane, "blocked_files");
-            }
+            // `#panefocussteal`: do not reselect the focus pane here — a passive
+            // sync never moves the operator's tmux focus.
             sync_log(&format!(
                 "safe_passive_layout_preserved blocked_files={}",
                 blocked_summary

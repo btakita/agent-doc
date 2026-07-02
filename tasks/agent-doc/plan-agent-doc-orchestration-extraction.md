@@ -265,6 +265,10 @@ seams:
   `agent-doc-controller::dispatch`; route keeps registry loading, canonical
   path projection, and live-owner probing while calling
   `classify_dispatch_target_bind` and `classify_dispatch_target_match`.
+- Fresh-dispatch target selection after a ready wait moved from
+  `route/dispatch.rs` to `agent-doc-controller::dispatch`; route keeps registry
+  reads, canonical path projection, handoff logging, and registration effects
+  while calling `decide_fresh_dispatch_target_after_ready_wait`.
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.

@@ -39,7 +39,22 @@ done
 Compacted content:
 - Archived 2 response topic(s): #restartstderrbleed; IPC proof diagnostic (interrupted-cycle recovery)
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): next-steps to fix bugs (and "clear the review items"); wedge r...
-<!-- agent:boundary:30394ae7 -->
+
+### Re: ensure VS Code parity — publish_live_buffer editor-save (update spec + tests + install + recycle) — opus-4-8
+
+Done. Restored VS Code parity for the editor-save / live-buffer flush, updated spec + tests, installed, and recycled.
+
+**The gap (a real bug, `#vscodepublishparity`).** The editor-sync-barrier timeout flush (`settle_or_flush_editor_sync_barrier`, `crdt_relay_host.rs`) sent `publish_live_buffer` over the **socket only** and early-returned `cause=no_ipc_listener` when no socket owned the project. VS Code (and pluginless / file-IPC editors) run **no socket**, so those sessions silently missed the live-buffer publish a JetBrains session receives — even though the sibling convergence path (`live_buffer_delivery_missing_operator_text_authority_after_refresh`, `write/converge.rs`) already fell back to the `.agent-doc/patches/publish-live-buffer.signal` file signal. It is the same "call editor save" recovery you just used — VS Code just never got asked.
+
+**Fix (committed `a435d7bd`).** Mirrored the converge fallback: socket when a listener is active, else the file signal VS Code watches. VS Code's handler (`processPublishLiveBufferSignal` → `publishLiveBufferNow`, already carrying the `#falsetyping-guard` provenance) was already correct — the binary just wasn't sending it. So parity is restored **binary-side**; no VS Code code change was needed (the fix ships to both plugins via the shared cdylib FFI).
+
+**Spec + tests + install + recycle.**
+- `SPEC.md`: documented the transport-symmetric `publish_live_buffer` contract (socket → file-signal fallback), matching the `save_document` rule.
+- Test: `editor_sync_barrier_timeout_falls_back_to_publish_live_buffer_file_signal_without_listener` proves the no-listener path writes a read-only (no `patch_id`) signal. `make check` green.
+- Install: `make install` (binary + cdylib @ 0.34.67); recycle marked 2 controllers + 3 route-owned supervisors at the idle boundary.
+
+**Residual parity (from a full JB↔VS Code diff).** Filed `#vscsaveproj` for the one remaining actionable gap: VS Code's `save_document` outcome only logs to the output channel, whereas JB records StateProjectionBridge surface ops (observability parity). Two divergences left intentionally: VS Code republishes the live buffer after a successful save (JB doesn't — harmless), and VS Code has no negative-ack channel for save failure (by design — the binary discovers it via ack-content poll timeout).
+<!-- agent:boundary:79dc58c4 -->
 <!-- /agent:exchange -->
 ## Queue
 

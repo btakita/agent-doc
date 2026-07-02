@@ -2,23 +2,6 @@
 
 use super::*;
 
-pub(crate) fn dispatch_only_starting_pane_not_ready_error(
-    harness: &HarnessConfig,
-    pane: &str,
-    file: &Path,
-    detail: &str,
-) -> String {
-    format!(
-        "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again {}",
-        harness.binary,
-        pane,
-        file.display(),
-        agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
-            "wait_for_dispatch_ready_prompt",
-        )
-    )
-}
-
 fn dispatch_only_starting_pane_ready_via_authoritative_actor(
     tmux: &Tmux,
     file: &Path,
@@ -77,23 +60,6 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
 /// project supervisor is mid-`execve` hot-reload, so a trigger typed now would
 /// be dropped before submit. Fail closed (don't type) and let the caller retry
 /// once the recycle settles.
-pub(crate) fn dispatch_only_recycle_inflight_error(
-    harness: &HarnessConfig,
-    pane: &str,
-    file: &Path,
-    reason: &str,
-) -> String {
-    format!(
-        "dispatch-only {} reopen refused to inject into pane {} for {} because the project supervisor is mid-recycle (reason={reason}); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary {}",
-        harness.binary,
-        pane,
-        file.display(),
-        agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
-            "wait_for_supervisor_recycle_settle",
-        )
-    )
-}
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DispatchOnlySendReopenOptions<'a> {
     pub(crate) delivery: DispatchOnlyReopenDelivery,
@@ -146,8 +112,18 @@ pub(crate) fn dispatch_only_send_reopen(
                         started.elapsed().as_millis()
                     ),
                 );
-                anyhow::bail!(dispatch_only_recycle_inflight_error(
-                    harness, pane, file, &reason
+                let file_display = file.display().to_string();
+                let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+                    "wait_for_supervisor_recycle_settle",
+                );
+                anyhow::bail!(dispatch_only_recycle_inflight_message(
+                    DispatchOnlyRecycleInflightMessageFacts {
+                        harness_binary: &harness.binary,
+                        pane,
+                        file_display: &file_display,
+                        reason: &reason,
+                        outcome_fields: &outcome_fields,
+                    },
                 ));
             }
             std::thread::sleep(agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL);
@@ -282,11 +258,18 @@ pub(crate) fn dispatch_only_send_reopen(
                     detail
                 ),
             );
-            anyhow::bail!(dispatch_only_starting_pane_not_ready_error(
-                harness,
-                &dispatch_pane,
-                file,
-                detail
+            let file_display = file.display().to_string();
+            let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+                "wait_for_dispatch_ready_prompt",
+            );
+            anyhow::bail!(dispatch_only_starting_pane_not_ready_message(
+                DispatchOnlyStartingPaneNotReadyMessageFacts {
+                    harness_binary: &harness.binary,
+                    pane: &dispatch_pane,
+                    file_display: &file_display,
+                    detail,
+                    outcome_fields: &outcome_fields,
+                },
             ));
         }
     }
@@ -334,7 +317,12 @@ pub(crate) fn dispatch_only_send_reopen(
             emit_busy_route_queued_diagnostic(tmux, &dispatch_pane, file, harness);
             return Ok(dispatch_pane);
         }
-        let recovery = dispatch_blocker_recovery_hint(harness, &reason, file);
+        let file_display = file.display().to_string();
+        let recovery = dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
+            harness_binary: &harness.binary,
+            reason: &reason,
+            file_display: &file_display,
+        });
         // #snrun: name the interactive shell substate distinctly from a generic
         // busy actor so the failure says which terminal state blocked dispatch.
         let guard_reason = dispatch_only_blocked_guard_reason(&reason);
@@ -850,45 +838,12 @@ pub(crate) fn retry_dispatch_only_after_busy_pane(
     );
 }
 
-pub(crate) fn dispatch_blocker_recovery_hint(
-    harness: &HarnessConfig,
-    reason: &str,
-    file: &Path,
-) -> String {
-    if harness.binary == "codex" && reason == "codex hook review prompt" {
-        return format!(
-            "open `/hooks` in that Codex pane, approve or disable the pending hook change, wait for the idle composer, then rerun `agent-doc route --dispatch-only {}` or the editor Run Agent Doc action",
-            file.display()
-        );
-    }
-
-    "restore an idle prompt and retry".to_string()
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
     use super::*;
     use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
-    #[test]
-    fn dispatch_only_starting_pane_not_ready_error_matches_sampleportal_active_turn() {
-        let file = std::path::Path::new("tasks/professional/sampleportal.md");
-        let message = dispatch_only_starting_pane_not_ready_error(
-            &HarnessConfig::codex(),
-            "%42",
-            file,
-            "active codex turn",
-        );
-
-        assert!(message.contains("dispatch-only codex reopen refused"));
-        assert!(message.contains("tasks/professional/sampleportal.md"));
-        assert!(message.contains("latest run is still booting"));
-        assert!(message.contains("never reached a dispatch-ready prompt"));
-        assert!(message.contains("(active codex turn)"));
-        assert!(message.contains("ui_outcome=blocked_with_exact_unblocker"));
-        assert!(message.contains("unblocker=wait_for_dispatch_ready_prompt"));
-    }
     #[test]
     fn dispatch_only_progress_policy_is_harness_neutral() {
         let dir = tempfile::tempdir().unwrap();
@@ -973,35 +928,6 @@ mod tests {
         );
         assert!(message.contains("proof=accepted"), "{message}");
         assert!(message.contains("proof_scope=accepted_only"), "{message}");
-    }
-    #[test]
-    fn dispatch_blocker_recovery_hint_names_codex_hook_review_action() {
-        let doc = PathBuf::from("tasks/agent-doc/agent-doc-bugs2.md");
-        let hint = dispatch_blocker_recovery_hint(
-            &HarnessConfig::codex(),
-            "codex hook review prompt",
-            &doc,
-        );
-
-        assert!(
-            hint.contains("open `/hooks`"),
-            "hook-review blockers should tell the operator where to approve hooks: {hint}"
-        );
-        assert!(
-            hint.contains("approve or disable the pending hook change"),
-            "hook-review blockers should describe the approval gate: {hint}"
-        );
-        assert!(
-            hint.contains("agent-doc route --dispatch-only tasks/agent-doc/agent-doc-bugs2.md"),
-            "hook-review blockers should include a reroute recovery command: {hint}"
-        );
-
-        let generic = dispatch_blocker_recovery_hint(
-            &HarnessConfig::codex(),
-            "queued draft in composer",
-            &doc,
-        );
-        assert_eq!(generic, "restore an idle prompt and retry");
     }
     #[test]
     fn dispatch_only_submit_proof_gate_accepts_enter_delivery_without_codex_hooks() {

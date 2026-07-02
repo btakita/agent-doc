@@ -1259,14 +1259,15 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // failure.
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof=") => 5,
         ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof_scope=") => 5,
-        // +4 (#jbdisprecycle): the recycle-in-flight dispatch guard adds four
-        // audited `reason=` tokens — the `dispatch_only_recycle_inflight_error`
-        // message (`reason={reason}`) plus three ops_log lines
-        // (`route_dispatch_only_recycle_inflight_wait/_unsettled/_settled
-        // ... reason={}`). All carry the supervisor recycle reason
+        // +3 (#jbdisprecycle): the recycle-in-flight dispatch guard adds three
+        // audited route-local `reason=` ops_log lines
+        // (`route_dispatch_only_recycle_inflight_wait/_unsettled/_settled ... reason={}`).
+        // The fail-closed refusal message wording moved to
+        // `agent-doc-controller::dispatch`.
+        // All route-local reason tokens carry the supervisor recycle reason
         // (`auto_install_reexec` / `restart_reexec`) so a deferred-then-settled
         // or fail-closed dispatch is auditable against the marker that gated it.
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 6,
+        ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 5,
         // +1 (#3x90): regression coverage for tracked dispatch-start timeouts
         // asserts that `DispatchStartUnproven` fails closed even though plain
         // `CommandAcceptedOnly` remains allowed for harnesses with no tracker.
@@ -10922,6 +10923,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn dispatch_only_sent_console_message(",
         "pub fn accepted_only_dispatch_start_log_message(",
         "pub fn accepted_only_dispatch_start_refusal_message(",
+        "pub struct DispatchOnlyStartingPaneNotReadyMessageFacts",
+        "pub fn dispatch_only_starting_pane_not_ready_message(",
+        "pub struct DispatchOnlyRecycleInflightMessageFacts",
+        "pub fn dispatch_only_recycle_inflight_message(",
+        "pub struct DispatchOnlyBlockerRecoveryHintFacts",
+        "pub fn dispatch_only_blocker_recovery_hint(",
         "pub fn routed_dispatch_start_timeout(",
         "pub fn routed_dispatch_start_timeout_for_binary(",
         "pub fn dispatch_start_busy_probe_timeout(",
@@ -11077,6 +11084,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn dispatch_only_sent_console_message(",
         "pub fn accepted_only_dispatch_start_log_message(",
         "pub fn accepted_only_dispatch_start_refusal_message(",
+        "pub struct DispatchOnlyStartingPaneNotReadyMessageFacts",
+        "pub fn dispatch_only_starting_pane_not_ready_message(",
+        "pub struct DispatchOnlyRecycleInflightMessageFacts",
+        "pub fn dispatch_only_recycle_inflight_message(",
+        "pub struct DispatchOnlyBlockerRecoveryHintFacts",
+        "pub fn dispatch_only_blocker_recovery_hint(",
         "pub fn should_print_dispatch_only_unproven_progress(",
         "pub fn routed_dispatch_start_timeout(",
         "pub fn routed_dispatch_start_timeout_for_binary(",
@@ -11258,6 +11271,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn route_dispatch_only_sent_log_message(",
         "fn route_dispatch_only_sent_console_message(",
         "fn dispatch_only_starting_pane_actor_ready_gate(",
+        "fn dispatch_only_starting_pane_not_ready_error(",
+        "fn dispatch_only_recycle_inflight_error(",
+        "fn dispatch_blocker_recovery_hint(",
         "pub fn dispatch_only_sent_log_message(",
         "pub fn accepted_only_dispatch_start_refusal_message(",
     ] {
@@ -11270,6 +11286,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         route_dispatch_only_source.contains("DispatchOnlyProofOutcomeFacts")
             && route_dispatch_only_source.contains("DispatchOnlyStartingPaneActorReadyFacts")
             && route_dispatch_only_source.contains("dispatch_only_starting_pane_actor_ready(")
+            && route_dispatch_only_source.contains("DispatchOnlyStartingPaneNotReadyMessageFacts")
+            && route_dispatch_only_source
+                .contains("dispatch_only_starting_pane_not_ready_message(")
+            && route_dispatch_only_source.contains("DispatchOnlyRecycleInflightMessageFacts")
+            && route_dispatch_only_source.contains("dispatch_only_recycle_inflight_message(")
+            && route_dispatch_only_source.contains("DispatchOnlyBlockerRecoveryHintFacts")
+            && route_dispatch_only_source.contains("dispatch_only_blocker_recovery_hint(")
             && route_dispatch_only_source.contains("dispatch_only_sent_log_message(")
             && route_dispatch_only_source.contains("dispatch_only_sent_console_message(")
             && route_dispatch_only_source.contains("accepted_only_dispatch_start_log_message(")

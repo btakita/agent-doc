@@ -1849,6 +1849,62 @@ pub fn accepted_only_dispatch_start_refusal_message(
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyStartingPaneNotReadyMessageFacts<'a> {
+    pub harness_binary: &'a str,
+    pub pane: &'a str,
+    pub file_display: &'a str,
+    pub detail: &'a str,
+    pub outcome_fields: &'a str,
+}
+
+pub fn dispatch_only_starting_pane_not_ready_message(
+    facts: DispatchOnlyStartingPaneNotReadyMessageFacts<'_>,
+) -> String {
+    format!(
+        "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({}); wait for the pane to become ready and reroute again {}",
+        facts.harness_binary, facts.pane, facts.file_display, facts.detail, facts.outcome_fields
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyRecycleInflightMessageFacts<'a> {
+    pub harness_binary: &'a str,
+    pub pane: &'a str,
+    pub file_display: &'a str,
+    pub reason: &'a str,
+    pub outcome_fields: &'a str,
+}
+
+pub fn dispatch_only_recycle_inflight_message(
+    facts: DispatchOnlyRecycleInflightMessageFacts<'_>,
+) -> String {
+    format!(
+        "dispatch-only {} reopen refused to inject into pane {} for {} because the project supervisor is mid-recycle (reason={}); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary {}",
+        facts.harness_binary, facts.pane, facts.file_display, facts.reason, facts.outcome_fields
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyBlockerRecoveryHintFacts<'a> {
+    pub harness_binary: &'a str,
+    pub reason: &'a str,
+    pub file_display: &'a str,
+}
+
+pub fn dispatch_only_blocker_recovery_hint(
+    facts: DispatchOnlyBlockerRecoveryHintFacts<'_>,
+) -> String {
+    if facts.harness_binary == "codex" && facts.reason == "codex hook review prompt" {
+        return format!(
+            "open `/hooks` in that Codex pane, approve or disable the pending hook change, wait for the idle composer, then rerun `agent-doc route --dispatch-only {}` or the editor Run Agent Doc action",
+            facts.file_display
+        );
+    }
+
+    "restore an idle prompt and retry".to_string()
+}
+
 pub fn routed_dispatch_start_timeout(test_mode: bool) -> Duration {
     routed_dispatch_start_timeout_for_binary(None, test_mode)
 }
@@ -4093,6 +4149,70 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(refusal.contains("tmux_text_enter"));
         assert!(refusal.contains("only pane-input acceptance proof was available"));
         assert!(refusal.contains("treating this as not dispatched"));
+    }
+
+    #[test]
+    fn dispatch_only_refusal_messages_preserve_unblocker_and_recycle_reason() {
+        let outcome_fields =
+            "ui_outcome=blocked_with_exact_unblocker unblocker=wait_for_dispatch_ready_prompt";
+        let not_ready = dispatch_only_starting_pane_not_ready_message(
+            DispatchOnlyStartingPaneNotReadyMessageFacts {
+                harness_binary: "codex",
+                pane: "%42",
+                file_display: "tasks/professional/sampleportal.md",
+                detail: "active codex turn",
+                outcome_fields,
+            },
+        );
+        assert!(not_ready.contains("dispatch-only codex reopen refused"));
+        assert!(not_ready.contains("tasks/professional/sampleportal.md"));
+        assert!(not_ready.contains("latest run is still booting"));
+        assert!(not_ready.contains("never reached a dispatch-ready prompt"));
+        assert!(not_ready.contains("(active codex turn)"));
+        assert!(not_ready.contains("ui_outcome=blocked_with_exact_unblocker"));
+        assert!(not_ready.contains("unblocker=wait_for_dispatch_ready_prompt"));
+
+        let recycle = dispatch_only_recycle_inflight_message(
+            DispatchOnlyRecycleInflightMessageFacts {
+                harness_binary: "codex",
+                pane: "%42",
+                file_display: "tasks/professional/sampleportal.md",
+                reason: "auto_install_reexec",
+                outcome_fields: "ui_outcome=blocked_with_exact_unblocker unblocker=wait_for_supervisor_recycle_settle",
+            },
+        );
+        assert!(recycle.contains("reason=auto_install_reexec"));
+        assert!(recycle.contains("mid-recycle"));
+        assert!(recycle.contains("unblocker=wait_for_supervisor_recycle_settle"));
+    }
+
+    #[test]
+    fn dispatch_only_blocker_recovery_hint_names_codex_hook_review_action() {
+        let hint = dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
+            harness_binary: "codex",
+            reason: "codex hook review prompt",
+            file_display: "tasks/agent-doc/agent-doc-bugs2.md",
+        });
+
+        assert!(
+            hint.contains("open `/hooks`"),
+            "hook-review blockers should tell the operator where to approve hooks: {hint}"
+        );
+        assert!(
+            hint.contains("approve or disable the pending hook change"),
+            "hook-review blockers should describe the approval gate: {hint}"
+        );
+        assert!(
+            hint.contains("agent-doc route --dispatch-only tasks/agent-doc/agent-doc-bugs2.md"),
+            "hook-review blockers should include a reroute recovery command: {hint}"
+        );
+
+        let generic = dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
+            harness_binary: "codex",
+            reason: "queued draft in composer",
+            file_display: "tasks/agent-doc/agent-doc-bugs2.md",
+        });
+        assert_eq!(generic, "restore an idle prompt and retry");
     }
 
     #[test]

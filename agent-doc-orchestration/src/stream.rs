@@ -81,7 +81,9 @@ use agent_doc_template as template;
 use agent_doc_turn::response_text::render_interleaved_thinking_response;
 use agent_doc_turn_executor::agent_stream::{StreamChunk, StreamingAgent};
 
-use crate::{agent, git, repair};
+use agent_doc_agent_io::agent;
+
+use crate::{git, repair};
 
 /// Run the stream command: stream agent output to document in real-time.
 ///

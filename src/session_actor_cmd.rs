@@ -3254,7 +3254,7 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
     let global_config = agent_doc_config::Config::default();
     #[cfg(not(test))]
     let global_config = agent_doc_config::load().unwrap_or_default();
-    if !agent_doc_orchestration::agent::codex::managed_capability_contract_required_for_doc_and_harness(
+    if !agent_doc_agent_io::agent::codex::managed_capability_contract_required_for_doc_and_harness(
         &ctx.canonical_file,
         &fm,
         &global_config,
@@ -3263,7 +3263,7 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
         return "not_required".to_string();
     }
     let expected_writable_contract = if ctx.harness == "codex" {
-        agent_doc_orchestration::agent::codex::managed_writable_root_contract_id_for_doc(
+        agent_doc_agent_io::agent::codex::managed_writable_root_contract_id_for_doc(
             &ctx.canonical_file,
             &fm,
             &global_config,

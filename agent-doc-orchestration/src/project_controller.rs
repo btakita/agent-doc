@@ -1389,7 +1389,7 @@ pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
         // `#adsessreap1`: reap a record whose pane degraded `claude → zsh`. A
         // bare-shell pane is alive but no longer owns the agent, so it must
         // transition the actor to `Closed`, not be kept as false-alive.
-        |pane| crate::session_liveness::pane_owns_live_agent(&tmux, pane),
+        |pane| agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(&tmux, pane),
         dry_run,
         caller,
         reason,

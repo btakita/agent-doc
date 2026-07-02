@@ -23,6 +23,7 @@ dependencies = [
 name = "agent-doc"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-agent-io",
  "agent-doc-archive-io",
  "agent-doc-boundary-io",
  "agent-doc-callback-io",

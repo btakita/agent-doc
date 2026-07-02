@@ -533,7 +533,10 @@ fn validate_file_claim(file: &Path) {
                     window: &entry.window,
                 },
                 agent_doc_git_io::dirs::resolve_canonical_or_absolute_file_path,
-            ) && !crate::session_liveness::pane_owns_live_agent(&tmux, &entry.pane)
+            ) && !agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(
+                &tmux,
+                &entry.pane,
+            )
         })
         .map(|(k, e)| (k.clone(), e.pane.clone()))
         .collect();

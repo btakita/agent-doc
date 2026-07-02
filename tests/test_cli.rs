@@ -14657,20 +14657,15 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "orchestration must not keep a supervisor::cwd facade over supervisor-io CWD resolution"
     );
 
-    let supervisor_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/mod.rs"))
-            .unwrap();
     let supervisor_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
     let supervisor_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/lib.rs")).unwrap();
     assert!(
-        !supervisor_mod.contains("pub mod state"),
-        "orchestration supervisor module must not re-export crash policy state"
-    );
-    assert!(
-        !supervisor_mod.contains("pub mod cwd"),
-        "orchestration supervisor module must not expose a CWD resolver facade"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/supervisor/mod.rs")
+            .exists(),
+        "orchestration must not keep a supervisor facade module"
     );
     let rpc_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
@@ -14746,7 +14741,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "orchestration must not keep a supervisor IPC transport facade"
     );
     assert!(
-        !supervisor_mod.contains("pub mod ipc"),
+        !manifest_dir
+            .join("agent-doc-orchestration/src/supervisor/mod.rs")
+            .exists(),
         "orchestration supervisor module must not expose a supervisor IPC facade"
     );
     assert!(
@@ -15854,12 +15851,11 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
         "orchestration must not keep a supervisor::resize facade"
     );
 
-    let supervisor_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/mod.rs"))
-            .unwrap();
     assert!(
-        !supervisor_mod.contains("pub mod resize"),
-        "orchestration supervisor module must not re-export resize effects"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/supervisor/mod.rs")
+            .exists(),
+        "orchestration must not keep a supervisor facade module for resize effects"
     );
 
     let start_run =
@@ -16014,20 +16010,12 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
         );
     }
 
-    let supervisor_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/mod.rs"))
-            .unwrap();
-    for forbidden in [
-        "pub mod env;",
-        "pub mod screen;",
-        "pub use agent_doc_supervisor_io::env",
-        "pub use agent_doc_supervisor_process::screen",
-    ] {
-        assert!(
-            !supervisor_mod.contains(forbidden),
-            "orchestration supervisor module must not expose an env/screen facade: {forbidden}"
-        );
-    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/supervisor/mod.rs")
+            .exists(),
+        "orchestration must not expose an env/screen supervisor facade"
+    );
     let orchestration_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();

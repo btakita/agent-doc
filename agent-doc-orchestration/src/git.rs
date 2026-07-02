@@ -957,14 +957,16 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // frontmatter onto the staged content and regenerate the snapshot sidecar in
     // the background. A corrupt snapshot self-heals instead of poisoning HEAD.
     if let (Some(snapshot), Some(head)) = (snapshot_content.as_deref(), head_doc.as_deref()) {
-        let dropped = crate::commit_integrity::dropped_committed_frontmatter_keys(
+        let dropped = agent_doc_document::commit_integrity::dropped_committed_frontmatter_keys(
             snapshot,
             head,
             &file_content,
         );
         if !dropped.is_empty() {
-            let corrected =
-                crate::commit_integrity::overlay_live_frontmatter(snapshot, &file_content);
+            let corrected = agent_doc_document::commit_integrity::overlay_live_frontmatter(
+                snapshot,
+                &file_content,
+            );
             crate::ops_log::log_op(
                 file,
                 &format!(

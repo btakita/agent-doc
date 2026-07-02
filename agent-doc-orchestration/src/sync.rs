@@ -3986,7 +3986,7 @@ fn find_alive_pane_via_open_session_log(
     // `claude → zsh` must not be re-owned off a stale session-log — treat it as
     // ownerless so the editor's live-buffer sync stays a separate lifecycle.
     if excluded_pane == Some(pane_id)
-        || !crate::session_liveness::pane_owns_live_agent(tmux, pane_id)
+        || !agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, pane_id)
     {
         return None;
     }

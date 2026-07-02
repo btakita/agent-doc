@@ -127,10 +127,6 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, O
 use std::sync::{Arc, Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
-use crate::supervisor::{
-    in_process::{InProcessSupervisor, PtySupervisedChild, TickOutcome},
-    pty::PtySpawnConfig,
-};
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::idle_drain::{
     idle_queue_drain_payload, idle_queue_drain_payload_kind, idle_queue_head_slash_command,
@@ -175,6 +171,10 @@ use agent_doc_supervisor_io::ipc::SupervisorIpc;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
 use agent_doc_supervisor_process::screen::OwnedPtyScreen;
+use agent_doc_supervisor_process::{
+    in_process::{InProcessSupervisor, PtySupervisedChild, TickOutcome},
+    pty::PtySpawnConfig,
+};
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;
 
@@ -1463,7 +1463,7 @@ fn spawn_managed_capability_proof_thread(
                     return;
                 }
                 attempt += 1;
-                match crate::agent::codex::prove_managed_session_capabilities(
+                match agent_doc_agent_io::agent::codex::prove_managed_session_capabilities(
                     &harness_binary,
                     &args,
                     &env,

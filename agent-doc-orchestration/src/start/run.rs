@@ -1308,8 +1308,11 @@ pub fn run_with_reap_policy(
                         state.child_pid, state.master_fd
                     ),
                 );
-                crate::supervisor::pty::PtySession::adopt(state.master_fd, state.child_pid)
-                    .with_context(|| "failed to adopt harness child across supervisor reexec")?
+                agent_doc_supervisor_process::pty::PtySession::adopt(
+                    state.master_fd,
+                    state.child_pid,
+                )
+                .with_context(|| "failed to adopt harness child across supervisor reexec")?
             }
 
             #[cfg(not(unix))]
@@ -1319,11 +1322,11 @@ pub fn run_with_reap_policy(
                     &mut session_log,
                     "supervisor_reexec_adopt_skipped reason=unsupported_platform",
                 );
-                crate::supervisor::pty::PtySession::spawn(cfg)
+                agent_doc_supervisor_process::pty::PtySession::spawn(cfg)
                     .with_context(|| format!("failed to spawn {}", harness.binary))?
             }
         } else {
-            crate::supervisor::pty::PtySession::spawn(cfg)
+            agent_doc_supervisor_process::pty::PtySession::spawn(cfg)
                 .with_context(|| format!("failed to spawn {}", harness.binary))?
         };
 

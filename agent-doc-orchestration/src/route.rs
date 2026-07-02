@@ -1149,7 +1149,7 @@ fn managed_capability_proof_status(
     let global_config = agent_doc_config::Config::default();
     #[cfg(not(test))]
     let global_config = rc.global_config();
-    if !crate::agent::codex::managed_capability_contract_required_for_doc_and_harness(
+    if !agent_doc_agent_io::agent::codex::managed_capability_contract_required_for_doc_and_harness(
         file,
         &fm,
         &global_config,
@@ -1159,7 +1159,11 @@ fn managed_capability_proof_status(
     }
     let prefix = format!("{}_capability_proof status=", harness.binary);
     let expected_writable_contract = if harness.binary == "codex" {
-        crate::agent::codex::managed_writable_root_contract_id_for_doc(file, &fm, &global_config)
+        agent_doc_agent_io::agent::codex::managed_writable_root_contract_id_for_doc(
+            file,
+            &fm,
+            &global_config,
+        )
     } else {
         None
     };

@@ -66,8 +66,9 @@ use crate::{
     frontmatter::{self, ResolvedMode},
     parallel, queue_dispatch,
 };
+use agent_doc_agent_io::agent;
 use agent_doc_config::{AgentConfig, Config};
-use agent_doc_orchestration::{agent, preflight::PreflightOutput, write};
+use agent_doc_orchestration::{preflight::PreflightOutput, write};
 use agent_doc_prompt_context::AgentPromptContext;
 use agent_doc_queue::dispatch_item::{QueueItemKind, classify};
 #[cfg(test)]

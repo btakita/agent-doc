@@ -1,7 +1,29 @@
 //! Commit-seam document-integrity guard.
+//!
+//! Operator-visible document text is authoritative: a commit must never
+//! *regress* frontmatter the operator kept. A legitimate pending prompt makes
+//! the committed snapshot's **body** smaller than the live working-tree file,
+//! but it never drops top-level frontmatter keys -- only a corrupt snapshot does
+//! (a stale-base CRDT merge, or a `no_liveness_signals` synthetic auto-reap that
+//! serialized a scaffold/empty base). Persisting such a snapshot poisons `HEAD`;
+//! preflight's commit step then collapses the snapshot back to the corrupt
+//! `HEAD` every cycle, so `doc != snapshot` never converges and the supervisor
+//! spins the cycle (`suprecyclespin` `cycle_never_closed`).
+//!
+//! This guard detects the *provable* regression and lets the commit path
+//! self-heal (overlay the authoritative live frontmatter, regenerate the
+//! snapshot in the background) instead of persisting the corruption. See
+//! `#boundaryaccum` / stale-CRDT recovery notes and the "operator-visible text
+//! is authoritative ... snapshots are backup, not hot-path authority" contract
+//! in `AGENTS.md`.
 
 use std::collections::BTreeSet;
 
+/// Top-level YAML frontmatter keys in `content`.
+///
+/// Returns an empty set when there is no frontmatter block or the block does
+/// not parse as a YAML mapping -- the guard only fires on a *provable* key drop,
+/// so "can't tell" degrades to "no keys" (no false positive).
 fn frontmatter_keys(content: &str) -> BTreeSet<String> {
     let Some(yaml) = agent_doc_frontmatter::raw_frontmatter_yaml(content) else {
         return BTreeSet::new();
@@ -15,6 +37,19 @@ fn frontmatter_keys(content: &str) -> BTreeSet<String> {
     }
 }
 
+/// Frontmatter keys that `to_commit` would drop, restricted to keys present in
+/// **both** the prior committed `head` and the authoritative `live_file`.
+///
+/// Restricting to `head`/`live_file` intersection keeps legitimate edits from tripping the
+/// guard:
+/// - operator *adds* a key (in `live_file`, not yet in `head`/snapshot) -> not in
+///   the intersection -> ignored;
+/// - operator *removes* a key (gone from `live_file`) -> not in the intersection
+///   -> ignored.
+///
+/// A non-empty result means the snapshot lost a key the operator still has and
+/// that was already committed -- a corrupt drop, never a normal edit. Result is
+/// sorted (`BTreeSet` order) for stable diagnostics.
 pub fn dropped_committed_frontmatter_keys(
     to_commit: &str,
     head: &str,
@@ -30,6 +65,17 @@ pub fn dropped_committed_frontmatter_keys(
         .collect()
 }
 
+/// Rebuild `to_commit` with its frontmatter block replaced by the authoritative
+/// frontmatter from `live_file`, preserving `to_commit`'s body verbatim.
+///
+/// Frontmatter is config, never selectively committed, so it is always taken
+/// from the operator-authoritative live document; the body (components /
+/// exchange) stays sourced from `to_commit` so selective response staging is
+/// unaffected. This lets a corrupt-frontmatter snapshot self-heal at the commit
+/// seam instead of poisoning HEAD or failing closed.
+///
+/// If `live_file` has no frontmatter there is nothing authoritative to apply, so
+/// `to_commit` is returned unchanged.
 pub fn overlay_live_frontmatter(to_commit: &str, live_file: &str) -> String {
     let (live_fm, _) = agent_doc_frontmatter::split_frontmatter_parts(live_file);
     let Some(live_yaml) = live_fm else {

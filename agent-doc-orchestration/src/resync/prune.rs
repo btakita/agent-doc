@@ -42,7 +42,7 @@ pub(crate) fn prune_targeted_in(
     // pane is still alive to tmux but owns no agent, so the stale registry entry
     // must be removed like a dead-pane entry.
     let removed = prune_dead_entries_for_target_in_registry(&mut registry, target, |pane| {
-        crate::session_liveness::pane_owns_live_agent(tmux, pane)
+        agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, pane)
     });
     if !removed.is_empty() {
         agent_doc_session_registry_io::save_in(base_dir, &registry)?;

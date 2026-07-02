@@ -147,7 +147,9 @@ use agent_doc_workflow::owner_pane_self_invocation::{
     OwnedPaneSelfInvocationOptions, build_owned_pane_self_invocation,
 };
 
-use crate::{agent, git, write};
+use agent_doc_agent_io::agent;
+
+use crate::{git, write};
 
 const AGENT_DOC_RUN_HEARTBEAT_SECS_ENV: &str = "AGENT_DOC_RUN_HEARTBEAT_SECS";
 const DEFAULT_RUN_HEARTBEAT_SECS: u64 = 30;
@@ -753,7 +755,7 @@ fn run_once(
             file,
             "child_agent_wait",
             agent_name,
-            Some(crate::agent::run_agent_timeout()),
+            Some(agent_doc_agent_io::agent::run_agent_timeout()),
         );
         backend.send(
             &prompt,
@@ -1494,7 +1496,7 @@ fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {
     format!(
         "direct `agent-doc {}` invocation timed out after waiting {}s for {} to return after preflight. cycle_id={} phase={} last_event={} current_pane={} {}. The cycle is recoverable; inspect with `agent-doc session-check {}` or restart the managed owner with `agent-doc start {}`.",
         file.display(),
-        crate::agent::run_agent_timeout().as_secs(),
+        agent_doc_agent_io::agent::run_agent_timeout().as_secs(),
         agent_name,
         cycle_id,
         phase,

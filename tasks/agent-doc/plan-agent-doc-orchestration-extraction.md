@@ -257,9 +257,17 @@ seams:
 - Busy dispatch-start short-probe timeout policy moved from `route/dispatch.rs`
   to `agent-doc-controller::dispatch`; route passes the local test-mode fact and
   keeps only the effectful wait/probe call.
+- Pre-send dead-harness-shell dispatch classification moved from
+  `route/dispatch.rs` to `agent-doc-controller::dispatch`; route keeps tmux
+  current-command lookup, pane capture, and diagnostics while calling
+  `classify_dead_harness_shell_dispatch_block` with scalar facts.
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.
+- Idle-queue submit-mode diagnostics moved from `start.rs` to
+  `agent-doc-supervisor::idle_watch`; orchestration now passes inject-pane
+  presence and harness binary to `idle_queue_submit_mode` from both start and
+  idle-watch adapters.
 - Supervisor child-exit provenance formatting moved from `start.rs` to
   `agent-doc-supervisor::crash_policy`; start keeps the `portable_pty`
   `ExitStatus` adapter and passes rendered status/success facts to the focused

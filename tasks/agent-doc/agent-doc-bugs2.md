@@ -194,7 +194,22 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=a59a2904-8926-4d93-bfc8-00d20b88e1db invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/a59a2904-8926-4d93-bfc8-00d20b88e1db.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782980070172
 ```
-<!-- agent:boundary:3833de62 -->
+
+### Re: cascade statechart work — opus-4-8
+
+Took the next rung: **`#adstatechartlean` (Lean invariant proof) — DONE, committed (`892fcf2` in `lazily-formal`; superproject submodule pointer bumped `0b1bcab8f`).**
+
+`LazilyFormal/AdStateChart.lean` now proves **both** rung-1 invariants the PRD calls for, each by `decide` over the finite closeout config space (so it holds on every path, not the sampled points the 8 Rust unit tests cover):
+
+- **Rejected-edge safety (all paths)** — `commit` while the editor buffer is ahead of disk leaves the config in `written`; `committed` is never entered (`commit_rejected_when_editor_ahead`, `committed_not_entered_when_editor_ahead`), and the legal edge IS taken once synced (`commit_taken_when_editor_synced`), so the guard is doing real work, not `commit` being structurally unreachable. *(Already there from the rung-1 land.)*
+- **No dead-end config** *(new this rung)* — the second invariant the PRD names. `written_not_dead_end`: the non-final `written` state always has an enabled outgoing edge under the synced resolver (progress is possible). `written_commit_edge_exists` + `enabled_empty_when_editor_ahead`: the `commit` edge stays in the transition table under every resolver — editor-ahead rejection is guard work *inside* `send`, not the edge vanishing. `committed_is_final` + `written_is_not_final`: the only terminal sink is the accepting `final` state, so the progress obligation lands on a real non-accepting state rather than vacuously on the sink. Full `lake build` green (14 jobs).
+
+`Kind` derives only `Repr`, so final-ness is projected through a `Bool` match and edge presence uses `.length` to stay decidable without `DecidableEq Kind`/`Transition`.
+
+**Honest boundary unchanged:** this is per-process safety only. It proves the chart cannot *take* the illegal edge and has no non-accepting dead-end; it does **not** prove production wedge-freedom — a live wedge is "the unblocking IPC-ack/recycle event never fires", a distributed-liveness property outside a per-process chart (root cause **B**).
+
+**Remaining cascade:** `#adstatechart2` (observability read) / `#adstatechart3` (live wiring — gated behind the decomposition landing + install), the JetBrains-plugin lazily-kt 0.9.0 dep bump + `#mergestatemachine3` fold-in (`#adstatechartkt`), and the VS Code-plugin `@lazily/js` 1.1.0 dep bump (`#adstatechartjs`; npm publish still operator-2FA-gated, `#lzjsnpmpub`). Say "cascade" for the next rung (I'd take the JetBrains-plugin kt dep bump next — it's the one with live-plugin payoff), or name one.
+<!-- agent:boundary:8ff0bcbe -->
 <!-- /agent:exchange -->
 ## Queue
 

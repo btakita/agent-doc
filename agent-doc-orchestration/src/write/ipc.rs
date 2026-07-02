@@ -4,10 +4,12 @@ use super::*;
 use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;
 use agent_doc_document_realtime::write_policy::{
     WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
-    WholeBufferDeliveryAction, ack_content_contains_latest_response, decide_whole_buffer_delivery,
+    WholeBufferDeliveryAction, ack_content_contains_latest_response,
+    buffer_presents_reference_response, decide_whole_buffer_delivery,
     dropped_prompt_lines_after_content_ours, first_response_heading,
     ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, new_agent_response_headings,
-    response_already_in_current, response_target_disjoint_from_user_edit,
+    response_already_in_current, response_converged_in_visible_target,
+    response_target_disjoint_from_user_edit,
 };
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
@@ -502,6 +504,73 @@ pub(crate) fn ack_content_disk_write_proof(
     }
 }
 
+/// `#adoc-live-prompt-drift-operator-edit`: reconcile the ack-content snapshot the
+/// closeout is about to persist FORWARD to the operator's *newer* live buffer when
+/// the operator kept editing past the ack capture (so the ack is stale relative to
+/// the live buffer). The newer operator-authoritative buffer is adopted as the
+/// snapshot — provided it still presents this cycle's response and is structurally
+/// clean — so the disk-write-through proof matches the live buffer instead of
+/// wedging on `stale_source_buffer`, and disk/snapshot/CRDT all persist the
+/// operator's latest edits consistently. Returns true when a forward reconcile
+/// happened. Never regresses to an older or non-authoritative buffer.
+pub(crate) fn reconcile_ack_snapshot_to_newer_operator_buffer(
+    file: &Path,
+    editor_id: Option<&str>,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return false;
+    };
+    let Some(newer) = live_buffer_file_keys(file)
+        .into_iter()
+        .flat_map(|file_key| agent_doc_debounce::live_buffer_snapshots(&file_key))
+        .filter(|snapshot| {
+            snapshot
+                .editor_id
+                .as_deref()
+                .is_some_and(|candidate| candidate == editor_id)
+        })
+        .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
+        .filter(|snapshot| {
+            snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+        })
+        .max_by_key(|snapshot| snapshot.timestamp_ms)
+    else {
+        return false;
+    };
+    let Some(newer_content) = newer.content.as_deref() else {
+        return false;
+    };
+    // Already consistent — nothing to reconcile.
+    if newer_content == decision.snapshot_content {
+        return false;
+    }
+    // Only reconcile forward when the newer operator buffer still carries this
+    // cycle's response; otherwise leave the existing fail-closed proof to run so a
+    // genuinely dropped response is never silently committed.
+    if !buffer_presents_reference_response(&decision.snapshot_content, newer_content) {
+        return false;
+    }
+    // Structural safety: never adopt a corrupt operator buffer.
+    if element::structural_corruption_reason(newer_content).is_some() {
+        return false;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ack_content_snapshot_reconciled_forward file={} editor_id={} reason=operator_buffer_ahead stale_len={} stale_hash={} newer_len={} newer_hash={}",
+            file.display(),
+            editor_id,
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            newer_content.len(),
+            agent_doc_hash::content_hash(newer_content),
+        ),
+    );
+    decision.snapshot_content = newer_content.to_string();
+    true
+}
+
 #[cfg(test)]
 const ACK_CONTENT_TYPING_SETTLE_MS: u64 = 75;
 #[cfg(not(test))]
@@ -932,8 +1001,14 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 );
             }
         }
+        // #adoc-live-prompt-drift-operator-edit: the reconciled `merged_doc` is the
+        // operator-visible converged state (semantic merge, operator-wins on the
+        // response node). It is proven — no editor redelivery required — as soon as
+        // it presents this cycle's response heading(s) with a body, even if the
+        // operator edited the response text. Requiring the agent's exact bytes here
+        // is what wedged the closeout on an operator body-edit.
         let visible_repair_required =
-            !ack_content_contains_latest_response(&candidate, &merged_doc);
+            !response_converged_in_visible_target(base, &candidate, &merged_doc);
         decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
             &merged_doc,
             visible_repair_required,
@@ -973,7 +1048,11 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 agent_doc_hash::content_hash(&union),
             ),
         );
-        let visible_repair_required = !ack_content_contains_latest_response(&candidate, &union);
+        // #adoc-live-prompt-drift-operator-edit: same operator-edit tolerance for the
+        // forward-merge union — proven once it presents this cycle's response
+        // heading(s) with a body, regardless of operator body-edits.
+        let visible_repair_required =
+            !response_converged_in_visible_target(base, &candidate, &union);
         decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
             &union,
             visible_repair_required,
@@ -1992,7 +2071,11 @@ fn redelivery_missing_operator_text_authority(
         if let Ok(canonical) = file.canonicalize() {
             let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
             let disk = std::fs::read_to_string(&canonical).unwrap_or_default();
-            let refresh_target = if disk.is_empty() { expected_bad_state } else { &disk };
+            let refresh_target = if disk.is_empty() {
+                expected_bad_state
+            } else {
+                &disk
+            };
             let _ = agent_doc_ipc_io::send_refresh_content(
                 &project_root,
                 &canonical.to_string_lossy(),
@@ -2943,6 +3026,92 @@ mod ack_content_snapshot_tests {
         assert!(
             log.contains("ack_content_disk_write_proof_typing_settle"),
             "typing-settle proof should be auditable:\n{log}"
+        );
+    }
+
+    #[test]
+    fn reconcile_ack_snapshot_forward_adopts_newer_operator_buffer_presenting_response() {
+        // #adoc-live-prompt-drift-operator-edit: the ack snapshot the closeout is
+        // about to persist is stale (agent's exact body) relative to the operator's
+        // newer live buffer (edited body, response still present). Reconcile forward
+        // to the newer operator-authoritative buffer instead of wedging.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("session.md");
+        std::fs::write(&doc, "before\n").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let editor_id = "jetbrains:test";
+        let stale_ack = "<!-- agent:exchange -->\n❯ fold it in\n### Re: folded — opus\n\nAgent exact body.\n<!-- /agent:exchange -->\n";
+        let newer = "<!-- agent:exchange -->\n❯ fold it in\n### Re: folded — opus\n\nOperator reworded body, happy 4th.\n<!-- /agent:exchange -->\n";
+
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            newer,
+            editor_id,
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let mut decision = IpcRepairDecision::ack_content(stale_ack.to_string());
+        let reconciled =
+            reconcile_ack_snapshot_to_newer_operator_buffer(&doc, Some(editor_id), &mut decision);
+
+        assert!(
+            reconciled,
+            "newer operator buffer presenting the response must reconcile forward"
+        );
+        assert_eq!(
+            decision.snapshot_content, newer,
+            "snapshot must adopt the operator's newer buffer so disk/snapshot/CRDT stay consistent"
+        );
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ack_content_snapshot_reconciled_forward"),
+            "forward reconcile must be auditable:\n{log}"
+        );
+    }
+
+    #[test]
+    fn reconcile_ack_snapshot_forward_declines_when_newer_buffer_dropped_the_response() {
+        // Fail closed: the newer buffer no longer carries the response, so the stale
+        // ack must NOT reconcile forward (the existing proof stays authoritative).
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("session.md");
+        std::fs::write(&doc, "before\n").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let editor_id = "jetbrains:test";
+        let stale_ack = "<!-- agent:exchange -->\n❯ fold it in\n### Re: folded — opus\n\nAgent exact body.\n<!-- /agent:exchange -->\n";
+        let newer_without_response =
+            "<!-- agent:exchange -->\n❯ fold it in\n<!-- /agent:exchange -->\n";
+
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            newer_without_response,
+            editor_id,
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let mut decision = IpcRepairDecision::ack_content(stale_ack.to_string());
+        let reconciled =
+            reconcile_ack_snapshot_to_newer_operator_buffer(&doc, Some(editor_id), &mut decision);
+
+        assert!(
+            !reconciled,
+            "must not reconcile forward when the response was dropped"
+        );
+        assert_eq!(
+            decision.snapshot_content, stale_ack,
+            "snapshot unchanged on decline"
         );
     }
 

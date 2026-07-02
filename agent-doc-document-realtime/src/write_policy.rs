@@ -361,6 +361,78 @@ pub fn ack_content_contains_latest_response(ack_content: &str, target: &str) -> 
     response_materialized_in_content(&response, ack_content)
 }
 
+/// Operator-edit-tolerant convergence predicate for the `live_prompt_drift`
+/// closeout path (`#adoc-live-prompt-drift-operator-edit`).
+///
+/// Returns true when `target` — the reconciled snapshot about to be adopted —
+/// already presents every `### Re:` response heading the agent authored this
+/// cycle (`base` → `candidate`) with a non-empty body. That means the response
+/// converged into the operator-visible document even though the operator may
+/// have edited the body before the write landed, so the editor already shows
+/// the response and NO redelivery/repair is required — closeout must not wedge.
+///
+/// This is the reconcile-aware counterpart to
+/// [`ack_content_contains_latest_response`], which requires the agent's *exact*
+/// response bytes and therefore misreads any operator body-edit as
+/// "response missing", forcing a needless editor redelivery that cannot prove
+/// against a lagging disk (the observed live_prompt_drift wedge). When the cycle
+/// authored no new `### Re:` heading, it falls back to the exact materialization
+/// check so non-heading turns keep their prior proof semantics unchanged.
+pub fn response_converged_in_visible_target(base: &str, candidate: &str, target: &str) -> bool {
+    let headings = new_agent_response_headings(base, candidate);
+    if headings.is_empty() {
+        return ack_content_contains_latest_response(candidate, target);
+    }
+    let target_exchange = exchange_component_text(target);
+    headings
+        .iter()
+        .all(|heading| response_heading_has_body(&target_exchange, heading))
+}
+
+/// True when `buffer` still presents the latest `### Re:` response block found in
+/// `reference` — matched by heading with a non-empty body — even if the operator
+/// edited the body. `reference` is the proven ack content (which carries the
+/// response); `buffer` is a *newer* operator live buffer that has moved ahead of
+/// it. Used to reconcile a stale ack-content disk write FORWARD to the operator's
+/// newer buffer instead of wedging on a `stale_source_buffer` mismatch
+/// (`#adoc-live-prompt-drift-operator-edit`). When `reference` carries no response
+/// block there is nothing to preserve, so it returns true.
+pub fn buffer_presents_reference_response(reference: &str, buffer: &str) -> bool {
+    let Some(response) = latest_exchange_response_block(reference) else {
+        return true;
+    };
+    match first_response_heading(&response) {
+        Some(heading) => response_heading_has_body(&exchange_component_text(buffer), &heading),
+        None => ack_content_contains_latest_response(reference, buffer),
+    }
+}
+
+/// True when `exchange` contains `heading` on its own trimmed line followed by
+/// at least one non-empty content line before the next `### Re:` heading,
+/// `<!-- agent:boundary:` marker, or the end of the component — i.e. the
+/// response body was kept (possibly operator-edited), not emptied. An emptied or
+/// missing body returns false so the fail-closed repair path still runs for that
+/// degenerate case.
+fn response_heading_has_body(exchange: &str, heading: &str) -> bool {
+    let mut lines = exchange.lines();
+    while let Some(line) = lines.next() {
+        if line.trim() != heading {
+            continue;
+        }
+        for body in lines.by_ref() {
+            let trimmed = body.trim();
+            if trimmed.starts_with("### Re:") || trimmed.starts_with("<!-- agent:boundary:") {
+                return false;
+            }
+            if !trimmed.is_empty() {
+                return true;
+            }
+        }
+        return false;
+    }
+    false
+}
+
 fn latest_exchange_response_block(content: &str) -> Option<String> {
     let exchange = exchange_content(content);
     let lines = exchange
@@ -2557,6 +2629,97 @@ Same content.
             "### Re: other response - gpt-5\n\nOther body.\n",
             target,
         ));
+    }
+
+    #[test]
+    fn response_converged_true_when_operator_edited_body_but_kept_heading() {
+        // #adoc-live-prompt-drift-operator-edit: the operator edited the response
+        // body before commit. The heading is present with a body, so the target is
+        // converged — no editor repair required (must NOT wedge), even though the
+        // agent's exact bytes are gone.
+        let base = doc_with_exchange("❯ fold in the line\n", "");
+        let candidate = doc_with_exchange(
+            "❯ fold in the line\n### Re: folded draft — opus\n\nAgent's exact draft body.\n",
+            "",
+        );
+        let operator_edited = doc_with_exchange(
+            "❯ fold in the line\n### Re: folded draft — opus\n\nOperator's reworded body.\n",
+            "",
+        );
+
+        assert!(
+            response_converged_in_visible_target(&base, &candidate, &operator_edited),
+            "operator body-edit with heading + body present is converged"
+        );
+        // The strict byte check is what used to wedge here.
+        assert!(!ack_content_contains_latest_response(
+            &candidate,
+            &operator_edited
+        ));
+    }
+
+    #[test]
+    fn response_converged_false_when_heading_present_but_body_emptied() {
+        let base = doc_with_exchange("❯ do #x\n", "");
+        let candidate = doc_with_exchange("❯ do #x\n### Re: do #x — opus\n\nAgent body.\n", "");
+        // Operator emptied the body (kept only the heading) → not converged, the
+        // fail-closed repair path must still run.
+        let emptied = doc_with_exchange("❯ do #x\n### Re: do #x — opus\n\n", "");
+
+        assert!(!response_converged_in_visible_target(
+            &base, &candidate, &emptied
+        ));
+    }
+
+    #[test]
+    fn response_converged_false_when_heading_missing() {
+        let base = doc_with_exchange("❯ do #x\n", "");
+        let candidate = doc_with_exchange("❯ do #x\n### Re: do #x — opus\n\nAgent body.\n", "");
+        // Response never landed in the target (editor still shows only the prompt).
+        let no_response = doc_with_exchange("❯ do #x\n", "");
+
+        assert!(!response_converged_in_visible_target(
+            &base,
+            &candidate,
+            &no_response
+        ));
+    }
+
+    #[test]
+    fn response_converged_falls_back_to_exact_check_without_new_heading() {
+        // No NEW response heading this cycle → preserve prior exact-materialization
+        // semantics.
+        let base = doc_with_exchange("### Re: pre — opus\n\nOld.\n", "");
+        let candidate = doc_with_exchange("### Re: pre — opus\n\nOld.\n", "");
+        let target = doc_with_exchange("### Re: pre — opus\n\nOld.\n", "");
+
+        assert!(response_converged_in_visible_target(
+            &base, &candidate, &target
+        ));
+    }
+
+    #[test]
+    fn buffer_presents_reference_response_true_for_newer_operator_edit() {
+        // Reference = proven ack content (carries the response). Buffer = a NEWER
+        // operator buffer whose response body was edited. It still presents the
+        // response heading with a body, so the stale ack can reconcile forward.
+        let reference = doc_with_exchange("❯ prompt\n### Re: topic — opus\n\nAck body.\n", "");
+        let newer = doc_with_exchange(
+            "❯ prompt\n### Re: topic — opus\n\nOperator edited body, plus a happy-4th line.\n",
+            "",
+        );
+
+        assert!(buffer_presents_reference_response(&reference, &newer));
+    }
+
+    #[test]
+    fn buffer_presents_reference_response_false_when_response_dropped_from_newer_buffer() {
+        let reference = doc_with_exchange("❯ prompt\n### Re: topic — opus\n\nAck body.\n", "");
+        // Operator (or a bad merge) dropped the response entirely in the newer
+        // buffer → must NOT reconcile forward (fail closed).
+        let newer = doc_with_exchange("❯ prompt\n", "");
+
+        assert!(!buffer_presents_reference_response(&reference, &newer));
     }
 
     #[test]

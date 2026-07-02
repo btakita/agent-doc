@@ -594,6 +594,17 @@ pub fn try_ipc(
                     if let Some(ref path) = fallback_patch_file {
                         let _ = std::fs::remove_file(path);
                     }
+                    // #adoc-live-prompt-drift-operator-edit: if the operator kept
+                    // editing past the ack capture, reconcile the snapshot forward to
+                    // their newer live buffer BEFORE the visible-state repair and disk
+                    // proof, so the closeout persists the operator's latest edits and
+                    // the proof matches the live buffer instead of wedging on a stale
+                    // source buffer.
+                    reconcile_ack_snapshot_to_newer_operator_buffer(
+                        file,
+                        socket_editor_id.as_deref(),
+                        &mut repair_decision,
+                    );
                     repair_ipc_decision_visible_state(file, &repair_decision, Some(&patch_id))?;
                     if repair_decision.snap_source.is_ack_content_proven() {
                         let proof = ack_content_disk_write_proof(

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -53,7 +53,7 @@ Done. On the Lender Pipeline **Advance lender** dialog, the lender-document uplo
 **Committed + pushed:** EFS `d52d7d9` → `origin/main`; superproject submodule pointer bumped (`83cd4f3`).
 
 `deploy` is still queued but the queue is paused — unpause (or say the word) and I'll ship it to production.
-<!-- agent:boundary:14dfa97a -->
+<!-- agent:boundary:3955f1e0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,7 +74,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" start -->
 - ~~On https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=advance-lender, the upload fields should be replaced by the questionaire. Remove all lender annual requirements uploads.~~
-- 🚧 deploy
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

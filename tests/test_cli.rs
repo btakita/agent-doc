@@ -10790,6 +10790,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct AuthoritativeActorReadyFacts",
         "pub struct AuthoritativePromptReadyBarrierFacts",
         "pub fn classify_authoritative_prompt_ready_barrier(",
+        "pub struct DispatchOnlyStartingPaneActorReadyFacts",
+        "pub fn dispatch_only_starting_pane_actor_ready(",
         "pub struct StartingActorLogFacts",
         "pub fn starting_actor_not_ready_log_line(",
         "pub fn starting_actor_ready_log_line(",
@@ -10997,6 +10999,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct AuthoritativeActorReadyFacts",
         "pub struct AuthoritativePromptReadyBarrierFacts",
         "pub fn classify_authoritative_prompt_ready_barrier(",
+        "pub struct DispatchOnlyStartingPaneActorReadyFacts",
+        "pub fn dispatch_only_starting_pane_actor_ready(",
         "pub struct StartingActorLogFacts",
         "pub fn starting_actor_not_ready_log_line(",
         "pub fn starting_actor_ready_log_line(",
@@ -11247,6 +11251,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     for forbidden_snippet in [
         "fn route_dispatch_only_sent_log_message(",
         "fn route_dispatch_only_sent_console_message(",
+        "fn dispatch_only_starting_pane_actor_ready_gate(",
         "pub fn dispatch_only_sent_log_message(",
         "pub fn accepted_only_dispatch_start_refusal_message(",
     ] {
@@ -11257,6 +11262,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     }
     assert!(
         route_dispatch_only_source.contains("DispatchOnlyProofOutcomeFacts")
+            && route_dispatch_only_source.contains("DispatchOnlyStartingPaneActorReadyFacts")
+            && route_dispatch_only_source.contains("dispatch_only_starting_pane_actor_ready(")
             && route_dispatch_only_source.contains("dispatch_only_sent_log_message(")
             && route_dispatch_only_source.contains("dispatch_only_sent_console_message(")
             && route_dispatch_only_source.contains("accepted_only_dispatch_start_log_message(")

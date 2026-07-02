@@ -835,6 +835,27 @@ pub fn classify_authoritative_prompt_ready_barrier(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyStartingPaneActorReadyFacts<'a> {
+    pub requested_pane: &'a str,
+    pub ready_facts: &'a AuthoritativeActorReadyFacts,
+    pub dispatch_eligible: bool,
+}
+
+pub fn dispatch_only_starting_pane_actor_ready(
+    facts: DispatchOnlyStartingPaneActorReadyFacts<'_>,
+) -> bool {
+    facts.ready_facts.pane_id == facts.requested_pane
+        && facts.ready_facts.actor_state == ActorDispatchState::Ready
+        && matches!(
+            classify_authoritative_prompt_ready_barrier(AuthoritativePromptReadyBarrierFacts {
+                ready_facts: facts.ready_facts,
+                dispatch_eligible: facts.dispatch_eligible,
+            }),
+            PromptReadyBarrierDecision::Ready
+        )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StartingActorLogFacts<'a> {
     pub file_display: &'a str,
     pub harness_binary: &'a str,
@@ -4351,6 +4372,63 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             })
             .contains("timeout_ms=8000")
         );
+    }
+
+    #[test]
+    fn dispatch_only_starting_pane_actor_ready_requires_same_ready_prompt_proven_actor() {
+        let ready_facts = AuthoritativeActorReadyFacts {
+            pane_id: "%42".to_string(),
+            generation: 9,
+            actor_state: ActorDispatchState::Ready,
+            supervisor_health: "healthy".to_string(),
+            runtime_state: "ready".to_string(),
+            prompt_ready: true,
+            last_transition_reason: "prompt_ready".to_string(),
+            last_transition_caller: "route".to_string(),
+        };
+
+        assert!(dispatch_only_starting_pane_actor_ready(
+            DispatchOnlyStartingPaneActorReadyFacts {
+                requested_pane: "%42",
+                ready_facts: &ready_facts,
+                dispatch_eligible: true,
+            }
+        ));
+        assert!(!dispatch_only_starting_pane_actor_ready(
+            DispatchOnlyStartingPaneActorReadyFacts {
+                requested_pane: "%99",
+                ready_facts: &ready_facts,
+                dispatch_eligible: true,
+            }
+        ));
+
+        let mut missing_prompt = ready_facts.clone();
+        missing_prompt.prompt_ready = false;
+        assert!(!dispatch_only_starting_pane_actor_ready(
+            DispatchOnlyStartingPaneActorReadyFacts {
+                requested_pane: "%42",
+                ready_facts: &missing_prompt,
+                dispatch_eligible: true,
+            }
+        ));
+
+        let mut busy = ready_facts.clone();
+        busy.actor_state = ActorDispatchState::Busy;
+        assert!(!dispatch_only_starting_pane_actor_ready(
+            DispatchOnlyStartingPaneActorReadyFacts {
+                requested_pane: "%42",
+                ready_facts: &busy,
+                dispatch_eligible: true,
+            }
+        ));
+
+        assert!(!dispatch_only_starting_pane_actor_ready(
+            DispatchOnlyStartingPaneActorReadyFacts {
+                requested_pane: "%42",
+                ready_facts: &ready_facts,
+                dispatch_eligible: false,
+            }
+        ));
     }
 
     #[test]

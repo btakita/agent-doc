@@ -19,28 +19,6 @@ pub(crate) fn dispatch_only_starting_pane_not_ready_error(
     )
 }
 
-fn dispatch_only_starting_pane_actor_ready_gate(
-    actor: &AuthoritativeActorDispatchTarget,
-    pane: &str,
-    prompt_ready: bool,
-) -> bool {
-    if actor.record.pane_id != pane {
-        return false;
-    }
-    if actor.actor_state() != agent_doc_sqlite::state_store::ActorState::Ready {
-        return false;
-    }
-    matches!(
-        classify_authoritative_prompt_ready_barrier(AuthoritativePromptReadyBarrierFacts {
-            ready_facts: &authoritative_actor_ready_facts_from_target(actor, prompt_ready),
-            dispatch_eligible: supervisor_authoritative_actor_dispatch_target_eligible(
-                &actor.runtime,
-            ),
-        }),
-        PromptReadyBarrierDecision::Ready
-    )
-}
-
 fn dispatch_only_starting_pane_ready_via_authoritative_actor(
     tmux: &Tmux,
     file: &Path,
@@ -69,7 +47,12 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
         }
     };
     let prompt_ready = current_generation_ready_prompt_proven(tmux, &actor, harness);
-    if !dispatch_only_starting_pane_actor_ready_gate(&actor, dispatch_pane, prompt_ready) {
+    let ready_facts = authoritative_actor_ready_facts_from_target(&actor, prompt_ready);
+    if !dispatch_only_starting_pane_actor_ready(DispatchOnlyStartingPaneActorReadyFacts {
+        requested_pane: dispatch_pane,
+        ready_facts: &ready_facts,
+        dispatch_eligible: supervisor_authoritative_actor_dispatch_target_eligible(&actor.runtime),
+    }) {
         return false;
     }
 
@@ -887,7 +870,6 @@ mod tests {
     #![allow(unused_imports)]
     use super::*;
     use crate::supervisor::ipc::SupervisorIpc;
-    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     #[test]
     fn dispatch_only_starting_pane_not_ready_error_matches_sampleportal_active_turn() {
@@ -906,51 +888,6 @@ mod tests {
         assert!(message.contains("(active codex turn)"));
         assert!(message.contains("ui_outcome=blocked_with_exact_unblocker"));
         assert!(message.contains("unblocker=wait_for_dispatch_ready_prompt"));
-    }
-    #[test]
-    fn dispatch_only_starting_pane_actor_ready_gate_requires_same_ready_prompt_proven_actor() {
-        let mut record = test_actor_record("%42");
-        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
-        record.generation = 9;
-        record.last_transition.reason = "prompt_ready".to_string();
-        record.last_transition.new_generation = 9;
-        let ready_actor = AuthoritativeActorDispatchTarget {
-            record,
-            runtime: SupervisorRuntime {
-                health: SupervisorHealth::Healthy,
-                actor_state: Some(RouteActorState::Ready),
-            },
-        };
-
-        assert!(
-            dispatch_only_starting_pane_actor_ready_gate(&ready_actor, "%42", true),
-            "a healthy Ready actor for the same pane with prompt proof should satisfy the startup gate"
-        );
-        assert!(
-            !dispatch_only_starting_pane_actor_ready_gate(&ready_actor, "%99", true),
-            "a Ready actor for a different pane must not satisfy this dispatch pane's gate"
-        );
-        assert!(
-            !dispatch_only_starting_pane_actor_ready_gate(&ready_actor, "%42", false),
-            "Ready state without prompt/current-generation proof must still fail closed"
-        );
-
-        let mut busy_actor = ready_actor.clone();
-        busy_actor.runtime.actor_state = Some(RouteActorState::Busy);
-        assert!(
-            !dispatch_only_starting_pane_actor_ready_gate(&busy_actor, "%42", true),
-            "non-Ready runtime state must not bypass the startup probe"
-        );
-
-        let mut degraded_actor = ready_actor;
-        degraded_actor.runtime = SupervisorRuntime {
-            health: SupervisorHealth::NoSocket,
-            actor_state: None,
-        };
-        assert!(
-            !dispatch_only_starting_pane_actor_ready_gate(&degraded_actor, "%42", true),
-            "a persisted Ready record without healthy runtime authority must not bypass the startup probe"
-        );
     }
     #[test]
     fn dispatch_only_progress_policy_is_harness_neutral() {

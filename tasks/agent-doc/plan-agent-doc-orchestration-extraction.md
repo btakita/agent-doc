@@ -254,6 +254,9 @@ seams:
   `route/dispatch.rs` to `agent-doc-controller::dispatch`; route keeps tmux pane
   capture, the short proof probe, diagnostics, and ops-log effects while calling
   `busy_dispatch_start_outcome` directly.
+- Busy dispatch-start short-probe timeout policy moved from `route/dispatch.rs`
+  to `agent-doc-controller::dispatch`; route passes the local test-mode fact and
+  keeps only the effectful wait/probe call.
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.

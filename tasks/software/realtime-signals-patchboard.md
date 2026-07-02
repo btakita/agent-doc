@@ -27,11 +27,19 @@ The interface is a realtime signal patchboard with scopes.
 
 The closest metaphors are:
 
+- a modular synth patchbay: nodes are modules with typed input/output jacks,
+  edges are patch cables, and patching a signal should feel like plugging a
+  cable into a rack
 - Max/MSP for signal flow
 - an oscilloscope for live inspection
 - a spreadsheet for approachable tabular state
 - a model debugger for training and promotion
 - a versioned document session for auditability and collaboration
+
+It should feel like a music patchboard, but for signals, information, and
+logic that ordinary operators can use. Every cable is observable in the
+moment — live value, sparkline, rate, freshness — and every module exposes
+its state, including Harel state charts on state-bearing nodes.
 
 Users wire streams into a graph. Every wire carries typed data and can be
 inspected in realtime. Deterministic nodes transform signals. Learnable nodes
@@ -787,14 +795,17 @@ Why it is a good wedge:
 - Promotion ledger
 - Connector adapters
 
-The reactive graph runtime is `lazily`, now available across three conforming
-implementations, so one patchboard design runs on every frontend:
+The reactive graph runtime is `lazily`, and the product UI is **Slint**
+(https://slint.dev/) rather than Flutter. Slint is Rust-native, so the UI
+links directly against `lazily-rs`, `signal-space-rs`, and the patchboard
+adapter in one process with no FFI boundary, and it also compiles to
+WebAssembly for a browser observer:
 
 | Runtime | Frontends | Role |
 |---------|-----------|------|
-| `lazily-rs` | native, server, CLI | reference implementation; backs the first patchboard adapter; heavy replay and batch training |
-| `lazily-dart` | Flutter (iOS, Android, desktop, web) | mobile and cross-platform UI runtime; pure Dart, no native binaries |
-| `lazily-js` | browser, editor extensions | web / dashboard / live-mode UI runtime |
+| `lazily-rs` + Slint | native desktop (Linux, macOS, Windows), WebAssembly | primary product UI; heavy replay and batch training; realtime I/O host |
+| `lazily-js` | browser, editor extensions | read-only mirrors and dashboards over the Snapshot/Delta stream |
+| `lazily-dart` | Flutter (iOS, Android) | optional mobile companion (labels, alerts, overrides); not the product UI |
 
 All three share `lazily-spec` (the wire protocol and state-chart behavior) and
 project through `signal-space`, so a patchboard's graph, timeline, inspectors,
@@ -802,6 +813,41 @@ decisions, and intents mean the same thing on every device. The product stays
 local-first: raw signals stay on-device when possible, and only derived
 features, decisions, labels, and model metadata sync across runtimes when the
 user opts in.
+
+### Realtime I/O
+
+The patchboard is not a closed simulation. It has first-class ingress and
+egress so other systems can feed it and be notified in realtime.
+
+Ingress connectors:
+
+- webhook intake (HTTP)
+- WebSocket subscription to remote feeds
+- file tail (logs, JSONL)
+- stdin JSONL
+- timers and clocks
+- service adapters (email, CI, git, Stripe, GA4, agent-doc state, tsift
+  packets, corky signals)
+
+Egress connectors:
+
+- webhook POST with a bounded JSON packet
+- WebSocket broadcast of the signal-space Snapshot/Delta stream — the spine
+  that lets dashboards, browser observers, and other systems watch the rack
+  live
+- desktop notifications
+- allowlisted command execution
+- advisory agent triggers (bounded packet to an agent loop such as agent-doc)
+
+I/O rules:
+
+- every egress action passes a deterministic gate and the signal-space
+  authority boundary; no connector holds direct authority
+- every action taken or suppressed lands on the timeline
+- connector failures are themselves signals (freshness and missing-data
+  indicators flip)
+- credentials are referenced by name and resolved by the host; secrets never
+  live in the patchboard document
 
 ### Model Options
 

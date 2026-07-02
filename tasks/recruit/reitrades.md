@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -74,6 +74,9 @@ Given what you know about my work, what are some examples of the plumbing that I
 5. **Audit-trail / change-history library.** Append-only "who changed what, when" tracking. Their admin DBMS explicitly needs audit trails; a clean generic audit crate is pure plumbing.
 
 6. **Permissions / RBAC layer.** Roles, scopes, and resource ownership for the buyer / seller / broker separation. Generic policy infra, load-bearing for the broker segment.
+3. **The legitimate Rust angle is the opposite framing.** Your value isn't "I want to learn Rust" — it's "the reusable plumbing I'd contribute is *already* built in Rust," which is why it's cheap, proven, and low-risk. That's a client benefit (exists today, battle-tested, royalty-free to him), not a personal motivation. If Rust surfaces at all, that's the frame — and it belongs on a technical call, not in the outreach.
+2. **It reads as risk, not upside.** To a cost-sensitive early-stage founder, "I want to use Rust" can sound like over-engineering, slower iteration, or a harder-to-hire stack for a young product. You'd be planting a doubt you don't need to raise.
+1. **It's freelancer-centric.** Artur cares that his problem gets solved correctly and cheaply. "I want to get into Rust" is about your growth, and it lands the same way the MLP thing would — as using his engagement to scratch a personal itch. That's the exact misfit signal to avoid with a budget-conscious, bootstrapped founder.
 
 Optional: import/export + migration tooling (overlaps your spreadsheet/cell-family work), and an eval harness for AI output quality (from `eval-runner`).
 
@@ -94,12 +97,29 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/reitrades.md source=socket_already_applied patch_id=d26f0b3e-f6a3-47d3-b731-ef2b5bca4f21 invariant=disk_missing_response_probe recovery=content_ours_snapshot_visible_response_repair response_sha256=def071b2208e0feb8e168601b8a10bf4c94a91949106a8202479aa70c83ae832 current_len=6153 current_hash=6def72e3c5ae01bf68223b16cd3f3cc5deb574842ff6a2c242cdc83c9d305482 repaired_len=9277 repaired_hash=db23647a2addfcc45a44f132b773225c773d47fa736070278a8b38db955911b5 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782948994082
 ```
-<!-- agent:boundary:f4e30ee8 -->
+
+### Re: Mentioning "want to get into Rust" — opus-4-8
+
+Short answer: no — not as a *motivating factor*, and not in this note.
+
+Reasoning:
+
+1. **It's freelancer-centric.** Artur cares that his problem gets solved correctly and cheaply. "I want to get into Rust" is about your growth, and it lands the same way the MLP thing would — as using his engagement to scratch a personal itch. That's the exact misfit signal to avoid with a budget-conscious, bootstrapped founder.
+
+2. **It reads as risk, not upside.** To a cost-sensitive early-stage founder, "I want to use Rust" can sound like over-engineering, slower iteration, or a harder-to-hire stack for a young product. You'd be planting a doubt you don't need to raise.
+
+3. **The legitimate Rust angle is the opposite framing.** Your value isn't "I want to learn Rust" — it's "the reusable plumbing I'd contribute is *already* built in Rust," which is why it's cheap, proven, and low-risk. That's a client benefit (exists today, battle-tested, royalty-free to him), not a personal motivation. If Rust surfaces at all, that's the frame — and it belongs on a technical call, not in the outreach.
+
+The current draft is deliberately **generalist → keep-systems-correct → AI-you-can-trust**. A language preference narrows that pitch and weakens it. Leave it out of the note.
+
+If you want, I can hold one optional low-key talking point for the *eventual technical conversation* (not this message) — something like: the shared libraries you'd bring are already in Rust, so they're proven and free to him. Want that as a call-ready line rather than part of the reply?
+<!-- agent:boundary:a1b72cfc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue stop -->
+/goal Implement backlog item(s): #pbpx
 <!-- /agent:queue -->
 
 ## Backlog

@@ -194,13 +194,49 @@ should be deleted during extraction.
 3. Use fan-out extractors for disjoint seams. Each extractor owns a narrow write
    set and can move multiple related seams only when they share the same
    destination and tests.
-4. Keep docs, cross-crate boundary tests, final no-shim scans, `make check`,
+   The practical fan-out size is 4 by default and can grow toward 8 only when
+   the write sets are genuinely disjoint and the main session can still review
+   and integrate every diff. Extractors should run focused target-crate tests
+   for their seam, but the main integration pass owns final boundary tests,
+   `make check`, commits, pushes, plan updates, and CI sampling.
+4. Extract by layer, not by historical file-wave. A single turn may move all
+   helpers in a layer that do not need broad adapters: gather facts in
+   orchestration, move pure policy/data decisions to the owning crate, move
+   behavior tests with the policy, and leave only effect adapters behind.
+5. Keep docs, cross-crate boundary tests, final no-shim scans, `make check`,
    commit, push, and one CI check in the main integration pass.
-5. Prefer direct dependency inversion over shared catch-all utilities. A shared
+6. Prefer direct dependency inversion over shared catch-all utilities. A shared
    IO/base crate is tactical only when it unblocks a domain extraction.
-6. Rename deprecated internal symbols and module names to the current domain
+7. Rename deprecated internal symbols and module names to the current domain
    vocabulary in the same pass as the related extraction; do not preserve the
    obsolete path as a compatibility alias.
+
+### Current layer status
+
+The legacy migration-wave labels are superseded. Current work is in the
+domain-policy layer of Option B: orchestration remains the effect coordinator,
+while pure decisions move into the crate that owns the vocabulary. As of the
+2026-07-01 fan-out batch, the current layer has extracted the following seams:
+
+- Route-owned cycle change/completion policy moved from `start.rs` to
+  `agent-doc-supervisor::route_owned`; orchestration now only converts
+  `CycleState` into route-owned facts.
+- Starting-pane recovery target selection moved from `route.rs` to
+  `agent-doc-supervisor::startup_miss`; route keeps tmux/session-registry
+  probing and calls the focused policy directly.
+- Controller self-watchdog and stranded handoff-replacement policy moved from
+  `project_controller/rpc.rs` to `agent-doc-controller::status`; orchestration
+  now supplies bootstrap/socket/time facts.
+- Visible-write reconcile loop policy moved from `write.rs` to
+  `agent-doc-document-realtime::write_policy`; orchestration keeps file,
+  live-buffer, log, and mutation effects.
+- Codex-network-access-on-non-Codex warning construction moved from
+  `preflight/run.rs` to `agent-doc-model-tier`; preflight supplies document and
+  active-harness facts.
+
+The no-shim policy remains active for these layer extractions: old helper names
+were removed or confined to static test strings, and boundary tests now assert
+the owning crates expose the policy while orchestration does not re-own it.
 
 ### Current extraction ledger
 

@@ -130,6 +130,17 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 return null
             }
 
+            // #panefocussteal: a pure focus change (same visible layout, the
+            // operator just switched between open doc tabs) is the ONLY case that
+            // should move tmux focus — route it through `agent-doc focus`, the
+            // dedicated focus mover. `agent-doc sync` is layout-only and never
+            // moves the operator's active pane (it neutralizes any internal
+            // selection), so emitting Sync here would leave the doc-to-doc switch
+            // dead. A changed visible layout still goes through Sync.
+            if (!forceReconcile && visibleSignature == previousVisibleSignature) {
+                return AutomaticCommandPlan(AutomaticCommandKind.Focus, visibleSignature)
+            }
+
             return AutomaticCommandPlan(AutomaticCommandKind.Sync, visibleSignature)
         }
 

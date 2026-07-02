@@ -31,7 +31,10 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `selection change keeps split layouts on sync when visible markdown set is unchanged`() {
+    fun `selection change with unchanged visible set routes to focus command not sync`() {
+        // #panefocussteal: a pure focus change (same visible layout, operator
+        // switched doc tabs) must move tmux via the dedicated `agent-doc focus`
+        // command — `sync` is layout-only and would not follow the switch.
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
             "/repo/src/sample-app/tasks/sampleorders.md",
@@ -49,11 +52,12 @@ class EditorTabSyncListenerTest {
             previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
         )
 
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
     }
 
     @Test
-    fun `single visible markdown file still uses sync when selection changes`() {
+    fun `single visible markdown file routes to focus command when selection changes`() {
+        // Same visible set, focus moved to this file → focus command, not sync.
         val visibleMdFiles = listOf("/repo/src/sample-app/tasks/sampleorders.md")
         val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
             visibleMdFiles = visibleMdFiles,
@@ -63,7 +67,7 @@ class EditorTabSyncListenerTest {
             previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
         )
 
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
     }
 
     @Test
@@ -120,7 +124,9 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `opposite pane selection still dispatches sync when visible split is unchanged`() {
+    fun `opposite pane selection routes to focus command when visible split is unchanged`() {
+        // Switching focus to the other pane of an unchanged split is a pure focus
+        // change → focus command (tmux follows), not a layout sync.
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
             "/repo/src/sample-app/tasks/sampleorders.md",
@@ -135,7 +141,7 @@ class EditorTabSyncListenerTest {
             previousFocusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
         )
 
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
     }
 
     @Test
@@ -156,7 +162,8 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `selection change to a different file still dispatches sync`() {
+    fun `selection change to a different file routes to focus command`() {
+        // Different focused file, same visible layout → focus command.
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
             "/repo/src/sample-app/tasks/sampleorders.md",
@@ -171,7 +178,7 @@ class EditorTabSyncListenerTest {
             previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
         )
 
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
     }
 
     @Test

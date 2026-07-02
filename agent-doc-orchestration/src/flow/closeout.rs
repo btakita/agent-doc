@@ -2,11 +2,10 @@ use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_turn::closeout_guard::CloseoutGuardReason;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryCommandInput, CloseoutRecoveryCycleInput, CloseoutRecoveryDecision,
-    CloseoutRecoveryDecisionInput, CloseoutRecoveryDrift, CloseoutRecoveryMutationReason,
-    CloseoutRecoveryState, CloseoutRecoveryStateInput, MetadataDriftAuthority,
-    OpenCycleRecoveryCommandInput, classify_closeout_recovery_state_from_input,
-    closeout_content_component_signature,
-    closeout_recovery_command as render_closeout_recovery_command,
+    CloseoutRecoveryDecisionInput, CloseoutRecoveryMutationReason, CloseoutRecoveryState,
+    CloseoutRecoveryStateInput, MetadataDriftAuthority, OpenCycleRecoveryCommandInput,
+    classify_closeout_recovery_state_from_input, classify_snapshot_head_drift,
+    classify_snapshot_visible_drift, closeout_recovery_command as render_closeout_recovery_command,
     closeout_recovery_decision_from_state, metadata_drift_authority,
 };
 use anyhow::{Context, Result};
@@ -1216,41 +1215,6 @@ pub fn classify_closeout_recovery_state_for_file(file: &Path) -> CloseoutRecover
         .flatten()
         .is_some();
     classify_closeout_recovery_state_from_input(input)
-}
-
-fn classify_snapshot_head_drift(snapshot: &str, head: &str) -> CloseoutRecoveryDrift {
-    // Boundary / `(HEAD)` / answered-prompt-prefix artifacts only.
-    if agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(snapshot)
-        == agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(head)
-    {
-        return CloseoutRecoveryDrift::BoundaryOnly;
-    }
-    // User/response + tracked-item content is byte-identical → the diff is
-    // queue / `queue_active` / status metadata (e.g. a `queue` sync-attribute
-    // regeneration). Safe to `agent-doc commit`.
-    if closeout_content_signature_after_artifact_normalization(snapshot)
-        == closeout_content_signature_after_artifact_normalization(head)
-    {
-        return CloseoutRecoveryDrift::MetadataOnly;
-    }
-    // Real user/response content differs from HEAD → never auto-commit.
-    CloseoutRecoveryDrift::Content
-}
-
-fn classify_snapshot_visible_drift(snapshot: &str, visible: &str) -> CloseoutRecoveryDrift {
-    if closeout_content_signature_after_artifact_normalization(snapshot)
-        == closeout_content_signature_after_artifact_normalization(visible)
-    {
-        CloseoutRecoveryDrift::MetadataOnly
-    } else {
-        CloseoutRecoveryDrift::Content
-    }
-}
-
-fn closeout_content_signature_after_artifact_normalization(doc: &str) -> String {
-    let normalized =
-        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(doc);
-    closeout_content_component_signature(&normalized)
 }
 
 fn head_exchange_has_escaped_markers(file: &Path) -> bool {

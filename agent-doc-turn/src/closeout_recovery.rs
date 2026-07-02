@@ -563,6 +563,39 @@ pub fn closeout_content_component_signature(normalized_doc: &str) -> String {
     sig
 }
 
+pub fn classify_snapshot_head_drift(snapshot: &str, head: &str) -> CloseoutRecoveryDrift {
+    // Boundary / `(HEAD)` / answered-prompt-prefix artifacts only.
+    if agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(snapshot)
+        == agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(head)
+    {
+        return CloseoutRecoveryDrift::BoundaryOnly;
+    }
+    // User/response + tracked-item content is byte-identical, so the diff is
+    // queue/status metadata and is safe to commit through closeout recovery.
+    if closeout_content_signature_after_artifact_normalization(snapshot)
+        == closeout_content_signature_after_artifact_normalization(head)
+    {
+        return CloseoutRecoveryDrift::MetadataOnly;
+    }
+    CloseoutRecoveryDrift::Content
+}
+
+pub fn classify_snapshot_visible_drift(snapshot: &str, visible: &str) -> CloseoutRecoveryDrift {
+    if closeout_content_signature_after_artifact_normalization(snapshot)
+        == closeout_content_signature_after_artifact_normalization(visible)
+    {
+        CloseoutRecoveryDrift::MetadataOnly
+    } else {
+        CloseoutRecoveryDrift::Content
+    }
+}
+
+fn closeout_content_signature_after_artifact_normalization(doc: &str) -> String {
+    let normalized =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(doc);
+    closeout_content_component_signature(&normalized)
+}
+
 /// Input facts that are already known at a closeout recovery call site.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CloseoutRecoveryDecisionInput<'a> {
@@ -1221,6 +1254,67 @@ mod tests {
                 ..CloseoutRecoveryStateInput::default()
             }),
             CloseoutRecoveryState::UnsafeUserContentDrift
+        );
+    }
+
+    #[test]
+    fn snapshot_head_drift_classifier_distinguishes_boundary_metadata_and_content() {
+        let head = concat!(
+            "---\nagent_doc_session: test\nqueue_active: false\n---\n\n",
+            "<!-- agent:status -->\nidle\n<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Please rerun the deploy check.\n",
+            "### Re: deploy check - gpt-5 (HEAD)\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let boundary_only = head.replace("Please rerun the", "❯ Please rerun the");
+        assert_eq!(
+            classify_snapshot_head_drift(&boundary_only, head),
+            CloseoutRecoveryDrift::BoundaryOnly
+        );
+
+        let metadata_only = head
+            .replace("queue_active: false", "queue_active: true")
+            .replace(
+                "<!-- agent:status -->\nidle",
+                "<!-- agent:status -->\nactive",
+            );
+        assert_eq!(
+            classify_snapshot_head_drift(&metadata_only, head),
+            CloseoutRecoveryDrift::MetadataOnly
+        );
+
+        let content = head.replace("Done.", "Different response.");
+        assert_eq!(
+            classify_snapshot_head_drift(&content, head),
+            CloseoutRecoveryDrift::Content
+        );
+    }
+
+    #[test]
+    fn snapshot_visible_drift_classifier_ignores_metadata_but_not_content() {
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nqueue_active: false\n---\n\n",
+            "<!-- agent:status -->\nidle\n<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange -->\n### Re: x\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let metadata_only = snapshot
+            .replace("queue_active: false", "queue_active: true")
+            .replace(
+                "<!-- agent:status -->\nidle",
+                "<!-- agent:status -->\nactive",
+            );
+        assert_eq!(
+            classify_snapshot_visible_drift(snapshot, &metadata_only),
+            CloseoutRecoveryDrift::MetadataOnly
+        );
+
+        let content = snapshot.replace("Done.", "Different response.");
+        assert_eq!(
+            classify_snapshot_visible_drift(snapshot, &content),
+            CloseoutRecoveryDrift::Content
         );
     }
 

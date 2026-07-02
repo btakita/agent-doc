@@ -4143,6 +4143,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub struct CloseoutRecoveryStateInput",
         "pub fn classify_closeout_recovery_state_from_input",
         "pub fn closeout_content_component_signature",
+        "pub fn classify_snapshot_head_drift",
+        "pub fn classify_snapshot_visible_drift",
+        "fn closeout_content_signature_after_artifact_normalization",
         "pub struct OpenCycleRecoveryCommandInput",
         "pub struct CloseoutRecoveryCommandInput",
         "pub fn closeout_recovery_command",
@@ -4246,6 +4249,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "preserve the user-authored content and finish through `agent-doc finalize",
         "pub fn classify_closeout_recovery_state(",
         "fn content_component_signature(",
+        "fn classify_snapshot_head_drift(",
+        "fn classify_snapshot_visible_drift(",
+        "fn closeout_content_signature_after_artifact_normalization(",
     ] {
         assert!(
             !closeout_source.contains(forbidden),
@@ -4256,7 +4262,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         closeout_source.contains("use agent_doc_turn::closeout_recovery::{")
             && closeout_source.contains("CloseoutRecoveryDecision")
             && closeout_source.contains("CloseoutRecoveryDecisionInput")
-            && closeout_source.contains("CloseoutRecoveryDrift")
             && closeout_source.contains("CloseoutRecoveryStateInput")
             && closeout_source.contains("CloseoutRecoveryMutationReason")
             && closeout_source.contains("CloseoutRecoveryState")
@@ -4264,7 +4269,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             && closeout_source.contains("OpenCycleRecoveryCommandInput")
             && closeout_source.contains("MetadataDriftAuthority")
             && closeout_source.contains("classify_closeout_recovery_state_from_input")
-            && closeout_source.contains("closeout_content_component_signature")
+            && closeout_source.contains("classify_snapshot_head_drift")
+            && closeout_source.contains("classify_snapshot_visible_drift")
             && closeout_source
                 .contains("closeout_recovery_command as render_closeout_recovery_command")
             && closeout_source.contains("closeout_recovery_decision_from_state")

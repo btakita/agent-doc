@@ -9,7 +9,26 @@ LOCAL_INSTALL_TARGET_DIR ?= target/local-install
 LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mold; elif command -v ld.lld >/dev/null 2>&1 || command -v lld >/dev/null 2>&1; then printf '%s' lld; fi)
 LOCAL_RUSTFLAGS ?= $(if $(LOCAL_LINKER),-C link-arg=-fuse-ld=$(LOCAL_LINKER),)
 LOCAL_CARGO_ENV = CARGO_INCREMENTAL=1
-CRATES_IO_PUBLISH_ORDER = tmux-router agent-doc-debounce agent-doc-template agent-doc-diff agent-doc-frontmatter agent-doc-turn agent-doc-syntax agent-doc-topic agent-doc-markdown-ast agent-doc-merge agent-doc-ffi agent-doc-sqlite agent-doc-queue agent-doc-work-graph agent-doc-orchestration agent-doc
+CRATES_IO_PUBLISH_ORDER = tmux-router \
+	agent-doc-element agent-doc-element-boundary agent-doc-element-icebox agent-doc-element-queue \
+	agent-doc-element-signals agent-doc-element-status agent-doc-element-unknown agent-doc-flow \
+	agent-doc-hash agent-doc-fs agent-doc-boundary-io agent-doc-lease agent-doc-log-time \
+	agent-doc-debounce agent-doc-markdown-ast agent-doc-ipc-protocol agent-doc-callback-io \
+	agent-doc-model-tier agent-doc-frontmatter agent-doc-config agent-doc-element-backlog \
+	agent-doc-element-done agent-doc-element-review agent-doc-memory agent-doc-merge \
+	agent-doc-project-config-io agent-doc-frontmatter-io agent-doc-prompt-cache \
+	agent-doc-prompt-cache-io agent-doc-prompt-lines agent-doc-diff agent-doc-element-exchange \
+	agent-doc-element-registry agent-doc-prompt-contract agent-doc-response-toc \
+	agent-doc-secret-redact agent-doc-session-accretion agent-doc-prompt-context agent-doc-sync \
+	agent-doc-syntax agent-doc-tmux agent-doc-tmux-commands agent-doc-tmux-io agent-doc-topic \
+	agent-doc-document agent-doc-queue agent-doc-template agent-doc-ffi agent-doc-turn \
+	agent-doc-owner-pane-io agent-doc-sqlite agent-doc-response-toc-io agent-doc-state-backbone \
+	agent-doc-document-realtime agent-doc-git agent-doc-git-io agent-doc-plugin-owner \
+	agent-doc-queue-io agent-doc-state-wire agent-doc-turn-executor agent-doc-turn-executor-tmux \
+	agent-doc-harness agent-doc-supervisor agent-doc-controller agent-doc-supervisor-io \
+	agent-doc-supervisor-process agent-doc-turn-scope-io agent-doc-turn-status-io \
+	agent-doc-watch-io agent-doc-work-graph agent-doc-workflow agent-doc-workflow-io \
+	agent-doc-orchestration agent-doc
 ifneq ($(strip $(LOCAL_RUSTFLAGS)),)
 LOCAL_CARGO_ENV += RUSTFLAGS="$(LOCAL_RUSTFLAGS)"
 endif
@@ -69,7 +88,7 @@ version-sync:
 		echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver pyproject.toml=$$pypi_ver"; \
 		exit 1; \
 	fi; \
-	for manifest in agent-doc-debounce/Cargo.toml agent-doc-template/Cargo.toml agent-doc-diff/Cargo.toml agent-doc-frontmatter/Cargo.toml agent-doc-turn/Cargo.toml agent-doc-syntax/Cargo.toml agent-doc-topic/Cargo.toml agent-doc-markdown-ast/Cargo.toml agent-doc-merge/Cargo.toml agent-doc-ffi/Cargo.toml agent-doc-sqlite/Cargo.toml agent-doc-queue/Cargo.toml agent-doc-work-graph/Cargo.toml agent-doc-orchestration/Cargo.toml; do \
+	for manifest in */Cargo.toml; do \
 		crate_ver=$$(grep '^version' "$$manifest" | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 		if [ "$$cargo_ver" != "$$crate_ver" ]; then \
 			echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver $$manifest=$$crate_ver"; \

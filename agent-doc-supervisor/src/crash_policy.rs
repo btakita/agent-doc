@@ -251,6 +251,17 @@ pub fn supervisor_policy_exit_code(exit_code: i32, ctrl_c_forwarded_interrupt: b
     }
 }
 
+/// Format stable child-exit provenance fields for supervisor logs.
+pub fn format_exit_provenance_fields(rendered_status: &str, success: bool) -> String {
+    if let Some(signal) = rendered_status.strip_prefix("Terminated by ") {
+        format!("exit_kind=signal exit_signal={signal:?} exit_status={rendered_status:?}")
+    } else if success {
+        format!("exit_kind=success exit_status={rendered_status:?}")
+    } else {
+        format!("exit_kind=exit_code exit_status={rendered_status:?}")
+    }
+}
+
 /// A single exit event recorded in the ring buffer.
 #[derive(Debug, Clone)]
 pub struct ExitRecord {
@@ -606,6 +617,40 @@ mod tests {
         assert_eq!(supervisor_policy_exit_code(1, true), 0);
         assert_eq!(supervisor_policy_exit_code(130, true), 0);
         assert_eq!(supervisor_policy_exit_code(1, false), 1);
+    }
+
+    #[test]
+    fn exit_provenance_fields_capture_signal_termination() {
+        let rendered = format_exit_provenance_fields("Terminated by Hangup", false);
+        assert!(rendered.contains("exit_kind=signal"), "got: {rendered}");
+        assert!(
+            rendered.contains("exit_signal=\"Hangup\""),
+            "got: {rendered}"
+        );
+        assert!(
+            rendered.contains("exit_status=\"Terminated by Hangup\""),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn exit_provenance_fields_capture_success() {
+        let rendered = format_exit_provenance_fields("Exited with code 0", true);
+        assert!(rendered.contains("exit_kind=success"), "got: {rendered}");
+        assert!(
+            rendered.contains("exit_status=\"Exited with code 0\""),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn exit_provenance_fields_capture_nonzero_exit_code() {
+        let rendered = format_exit_provenance_fields("Exited with code 7", false);
+        assert!(rendered.contains("exit_kind=exit_code"), "got: {rendered}");
+        assert!(
+            rendered.contains("exit_status=\"Exited with code 7\""),
+            "got: {rendered}"
+        );
     }
 
     #[test]

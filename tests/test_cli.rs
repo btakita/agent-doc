@@ -10402,6 +10402,8 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/lib.rs")).unwrap();
     let controller_paths =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/paths.rs")).unwrap();
+    let controller_status =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/status.rs")).unwrap();
     assert!(
         controller_lib.contains("pub mod paths;"),
         "agent-doc-controller must expose focused controller path policy"
@@ -10423,6 +10425,20 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
             "agent-doc-controller paths must own project controller path policy: {required}"
         );
     }
+    for required in [
+        "pub struct SessionsProjectionRecordFacts",
+        "pub struct SessionsProjectionPriorFacts",
+        "pub struct SessionsProjectionHintFacts",
+        "pub struct SessionsProjectionLeaseFacts",
+        "pub struct SessionsProjectionEntryFacts",
+        "pub struct SessionsProjectionEntrySelection",
+        "pub fn select_sessions_projection_entry(",
+    ] {
+        assert!(
+            controller_status.contains(required),
+            "agent-doc-controller status must own pure sessions projection selection policy: {required}"
+        );
+    }
 
     let project_controller =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
@@ -10438,6 +10454,7 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
         "fn actor_projection_path(",
         "fn layout_projection_path(",
         "pub fn launch_lock_path(",
+        "fn sessions_projection_entry(",
     ] {
         assert!(
             !project_controller.contains(forbidden),
@@ -10447,6 +10464,11 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
     assert!(
         project_controller.contains("use agent_doc_controller::paths::{"),
         "project_controller.rs should call focused controller path policy directly"
+    );
+    assert!(
+        project_controller.contains("status::select_sessions_projection_entry(")
+            && project_controller.contains("status::SessionsProjectionEntryFacts"),
+        "project_controller.rs should adapt sqlite/tmux facts and call focused sessions projection selection directly"
     );
 }
 
@@ -12699,6 +12721,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn restart_continue_exit_strategy",
         "pub fn supervisor_resume_handoff_failed",
         "pub fn supervisor_clean_exit_before_prompt_seen",
+        "pub fn format_exit_provenance_fields(",
     ] {
         assert!(
             supervisor_crash_policy.contains(required_snippet),
@@ -12749,6 +12772,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "fn restart_continue_exit_strategy",
         "fn resume_handoff_failed",
         "fn clean_exit_before_prompt_seen",
+        "format!(\"exit_kind=signal",
+        "format!(\"exit_kind=success",
+        "format!(\"exit_kind=exit_code",
     ] {
         assert!(
             !start_source.contains(forbidden_snippet),
@@ -12764,7 +12790,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && start_run_source.contains("supervisor_clean_exit_resolution(")
             && start_run_source.contains("restart_continue_exit_strategy(")
             && start_run_source.contains("supervisor_resume_handoff_failed(")
-            && start_run_source.contains("supervisor_clean_exit_before_prompt_seen("),
+            && start_run_source.contains("supervisor_clean_exit_before_prompt_seen(")
+            && start_source.contains("format_exit_provenance_fields(&rendered, status.success())"),
         "start paths should call focused supervisor restart policy directly"
     );
     for required_snippet in [
@@ -14436,10 +14463,14 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
         "pub enum StaleCaptureRetirementDecision",
         "pub struct StaleCaptureRetirementEvidence",
         "pub const fn decide_stale_capture_retirement(",
+        "pub enum RepairTemplateChangeKind",
+        "pub struct RepairTemplateChanges",
+        "pub const fn should_persist(",
+        "pub fn changed_kinds(",
     ] {
         assert!(
             workflow_capture.contains(required),
-            "agent-doc-workflow must own pure stale-capture retirement policy: {required}"
+            "agent-doc-workflow must own pure capture/repair-template policy: {required}"
         );
     }
 
@@ -14450,17 +14481,27 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
         "fn retire_wedged_write_applied_capture_if_drifted(",
         "fn retire_superseded_captured_only_orphan_if_drifted(",
         "fn decide_stale_capture_retirement(",
+        "if duplicate_opener_changed",
+        "if duplicate_close_changed",
+        "if duplicate_scaffold_changed",
+        "if tail_changed",
+        "if boundary_changed",
+        "if order_changed",
+        "if prompt_changed",
     ] {
         assert!(
             !repair.contains(forbidden),
-            "repair.rs must not re-own capture lifecycle policy: {forbidden}"
+            "repair.rs must not re-own capture lifecycle or repair-template aggregation policy: {forbidden}"
         );
     }
     assert!(
         repair.contains("agent_doc_workflow::capture::{")
             && repair.contains("capture_state_is_repairable(")
-            && repair.contains("decide_stale_capture_retirement("),
-        "repair.rs should gather file-backed evidence and call capture lifecycle policy from agent-doc-workflow directly"
+            && repair.contains("decide_stale_capture_retirement(")
+            && repair.contains("RepairTemplateChanges {")
+            && repair.contains("template_changes.should_persist()")
+            && repair.contains("template_changes.changed_kinds()"),
+        "repair.rs should gather file-backed evidence and call capture/repair-template policy from agent-doc-workflow directly"
     );
 }
 
@@ -15890,6 +15931,15 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "pub fn format_byte_event(",
         "pub fn format_transform_event(",
         "pub fn format_prompt_detection(",
+        "pub fn sanitize_route_snapshot_field(",
+        "pub fn format_route_pane_snapshot_filename(",
+        "pub struct RoutePaneSnapshotFacts",
+        "pub struct RoutePaneSnapshotLogFacts",
+        "pub struct RoutePaneSnapshotFailedLogFacts",
+        "pub struct RoutePaneSnapshotHintFacts",
+        "pub fn format_route_pane_snapshot_log(",
+        "pub fn format_route_pane_snapshot_failed_log(",
+        "pub fn format_route_pane_snapshot_hint(",
     ] {
         assert!(
             tmux_commands_source.contains(required),
@@ -16041,6 +16091,25 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
     assert!(
         !route_source.contains("const EDITOR_ROUTE_ATTEMPT_ID_ENV"),
         "route diagnostics should use the focused editor route attempt-id env constant"
+    );
+    for forbidden in [
+        "fn append_editor_route_attempt(",
+        "fn route_snapshot_field(",
+        "route_pane_snapshot file={}",
+        "route_pane_snapshot_failed file={}",
+        "[route] preserved dispatch-start proof snapshot",
+    ] {
+        assert!(
+            !route_source.contains(forbidden),
+            "route.rs must not re-own route snapshot diagnostic formatting policy: {forbidden}"
+        );
+    }
+    assert!(
+        route_source.contains("format_route_pane_snapshot_filename(")
+            && route_source.contains("format_route_pane_snapshot_log(")
+            && route_source.contains("format_route_pane_snapshot_failed_log(")
+            && route_source.contains("format_route_pane_snapshot_hint("),
+        "route.rs should preserve snapshots and call focused route snapshot diagnostic formatting directly"
     );
 
     for forbidden in [

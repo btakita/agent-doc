@@ -2051,6 +2051,7 @@ fn emit_sessions_projection(
     registry
         .retain(|key, entry| store.contains_key(key) || !live_actor_panes.contains(&entry.pane));
 
+    let project_root_default = project_root.to_string_lossy().to_string();
     for record in store.values() {
         if record.state == agent_doc_sqlite::state_store::ActorState::Closed
             || record.pane_id.is_empty()
@@ -2064,7 +2065,53 @@ fn emit_sessions_projection(
         });
         let prior = registry.get(&record.document_id);
         let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
-        let entry = sessions_projection_entry(project_root, record, prior, projected_hint, lease);
+        let default_started_storage;
+        let default_started = if prior
+            .map(|entry| !entry.started.is_empty())
+            .unwrap_or(false)
+        {
+            ""
+        } else {
+            default_started_storage = timestamp_secs().to_string();
+            default_started_storage.as_str()
+        };
+        let selected =
+            status::select_sessions_projection_entry(status::SessionsProjectionEntryFacts {
+                project_root: project_root_default.as_str(),
+                record: status::SessionsProjectionRecordFacts {
+                    document_id: record.document_id.as_str(),
+                    session_id: record.session_id.as_str(),
+                    pane_id: record.pane_id.as_str(),
+                    window_id: record.window_id.as_str(),
+                },
+                prior: prior.map(|entry| status::SessionsProjectionPriorFacts {
+                    pid: entry.pid,
+                    cwd: entry.cwd.as_str(),
+                    started: entry.started.as_str(),
+                    file: entry.file.as_str(),
+                    supervisor_instance_id: entry.supervisor_instance_id.as_str(),
+                }),
+                hint: projected_hint.map(|hint| status::SessionsProjectionHintFacts {
+                    pid: hint.pid,
+                    cwd: hint.cwd.as_str(),
+                    file: hint.file.as_str(),
+                    supervisor_instance_id: hint.supervisor_instance_id.as_str(),
+                }),
+                lease: lease.map(|lease| status::SessionsProjectionLeaseFacts {
+                    supervisor_pid: lease.supervisor_pid,
+                }),
+                default_started,
+            });
+        let entry = tmux_router::RegistryEntry {
+            pane: selected.pane,
+            pid: selected.pid,
+            cwd: selected.cwd,
+            started: selected.started,
+            session_id: selected.session_id,
+            file: selected.file,
+            window: selected.window,
+            supervisor_instance_id: selected.supervisor_instance_id,
+        };
         registry.insert(record.document_id.clone(), entry);
     }
 
@@ -2131,63 +2178,6 @@ fn emit_sessions_projection(
         );
     }
     Ok(())
-}
-
-fn sessions_projection_entry(
-    project_root: &Path,
-    record: &agent_doc_sqlite::state_store::ActorRecord,
-    prior: Option<&tmux_router::RegistryEntry>,
-    hint: Option<&SessionsProjectionHint>,
-    lease: Option<SupervisorLeaseStatus>,
-) -> tmux_router::RegistryEntry {
-    let pid = prior
-        .map(|entry| entry.pid)
-        .filter(|pid| *pid != 0)
-        .or_else(|| hint.map(|hint| hint.pid).filter(|pid| *pid != 0))
-        .or_else(|| lease.and_then(|lease| lease.supervisor_pid))
-        .unwrap_or(0);
-    let cwd = prior
-        .map(|entry| entry.cwd.clone())
-        .filter(|cwd| !cwd.is_empty())
-        .or_else(|| {
-            hint.map(|hint| hint.cwd.clone())
-                .filter(|cwd| !cwd.is_empty())
-        })
-        .unwrap_or_else(|| project_root.to_string_lossy().to_string());
-    let started = prior
-        .map(|entry| entry.started.as_str())
-        .filter(|started| !started.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| timestamp_secs().to_string());
-    let file = prior
-        .map(|entry| entry.file.as_str())
-        .filter(|file| !file.is_empty())
-        .or_else(|| {
-            hint.map(|hint| hint.file.as_str())
-                .filter(|file| !file.is_empty())
-        })
-        .unwrap_or(record.document_id.as_str())
-        .to_string();
-    let supervisor_instance_id = prior
-        .map(|entry| entry.supervisor_instance_id.as_str())
-        .filter(|id| !id.is_empty())
-        .or_else(|| {
-            hint.map(|hint| hint.supervisor_instance_id.as_str())
-                .filter(|id| !id.is_empty())
-        })
-        .unwrap_or("")
-        .to_string();
-
-    tmux_router::RegistryEntry {
-        pane: record.pane_id.clone(),
-        pid,
-        cwd,
-        started,
-        session_id: record.session_id.clone(),
-        file,
-        window: record.window_id.clone(),
-        supervisor_instance_id,
-    }
 }
 
 #[cfg(test)]

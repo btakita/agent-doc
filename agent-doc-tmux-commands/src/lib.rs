@@ -223,6 +223,126 @@ pub mod input_diag {
         }
     }
 
+    pub fn sanitize_route_snapshot_field(value: &str) -> String {
+        let mut out = String::with_capacity(value.len());
+        for ch in value.chars() {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                out.push(ch);
+            } else {
+                out.push('_');
+            }
+        }
+        if out.is_empty() {
+            "none".to_string()
+        } else {
+            out
+        }
+    }
+
+    pub fn format_route_pane_snapshot_filename(
+        timestamp_millis: u128,
+        phase: &str,
+        harness_binary: &str,
+        pane: &str,
+        capture_hash: &str,
+    ) -> String {
+        format!(
+            "{}-{}-{}-{}-{}.txt",
+            timestamp_millis,
+            sanitize_route_snapshot_field(phase),
+            sanitize_route_snapshot_field(harness_binary),
+            sanitize_route_snapshot_field(pane),
+            capture_hash
+        )
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct RoutePaneSnapshotFacts<'a> {
+        pub file_display: &'a str,
+        pub pane: &'a str,
+        pub harness_binary: &'a str,
+        pub phase: &'a str,
+        pub capture_len: usize,
+        pub capture_hash: &'a str,
+        pub editor_attempt_id: Option<&'a str>,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct RoutePaneSnapshotLogFacts<'a> {
+        pub snapshot: RoutePaneSnapshotFacts<'a>,
+        pub snapshot_path: &'a str,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct RoutePaneSnapshotFailedLogFacts<'a> {
+        pub snapshot: RoutePaneSnapshotFacts<'a>,
+        pub error: &'a str,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct RoutePaneSnapshotHintFacts<'a> {
+        pub snapshot: RoutePaneSnapshotFacts<'a>,
+        pub snapshot_path: Option<&'a str>,
+    }
+
+    fn append_route_pane_snapshot_attempt(message: &mut String, facts: RoutePaneSnapshotFacts<'_>) {
+        if let Some(editor_attempt_id) = facts.editor_attempt_id {
+            message.push_str(&format!(" editor_attempt_id={editor_attempt_id}"));
+        }
+    }
+
+    pub fn format_route_pane_snapshot_log(facts: RoutePaneSnapshotLogFacts<'_>) -> String {
+        let snapshot = facts.snapshot;
+        let mut message = format!(
+            "route_pane_snapshot file={} pane={} harness={} phase={} capture_len={} capture_hash={} snapshot_path={}",
+            snapshot.file_display,
+            snapshot.pane,
+            snapshot.harness_binary,
+            snapshot.phase,
+            snapshot.capture_len,
+            snapshot.capture_hash,
+            facts.snapshot_path
+        );
+        append_route_pane_snapshot_attempt(&mut message, snapshot);
+        message
+    }
+
+    pub fn format_route_pane_snapshot_failed_log(
+        facts: RoutePaneSnapshotFailedLogFacts<'_>,
+    ) -> String {
+        let snapshot = facts.snapshot;
+        let mut message = format!(
+            "route_pane_snapshot_failed file={} pane={} harness={} phase={} capture_len={} capture_hash={} error={}",
+            snapshot.file_display,
+            snapshot.pane,
+            snapshot.harness_binary,
+            snapshot.phase,
+            snapshot.capture_len,
+            snapshot.capture_hash,
+            facts.error.replace(char::is_whitespace, "_")
+        );
+        append_route_pane_snapshot_attempt(&mut message, snapshot);
+        message
+    }
+
+    pub fn format_route_pane_snapshot_hint(facts: RoutePaneSnapshotHintFacts<'_>) -> String {
+        let snapshot = facts.snapshot;
+        let mut message = format!(
+            "[route] preserved dispatch-start proof snapshot for {} pane {} harness={} phase={} capture_len={} capture_hash={}",
+            snapshot.file_display,
+            snapshot.pane,
+            snapshot.harness_binary,
+            snapshot.phase,
+            snapshot.capture_len,
+            snapshot.capture_hash
+        );
+        if let Some(snapshot_path) = facts.snapshot_path {
+            message.push_str(&format!(" snapshot_path={snapshot_path}"));
+        }
+        append_route_pane_snapshot_attempt(&mut message, snapshot);
+        message
+    }
+
     fn editor_route_attempt_id() -> Option<String> {
         std::env::var(EDITOR_ROUTE_ATTEMPT_ID_ENV)
             .ok()
@@ -415,6 +535,18 @@ pub mod input_diag {
             }
         }
 
+        fn route_snapshot_facts() -> RoutePaneSnapshotFacts<'static> {
+            RoutePaneSnapshotFacts {
+                file_display: "tasks/route.md",
+                pane: "%7",
+                harness_binary: "codex",
+                phase: "direct_pane_acceptance",
+                capture_len: 42,
+                capture_hash: "abc123",
+                editor_attempt_id: Some("attempt_1_2"),
+            }
+        }
+
         #[test]
         fn key_event_format_is_structured_and_sanitized() {
             let _lock = ENV_LOCK.lock().unwrap();
@@ -481,6 +613,76 @@ pub mod input_diag {
             );
 
             assert!(event.contains("editor_attempt_id=attempt_1/2"), "{event}");
+        }
+
+        #[test]
+        fn route_snapshot_filename_fields_use_strict_filename_sanitization() {
+            assert_eq!(
+                sanitize_route_snapshot_field("phase/name:%7=ok"),
+                "phase_name__7_ok"
+            );
+            assert_eq!(sanitize_route_snapshot_field(""), "none");
+            assert_eq!(
+                sanitize_field("phase/name:%7=ok"),
+                "phase/name:%7=ok",
+                "generic input diagnostics keep log-safe route characters"
+            );
+
+            assert_eq!(
+                format_route_pane_snapshot_filename(
+                    123,
+                    "direct/pane acceptance",
+                    "codex:dev",
+                    "%7",
+                    "abc123"
+                ),
+                "123-direct_pane_acceptance-codex_dev-_7-abc123.txt"
+            );
+        }
+
+        #[test]
+        fn route_snapshot_logs_are_structured_and_keep_attempt_id() {
+            let log = format_route_pane_snapshot_log(RoutePaneSnapshotLogFacts {
+                snapshot: route_snapshot_facts(),
+                snapshot_path: "/tmp/.agent-doc/logs/route-submit/one.txt",
+            });
+            assert_eq!(
+                log,
+                "route_pane_snapshot file=tasks/route.md pane=%7 harness=codex phase=direct_pane_acceptance capture_len=42 capture_hash=abc123 snapshot_path=/tmp/.agent-doc/logs/route-submit/one.txt editor_attempt_id=attempt_1_2"
+            );
+
+            let failed = format_route_pane_snapshot_failed_log(RoutePaneSnapshotFailedLogFacts {
+                snapshot: route_snapshot_facts(),
+                error: "write failed\npermission denied",
+            });
+            assert_eq!(
+                failed,
+                "route_pane_snapshot_failed file=tasks/route.md pane=%7 harness=codex phase=direct_pane_acceptance capture_len=42 capture_hash=abc123 error=write_failed_permission_denied editor_attempt_id=attempt_1_2"
+            );
+        }
+
+        #[test]
+        fn route_snapshot_hint_formats_optional_snapshot_path() {
+            let hint = format_route_pane_snapshot_hint(RoutePaneSnapshotHintFacts {
+                snapshot: route_snapshot_facts(),
+                snapshot_path: Some("/tmp/.agent-doc/logs/route-submit/one.txt"),
+            });
+            assert_eq!(
+                hint,
+                "[route] preserved dispatch-start proof snapshot for tasks/route.md pane %7 harness=codex phase=direct_pane_acceptance capture_len=42 capture_hash=abc123 snapshot_path=/tmp/.agent-doc/logs/route-submit/one.txt editor_attempt_id=attempt_1_2"
+            );
+
+            let without_path = format_route_pane_snapshot_hint(RoutePaneSnapshotHintFacts {
+                snapshot: RoutePaneSnapshotFacts {
+                    editor_attempt_id: None,
+                    ..route_snapshot_facts()
+                },
+                snapshot_path: None,
+            });
+            assert_eq!(
+                without_path,
+                "[route] preserved dispatch-start proof snapshot for tasks/route.md pane %7 harness=codex phase=direct_pane_acceptance capture_len=42 capture_hash=abc123"
+            );
         }
 
         #[test]

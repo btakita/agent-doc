@@ -72,6 +72,72 @@ pub const fn decide_stale_capture_retirement(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairTemplateChangeKind {
+    DuplicateOpener,
+    DuplicateClose,
+    DuplicateScaffold,
+    ConversationTail,
+    CompletedTurnBoundary,
+    ResponsePromptOrder,
+    PromptPrefixes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RepairTemplateChanges {
+    pub duplicate_opener: bool,
+    pub duplicate_close: bool,
+    pub duplicate_scaffold: bool,
+    pub conversation_tail: bool,
+    pub completed_turn_boundary: bool,
+    pub response_prompt_order: bool,
+    pub prompt_prefixes: bool,
+}
+
+impl RepairTemplateChanges {
+    const LOG_ORDER: [RepairTemplateChangeKind; 7] = [
+        RepairTemplateChangeKind::DuplicateOpener,
+        RepairTemplateChangeKind::DuplicateClose,
+        RepairTemplateChangeKind::DuplicateScaffold,
+        RepairTemplateChangeKind::ConversationTail,
+        RepairTemplateChangeKind::CompletedTurnBoundary,
+        RepairTemplateChangeKind::ResponsePromptOrder,
+        RepairTemplateChangeKind::PromptPrefixes,
+    ];
+
+    pub const fn contains(self, kind: RepairTemplateChangeKind) -> bool {
+        match kind {
+            RepairTemplateChangeKind::DuplicateOpener => self.duplicate_opener,
+            RepairTemplateChangeKind::DuplicateClose => self.duplicate_close,
+            RepairTemplateChangeKind::DuplicateScaffold => self.duplicate_scaffold,
+            RepairTemplateChangeKind::ConversationTail => self.conversation_tail,
+            RepairTemplateChangeKind::CompletedTurnBoundary => self.completed_turn_boundary,
+            RepairTemplateChangeKind::ResponsePromptOrder => self.response_prompt_order,
+            RepairTemplateChangeKind::PromptPrefixes => self.prompt_prefixes,
+        }
+    }
+
+    pub const fn should_persist(self) -> bool {
+        self.duplicate_opener
+            || self.duplicate_close
+            || self.duplicate_scaffold
+            || self.conversation_tail
+            || self.completed_turn_boundary
+            || self.response_prompt_order
+            || self.prompt_prefixes
+    }
+
+    pub const fn should_log(self, kind: RepairTemplateChangeKind) -> bool {
+        self.contains(kind)
+    }
+
+    pub fn changed_kinds(self) -> impl Iterator<Item = RepairTemplateChangeKind> {
+        Self::LOG_ORDER
+            .into_iter()
+            .filter(move |kind| self.should_log(*kind))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +263,61 @@ mod tests {
             });
             assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
         }
+    }
+
+    #[test]
+    fn repair_template_changes_do_not_persist_or_log_when_empty() {
+        let changes = RepairTemplateChanges::default();
+
+        assert!(!changes.should_persist());
+        assert!(changes.changed_kinds().collect::<Vec<_>>().is_empty());
+    }
+
+    #[test]
+    fn repair_template_changes_persist_and_log_each_changed_kind() {
+        let changes = RepairTemplateChanges {
+            duplicate_opener: true,
+            duplicate_close: false,
+            duplicate_scaffold: true,
+            conversation_tail: false,
+            completed_turn_boundary: true,
+            response_prompt_order: false,
+            prompt_prefixes: true,
+        };
+
+        assert!(changes.should_persist());
+        assert!(changes.should_log(RepairTemplateChangeKind::DuplicateOpener));
+        assert!(!changes.should_log(RepairTemplateChangeKind::DuplicateClose));
+        assert!(changes.should_log(RepairTemplateChangeKind::DuplicateScaffold));
+        assert!(!changes.should_log(RepairTemplateChangeKind::ConversationTail));
+        assert!(changes.should_log(RepairTemplateChangeKind::CompletedTurnBoundary));
+        assert!(!changes.should_log(RepairTemplateChangeKind::ResponsePromptOrder));
+        assert!(changes.should_log(RepairTemplateChangeKind::PromptPrefixes));
+    }
+
+    #[test]
+    fn repair_template_changes_keep_existing_log_order() {
+        let changes = RepairTemplateChanges {
+            duplicate_opener: true,
+            duplicate_close: true,
+            duplicate_scaffold: true,
+            conversation_tail: true,
+            completed_turn_boundary: true,
+            response_prompt_order: true,
+            prompt_prefixes: true,
+        };
+
+        assert_eq!(
+            changes.changed_kinds().collect::<Vec<_>>(),
+            vec![
+                RepairTemplateChangeKind::DuplicateOpener,
+                RepairTemplateChangeKind::DuplicateClose,
+                RepairTemplateChangeKind::DuplicateScaffold,
+                RepairTemplateChangeKind::ConversationTail,
+                RepairTemplateChangeKind::CompletedTurnBoundary,
+                RepairTemplateChangeKind::ResponsePromptOrder,
+                RepairTemplateChangeKind::PromptPrefixes,
+            ]
+        );
     }
 }

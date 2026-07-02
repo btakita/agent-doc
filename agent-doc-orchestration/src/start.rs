@@ -150,9 +150,10 @@ use agent_doc_supervisor::config::AgentLaunchArgsSources;
 use agent_doc_supervisor::crash_policy::{
     CrashPolicy, FAILED_RESUME_WINDOW, FailedResumeTracker, RestartAction,
     SupervisorCleanExitResolution, SupervisorPromptDecision, SupervisorRestartContinueExitStrategy,
-    SupervisorState, classify_supervisor_prompt_input, restart_continue_exit_strategy,
-    supervisor_clean_exit_before_prompt_seen, supervisor_clean_exit_resolution,
-    supervisor_policy_exit_code, supervisor_resume_handoff_failed,
+    SupervisorState, classify_supervisor_prompt_input, format_exit_provenance_fields,
+    restart_continue_exit_strategy, supervisor_clean_exit_before_prompt_seen,
+    supervisor_clean_exit_resolution, supervisor_policy_exit_code,
+    supervisor_resume_handoff_failed,
 };
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 use agent_doc_supervisor::input::{
@@ -237,13 +238,7 @@ fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
 
 fn exit_provenance_fields(status: &portable_pty::ExitStatus) -> String {
     let rendered = status.to_string();
-    if let Some(signal) = rendered.strip_prefix("Terminated by ") {
-        format!("exit_kind=signal exit_signal={signal:?} exit_status={rendered:?}")
-    } else if status.success() {
-        format!("exit_kind=success exit_status={rendered:?}")
-    } else {
-        format!("exit_kind=exit_code exit_status={rendered:?}")
-    }
+    format_exit_provenance_fields(&rendered, status.success())
 }
 
 const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
@@ -3101,30 +3096,6 @@ mod tests {
             // the code uses tcflush as best-effort cleanup.
             let _ = ret;
         }
-    }
-    #[test]
-    fn exit_provenance_fields_capture_signal_termination() {
-        let status = portable_pty::ExitStatus::with_signal("Hangup");
-        let rendered = exit_provenance_fields(&status);
-        assert!(rendered.contains("exit_kind=signal"), "got: {rendered}");
-        assert!(
-            rendered.contains("exit_signal=\"Hangup\""),
-            "got: {rendered}"
-        );
-        assert!(
-            rendered.contains("exit_status=\"Terminated by Hangup\""),
-            "got: {rendered}"
-        );
-    }
-    #[test]
-    fn exit_provenance_fields_capture_nonzero_exit_code() {
-        let status = portable_pty::ExitStatus::with_exit_code(7);
-        let rendered = exit_provenance_fields(&status);
-        assert!(rendered.contains("exit_kind=exit_code"), "got: {rendered}");
-        assert!(
-            rendered.contains("exit_status=\"Exited with code 7\""),
-            "got: {rendered}"
-        );
     }
     #[test]
     fn forwarded_ctrl_c_interrupt_exit_requires_forwarded_ctrl_c_signal_exit() {

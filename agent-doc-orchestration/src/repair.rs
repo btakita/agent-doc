@@ -77,8 +77,8 @@ use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_workflow::capture::{
-    StaleCaptureRetirementDecision, StaleCaptureRetirementEvidence, capture_state_is_repairable,
-    decide_stale_capture_retirement,
+    RepairTemplateChangeKind, RepairTemplateChanges, StaleCaptureRetirementDecision,
+    StaleCaptureRetirementEvidence, capture_state_is_repairable, decide_stale_capture_retirement,
 };
 
 use crate::{snapshot, write};
@@ -698,14 +698,17 @@ fn repair_template_doc_if_needed(
     }
     let prompt_changed = repaired != prompt_input;
 
-    if duplicate_opener_changed
-        || duplicate_close_changed
-        || duplicate_scaffold_changed
-        || tail_changed
-        || boundary_changed
-        || order_changed
-        || prompt_changed
-    {
+    let template_changes = RepairTemplateChanges {
+        duplicate_opener: duplicate_opener_changed,
+        duplicate_close: duplicate_close_changed,
+        duplicate_scaffold: duplicate_scaffold_changed,
+        conversation_tail: tail_changed,
+        completed_turn_boundary: boundary_changed,
+        response_prompt_order: order_changed,
+        prompt_prefixes: prompt_changed,
+    };
+
+    if template_changes.should_persist() {
         let save_repaired_snapshot = match snapshot::load(file)? {
             Some(snapshot_content) => {
                 !repair_leaves_unanswered_prompt_diff(&snapshot_content, &repaired, known_response)
@@ -716,75 +719,79 @@ fn repair_template_doc_if_needed(
         if save_repaired_snapshot {
             snapshot::save(file, &repaired)?;
         }
-        if duplicate_opener_changed {
-            crate::ops_log::log_op(
-                file,
-                &format!("repair_duplicate_exchange_opener file={}", file.display()),
-            );
-            eprintln!(
-                "[repair] merged duplicate exchange opener(s) in {}",
-                file.display()
-            );
-        }
-        if duplicate_close_changed {
-            crate::ops_log::log_op(
-                file,
-                &format!("repair_duplicate_exchange_close file={}", file.display()),
-            );
-            eprintln!(
-                "[repair] removed duplicate exchange close and restored escaped content in {}",
-                file.display()
-            );
-        }
-        if duplicate_scaffold_changed {
-            crate::ops_log::log_op(
-                file,
-                &format!("repair_duplicate_exchange_scaffold file={}", file.display()),
-            );
-            eprintln!(
-                "[repair] removed duplicate template scaffold after exchange close in {}",
-                file.display()
-            );
-        }
-        if tail_changed {
-            crate::ops_log::log_op(
-                file,
-                &format!("repair_exchange_tail file={}", file.display()),
-            );
-            eprintln!(
-                "[repair] repaired escaped conversation tail in {}",
-                file.display()
-            );
-        }
-        if boundary_changed {
-            crate::ops_log::log_op(
-                file,
-                &format!("repair_completed_turn_boundary file={}", file.display()),
-            );
-            eprintln!(
-                "[repair] moved stale boundary to the end of the completed exchange turn in {}",
-                file.display()
-            );
-        }
-        if order_changed {
-            crate::ops_log::log_op(
-                file,
-                &format!("repair_response_prompt_order file={}", file.display()),
-            );
-            eprintln!(
-                "[repair] repaired response/prompt ordering in {}",
-                file.display()
-            );
-        }
-        if prompt_changed {
-            crate::ops_log::log_op(
-                file,
-                &format!("repair_prompt_prefixes file={}", file.display()),
-            );
-            eprintln!(
-                "[repair] repaired transcript prompt prefixes in {}",
-                file.display()
-            );
+        for change in template_changes.changed_kinds() {
+            match change {
+                RepairTemplateChangeKind::DuplicateOpener => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!("repair_duplicate_exchange_opener file={}", file.display()),
+                    );
+                    eprintln!(
+                        "[repair] merged duplicate exchange opener(s) in {}",
+                        file.display()
+                    );
+                }
+                RepairTemplateChangeKind::DuplicateClose => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!("repair_duplicate_exchange_close file={}", file.display()),
+                    );
+                    eprintln!(
+                        "[repair] removed duplicate exchange close and restored escaped content in {}",
+                        file.display()
+                    );
+                }
+                RepairTemplateChangeKind::DuplicateScaffold => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!("repair_duplicate_exchange_scaffold file={}", file.display()),
+                    );
+                    eprintln!(
+                        "[repair] removed duplicate template scaffold after exchange close in {}",
+                        file.display()
+                    );
+                }
+                RepairTemplateChangeKind::ConversationTail => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!("repair_exchange_tail file={}", file.display()),
+                    );
+                    eprintln!(
+                        "[repair] repaired escaped conversation tail in {}",
+                        file.display()
+                    );
+                }
+                RepairTemplateChangeKind::CompletedTurnBoundary => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!("repair_completed_turn_boundary file={}", file.display()),
+                    );
+                    eprintln!(
+                        "[repair] moved stale boundary to the end of the completed exchange turn in {}",
+                        file.display()
+                    );
+                }
+                RepairTemplateChangeKind::ResponsePromptOrder => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!("repair_response_prompt_order file={}", file.display()),
+                    );
+                    eprintln!(
+                        "[repair] repaired response/prompt ordering in {}",
+                        file.display()
+                    );
+                }
+                RepairTemplateChangeKind::PromptPrefixes => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!("repair_prompt_prefixes file={}", file.display()),
+                    );
+                    eprintln!(
+                        "[repair] repaired transcript prompt prefixes in {}",
+                        file.display()
+                    );
+                }
+            }
         }
     }
 

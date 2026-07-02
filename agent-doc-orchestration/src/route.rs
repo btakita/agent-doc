@@ -229,6 +229,12 @@ use agent_doc_supervisor::startup_miss::{
     StartingPaneRecoveryTarget, starting_pane_recovery_target,
 };
 use agent_doc_tmux::is_first_column;
+use agent_doc_tmux_commands::input_diag::{
+    EDITOR_ROUTE_ATTEMPT_ID_ENV, RoutePaneSnapshotFacts, RoutePaneSnapshotFailedLogFacts,
+    RoutePaneSnapshotHintFacts, RoutePaneSnapshotLogFacts, format_route_pane_snapshot_failed_log,
+    format_route_pane_snapshot_filename, format_route_pane_snapshot_hint,
+    format_route_pane_snapshot_log, sanitize_route_snapshot_field,
+};
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
     short_recovery_command_from_recommendation,
@@ -436,9 +442,9 @@ const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_mil
 const AGENT_READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
 fn editor_route_attempt_id() -> Option<String> {
-    std::env::var(agent_doc_tmux_commands::input_diag::EDITOR_ROUTE_ATTEMPT_ID_ENV)
+    std::env::var(EDITOR_ROUTE_ATTEMPT_ID_ENV)
         .ok()
-        .map(|value| route_snapshot_field(&value))
+        .map(|value| sanitize_route_snapshot_field(&value))
         .filter(|value| !value.is_empty())
 }
 
@@ -457,12 +463,6 @@ fn route_ops_log_path(file: &Path) -> Option<PathBuf> {
     Some(root.join(".agent-doc/logs/ops.log"))
 }
 
-fn append_editor_route_attempt(message: &mut String) {
-    if let Some(attempt_id) = editor_route_attempt_id() {
-        message.push_str(&format!(" editor_attempt_id={attempt_id}"));
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RoutePaneSnapshot {
     len: usize,
@@ -475,22 +475,6 @@ fn route_snapshot_timestamp_millis() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0)
-}
-
-fn route_snapshot_field(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        "none".to_string()
-    } else {
-        out
-    }
 }
 
 fn preserve_route_pane_snapshot(
@@ -516,13 +500,12 @@ fn preserve_route_pane_snapshot(
         let dir = root.join(".agent-doc/logs/route-submit");
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("failed to create {}", dir.display()))?;
-        let name = format!(
-            "{}-{}-{}-{}-{}.txt",
+        let name = format_route_pane_snapshot_filename(
             route_snapshot_timestamp_millis(),
-            route_snapshot_field(phase),
-            route_snapshot_field(&harness.binary),
-            route_snapshot_field(pane),
-            snapshot.hash.as_str()
+            phase,
+            &harness.binary,
+            pane,
+            snapshot.hash.as_str(),
         );
         let path = dir.join(name);
         std::fs::write(&path, redacted)
@@ -532,17 +515,21 @@ fn preserve_route_pane_snapshot(
 
     match path {
         Ok(path) => {
-            let mut message = format!(
-                "route_pane_snapshot file={} pane={} harness={} phase={} capture_len={} capture_hash={} snapshot_path={}",
-                file.display(),
-                pane,
-                harness.binary,
-                phase,
-                snapshot.len,
-                snapshot.hash,
-                path.display()
-            );
-            append_editor_route_attempt(&mut message);
+            let file_display = file.display().to_string();
+            let snapshot_path = path.display().to_string();
+            let editor_attempt_id = editor_route_attempt_id();
+            let message = format_route_pane_snapshot_log(RoutePaneSnapshotLogFacts {
+                snapshot: RoutePaneSnapshotFacts {
+                    file_display: &file_display,
+                    pane,
+                    harness_binary: &harness.binary,
+                    phase,
+                    capture_len: snapshot.len,
+                    capture_hash: &snapshot.hash,
+                    editor_attempt_id: editor_attempt_id.as_deref(),
+                },
+                snapshot_path: &snapshot_path,
+            });
             crate::ops_log::log_op(file, &message);
             RoutePaneSnapshot {
                 path: Some(path),
@@ -550,17 +537,21 @@ fn preserve_route_pane_snapshot(
             }
         }
         Err(err) => {
-            let mut message = format!(
-                "route_pane_snapshot_failed file={} pane={} harness={} phase={} capture_len={} capture_hash={} error={}",
-                file.display(),
-                pane,
-                harness.binary,
-                phase,
-                snapshot.len,
-                snapshot.hash,
-                err.to_string().replace(char::is_whitespace, "_")
-            );
-            append_editor_route_attempt(&mut message);
+            let file_display = file.display().to_string();
+            let error = err.to_string();
+            let editor_attempt_id = editor_route_attempt_id();
+            let message = format_route_pane_snapshot_failed_log(RoutePaneSnapshotFailedLogFacts {
+                snapshot: RoutePaneSnapshotFacts {
+                    file_display: &file_display,
+                    pane,
+                    harness_binary: &harness.binary,
+                    phase,
+                    capture_len: snapshot.len,
+                    capture_hash: &snapshot.hash,
+                    editor_attempt_id: editor_attempt_id.as_deref(),
+                },
+                error: &error,
+            });
             crate::ops_log::log_op(file, &message);
             eprintln!(
                 "[route] warning: failed to preserve pane snapshot for {} phase {}: {}",
@@ -580,19 +571,24 @@ fn print_route_pane_snapshot_hint(
     phase: &str,
     snapshot: &RoutePaneSnapshot,
 ) {
-    let mut message = format!(
-        "[route] preserved dispatch-start proof snapshot for {} pane {} harness={} phase={} capture_len={} capture_hash={}",
-        file.display(),
-        pane,
-        harness.binary,
-        phase,
-        snapshot.len,
-        snapshot.hash
-    );
-    if let Some(path) = snapshot.path.as_ref() {
-        message.push_str(&format!(" snapshot_path={}", path.display()));
-    }
-    append_editor_route_attempt(&mut message);
+    let file_display = file.display().to_string();
+    let snapshot_path = snapshot
+        .path
+        .as_ref()
+        .map(|path| path.display().to_string());
+    let editor_attempt_id = editor_route_attempt_id();
+    let message = format_route_pane_snapshot_hint(RoutePaneSnapshotHintFacts {
+        snapshot: RoutePaneSnapshotFacts {
+            file_display: &file_display,
+            pane,
+            harness_binary: &harness.binary,
+            phase,
+            capture_len: snapshot.len,
+            capture_hash: &snapshot.hash,
+            editor_attempt_id: editor_attempt_id.as_deref(),
+        },
+        snapshot_path: snapshot_path.as_deref(),
+    });
     eprintln!("{message}");
 }
 

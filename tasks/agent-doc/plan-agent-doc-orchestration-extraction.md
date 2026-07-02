@@ -248,6 +248,19 @@ seams:
   `project_controller.rs` to `agent-doc-controller::status`; project-controller
   keeps only environment IO and passes the raw override value to the focused
   policy.
+- Route closeout drain outcome vocabulary and user-facing outcome formatting
+  moved from `route.rs` to `agent-doc-controller::dispatch`; route keeps closeout
+  IO and calls `agent-doc-turn` directly for recovery-command projection before
+  passing the result as a controller fact.
+- Controller crash-recovery stats and marker payload formatting moved from
+  `project_controller.rs` to `agent-doc-controller::status`; project-controller
+  keeps SQLite/projection/file IO and records focused marker statuses.
+- Existing-session owner conflict message formatting moved from `start.rs` to
+  `agent-doc-supervisor::session_owner`; start keeps tmux/session lookup and
+  passes gathered pane facts to the focused formatter.
+- Stale response-capture retirement decisions moved from `repair.rs` to
+  `agent-doc-workflow::capture`; repair now gathers file-backed drift/body/heading
+  evidence and calls `decide_stale_capture_retirement`.
 
 The no-shim policy remains active for these layer extractions: old helper names
 were removed or confined to static test strings, and boundary tests now assert

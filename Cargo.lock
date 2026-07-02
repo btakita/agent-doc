@@ -409,7 +409,9 @@ dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-frontmatter",
+ "agent-doc-markdown-ast",
  "agent-doc-template",
+ "agent-doc-turn",
  "tempfile",
 ]
 

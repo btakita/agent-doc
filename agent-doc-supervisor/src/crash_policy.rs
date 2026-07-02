@@ -251,6 +251,24 @@ pub fn supervisor_policy_exit_code(exit_code: i32, ctrl_c_forwarded_interrupt: b
     }
 }
 
+/// Classify an exit as the expected result of a forwarded Ctrl-C interrupt.
+pub fn forwarded_ctrl_c_interrupt_exit(
+    rendered_status: &str,
+    exit_code: u32,
+    ctrl_c_forwarded: bool,
+) -> bool {
+    if !ctrl_c_forwarded {
+        return false;
+    }
+
+    rendered_status
+        .strip_prefix("Terminated by ")
+        .is_some_and(|signal| {
+            signal.eq_ignore_ascii_case("Interrupt") || signal.eq_ignore_ascii_case("SIGINT")
+        })
+        || exit_code == 130
+}
+
 /// Format stable child-exit provenance fields for supervisor logs.
 pub fn format_exit_provenance_fields(rendered_status: &str, success: bool) -> String {
     if let Some(signal) = rendered_status.strip_prefix("Terminated by ") {
@@ -617,6 +635,34 @@ mod tests {
         assert_eq!(supervisor_policy_exit_code(1, true), 0);
         assert_eq!(supervisor_policy_exit_code(130, true), 0);
         assert_eq!(supervisor_policy_exit_code(1, false), 1);
+    }
+
+    #[test]
+    fn forwarded_ctrl_c_interrupt_exit_requires_forwarded_ctrl_c_signal_exit() {
+        assert!(forwarded_ctrl_c_interrupt_exit(
+            "Terminated by Interrupt",
+            1,
+            true
+        ));
+        assert!(!forwarded_ctrl_c_interrupt_exit(
+            "Terminated by Interrupt",
+            1,
+            false
+        ));
+        assert!(!forwarded_ctrl_c_interrupt_exit(
+            "Exited with code 0",
+            0,
+            true
+        ));
+    }
+
+    #[test]
+    fn forwarded_ctrl_c_interrupt_exit_accepts_exit_code_130() {
+        assert!(forwarded_ctrl_c_interrupt_exit(
+            "Exited with code 130",
+            130,
+            true
+        ));
     }
 
     #[test]

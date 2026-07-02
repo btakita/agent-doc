@@ -269,6 +269,104 @@ pub fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_
     saw_exchange
 }
 
+/// Finalize-path drift policy for non-exchange components, optionally
+/// intersected against the current turn scope.
+///
+/// Without a scope, any non-exchange component content change blocks the narrow
+/// agent-owned absorb path. With a scope, a non-exchange content change is
+/// allowed only when the node differ proves every change is independent of the
+/// turn's read/write sets. Structural drift and unexplained content changes
+/// still block conservatively.
+pub fn has_blocking_non_exchange_component_drift(
+    snapshot_doc: &str,
+    file_doc: &str,
+    turn_scope: Option<&agent_doc_turn::turn_scope::TurnScope>,
+) -> bool {
+    let snap_body = agent_doc_frontmatter::frontmatter::parse(snapshot_doc)
+        .map(|(_, body)| body)
+        .unwrap_or(snapshot_doc);
+    let file_body = agent_doc_frontmatter::frontmatter::parse(file_doc)
+        .map(|(_, body)| body)
+        .unwrap_or(file_doc);
+
+    let Ok(snap_components) = agent_doc_element::element::parse(snap_body) else {
+        return false;
+    };
+    let Ok(file_components) = agent_doc_element::element::parse(file_body) else {
+        return false;
+    };
+    if snap_components.is_empty() || file_components.is_empty() {
+        return false;
+    }
+    if snap_components.len() != file_components.len() {
+        return true;
+    }
+
+    for (snap_comp, file_comp) in snap_components.iter().zip(file_components.iter()) {
+        if snap_comp.name != file_comp.name {
+            return true;
+        }
+        if !is_backlog_component(&snap_comp.name)
+            && snap_comp.patch_mode() != file_comp.patch_mode()
+        {
+            return true;
+        }
+        let snap_content = normalize_component_content_for_absorb(snap_comp.content(snap_body));
+        let file_content = normalize_component_content_for_absorb(file_comp.content(file_body));
+        if snap_content == file_content {
+            continue;
+        }
+        if snap_comp.name == "exchange" {
+            continue;
+        }
+        match turn_scope {
+            Some(scope)
+                if non_exchange_change_is_turn_independent(
+                    snap_body,
+                    file_body,
+                    &snap_comp.name,
+                    scope,
+                ) =>
+            {
+                continue;
+            }
+            _ => return true,
+        }
+    }
+
+    false
+}
+
+fn non_exchange_change_is_turn_independent(
+    snap_body: &str,
+    file_body: &str,
+    component_name: &str,
+    scope: &agent_doc_turn::turn_scope::TurnScope,
+) -> bool {
+    use agent_doc_turn::op_log::OpActor;
+    use agent_doc_turn::turn_scope::{Address, classify_op};
+
+    let events: Vec<_> = agent_doc_markdown_ast::events::diff_node_events(snap_body, file_body)
+        .into_iter()
+        .filter(|event| event.component == component_name)
+        .collect();
+    if events.is_empty() {
+        return false;
+    }
+    events.iter().all(|event| {
+        let address = Address::from_component_node_key(&event.component, &event.node_key);
+        let node_index = event.after_index.or(event.before_index);
+        !classify_op(
+            OpActor::User,
+            event.kind.as_str(),
+            &address,
+            node_index,
+            scope,
+        )
+        .affects_turn()
+    })
+}
+
 fn prompt_classifier_post_commit_drift_kind(
     head_doc: &str,
     current_doc: &str,
@@ -452,8 +550,8 @@ mod tests {
         PostCommitLocalDriftKind, agent_doc_branch_name_for_file,
         agent_doc_commit_message_for_file, classify_post_commit_local_drift,
         classify_post_commit_local_drift_from_checks, classify_prompt_bearing_post_commit_drift,
-        commit_retry_backoff, doc_stem, doc_stem_or, is_index_lock_contention_text,
-        is_safe_user_only_follow_up_after_committed_head,
+        commit_retry_backoff, doc_stem, doc_stem_or, has_blocking_non_exchange_component_drift,
+        is_index_lock_contention_text, is_safe_user_only_follow_up_after_committed_head,
         line_looks_like_explicit_post_commit_prompt_directive, output_has_index_lock_contention,
         parent_pointer_recovery_hint, parent_submodule_pointer_commit_message,
         parent_submodule_pointer_message, parse_porcelain_path, parse_recovery_tags,
@@ -630,6 +728,84 @@ mod tests {
         assert!(paths.contains("vendor/missing"));
         assert!(paths.contains("vendor/conflict"));
         assert_eq!(paths.len(), 4);
+    }
+
+    fn drift_gate_doc(queue_items: &str, backlog_items: &str) -> String {
+        format!(
+            "---\nagent_doc_format: template\n---\n\n\
+             <!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue -->\n{queue_items}<!-- /agent:queue -->\n\n\
+             <!-- agent:backlog -->\n{backlog_items}<!-- /agent:backlog -->\n"
+        )
+    }
+
+    fn drift_gate_scope(content: &str, driver_id: &str) -> agent_doc_turn::turn_scope::TurnScope {
+        let nodes = agent_doc_markdown_ast::mutations::all_item_nodes(content);
+        let node = nodes
+            .iter()
+            .find(|node| node.component == "queue" && node.item.id == driver_id)
+            .expect("driver queue node present");
+        let driver =
+            agent_doc_turn::turn_scope::Address::from_component_node_key("queue", &node.node_key);
+        agent_doc_turn::turn_scope::TurnScope::for_driver(Some(driver))
+    }
+
+    #[test]
+    fn blocking_non_exchange_component_drift_ignores_independent_sibling_queue_insert() {
+        let snapshot = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task\n");
+        let file = drift_gate_doc("- do [#driver]\n- do [#sibling]\n", "- [ ] [#b1] task\n");
+        let scope = drift_gate_scope(&file, "driver");
+
+        assert!(
+            !has_blocking_non_exchange_component_drift(&snapshot, &file, Some(&scope)),
+            "an independent sibling queue insert must not block finalize"
+        );
+        assert!(has_blocking_non_exchange_component_drift(
+            &snapshot, &file, None
+        ));
+    }
+
+    #[test]
+    fn blocking_non_exchange_component_drift_still_blocks_driver_edit() {
+        let snapshot = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task\n");
+        let file = drift_gate_doc("- do [#driver] reworded\n", "- [ ] [#b1] task\n");
+        let scope = drift_gate_scope(&file, "driver");
+
+        assert!(has_blocking_non_exchange_component_drift(
+            &snapshot,
+            &file,
+            Some(&scope)
+        ));
+    }
+
+    #[test]
+    fn blocking_non_exchange_component_drift_still_blocks_backlog_contention() {
+        let snapshot = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task\n");
+        let file = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task changed\n");
+        let scope = drift_gate_scope(&file, "driver");
+
+        assert!(has_blocking_non_exchange_component_drift(
+            &snapshot,
+            &file,
+            Some(&scope)
+        ));
+    }
+
+    #[test]
+    fn blocking_non_exchange_component_drift_blocks_when_node_differ_cannot_explain_change() {
+        let snapshot = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task\n");
+        let file = format!(
+            "---\nagent_doc_format: template\n---\n\n\
+             <!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue -->\n- do [#driver]\n<!-- /agent:queue -->\n"
+        );
+        let scope = drift_gate_scope(&snapshot, "driver");
+
+        assert!(has_blocking_non_exchange_component_drift(
+            &snapshot,
+            &file,
+            Some(&scope)
+        ));
     }
 
     #[test]

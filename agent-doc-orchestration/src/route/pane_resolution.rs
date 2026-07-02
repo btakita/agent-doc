@@ -250,8 +250,8 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
         if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) =
             &associated_resolution
         {
-            let error = format_associated_pane_resolution_error(
-                file,
+            let error = agent_doc_tmux::format_associated_pane_resolution_error(
+                file.display(),
                 candidates,
                 preferred_active_window.as_deref(),
             );
@@ -278,8 +278,10 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
                     winner.source_summary()
                 ),
             );
-            anyhow::bail!(format_associated_pane_selected_error(
-                file, winner, redundant
+            anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
+                file.display(),
+                winner,
+                redundant
             ));
         }
         let dispatch_pane = live_owner.as_deref().unwrap_or(registered_pane.as_str());
@@ -311,8 +313,8 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
 
     if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) = &associated_resolution
     {
-        let error = format_associated_pane_resolution_error(
-            file,
+        let error = agent_doc_tmux::format_associated_pane_resolution_error(
+            file.display(),
             candidates,
             preferred_active_window.as_deref(),
         );
@@ -339,8 +341,10 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
                 winner.source_summary()
             ),
         );
-        anyhow::bail!(format_associated_pane_selected_error(
-            file, winner, redundant
+        anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
+            file.display(),
+            winner,
+            redundant
         ));
     }
 
@@ -652,8 +656,8 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
             if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) =
                 &associated_resolution
             {
-                let error = format_associated_pane_resolution_error(
-                    file,
+                let error = agent_doc_tmux::format_associated_pane_resolution_error(
+                    file.display(),
                     candidates,
                     preferred_active_window.as_deref(),
                 );
@@ -680,8 +684,10 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                         winner.source_summary()
                     ),
                 );
-                anyhow::bail!(format_associated_pane_selected_error(
-                    file, winner, redundant
+                anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
+                    file.display(),
+                    winner,
+                    redundant
                 ));
             }
             let mut stale_registration_cleared = false;
@@ -909,8 +915,8 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         .collect();
     if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) = &associated_resolution
     {
-        let error = format_associated_pane_resolution_error(
-            file,
+        let error = agent_doc_tmux::format_associated_pane_resolution_error(
+            file.display(),
             candidates,
             preferred_active_window.as_deref(),
         );
@@ -936,8 +942,10 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 winner.source_summary()
             ),
         );
-        anyhow::bail!(format_associated_pane_selected_error(
-            file, winner, redundant
+        anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
+            file.display(),
+            winner,
+            redundant
         ));
     }
     if registered.is_some()
@@ -1017,8 +1025,8 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
     if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) =
         &late_associated_resolution
     {
-        let error = format_associated_pane_resolution_error(
-            file,
+        let error = agent_doc_tmux::format_associated_pane_resolution_error(
+            file.display(),
             candidates,
             tmux.active_window(target_session).as_deref(),
         );
@@ -1044,8 +1052,10 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 winner.source_summary()
             ),
         );
-        anyhow::bail!(format_associated_pane_selected_error(
-            file, winner, redundant
+        anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
+            file.display(),
+            winner,
+            redundant
         ));
     }
 

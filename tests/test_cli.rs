@@ -12722,6 +12722,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn supervisor_resume_handoff_failed",
         "pub fn supervisor_clean_exit_before_prompt_seen",
         "pub fn format_exit_provenance_fields(",
+        "pub fn forwarded_ctrl_c_interrupt_exit(",
     ] {
         assert!(
             supervisor_crash_policy.contains(required_snippet),
@@ -12775,6 +12776,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "format!(\"exit_kind=signal",
         "format!(\"exit_kind=success",
         "format!(\"exit_kind=exit_code",
+        "signal.eq_ignore_ascii_case(\"Interrupt\")",
+        "status.exit_code() == 130",
     ] {
         assert!(
             !start_source.contains(forbidden_snippet),
@@ -12791,7 +12794,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && start_run_source.contains("restart_continue_exit_strategy(")
             && start_run_source.contains("supervisor_resume_handoff_failed(")
             && start_run_source.contains("supervisor_clean_exit_before_prompt_seen(")
-            && start_source.contains("format_exit_provenance_fields(&rendered, status.success())"),
+            && start_source.contains("format_exit_provenance_fields(&rendered, status.success())")
+            && start_source.contains(
+                "forwarded_ctrl_c_interrupt_exit(&rendered, status.exit_code(), ctrl_c_forwarded)"
+            ),
         "start paths should call focused supervisor restart policy directly"
     );
     for required_snippet in [
@@ -14919,6 +14925,9 @@ fn test_agent_doc_tmux_owns_associated_pane_resolution_policy() {
         "pub fn resolve_associated_panes(",
         "pub fn is_stash(&self) -> bool",
         "pub fn source_summary(&self) -> String",
+        "pub fn format_associated_pane_resolution_error(",
+        "pub fn format_associated_pane_selected_error(",
+        "pub fn format_associated_pane_fix_error(",
     ] {
         assert!(
             tmux_source.contains(required),
@@ -14936,6 +14945,8 @@ fn test_agent_doc_tmux_owns_associated_pane_resolution_policy() {
         "pub fn resolve_associated_panes(",
         "pub use agent_doc_tmux",
         "pub(crate) use agent_doc_tmux",
+        "fn format_associated_pane_resolution_error(",
+        "fn format_associated_pane_selected_error(",
     ] {
         assert!(
             !sync_source.contains(forbidden),
@@ -14964,8 +14975,17 @@ fn test_agent_doc_tmux_owns_associated_pane_resolution_policy() {
             "{relative_path} must import associated pane policy from agent-doc-tmux, not through sync.rs"
         );
         assert!(
+            !source.contains("fn format_associated_pane_resolution_error(")
+                && !source.contains("fn format_associated_pane_selected_error(")
+                && !source.contains("multiple tmux panes are associated with {}")
+                && !source.contains("route found legacy pane-association evidence for {}"),
+            "{relative_path} must not re-own associated pane diagnostic formatting policy"
+        );
+        assert!(
             source.contains("agent_doc_tmux::AssociatedPane")
-                || source.contains("agent_doc_tmux::resolve_associated_panes"),
+                || source.contains("agent_doc_tmux::resolve_associated_panes")
+                || source.contains("agent_doc_tmux::format_associated_pane_")
+                || !source.contains("associated_pane"),
             "{relative_path} should call the focused associated pane API directly"
         );
     }
@@ -16633,6 +16653,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub struct RecoveryTag",
         "pub fn doc_stem(",
         "pub fn parse_recovery_tags(",
+        "pub fn has_blocking_non_exchange_component_drift(",
     ] {
         assert!(
             git_policy_source.contains(required),
@@ -16649,6 +16670,9 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "fn relative_to(",
         "fn is_index_lock_contention_text(",
         "fn render_git_output(",
+        "fn has_non_exchange_component_drift(",
+        "fn has_non_exchange_component_drift_scoped(",
+        "fn non_exchange_change_is_turn_independent(",
     ] {
         assert!(
             !git_source.contains(forbidden),
@@ -16662,6 +16686,10 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     assert!(
         git_source.contains("use agent_doc_git::{"),
         "git.rs should import focused git command/path policy directly"
+    );
+    assert!(
+        git_source.contains("has_blocking_non_exchange_component_drift("),
+        "git.rs should call focused non-exchange component drift policy directly"
     );
 
     let partial_staging = fs::read_to_string(

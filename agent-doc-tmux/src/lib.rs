@@ -371,6 +371,136 @@ pub fn associated_pane_candidates_detail<'a>(
         .join(", ")
 }
 
+pub fn format_associated_pane_resolution_error(
+    file_display: impl fmt::Display,
+    candidates: &[AssociatedPaneCandidate],
+    preferred_window: Option<&str>,
+) -> String {
+    let mut lines = vec![format!(
+        "multiple tmux panes are associated with {}; route cannot safely auto-pick one.",
+        file_display
+    )];
+    if let Some(window_id) = preferred_window {
+        lines.push(format!(
+            "Preferred active window: {}. Resolve by inspecting one pane, claiming it explicitly, then killing the redundant panes.",
+            window_id
+        ));
+    } else {
+        lines.push(
+            "Resolve by inspecting one pane, claiming it explicitly, then killing the redundant panes."
+                .to_string(),
+        );
+    }
+    for candidate in candidates {
+        lines.push(format!(
+            "  - {} session={} window={} ({}) cmd={} sources={}",
+            candidate.pane_id,
+            candidate.session_name,
+            candidate.window_id,
+            candidate.window_name,
+            candidate.current_command,
+            candidate.source_summary()
+        ));
+        lines.push(format!(
+            "    view: tmux capture-pane -pt {} | tail -n 80",
+            candidate.pane_id
+        ));
+        lines.push(format!(
+            "    assign: agent-doc claim {} --pane {} --force",
+            file_display, candidate.pane_id
+        ));
+        lines.push(format!("    kill: tmux kill-pane -t {}", candidate.pane_id));
+    }
+    lines.join("\n")
+}
+
+pub fn format_associated_pane_selected_error(
+    file_display: impl fmt::Display,
+    winner: &AssociatedPaneCandidate,
+    redundant: &[AssociatedPaneCandidate],
+) -> String {
+    let mut lines = vec![format!(
+        "route found legacy pane-association evidence for {}, but the normal path will not re-elect ownership from {}.",
+        file_display, winner.pane_id
+    )];
+    lines.push(
+        "Inspect the candidate, claim it explicitly if it is authoritative, or kill it before rerouting."
+            .to_string(),
+    );
+    lines.push(format!(
+        "  - {} session={} window={} ({}) cmd={} sources={}",
+        winner.pane_id,
+        winner.session_name,
+        winner.window_id,
+        winner.window_name,
+        winner.current_command,
+        winner.source_summary()
+    ));
+    lines.push(format!(
+        "    view: tmux capture-pane -pt {} | tail -n 80",
+        winner.pane_id
+    ));
+    lines.push(format!(
+        "    assign: agent-doc claim {} --pane {} --force",
+        file_display, winner.pane_id
+    ));
+    lines.push(format!("    kill: tmux kill-pane -t {}", winner.pane_id));
+    for candidate in redundant {
+        lines.push(format!(
+            "  - redundant {} session={} window={} ({}) cmd={} sources={}",
+            candidate.pane_id,
+            candidate.session_name,
+            candidate.window_id,
+            candidate.window_name,
+            candidate.current_command,
+            candidate.source_summary()
+        ));
+    }
+    lines.join("\n")
+}
+
+pub fn format_associated_pane_fix_error(
+    file_display: impl fmt::Display,
+    candidates: &[AssociatedPaneCandidate],
+    preferred_window: Option<&str>,
+) -> String {
+    let mut lines = vec![format!(
+        "multiple tmux panes are associated with {}; fix will not auto-pick one.",
+        file_display
+    )];
+    if let Some(window_id) = preferred_window {
+        lines.push(format!(
+            "Preferred active window: {}. Inspect one pane, claim it explicitly, then kill the redundant panes.",
+            window_id
+        ));
+    } else {
+        lines.push(
+            "Inspect one pane, claim it explicitly, then kill the redundant panes.".to_string(),
+        );
+    }
+    for candidate in candidates {
+        lines.push(format!(
+            "  - {} session={} window={} ({}) cmd={} sources={}",
+            candidate.pane_id,
+            candidate.session_name,
+            candidate.window_id,
+            candidate.window_name,
+            candidate.current_command,
+            candidate.source_summary()
+        ));
+        lines.push(format!(
+            "    view: tmux capture-pane -pt {} | tail -n 80",
+            candidate.pane_id
+        ));
+        lines.push(format!(
+            "    assign: agent-doc claim {} --pane {} --force",
+            file_display, candidate.pane_id
+        ));
+        lines.push(format!("    kill: tmux kill-pane -t {}", candidate.pane_id));
+    }
+    lines.join("\n")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssociatedPaneResolution {
     None,
@@ -1233,6 +1363,99 @@ mod tests {
         assert_eq!(
             associated_pane_candidates_detail([&active, &stashed]),
             "%419:agent-doc:@3:registered,supervisor-pid, %417:stash:@9:process-tree"
+        );
+    }
+
+    #[test]
+    fn associated_pane_resolution_error_formats_manual_recovery_steps() {
+        let candidates = vec![
+            associated_candidate(
+                "%419",
+                "@3",
+                "agent-doc",
+                &[AssociatedPaneSource::Registered],
+            ),
+            associated_candidate("%417", "@9", "stash", &[AssociatedPaneSource::ProcessTree]),
+        ];
+
+        let error =
+            format_associated_pane_resolution_error("tasks/left.md", &candidates, Some("@3"));
+
+        assert_eq!(
+            error,
+            [
+                "multiple tmux panes are associated with tasks/left.md; route cannot safely auto-pick one.",
+                "Preferred active window: @3. Resolve by inspecting one pane, claiming it explicitly, then killing the redundant panes.",
+                "  - %419 session=14 window=@3 (agent-doc) cmd=agent-doc sources=registered",
+                "    view: tmux capture-pane -pt %419 | tail -n 80",
+                "    assign: agent-doc claim tasks/left.md --pane %419 --force",
+                "    kill: tmux kill-pane -t %419",
+                "  - %417 session=14 window=@9 (stash) cmd=agent-doc sources=process-tree",
+                "    view: tmux capture-pane -pt %417 | tail -n 80",
+                "    assign: agent-doc claim tasks/left.md --pane %417 --force",
+                "    kill: tmux kill-pane -t %417",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn associated_pane_selected_error_formats_fail_closed_claim_guidance() {
+        let winner = associated_candidate(
+            "%419",
+            "@3",
+            "agent-doc",
+            &[
+                AssociatedPaneSource::Registered,
+                AssociatedPaneSource::SupervisorPid,
+            ],
+        );
+        let redundant = vec![associated_candidate(
+            "%417",
+            "@9",
+            "stash",
+            &[AssociatedPaneSource::ProcessTree],
+        )];
+
+        let error = format_associated_pane_selected_error("tasks/left.md", &winner, &redundant);
+
+        assert_eq!(
+            error,
+            [
+                "route found legacy pane-association evidence for tasks/left.md, but the normal path will not re-elect ownership from %419.",
+                "Inspect the candidate, claim it explicitly if it is authoritative, or kill it before rerouting.",
+                "  - %419 session=14 window=@3 (agent-doc) cmd=agent-doc sources=registered,supervisor-pid",
+                "    view: tmux capture-pane -pt %419 | tail -n 80",
+                "    assign: agent-doc claim tasks/left.md --pane %419 --force",
+                "    kill: tmux kill-pane -t %419",
+                "  - redundant %417 session=14 window=@9 (stash) cmd=agent-doc sources=process-tree",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn associated_pane_fix_error_formats_resync_manual_recovery_steps() {
+        let candidates = vec![associated_candidate(
+            "%419",
+            "@3",
+            "agent-doc",
+            &[AssociatedPaneSource::Registered],
+        )];
+
+        let error = format_associated_pane_fix_error("tasks/left.md", &candidates, Some("@3"));
+
+        assert_eq!(
+            error,
+            [
+                "multiple tmux panes are associated with tasks/left.md; fix will not auto-pick one.",
+                "Preferred active window: @3. Inspect one pane, claim it explicitly, then kill the redundant panes.",
+                "  - %419 session=14 window=@3 (agent-doc) cmd=agent-doc sources=registered",
+                "    view: tmux capture-pane -pt %419 | tail -n 80",
+                "    assign: agent-doc claim tasks/left.md --pane %419 --force",
+                "    kill: tmux kill-pane -t %419",
+            ]
+            .join("\n")
         );
     }
 

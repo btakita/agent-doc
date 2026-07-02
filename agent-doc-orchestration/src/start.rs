@@ -151,9 +151,9 @@ use agent_doc_supervisor::crash_policy::{
     CrashPolicy, FAILED_RESUME_WINDOW, FailedResumeTracker, RestartAction,
     SupervisorCleanExitResolution, SupervisorPromptDecision, SupervisorRestartContinueExitStrategy,
     SupervisorState, classify_supervisor_prompt_input, format_exit_provenance_fields,
-    restart_continue_exit_strategy, supervisor_clean_exit_before_prompt_seen,
-    supervisor_clean_exit_resolution, supervisor_policy_exit_code,
-    supervisor_resume_handoff_failed,
+    forwarded_ctrl_c_interrupt_exit, restart_continue_exit_strategy,
+    supervisor_clean_exit_before_prompt_seen, supervisor_clean_exit_resolution,
+    supervisor_policy_exit_code, supervisor_resume_handoff_failed,
 };
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 use agent_doc_supervisor::input::{
@@ -735,17 +735,8 @@ fn is_forwarded_ctrl_c_interrupt_exit(
     status: &portable_pty::ExitStatus,
     ctrl_c_forwarded: bool,
 ) -> bool {
-    if !ctrl_c_forwarded {
-        return false;
-    }
-
     let rendered = status.to_string();
-    rendered
-        .strip_prefix("Terminated by ")
-        .is_some_and(|signal| {
-            signal.eq_ignore_ascii_case("Interrupt") || signal.eq_ignore_ascii_case("SIGINT")
-        })
-        || status.exit_code() == 130
+    forwarded_ctrl_c_interrupt_exit(&rendered, status.exit_code(), ctrl_c_forwarded)
 }
 
 fn sleep_with_stop(stop: &AtomicBool, total: Duration) -> bool {
@@ -3096,19 +3087,5 @@ mod tests {
             // the code uses tcflush as best-effort cleanup.
             let _ = ret;
         }
-    }
-    #[test]
-    fn forwarded_ctrl_c_interrupt_exit_requires_forwarded_ctrl_c_signal_exit() {
-        let interrupt = portable_pty::ExitStatus::with_signal("Interrupt");
-        assert!(is_forwarded_ctrl_c_interrupt_exit(&interrupt, true));
-        assert!(!is_forwarded_ctrl_c_interrupt_exit(&interrupt, false));
-
-        let clean = portable_pty::ExitStatus::with_exit_code(0);
-        assert!(!is_forwarded_ctrl_c_interrupt_exit(&clean, true));
-    }
-    #[test]
-    fn forwarded_ctrl_c_interrupt_exit_accepts_exit_code_130() {
-        let status = portable_pty::ExitStatus::with_exit_code(130);
-        assert!(is_forwarded_ctrl_c_interrupt_exit(&status, true));
     }
 }

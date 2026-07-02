@@ -92,7 +92,6 @@
 
 use agent_doc_document::commit_normalization::{
     canonicalize_answered_prompt_prefixes, normalize_committed_exchange_artifacts,
-    normalize_component_content_for_absorb,
 };
 use agent_doc_document::transient_markers::{
     exchange_prompt_prefix_equivalent, normalize_for_replay_hash,
@@ -112,14 +111,14 @@ use agent_doc_document_realtime::write_policy::{
     classify_committed_historical_agent_doc_mutation, classify_safe_out_of_band_agent_doc_mutation,
     detect_reintroduced_reaped_pending_ids, is_empty_template_scaffold_snapshot,
 };
-use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
 use agent_doc_git::{
     PostCommitLocalDriftKind, SubmodulePointerDrift, agent_doc_branch_name_for_file,
     agent_doc_commit_message_for_file, classify_post_commit_local_drift, commit_retry_backoff,
-    is_safe_user_only_follow_up_after_committed_head, output_has_index_lock_contention,
-    parent_submodule_pointer_commit_message, parse_submodule_paths, relative_to_root,
-    render_git_process_output, tracked_modified_paths_from_porcelain,
+    has_blocking_non_exchange_component_drift, is_safe_user_only_follow_up_after_committed_head,
+    output_has_index_lock_contention, parent_submodule_pointer_commit_message,
+    parse_submodule_paths, relative_to_root, render_git_process_output,
+    tracked_modified_paths_from_porcelain,
 };
 use agent_doc_git_io::dirs::{
     commit_lock_path_for_git_root, commit_lock_scope_path, narrow_to_submodule, resolve_to_git_root,
@@ -302,126 +301,6 @@ pub fn is_in_git_repo(file: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(test)]
-fn has_non_exchange_component_drift(snapshot_doc: &str, file_doc: &str) -> bool {
-    has_non_exchange_component_drift_scoped(snapshot_doc, file_doc, None)
-}
-
-/// `#nm1x` — the finalize-path drift gate, optionally intersected against the
-/// current [`TurnScope`].
-///
-/// Without a scope (`None`) this is the historical coarse gate: any non-exchange
-/// component whose content changed between snapshot and file is drift that blocks
-/// the narrow agent-owned absorb path. With a scope, a non-exchange content
-/// change that is *fully explained by node-level ops outside the turn scope*
-/// (a new queue item beside the running one, an icebox/done edit) is
-/// `Independent`/`ProvenanceSpoofed` — it integrates and persists without
-/// affecting the turn, so it does not block. Structural drift (component count /
-/// name / patch-mode mismatch) and any change the node differ cannot fully
-/// explain still block conservatively.
-fn has_non_exchange_component_drift_scoped(
-    snapshot_doc: &str,
-    file_doc: &str,
-    scope: Option<&agent_doc_turn::turn_scope::TurnScope>,
-) -> bool {
-    let snap_body = agent_doc_frontmatter::frontmatter::parse(snapshot_doc)
-        .map(|(_, body)| body)
-        .unwrap_or(snapshot_doc);
-    let file_body = agent_doc_frontmatter::frontmatter::parse(file_doc)
-        .map(|(_, body)| body)
-        .unwrap_or(file_doc);
-
-    let Ok(snap_components) = agent_doc_element::element::parse(snap_body) else {
-        return false;
-    };
-    let Ok(file_components) = agent_doc_element::element::parse(file_body) else {
-        return false;
-    };
-    if snap_components.is_empty() || file_components.is_empty() {
-        return false;
-    }
-    if snap_components.len() != file_components.len() {
-        return true;
-    }
-
-    for (snap_comp, file_comp) in snap_components.iter().zip(file_components.iter()) {
-        if snap_comp.name != file_comp.name {
-            return true;
-        }
-        if !is_backlog_component(&snap_comp.name)
-            && snap_comp.patch_mode() != file_comp.patch_mode()
-        {
-            return true;
-        }
-        let snap_content = normalize_component_content_for_absorb(snap_comp.content(snap_body));
-        let file_content = normalize_component_content_for_absorb(file_comp.content(file_body));
-        if snap_content == file_content {
-            continue;
-        }
-        if snap_comp.name == "exchange" {
-            continue;
-        }
-        // Non-exchange content changed. Coarse default: block. With a turn scope,
-        // un-gate only when the change is provably composed of node ops that all
-        // fall outside the turn's read/write sets.
-        match scope {
-            Some(scope)
-                if non_exchange_change_is_turn_independent(
-                    snap_body,
-                    file_body,
-                    &snap_comp.name,
-                    scope,
-                ) =>
-            {
-                continue;
-            }
-            _ => return true,
-        }
-    }
-
-    false
-}
-
-/// Whether a non-exchange component's node-level changes between snapshot and
-/// file are *all* independent of the current turn scope (`#nm1x`). Returns
-/// `false` — meaning the change DOES affect the turn, so keep blocking —
-/// whenever the node differ cannot fully explain the content change, so
-/// un-gating only ever happens for changes provably composed of out-of-scope
-/// node ops.
-fn non_exchange_change_is_turn_independent(
-    snap_body: &str,
-    file_body: &str,
-    component_name: &str,
-    scope: &agent_doc_turn::turn_scope::TurnScope,
-) -> bool {
-    use agent_doc_turn::op_log::OpActor;
-    use agent_doc_turn::turn_scope::{Address, classify_op};
-
-    let events: Vec<_> = agent_doc_markdown_ast::events::diff_node_events(snap_body, file_body)
-        .into_iter()
-        .filter(|event| event.component == component_name)
-        .collect();
-    if events.is_empty() {
-        // Content changed but no node-level explanation (e.g. prose / replace-mode
-        // component): stay conservative and keep blocking.
-        return false;
-    }
-    // The gate diff is snapshot↔file, so every node op is a `user` edit (the
-    // agent's committed output already lives in the snapshot).
-    events.iter().all(|event| {
-        let address = Address::from_component_node_key(&event.component, &event.node_key);
-        let node_index = event.after_index.or(event.before_index);
-        !classify_op(
-            OpActor::User,
-            event.kind.as_str(),
-            &address,
-            node_index,
-            scope,
-        )
-        .affects_turn()
-    })
-}
-
 pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
     let Some(snapshot_doc) = crate::snapshot::load(file)? else {
         return Ok(None);
@@ -444,7 +323,7 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     // block the historical snapshot repair.
     let turn_scope = agent_doc_turn_scope_io::load(file);
     let non_exchange_component_drift =
-        has_non_exchange_component_drift_scoped(&snapshot_doc, &head_doc, turn_scope.as_ref());
+        has_blocking_non_exchange_component_drift(&snapshot_doc, &head_doc, turn_scope.as_ref());
     let historical_response_marker =
         agent_doc_turn::document_drift::detect_bypassed_response_write_between(
             &snapshot_doc,
@@ -684,8 +563,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 let mutation = classify_committed_historical_agent_doc_mutation(snapshot, head);
                 (
                     mutation.or_else(|| {
-                        has_non_exchange_component_drift_scoped(snapshot, head, turn_scope.as_ref())
-                            .then_some("typed_component_drift")
+                        has_blocking_non_exchange_component_drift(
+                            snapshot,
+                            head,
+                            turn_scope.as_ref(),
+                        )
+                        .then_some("typed_component_drift")
                     }),
                     agent_doc_turn::document_drift::detect_bypassed_response_write_between(
                         snapshot, head,
@@ -2677,27 +2560,6 @@ fn chrono_timestamp() -> String {
 #[cfg(test)]
 mod th {
     use super::*;
-    pub(crate) fn drift_gate_doc(queue_items: &str, backlog_items: &str) -> String {
-        format!(
-            "---\nagent_doc_format: template\n---\n\n\
-             <!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n\n\
-             <!-- agent:queue -->\n{queue_items}<!-- /agent:queue -->\n\n\
-             <!-- agent:backlog -->\n{backlog_items}<!-- /agent:backlog -->\n"
-        )
-    }
-    pub(crate) fn drift_gate_scope(
-        content: &str,
-        driver_id: &str,
-    ) -> agent_doc_turn::turn_scope::TurnScope {
-        let nodes = agent_doc_markdown_ast::mutations::all_item_nodes(content);
-        let node = nodes
-            .iter()
-            .find(|node| node.component == "queue" && node.item.id == driver_id)
-            .expect("driver queue node present");
-        let driver =
-            agent_doc_turn::turn_scope::Address::from_component_node_key("queue", &node.node_key);
-        agent_doc_turn::turn_scope::TurnScope::for_driver(Some(driver))
-    }
     pub(crate) fn init_repo(repo: &Path) {
         Command::new("git")
             .current_dir(repo)
@@ -2825,79 +2687,12 @@ mod th {
     // --- #8jzg: resolve_pane_cwd tests ---
 }
 #[cfg(test)]
-pub(crate) use th::{
-    commit_file, drift_gate_doc, drift_gate_scope, init_repo, start_fake_listener,
-    wait_for_listener,
-};
+pub(crate) use th::{commit_file, init_repo, start_fake_listener, wait_for_listener};
 
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-
-    #[test]
-    fn scoped_drift_gate_ignores_independent_sibling_queue_insert() {
-        // The motivating bug: a queue item inserted *beside* the running one is
-        // Independent — it must integrate + persist without blocking finalize.
-        let snapshot = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task\n");
-        let file = drift_gate_doc("- do [#driver]\n- do [#sibling]\n", "- [ ] [#b1] task\n");
-        let scope = drift_gate_scope(&file, "driver");
-
-        assert!(
-            !has_non_exchange_component_drift_scoped(&snapshot, &file, Some(&scope)),
-            "an independent sibling queue insert must not block finalize"
-        );
-        // Without a scope the coarse gate still blocks (the historical behavior).
-        assert!(has_non_exchange_component_drift(&snapshot, &file));
-    }
-    #[test]
-    fn scoped_drift_gate_still_blocks_driver_edit() {
-        // Editing the queue item the turn is answering is Input-affecting — it
-        // must still gate the turn.
-        let snapshot = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task\n");
-        let file = drift_gate_doc("- do [#driver] reworded\n", "- [ ] [#b1] task\n");
-        let scope = drift_gate_scope(&file, "driver");
-
-        assert!(has_non_exchange_component_drift_scoped(
-            &snapshot,
-            &file,
-            Some(&scope)
-        ));
-    }
-    #[test]
-    fn scoped_drift_gate_still_blocks_backlog_contention() {
-        // The backlog is in the turn's write set, so a concurrent backlog change
-        // is Output-contended and must still block the narrow absorb path.
-        let snapshot = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task\n");
-        let file = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task changed\n");
-        let scope = drift_gate_scope(&file, "driver");
-
-        assert!(has_non_exchange_component_drift_scoped(
-            &snapshot,
-            &file,
-            Some(&scope)
-        ));
-    }
-    #[test]
-    fn scoped_drift_gate_blocks_when_node_differ_cannot_explain_change() {
-        // A non-exchange content change with no item-node explanation (component
-        // count mismatch / prose churn) stays conservative and blocks even with a
-        // scope present.
-        let snapshot = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task\n");
-        // Drop the backlog component entirely → component count mismatch.
-        let file = format!(
-            "---\nagent_doc_format: template\n---\n\n\
-             <!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n\n\
-             <!-- agent:queue -->\n- do [#driver]\n<!-- /agent:queue -->\n"
-        );
-        let scope = drift_gate_scope(&snapshot, "driver");
-
-        assert!(has_non_exchange_component_drift_scoped(
-            &snapshot,
-            &file,
-            Some(&scope)
-        ));
-    }
 
     #[test]
     fn commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot() {

@@ -258,49 +258,6 @@ fn registry_entry_session_id<'a>(key: &'a str, entry: &'a tmux_router::RegistryE
     }
 }
 
-fn format_associated_pane_fix_error(
-    file: &Path,
-    candidates: &[agent_doc_tmux::AssociatedPaneCandidate],
-    preferred_window: Option<&str>,
-) -> String {
-    let mut lines = vec![format!(
-        "multiple tmux panes are associated with {}; fix will not auto-pick one.",
-        file.display()
-    )];
-    if let Some(window_id) = preferred_window {
-        lines.push(format!(
-            "Preferred active window: {}. Inspect one pane, claim it explicitly, then kill the redundant panes.",
-            window_id
-        ));
-    } else {
-        lines.push(
-            "Inspect one pane, claim it explicitly, then kill the redundant panes.".to_string(),
-        );
-    }
-    for candidate in candidates {
-        lines.push(format!(
-            "  - {} session={} window={} ({}) cmd={} sources={}",
-            candidate.pane_id,
-            candidate.session_name,
-            candidate.window_id,
-            candidate.window_name,
-            candidate.current_command,
-            candidate.source_summary()
-        ));
-        lines.push(format!(
-            "    view: tmux capture-pane -pt {} | tail -n 80",
-            candidate.pane_id
-        ));
-        lines.push(format!(
-            "    assign: agent-doc claim {} --pane {} --force",
-            file.display(),
-            candidate.pane_id
-        ));
-        lines.push(format!("    kill: tmux kill-pane -t {}", candidate.pane_id));
-    }
-    lines.join("\n")
-}
-
 fn kill_redundant_associated_stash_panes(
     tmux: &Tmux,
     redundant: &[agent_doc_tmux::AssociatedPaneCandidate],
@@ -426,8 +383,8 @@ fn recover_target_document_pane_in(
             Ok(outcome)
         }
         agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) => {
-            anyhow::bail!(format_associated_pane_fix_error(
-                target,
+            anyhow::bail!(agent_doc_tmux::format_associated_pane_fix_error(
+                target.display(),
                 &candidates,
                 preferred_window.as_deref()
             ));

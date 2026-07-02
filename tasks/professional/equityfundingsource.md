@@ -45,7 +45,7 @@ I loaded the local workflow, ran preflight/plan, reset sidecars with `--preserve
 No EFS code, tests, commits, pushes, or deploys were run. The document also has `queue: stop`, so the Messages-tab URL and `deploy` queue lines are inactive residue.
 
 To unblock: resolve/save the live editor buffer for [equityfundingsource.md](/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md:1), then I can retry `agent-doc write --commit`; or explicitly authorize `--force-disk`.
-<!-- agent:boundary:da34698e -->
+<!-- agent:boundary:2edd27ce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,7 +73,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#ccpz] From the last call transcript, when did robert-waldman want to have another call?
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

@@ -5,6 +5,30 @@ consolidation rung: once A–D encode the *correct* guards, this replaces the
 scattered booleans/string-enums that encode those guards implicitly with one
 named, reactive Harel chart per process.
 
+## Status (2026-07-02)
+
+- **Dependency (Phase 0) — DONE.** `lazily` 0.18.0 published (statechart API).
+  Then `lazily` **0.19.0** published (crates.io + tag `v0.19.0`, commit
+  `458d914` on lazily-hub/lazily-rs) adding: a typed Rust `ChartBuilder`
+  (definition in Rust *or* JSON, both via the shared `from_states`), and
+  `ThreadSafeStateChart` + `AsyncStateChart` context variants (the flat
+  `StateMachine`'s three-context parity). Engine extracted context-free;
+  conformance fixtures 7/7 + 104 lib tests green.
+- **Rung 1 (`#adstatechart1`) — DONE.** `agent-doc-state-backbone::adstatechart`
+  (commit `8000c8cf`): `ChartFacts` + pure guards + the four-region ChartDef +
+  the load-bearing rejected-edge proof (`commit` while editor-ahead). 8 tests
+  green. On `lazily` 0.18 single-threaded `StateChart`, JSON def. Not installed
+  (decomposition deploy gate).
+- **Cascade (follow-ups, queued):** switch rung 1 to the typed builder + bump
+  agent-doc to `lazily` 0.19 + use `ThreadSafeStateChart` for the live wiring;
+  rungs 2–4 below; lazily-kt (Maven) + lazily-js (npm) StateChart + threading +
+  builder for the editor plugins; lazily-spec prose note (Pages) that StateChart
+  has all three context variants; a focused **Lean model** proving the rung-1
+  invariants (rejected-edge safety on all paths + no dead-end config), scoped to
+  per-process safety only — it cannot prove production wedge-freedom (real wedges
+  are "the unblocking event never fires", a distributed-liveness property outside
+  the per-process chart, same boundary as root cause B).
+
 ## Operator ask
 
 > lazily-rs now supports State Charts. Would a State Chart improve state

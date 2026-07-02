@@ -1,5 +1,6 @@
 //! Pure controller dispatch admission helpers.
 
+use agent_doc_supervisor::route_runtime::SupervisorHealth;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
@@ -989,7 +990,7 @@ pub enum BusyPaneAutoFixOutcome {
 pub struct BusyPaneAutoFixFacts {
     pub test_hook_changed: bool,
     pub fix_made_changes: bool,
-    pub supervisor_healthy: bool,
+    pub supervisor_health: Option<SupervisorHealth>,
     pub restarted_supervisor: bool,
 }
 
@@ -1000,7 +1001,7 @@ pub fn busy_existing_pane_auto_fix_outcome(facts: BusyPaneAutoFixFacts) -> BusyP
     if facts.test_hook_changed || facts.fix_made_changes {
         return BusyPaneAutoFixOutcome::RetryRoute;
     }
-    if facts.supervisor_healthy {
+    if matches!(facts.supervisor_health, Some(SupervisorHealth::Healthy)) {
         BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart
     } else {
         BusyPaneAutoFixOutcome::FailClosed
@@ -4613,7 +4614,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
                 test_hook_changed: false,
                 fix_made_changes: false,
-                supervisor_healthy: true,
+                supervisor_health: Some(SupervisorHealth::Healthy),
                 restarted_supervisor: false,
             }),
             BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart
@@ -4622,7 +4623,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
                 test_hook_changed: true,
                 fix_made_changes: false,
-                supervisor_healthy: false,
+                supervisor_health: None,
                 restarted_supervisor: false,
             }),
             BusyPaneAutoFixOutcome::RetryRoute
@@ -4631,7 +4632,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
                 test_hook_changed: false,
                 fix_made_changes: false,
-                supervisor_healthy: false,
+                supervisor_health: Some(SupervisorHealth::NoSocket),
                 restarted_supervisor: true,
             }),
             BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart

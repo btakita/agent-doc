@@ -125,12 +125,12 @@ pub(crate) fn attempt_busy_existing_pane_auto_fix(
             );
         }
     }
-    let outcome = busy_existing_pane_auto_fix_outcome(
+    let outcome = controller_busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
         test_hook_changed,
-        fix_outcome.made_changes(),
+        fix_made_changes: fix_outcome.made_changes(),
         supervisor_health,
-        restarted,
-    );
+        restarted_supervisor: restarted,
+    });
     crate::ops_log::log_op(
         file,
         &format!(
@@ -146,20 +146,6 @@ pub(crate) fn attempt_busy_existing_pane_auto_fix(
         ),
     );
     Ok(outcome)
-}
-
-pub(crate) fn busy_existing_pane_auto_fix_outcome(
-    test_hook_changed: bool,
-    fix_made_changes: bool,
-    supervisor_health: Option<SupervisorHealth>,
-    restarted_supervisor: bool,
-) -> BusyPaneAutoFixOutcome {
-    controller_busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
-        test_hook_changed,
-        fix_made_changes,
-        supervisor_healthy: matches!(supervisor_health, Some(SupervisorHealth::Healthy)),
-        restarted_supervisor,
-    })
 }
 
 /// Whether the busy-pane reroute may send `C-g`. Fast-path on the authoritative

@@ -11004,6 +11004,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             "route.rs must not re-own pure controller dispatch policy: {forbidden_snippet}"
         );
     }
+    assert!(
+        !route_busy_pane_source.contains("fn busy_existing_pane_auto_fix_outcome(")
+            && route_busy_pane_source.contains("controller_busy_existing_pane_auto_fix_outcome(")
+            && route_busy_pane_source.contains("BusyPaneAutoFixFacts"),
+        "route/busy_pane.rs must adapt supervisor facts into focused controller busy-pane auto-fix policy directly"
+    );
     for forbidden_snippet in [
         "pub enum RouteDecision",
         "pub enum ActorDispatchState",
@@ -12515,6 +12521,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum IpcMethod",
         "pub struct IpcResponse",
         "pub fn submit_bytes(",
+        "pub const fn ipc_method_requires_capability_gate(",
         "fn default_restart_mode(",
     ] {
         assert!(
@@ -12526,6 +12533,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum IpcMethod",
         "pub struct IpcResponse",
         "pub fn submit_bytes(",
+        "fn ipc_method_requires_capability_gate(",
         "pub use agent_doc_supervisor::ipc_protocol",
     ] {
         assert!(
@@ -12535,7 +12543,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     assert!(
         supervisor_ipc
-            .contains("use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};"),
+            .contains("use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};")
+            && orchestration_start.contains("ipc_method_requires_capability_gate"),
         "orchestration supervisor IPC transport should import focused protocol types directly"
     );
     for relative in [
@@ -19162,6 +19171,7 @@ fn test_agent_doc_queue_owns_queue_worklist_projection_policy() {
         "pub fn in_progress_marker_retarget_requested(",
         "pub fn selected_queue_head_node_key(",
         "pub fn queue_worklist_hash(",
+        "pub fn dedup_queue_nodes_by_key(",
         "fn queue_prompt_node_key(",
         "pub fn queue_worklist_entries(",
         "pub enum QueueWorklistEntryKind",
@@ -19190,6 +19200,7 @@ fn test_agent_doc_queue_owns_queue_worklist_projection_policy() {
         "fn in_progress_marker_retarget_requested(",
         "fn selected_queue_head_node_key(",
         "fn queue_worklist_hash(",
+        "fn dedup_queue_nodes_by_key(",
         "fn queue_prompt_node_key(",
         "fn queue_worklist_entries(",
     ] {
@@ -19204,6 +19215,7 @@ fn test_agent_doc_queue_owns_queue_worklist_projection_policy() {
         "agent_doc_queue::queue_projection::in_progress_marker_retarget_requested(",
         "agent_doc_queue::queue_projection::selected_queue_head_node_key(",
         "agent_doc_queue::queue_projection::queue_worklist_hash(",
+        "agent_doc_queue::queue_projection::dedup_queue_nodes_by_key(",
         "agent_doc_queue::queue_projection::queue_worklist_entries(",
     ] {
         assert!(

@@ -804,28 +804,6 @@ pub(crate) struct QueueState {
     pub(crate) warnings: Vec<PreflightWarning>,
 }
 
-/// Deduplicate queue item node keys before queue maintenance projects state
-/// from the markdown AST.
-pub(crate) fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, usize)>> {
-    let before_nodes =
-        agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
-            anyhow::anyhow!("queue maintenance: failed to parse queue node keys: {err}")
-        })?;
-    let updated =
-        agent_doc_markdown_ast::mutations::dedup_node_keys(content, "queue").map_err(|err| {
-            anyhow::anyhow!("queue maintenance: failed to dedup queue node keys: {err}")
-        })?;
-    if updated == content {
-        return Ok(None);
-    }
-    let after_nodes =
-        agent_doc_markdown_ast::mutations::item_nodes(&updated, "queue").map_err(|err| {
-            anyhow::anyhow!("queue maintenance: failed to parse deduped queue node keys: {err}")
-        })?;
-    let dropped = before_nodes.len().saturating_sub(after_nodes.len());
-    Ok(Some((updated, dropped)))
-}
-
 fn record_selected_queue_head_state(
     file: &Path,
     content: &str,
@@ -1898,7 +1876,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         );
     }
 
-    if let Some((deduped_content, dropped)) = dedup_queue_nodes_by_key(&current_content)? {
+    if let Some((deduped_content, dropped)) =
+        agent_doc_queue::queue_projection::dedup_queue_nodes_by_key(&current_content)?
+    {
         current_content = deduped_content;
         let comps = agent_doc_element::element::parse(&current_content)?;
         if let Some(q) = comps.iter().find(|c| c.name == "queue") {

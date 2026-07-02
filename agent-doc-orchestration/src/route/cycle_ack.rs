@@ -2,7 +2,8 @@
 
 use super::*;
 use agent_doc_turn::cycle_ack::{
-    CycleAckState, cycle_state_advances_start_ack, prompt_bearing_route_context_from_change,
+    CycleAckState, PromptBearingRouteContext, cycle_state_advances_start_ack,
+    prompt_bearing_route_context_from_change,
 };
 
 pub(crate) fn wait_for_start_ack(
@@ -251,7 +252,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
 pub(crate) fn pending_prompt_bearing_context_for_route(
     file: &Path,
     baseline: Option<&crate::cycle_state::CycleState>,
-) -> Result<Option<PendingPromptBearingRouteContext>> {
+) -> Result<Option<PromptBearingRouteContext>> {
     if baseline.is_some_and(|state| state.is_open()) {
         return Ok(None);
     }
@@ -261,11 +262,7 @@ pub(crate) fn pending_prompt_bearing_context_for_route(
     let Some(context) = prompt_bearing_route_context_from_change(&change) else {
         return Ok(None);
     };
-    Ok(Some(PendingPromptBearingRouteContext {
-        marker: context.marker,
-        prompt_text: context.prompt_text,
-        slash_command: context.slash_command,
-    }))
+    Ok(Some(context))
 }
 
 #[allow(clippy::too_many_arguments)]

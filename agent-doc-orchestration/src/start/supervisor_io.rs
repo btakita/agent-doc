@@ -2,10 +2,6 @@
 
 use super::*;
 
-pub(crate) fn ipc_method_requires_capability_gate(method: &IpcMethod) -> bool {
-    matches!(method, IpcMethod::Inject { .. })
-}
-
 /// Shared delivery for injected text (pane submit or PTY write). Used by both
 /// the gated [`IpcMethod::Inject`] path and the gate-exempt
 /// [`IpcMethod::Clear`] path; the gate decision is made by the caller.
@@ -1046,25 +1042,6 @@ mod tests {
                 .contains("capability proof failed"),
             "{response:?}"
         );
-    }
-    #[test]
-    fn ipc_method_gate_classification_only_gates_inject() {
-        // Only a real prompt dispatch is gated; operator/read-only methods are
-        // gate-exempt so a proof-failed session stays recoverable.
-        assert!(ipc_method_requires_capability_gate(&IpcMethod::Inject {
-            bytes: "x".to_string(),
-        }));
-        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Clear {
-            bytes: "/clear".to_string(),
-        }));
-        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Stop {
-            graceful: false,
-        }));
-        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Restart {
-            mode: "continue".to_string(),
-        }));
-        assert!(!ipc_method_requires_capability_gate(&IpcMethod::State));
-        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Pid));
     }
     #[test]
     fn handle_ipc_clear_bypasses_failed_capability_proof() {

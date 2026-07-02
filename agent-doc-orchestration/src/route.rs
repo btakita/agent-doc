@@ -244,6 +244,7 @@ use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
     short_recovery_command_from_recommendation,
 };
+use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 use tmux_router::Tmux;
 
 use crate::{frontmatter_io, resync, sessions, sync};
@@ -399,13 +400,6 @@ fn sqlite_actor_state_from_route(
         RouteActorState::Closed => agent_doc_sqlite::state_store::ActorState::Closed,
         RouteActorState::Blocked => agent_doc_sqlite::state_store::ActorState::Blocked,
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PendingPromptBearingRouteContext {
-    marker: String,
-    prompt_text: String,
-    slash_command: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2199,7 +2193,7 @@ fn enqueue_route_dispatch_prompt(
 
 fn enqueue_exchange_slash_command_for_idle_drain(
     file: &Path,
-    context: &PendingPromptBearingRouteContext,
+    context: &PromptBearingRouteContext,
     source: &str,
 ) -> Result<Option<RouteQueueEnqueueOutcome>> {
     let Some(command) = context.slash_command.as_deref() else {
@@ -2722,7 +2716,7 @@ fn route_via_authoritative_actor(
     split_before: bool,
     harness: &HarnessConfig,
     baseline: Option<&crate::cycle_state::CycleState>,
-    prompt_context: Option<&PendingPromptBearingRouteContext>,
+    prompt_context: Option<&PromptBearingRouteContext>,
     dispatch_only: bool,
     actor: AuthoritativeActorDispatchTarget,
 ) -> Result<String> {
@@ -6280,30 +6274,30 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     fn busy_existing_pane_auto_fix_outcome_restarts_fresh_for_healthy_authoritative_session_without_changes()
      {
         assert_eq!(
-            busy_existing_pane_auto_fix_outcome(
-                false,
-                false,
-                Some(SupervisorHealth::Healthy),
-                false,
-            ),
+            controller_busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+                test_hook_changed: false,
+                fix_made_changes: false,
+                supervisor_health: Some(SupervisorHealth::Healthy),
+                restarted_supervisor: false,
+            }),
             BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart
         );
         assert_eq!(
-            busy_existing_pane_auto_fix_outcome(
-                false,
-                false,
-                Some(SupervisorHealth::Restartable),
-                false,
-            ),
+            controller_busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+                test_hook_changed: false,
+                fix_made_changes: false,
+                supervisor_health: Some(SupervisorHealth::Restartable),
+                restarted_supervisor: false,
+            }),
             BusyPaneAutoFixOutcome::FailClosed
         );
         assert_eq!(
-            busy_existing_pane_auto_fix_outcome(
-                false,
-                false,
-                Some(SupervisorHealth::Restartable),
-                true,
-            ),
+            controller_busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+                test_hook_changed: false,
+                fix_made_changes: false,
+                supervisor_health: Some(SupervisorHealth::Restartable),
+                restarted_supervisor: true,
+            }),
             BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart
         );
     }

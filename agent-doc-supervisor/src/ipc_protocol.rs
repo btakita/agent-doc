@@ -112,6 +112,12 @@ fn default_restart_mode() -> String {
     "continue".to_string()
 }
 
+/// Return true when an IPC method is a real prompt dispatch that must pass the
+/// managed-capability proof gate before delivery.
+pub const fn ipc_method_requires_capability_gate(method: &IpcMethod) -> bool {
+    matches!(method, IpcMethod::Inject { .. })
+}
+
 /// Build the canonical raw-PTY submit bytes for a single-line harness input.
 ///
 /// This is only for direct child-PTY fallback writes. Tmux-bound submissions
@@ -285,6 +291,30 @@ mod tests {
             serde_json::to_string(&IpcResponse::err("no active session")).unwrap(),
             r#"{"ok":false,"error":"no active session"}"#
         );
+    }
+
+    #[test]
+    fn ipc_method_gate_classification_only_gates_inject() {
+        assert!(ipc_method_requires_capability_gate(&IpcMethod::Inject {
+            bytes: "x".to_string(),
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Clear {
+            bytes: "/clear".to_string(),
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Stop {
+            graceful: false,
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Restart {
+            mode: "continue".to_string(),
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::State));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Pid));
+        assert!(!ipc_method_requires_capability_gate(
+            &IpcMethod::ReplicaRegister {
+                file: "doc.md".to_string(),
+                identity: "editor".to_string(),
+            },
+        ));
     }
 
     #[test]

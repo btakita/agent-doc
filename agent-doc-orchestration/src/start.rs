@@ -159,7 +159,9 @@ use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision
 use agent_doc_supervisor::input::{
     normalize_supervisor_inject_bytes, prompt_input_summary, strip_stale_ctrl_d_before_prompt,
 };
-use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse, submit_bytes};
+use agent_doc_supervisor::ipc_protocol::{
+    IpcMethod, IpcResponse, ipc_method_requires_capability_gate, submit_bytes,
+};
 use agent_doc_supervisor::route_owned::{
     RouteOwnedCycleFacts, RouteOwnedCyclePhase, RouteOwnedLivenessReason, RouteOwnedReapDecision,
     RouteOwnedReapPolicy, route_owned_cycle_committed_since_start,

@@ -191,6 +191,130 @@ pub fn new_adstatechart(ctx: &lazily::Context) -> Result<StateChart, String> {
     Ok(StateChart::new(ctx, adstatechart_def()?))
 }
 
+// ------------------------------------------------------- observability read
+// Phase E rung 2 (`#adstatechart2`): an advisory, read-only projection of the
+// four orthogonal regions as a compact named snapshot. This does NOT gate
+// closeout — it constructs its own throwaway chart, drives it to the fact-implied
+// configuration, and reads `active_leaves()` back so session-check / status can
+// log `transport.x editor_sync.x closeout.x supervisor.x` alongside the existing
+// `ops.log` markers. The guard used for the closeout region is the same
+// `editor_synced` (`edit_epoch <= last_synced_epoch`) the live commit path uses
+// (`git.rs` `commit_blocked_live_buffer_ahead_of_disk`), so the advisory never
+// disagrees with the shipped A/C guard.
+
+/// The observed closeout phase the snapshot should reflect. The closeout region
+/// is driven by the real write/commit lifecycle, which is not derivable from
+/// [`ChartFacts`] alone, so the caller passes what it observed. Defaults to
+/// [`CloseoutPhase::Idle`] (the chart's initial closeout leaf).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CloseoutPhase {
+    /// No write has happened this cycle.
+    #[default]
+    Idle,
+    /// The response was written; a `commit` is pending.
+    Written,
+    /// The cycle committed.
+    Committed,
+    /// `session-check` passed; the cycle is final.
+    SessionOk,
+}
+
+/// Observed inputs the snapshot needs that are not derivable from [`ChartFacts`]:
+/// the closeout lifecycle position and whether the supervisor is mid-turn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedPhases {
+    /// Where the write/commit lifecycle is this cycle.
+    pub closeout: CloseoutPhase,
+    /// The supervisor is actively running a turn (drives `sup_idle -> sup_busy`).
+    /// Ignored when [`supervisor_stale`] holds — staleness wins.
+    pub supervisor_busy: bool,
+}
+
+/// Map a leaf state id to its `region.leaf` observability label. Unknown leaves
+/// (should not occur for this chart) are returned unprefixed so a drift is
+/// visible rather than silently dropped.
+fn region_label(leaf: &str) -> String {
+    let region = match leaf {
+        "socket" | "degraded" | "file_fallback" => "transport",
+        "synced" | "editor_ahead" | "publishing" => "editor_sync",
+        "idle" | "written" | "committed" | "session_ok" => "closeout",
+        "sup_idle" | "sup_busy" | "sup_stale" | "sup_recycle" => "supervisor",
+        _ => return leaf.to_string(),
+    };
+    format!("{region}.{leaf}")
+}
+
+/// Drive a fresh chart from `facts` + `observed` and return the advisory named
+/// snapshot: the active leaf of each region, ordered
+/// `transport.x editor_sync.x closeout.x supervisor.x`.
+///
+/// Read-only observability (`#adstatechart2`): builds its own chart and never
+/// touches the live closeout path. The regions are orthogonal, so events are
+/// applied independently; the closeout `commit` edge carries the real
+/// `editor_synced` guard, so a `Committed`/`SessionOk` observation while
+/// `editor_ahead` holds is faithfully reported as still `closeout.written`
+/// (the guard rejects the edge) rather than the caller's optimistic phase.
+pub fn configuration_snapshot(facts: &ChartFacts, observed: &ObservedPhases) -> String {
+    let ctx = lazily::Context::new();
+    let Ok(chart) = new_adstatechart(&ctx) else {
+        return "adstatechart.unavailable".to_string();
+    };
+    let g = guard_map(facts);
+
+    // transport region
+    if transport_no_listener(facts) {
+        chart.send(&ctx, "no_ipc_listener", &g);
+    } else if transport_degraded(facts) {
+        chart.send(&ctx, "send_timeout", &g);
+    }
+
+    // editor_sync region
+    if editor_ahead(facts) {
+        chart.send(&ctx, "editor_edited", &g);
+    }
+
+    // supervisor region — staleness wins over busy.
+    if supervisor_stale(facts) {
+        chart.send(&ctx, "stale_observed", &g);
+    } else if observed.supervisor_busy {
+        chart.send(&ctx, "turn_started", &g);
+    }
+
+    // closeout region — walk the lifecycle up to the observed phase. Each edge
+    // is guarded exactly as the live path, so an editor-ahead `commit` stalls at
+    // `written` no matter what phase the caller claims.
+    if !matches!(observed.closeout, CloseoutPhase::Idle) {
+        chart.send(&ctx, "write", &g);
+    }
+    if matches!(
+        observed.closeout,
+        CloseoutPhase::Committed | CloseoutPhase::SessionOk
+    ) {
+        chart.send(&ctx, "commit", &g);
+    }
+    if matches!(observed.closeout, CloseoutPhase::SessionOk) {
+        chart.send(&ctx, "session_check_ok", &g);
+    }
+
+    let mut labels: Vec<String> = chart
+        .active_leaves(&ctx)
+        .iter()
+        .map(|leaf| region_label(leaf))
+        .collect();
+    // Deterministic region order for a stable advisory line.
+    fn region_rank(label: &str) -> u8 {
+        match label.split('.').next().unwrap_or("") {
+            "transport" => 0,
+            "editor_sync" => 1,
+            "closeout" => 2,
+            "supervisor" => 3,
+            _ => 4,
+        }
+    }
+    labels.sort_by_key(|l| region_rank(l));
+    labels.join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,6 +466,108 @@ mod tests {
         let before = chart.configuration(&ctx);
         assert!(!chart.send(&ctx, "commit", &guard_map(&facts_synced())));
         assert_eq!(before, chart.configuration(&ctx));
+    }
+
+    #[test]
+    fn snapshot_initial_state_all_regions_initial() {
+        let snap = configuration_snapshot(&facts_synced(), &ObservedPhases::default());
+        assert_eq!(
+            snap,
+            "transport.socket editor_sync.synced closeout.idle supervisor.sup_idle"
+        );
+    }
+
+    #[test]
+    fn snapshot_reflects_transport_and_editor_sync_facts() {
+        // Editor ahead + IPC send failed (degraded transport).
+        let mut f = facts_editor_ahead();
+        f.ipc_send_failed = true;
+        let snap = configuration_snapshot(&f, &ObservedPhases::default());
+        assert!(snap.contains("transport.degraded"), "got: {snap}");
+        assert!(snap.contains("editor_sync.editor_ahead"), "got: {snap}");
+
+        // No listener beats degraded (file_fallback).
+        f.ipc_no_listener = true;
+        let snap = configuration_snapshot(&f, &ObservedPhases::default());
+        assert!(snap.contains("transport.file_fallback"), "got: {snap}");
+    }
+
+    #[test]
+    fn snapshot_closeout_walks_lifecycle_when_synced() {
+        let f = facts_synced();
+        let written = configuration_snapshot(
+            &f,
+            &ObservedPhases {
+                closeout: CloseoutPhase::Written,
+                ..Default::default()
+            },
+        );
+        assert!(written.contains("closeout.written"), "got: {written}");
+
+        let ok = configuration_snapshot(
+            &f,
+            &ObservedPhases {
+                closeout: CloseoutPhase::SessionOk,
+                ..Default::default()
+            },
+        );
+        assert!(ok.contains("closeout.session_ok"), "got: {ok}");
+    }
+
+    /// The advisory read must not disagree with the shipped closeout guard: an
+    /// observed `Committed` while the editor is ahead stalls at `written`.
+    #[test]
+    fn snapshot_committed_while_editor_ahead_stalls_at_written() {
+        let snap = configuration_snapshot(
+            &facts_editor_ahead(),
+            &ObservedPhases {
+                closeout: CloseoutPhase::Committed,
+                ..Default::default()
+            },
+        );
+        assert!(snap.contains("closeout.written"), "got: {snap}");
+        assert!(!snap.contains("closeout.committed"), "got: {snap}");
+    }
+
+    #[test]
+    fn snapshot_supervisor_stale_wins_over_busy() {
+        let stale = ChartFacts {
+            running_build_id: Some("old".into()),
+            installed_build_id: Some("new".into()),
+            ..facts_synced()
+        };
+        let snap = configuration_snapshot(
+            &stale,
+            &ObservedPhases {
+                supervisor_busy: true,
+                ..Default::default()
+            },
+        );
+        assert!(snap.contains("supervisor.sup_stale"), "got: {snap}");
+
+        // Busy without staleness → sup_busy.
+        let busy = configuration_snapshot(
+            &facts_synced(),
+            &ObservedPhases {
+                supervisor_busy: true,
+                ..Default::default()
+            },
+        );
+        assert!(busy.contains("supervisor.sup_busy"), "got: {busy}");
+    }
+
+    #[test]
+    fn snapshot_region_order_is_stable() {
+        // Every region present exactly once, in canonical order.
+        let snap = configuration_snapshot(&facts_synced(), &ObservedPhases::default());
+        let regions: Vec<&str> = snap
+            .split(' ')
+            .map(|l| l.split('.').next().unwrap())
+            .collect();
+        assert_eq!(
+            regions,
+            ["transport", "editor_sync", "closeout", "supervisor"]
+        );
     }
 
     #[test]

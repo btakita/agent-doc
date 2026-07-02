@@ -176,6 +176,10 @@ fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
 /// (#codex-auto-queue-stalled-final-gate)
 pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
     self_heal_late_ipc_overapplication(file)?;
+    // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
+    // local-process four-region state, logged alongside the existing ops.log
+    // markers. Never gates closeout — emitted regardless of the check outcome.
+    crate::adstatechart_snapshot::log_advisory_snapshot(file);
     let report = inspect_with_warnings(file)?;
     for warning in &report.warnings {
         eprintln!("{}", warning);

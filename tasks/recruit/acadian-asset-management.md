@@ -198,6 +198,69 @@ The role: **60% React/advanced TypeScript + MUI X, 40% Python (FastAPI, Ray, Pan
 **Prep checklist:** (1) rehearse the one-sentence Censible pitch, (2) have the MSCI-issue tie-in ready, (3) prep the Polars/MUI-X honest answers, (4) memorize the "evolution not revolution / overfitting discipline" line, (5) skim your own `libs/domain/src/esg` so you can speak to specifics if pressed.
 
 Want me to (a) draft a one-page "talking points" cheat-sheet PDF via the resume pipeline, (b) do mock Q&A rounds, or (c) pull specific numbers/screens out of the Censible ESG code so you can describe them precisely? Say which and I'll do it.
+<!-- agent:boundary:6e9dbeab -->
+Give me a quick primer on ML topics that are important to Acadian Asset Management.
+### Re: ML primer for Acadian — opus-4-8
+
+Focused on what *Acadian specifically* cares about (from their "revolution or evolution?" and systematic-ESG pieces), not a generic ML syllabus. Their whole stance is **evolution, not revolution** — ML is an expanded toolkit bolted onto disciplined quant research, and domain knowledge stays in charge. Frame everything below through that lens.
+
+---
+
+#### 1. The three algorithm families they name
+
+- **Decision trees → random forests → gradient boosting.** This is their *featured* case study (they ML-enhanced Piotroski's F-score). Know the ladder:
+  - A **decision tree** splits data on features to predict a target; interpretable but high-variance (overfits).
+  - **Random forest** = many trees on bootstrapped samples + random feature subsets, averaged. Reduces variance; gives **feature-importance** scores (which factors actually predict).
+  - **Gradient boosting** (XGBoost/LightGBM) = trees built sequentially, each correcting the last's errors. Usually the strongest tabular learner — this is the workhorse of modern quant ML. Be ready to say why trees suit finance: they capture **non-linearities and interactions** between factors that linear factor models miss.
+- **Support Vector Machines (SVMs).** Find a separating boundary, using kernels to map data into higher-dimensional space where it's linearly separable. Older, less common now, but they name it — know the one-liner.
+- **Neural networks.** Most flexible, can model arbitrary non-linear relationships, but **data-hungry and opaque**. Acadian is explicitly cautious here. Know the tradeoff, don't oversell deep learning to them.
+
+#### 2. Their central obsession: overfitting & low signal-to-noise
+
+This is the single most important theme for Acadian. Markets have a **low signal-to-noise ratio** and **few independent observations** (regime transitions are rare), so flexible models happily memorize noise. Be fluent in the defenses:
+- **Train / validation / out-of-sample split** — strict separation; the out-of-sample (holdout) test is sacred. **Walk-forward / expanding-window cross-validation** for time series (never random k-fold on time-ordered data — that leaks the future).
+- **Regularization** — L1/Lasso (drives coefficients to zero → feature selection), L2/Ridge (shrinks). For trees: max depth, min-samples-per-leaf, early stopping.
+- **Data mining / p-hacking awareness** — they literally warn "finance is rife with sloppy data mining." Show you know that more model choices = more ways to fool yourself, and the discipline is what protects you. (Your **DeepEval** experience is the natural bridge here.)
+
+#### 3. Interpretability / attribution
+
+Because they answer to investors and PMs, a black box is a liability. Know how to open one:
+- **Feature importance** (tree-based), **permutation importance**, **SHAP values** (per-prediction attribution — the current standard).
+- Compare the ML forecast to a **simpler linear baseline** — if it doesn't beat the simple model out-of-sample, it's noise. Acadian explicitly recommends this.
+
+#### 4. Feature engineering & the pipeline
+
+Their disciplined 3-stage process: **data prep** (feature selection, cleaning, **normalization/standardization**, handling missing data & outliers) → **algorithm selection** (driven by the problem, not fashion) → **sample management** (the train/val/OOS hygiene above). In finance specifically: **cross-sectional standardization** (rank/z-score factors each period), **winsorizing** outliers, **point-in-time** data to avoid look-ahead bias.
+
+#### 5. Where ML genuinely helps (their "strong use cases")
+
+- **Alternative data & NLP** — sentiment from text, event/entity detection from filings, earnings calls, news. Their **ENGAGER** greenwashing tool is exactly this. Modern angle: **transformers/LLMs + embeddings** for document signals — but they'll want to hear rigor, not hype.
+- **Network / graph analysis** — supply-chain mapping, ESG-risk contagion between related firms. (Your **FalkorDB / DuckPGQ / graph-store** work maps directly here.)
+- **Non-linear enhancement of technical signals**, risk-event forecasting, execution/HFT optimization.
+
+#### 6. Where they say ML is weak (know these too)
+
+- **Factor timing across regime shifts** — too few historical regimes to train on.
+- **Volatility forecasting** — no consensus on the underlying process.
+
+The pattern: ML struggles wherever data is scarce or **non-stationary**. Naming these unprompted signals maturity.
+
+---
+
+#### Cheat-sheet definitions to have on the tip of your tongue
+
+- **Overfitting** — model fits noise, fails out-of-sample. **Bias–variance tradeoff** — too simple underfits, too flexible overfits.
+- **Cross-validation** — rotate holdout folds to estimate real-world error (time-series: walk-forward only).
+- **Regularization** — penalize complexity (L1/L2, tree depth, dropout).
+- **Feature importance / SHAP** — which inputs drive predictions, and how much.
+- **Signal-to-noise** — finance ≈ mostly noise; why simple, well-regularized models often win.
+- **Non-stationarity / regime shift** — the data-generating process changes; yesterday's fit breaks.
+- **Supervised vs unsupervised** — labeled prediction (returns, F-score) vs structure discovery (clustering firms, dimensionality reduction/PCA).
+- **Ensemble** — combine many weak models (bagging = forests, boosting = XGBoost).
+
+**Your framing in the room:** "I treat ML as an extension of disciplined research, not a replacement for it — out-of-sample honesty and interpretability matter more than model complexity, especially in low signal-to-noise data." That's Acadian's own thesis said back to them.
+
+Want me to (a) drill you with mock ML interview questions + model answers, or (b) go deeper on any one topic (e.g. gradient boosting internals, walk-forward CV, or NLP/transformers for filings)?
 <!-- /agent:exchange -->
 
 ## Queue

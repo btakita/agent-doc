@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -45,7 +45,15 @@ I loaded the local workflow, ran preflight/plan, reset sidecars with `--preserve
 No EFS code, tests, commits, pushes, or deploys were run. The document also has `queue: stop`, so the Messages-tab URL and `deploy` queue lines are inactive residue.
 
 To unblock: resolve/save the live editor buffer for [equityfundingsource.md](/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md:1), then I can retry `agent-doc write --commit`; or explicitly authorize `--force-disk`.
-<!-- agent:boundary:2edd27ce -->
+❯ From the last call transcript, when did robert-waldman want to have another call?
+> **Queue prompt:** /goal Implement backlog item(s): #ccpz
+
+### Re: #ccpz — when Robert Waldman wanted the next call — opus-4-8
+
+Per the last call transcript (`src/equityfundingsource-dev/docs/calls/2026-06-30 13-20-29-compressed.transcript.md` — 88-min call with April Armas, Judith Krug, Robert Waldman), at the close of the call Robert said he'd be available **Wednesday afternoon, Central time**. He noted he has a **VA doctor's appointment Wednesday**, will be back in Texas afterward, and would try to do it "as early as I can" that afternoon before signing off with "talk to you soon."
+
+That Wednesday is **July 2, 2026** (today) — so reach out for the next call **Wednesday (7/2) afternoon Central**, ideally early-afternoon once he's back from the VA appointment.
+<!-- agent:boundary:192aa98d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,7 +73,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" -->
-/goal Implement backlog item(s): #ccpz
+- ~~/goal Implement backlog item(s): #ccpz~~
 - https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4046fa5a-65d4-4292-bfa6-59b66376cf6c&deal_tab=interests -> Messages should have the interested lender conversations as separate tabs.
 - deploy
 <!-- /agent:queue -->

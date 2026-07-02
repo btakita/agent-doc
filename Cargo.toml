@@ -30,6 +30,7 @@ members = [
     "agent-doc-ffi",
     "agent-doc-flow",
     "agent-doc-flow-io",
+    "agent-doc-gc-io",
     "agent-doc-syntax",
     "agent-doc-topic",
     "agent-doc-fs",

@@ -562,6 +562,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-gc-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-project-root-io",
+ "agent-doc-session-registry-io",
+ "agent-doc-supervisor-io",
+ "anyhow",
+ "filetime",
+ "tempfile",
+ "tmux-router",
+]
+
+[[package]]
 name = "agent-doc-git"
 version = "0.34.67"
 dependencies = [
@@ -818,6 +833,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
+ "agent-doc-gc-io",
  "agent-doc-git",
  "agent-doc-git-io",
  "agent-doc-harness",

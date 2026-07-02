@@ -788,19 +788,6 @@ pub(crate) fn send_command_once_unchecked(
     Ok(trigger)
 }
 
-/// Short re-probe window used when the pane is already mid-turn, in case the
-/// pane is busy BECAUSE our own routed prompt just started (so its dispatch
-/// -start proof is not discarded). Kept small so a trigger genuinely queued
-/// behind a *prior* turn short-circuits fast instead of burning the full proof
-/// budget (#kjw0 / #jbrunautobug).
-fn dispatch_start_busy_probe_timeout() -> Duration {
-    if cfg!(test) {
-        Duration::from_millis(50)
-    } else {
-        Duration::from_millis(600)
-    }
-}
-
 /// If the target pane is mid-turn, the routed trigger is queued behind that
 /// active turn and harness dispatch-start proof cannot arrive within the proof
 /// budget. Detect that up front and short-circuit to a queued outcome instead
@@ -842,7 +829,7 @@ fn short_circuit_dispatch_start_when_pane_busy(
         file,
         tracker,
         harness,
-        dispatch_start_busy_probe_timeout(),
+        dispatch_start_busy_probe_timeout(cfg!(test)),
     )?;
     let outcome = busy_dispatch_start_outcome(true, probe_proof);
     if outcome == Some(RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn) {
@@ -1763,18 +1750,6 @@ mod tests {
     use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
-
-    #[test]
-    fn dispatch_start_busy_probe_timeout_is_much_smaller_than_full_budget() {
-        // The busy probe must be a fraction of the full dispatch-start budget so
-        // a queued-behind-active-turn trigger resolves fast instead of hanging.
-        let probe = dispatch_start_busy_probe_timeout();
-        let full = routed_dispatch_start_timeout_for_binary(Some("codex"), false);
-        assert!(
-            probe * 4 < full,
-            "probe {probe:?} should be far below the full proof budget {full:?}"
-        );
-    }
 
     #[test]
     fn authoritative_actor_starting_hint_names_reroute_and_restart() {

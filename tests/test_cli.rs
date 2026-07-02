@@ -10907,6 +10907,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn accepted_only_dispatch_start_refusal_message(",
         "pub fn routed_dispatch_start_timeout(",
         "pub fn routed_dispatch_start_timeout_for_binary(",
+        "pub fn dispatch_start_busy_probe_timeout(",
         "pub fn fresh_route_start_ack_timeout(",
         "pub fn routed_cycle_ack_timeout(",
         "pub fn existing_pane_ready_timeout(",
@@ -11163,6 +11164,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("accepted_only_dispatch_start_log_message")
             && route_source.contains("accepted_only_dispatch_start_refusal_message")
             && route_source.contains("dispatch_only_should_print_unproven_progress")
+            && route_source.contains("dispatch_start_busy_probe_timeout")
             && route_source.contains("routed_dispatch_start_timeout_for_binary")
             && route_source.contains("fresh_route_start_ack_timeout")
             && route_source.contains("routed_cycle_ack_timeout")
@@ -11187,6 +11189,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_can_enter_existing_draft(",
         "fn direct_pane_should_await_dispatch_start_proof(",
         "fn busy_dispatch_start_outcome(",
+        "fn dispatch_start_busy_probe_timeout(",
         "fn resubmit_result_label(",
         "fn route_submit_resubmit_proof_line(",
         "fn routed_trigger_payload(",
@@ -11211,6 +11214,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("direct_pane_resubmit_proof_line(")
             && route_dispatch_source.contains("routed_dispatch_start_timeout_for_binary(")
             && route_dispatch_source.contains("busy_dispatch_start_outcome(true, probe_proof)")
+            && route_dispatch_source.contains("dispatch_start_busy_probe_timeout(cfg!(test))")
             && route_dispatch_source.contains("Some(harness.binary.as_str())")
             && route_dispatch_source.contains("cfg!(test)")
             && route_dispatch_source.contains("RoutedTriggerPayloadFacts")

@@ -1738,6 +1738,18 @@ pub fn routed_dispatch_start_timeout_for_binary(binary: Option<&str>, test_mode:
     }
 }
 
+/// Short re-probe window used when a routed dispatch finds the target pane
+/// already mid-turn. This keeps queued-behind-active-turn detection fast while
+/// still giving the harness a brief chance to prove the active turn is the new
+/// routed prompt.
+pub fn dispatch_start_busy_probe_timeout(test_mode: bool) -> Duration {
+    if test_mode {
+        Duration::from_millis(50)
+    } else {
+        Duration::from_millis(600)
+    }
+}
+
 pub fn fresh_route_start_ack_timeout(test_mode: bool) -> Duration {
     if test_mode {
         Duration::from_secs(2)
@@ -4170,6 +4182,27 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             Duration::from_secs(2)
         );
         assert_eq!(routed_dispatch_start_timeout(true), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn busy_dispatch_start_probe_timeout_stays_below_full_budget() {
+        assert_eq!(
+            dispatch_start_busy_probe_timeout(true),
+            Duration::from_millis(50)
+        );
+        assert_eq!(
+            dispatch_start_busy_probe_timeout(false),
+            Duration::from_millis(600)
+        );
+
+        // The busy probe must be a fraction of the full dispatch-start budget so
+        // a queued-behind-active-turn trigger resolves fast instead of hanging.
+        let probe = dispatch_start_busy_probe_timeout(false);
+        let full = routed_dispatch_start_timeout_for_binary(Some("codex"), false);
+        assert!(
+            probe * 4 < full,
+            "probe {probe:?} should be far below the full proof budget {full:?}"
+        );
     }
 
     #[test]

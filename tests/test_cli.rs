@@ -1530,7 +1530,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `guard_visible_write_idle_current_or_target` /
         // `guard_visible_write_reconcile_with_target` rather than introducing a
         // new write authority.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 47,
+        // 47 -> 50 (#falsetyping-guard): three new `#[cfg(test)]` regression
+        // tests each call `guard_visible_write_reconcile_with_target` to cover the
+        // replica-churn provenance branch (replica churn reconciles; a genuine
+        // unsaved operator edit still fails closed). These are test-assertion
+        // literals exercising the existing visible-write guard boundary, not new
+        // production flow guards.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 50,
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
         // 3 -> 1 (#template-materialization-policy): raw-response probe
         // construction now lives in `agent-doc-template::response_materialization`,

@@ -296,6 +296,11 @@ describe('patchGuard', () => {
         assert.ok(source.includes('native.documentClosedForEditor(document.uri.fsPath'));
         assert.ok(nativeSource.includes('agent_doc_document_changed_digest_content_for_editor'));
         assert.ok(nativeSource.includes('agent_doc_document_changed_digest_content_for_editor_v2'));
+        // #falsetyping-guard: v3 carries replica-churn provenance so the CLI
+        // re-merges on replica churn instead of failing the visible-write guard
+        // closed on a remoteCrdtApply.
+        assert.ok(nativeSource.includes('agent_doc_document_changed_digest_content_for_editor_v3'));
+        assert.ok(source.includes('unsyncedLocalEditDocs'));
         assert.ok(nativeSource.includes('operator_text_authority_v1'));
         assert.ok(nativeSource.includes('agent_doc_document_closed_for_editor'));
     });

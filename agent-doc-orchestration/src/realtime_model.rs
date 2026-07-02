@@ -403,6 +403,7 @@ mod tests {
             editor_version: None,
             capabilities: Vec::new(),
             content: content.map(|c| c.to_string()),
+            no_unsaved_operator_edits: false,
         }
     }
 

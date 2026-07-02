@@ -204,6 +204,39 @@ noise. Pairs with the write-path outcome logs in `write.rs`
 the live-buffer-matches-disk marker must carry expected/disk/live lengths and
 hashes plus `live_ts` so a live editor proof is self-contained.
 
+## Replica-churn provenance (`#falsetyping-guard`)
+
+`LiveBufferSnapshot` carries `no_unsaved_operator_edits` (serde-default `false`
+for backward compatibility). It is `true` only when the reporting editor has
+proven the buffer holds **no unsaved local operator edits ahead of disk** — any
+divergence between the editor buffer and disk is then purely replica-driven (a
+`remoteCrdtApply` moved the buffer via CRDT-replica reconciliation), not genuine
+operator text.
+
+The visible-write reconcile guard
+(`guard_visible_write_reconcile_with_target` in `write.rs`) uses it to
+distinguish replica churn from a real unsaved operator edit:
+
+- **Replica churn** (`no_unsaved_operator_edits == true`): a buffer that diverges
+  from both the merge baseline and disk is routed to the reconcile path instead
+  of failing closed. When disk still matches the merge baseline the write lands
+  `Clean`; when disk also drifted it reports `DiskDrifted` so the caller re-merges
+  the captured response. A `visible_write_replica_churn_reconcile` marker is
+  logged (carrying expected/disk/live lengths, hashes, and `live_ts`).
+- **Genuine unsaved operator edit** (`no_unsaved_operator_edits == false`, the
+  conservative default): still fails closed with "visible editor buffer differs
+  from the expected disk state; save or discard". Operator text stays
+  authoritative and is never dropped by a stale-merge write.
+
+Provenance is stamped by the editor plugins through the shared FFI entrypoint
+`agent_doc_document_changed_digest_content_for_editor_v3(..., no_unsaved_operator_edits)`
+(older plugins call `_v2` and imply the conservative `false`). Both the JetBrains
+plugin (`TypingTracker`) and the VS Code extension track a per-document
+"unsaved local edit" flag: set on a non-`remoteCrdtApply` document change and
+cleared when the document is saved/closed or observed clean (not dirty). This
+resolves the wedge where CRDT-replica churn made `finalize`/`write` fail closed
+with "save or discard" even though the operator had not edited the document.
+
 ## Recommended Improvements
 
 1. **Expose remaining timing constants to frontmatter** — Allow per-document control via:

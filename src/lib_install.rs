@@ -164,6 +164,7 @@ pub(crate) fn profile_lib_path(
 
 const REQUIRED_EDITOR_ABI_SYMBOLS: &[&str] = &[
     "agent_doc_document_changed_digest_content_for_editor_v2",
+    "agent_doc_document_changed_digest_content_for_editor_v3",
     "agent_doc_document_synced_digest_content_for_editor_v2",
     "agent_doc_write_ack_content_for_editor_v2",
     "agent_doc_document_closed_for_editor",

@@ -1978,6 +1978,41 @@ fn redelivery_missing_operator_text_authority(
         return false;
     };
     let editor_id = live.editor_id.as_deref().unwrap_or("unknown");
+    // The capability gate exists to avoid clobbering a live buffer that may hold
+    // UNSAVED operator edits. But if the stale buffer content byte-matches a
+    // recent COMMITTED blob of this file, it holds no unsaved work (a committed
+    // blob was previously saved and is recoverable) — so refusing here is a false
+    // block. Auto-heal the editor from current disk and let the write proceed.
+    if crate::realtime_model::content_matches_recent_committed_blob(file, expected_bad_state, 15) {
+        let stale_hash = agent_doc_hash::content_hash(expected_bad_state);
+        // Best-effort heal, mirroring the write/converge.rs send_refresh_content
+        // shape: push CURRENT DISK content, keyed on the stale buffer hash/len as
+        // the precondition. Any send failure is ignored — returning false still
+        // unblocks the write through its normal convergence.
+        if let Ok(canonical) = file.canonicalize() {
+            let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+            let disk = std::fs::read_to_string(&canonical).unwrap_or_default();
+            let refresh_target = if disk.is_empty() { expected_bad_state } else { &disk };
+            let _ = agent_doc_ipc_io::send_refresh_content(
+                &project_root,
+                &canonical.to_string_lossy(),
+                refresh_target,
+                &stale_hash,
+                expected_bad_state.len(),
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{label}_editor_authority_autoheal file={} action=refresh_editor_from_disk reason=stale_behind_committed_blob editor_id={} stale_len={} stale_hash={}",
+                file.display(),
+                editor_id,
+                expected_bad_state.len(),
+                &stale_hash[..stale_hash.len().min(12)],
+            ),
+        );
+        return false;
+    }
     eprintln!(
         "[write] {label} editor repair skipped: live editor buffer {editor_id} lacks required capability {}",
         agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
@@ -6168,6 +6203,135 @@ mod core_tests {
         assert!(
             !log.contains("ipcfullprompt_corruption_suspected"),
             "clean growth must not be flagged as corruption:\n{log}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod committed_blob_authority_autoheal_tests {
+    //! `#rtheal-write` — the WRITE/FINALIZE capability gate must UNBLOCK (heal +
+    //! return false) when the stale editor buffer byte-matches a recent committed
+    //! blob (a previously-saved, recoverable state with no unsaved work), and must
+    //! STILL REFUSE (return true) when the buffer matches no committed blob (could
+    //! be unsaved-ahead operator work).
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Build a temp git repo with `doc.md`, committing each snapshot in order, and
+    /// leave the working tree at the LAST snapshot (== HEAD). Also creates the
+    /// `.agent-doc/logs` dir the ops-log writer expects.
+    fn temp_git_doc(commits: &[&str]) -> (TempDir, std::path::PathBuf, String) {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        let file = root.join("doc.md");
+        for (i, body) in commits.iter().enumerate() {
+            std::fs::write(&file, body).unwrap();
+            git(&["add", "doc.md"]);
+            git(&["commit", "-m", &format!("commit {i}")]);
+        }
+        let canonical = std::fs::canonicalize(&file)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        (dir, file, canonical)
+    }
+
+    const OLD: &str = concat!(
+        "# Doc\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Older committed answer.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    const NEW: &str = concat!(
+        "# Doc\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Older committed answer.\n",
+        "### Re: next — gpt-5\n\n",
+        "Newer committed answer.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+
+    #[test]
+    fn unblocks_when_stale_buffer_matches_a_committed_blob() {
+        // disk == HEAD == NEW; the editor still holds committed ancestor OLD, and
+        // its live-buffer sidecar lacks the operator-text-authority capability.
+        let (_dir, file, canonical) = temp_git_doc(&[OLD, NEW]);
+        // Missing-capability sidecar holding the OLD committed blob.
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
+            &canonical,
+            OLD,
+            Some("vscode-committed-blob"),
+        )
+        .unwrap();
+
+        // The stale buffer (expected_bad_state) IS a committed blob → proceed.
+        let refuse = redelivery_missing_operator_text_authority(&file, OLD, "write", Some("p1"));
+        assert!(
+            !refuse,
+            "a stale buffer equal to a committed blob holds no unsaved work — the write must proceed (return false)"
+        );
+        // The autoheal marker is emitted; the capability-missing skip is NOT.
+        let ops_log =
+            std::fs::read_to_string(file.parent().unwrap().join(".agent-doc/logs/ops.log"))
+                .unwrap();
+        assert!(
+            ops_log.contains("write_editor_authority_autoheal")
+                && ops_log.contains("reason=stale_behind_committed_blob"),
+            "the committed-blob autoheal must be auditable:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("skip=editor_capability_missing"),
+            "the capability-missing refusal must NOT fire for a committed blob:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn still_refuses_when_stale_buffer_matches_no_committed_blob() {
+        // SAFETY INVARIANT: disk == HEAD == NEW, but the editor holds a genuine
+        // unsaved edit that matches NO commit. The gate MUST still refuse.
+        let (_dir, file, canonical) = temp_git_doc(&[OLD, NEW]);
+        let unsaved = format!("{NEW}<!-- operator note -->\nGENUINELY UNSAVED WORK\n");
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
+            &canonical,
+            &unsaved,
+            Some("vscode-unsaved-ahead"),
+        )
+        .unwrap();
+
+        let refuse =
+            redelivery_missing_operator_text_authority(&file, &unsaved, "write", Some("p2"));
+        assert!(
+            refuse,
+            "a buffer matching no committed blob may hold unsaved operator work — the gate MUST still refuse (return true)"
+        );
+        let ops_log =
+            std::fs::read_to_string(file.parent().unwrap().join(".agent-doc/logs/ops.log"))
+                .unwrap();
+        assert!(
+            ops_log.contains("skip=editor_capability_missing"),
+            "the capability-missing refusal must fire for a non-committed buffer:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("write_editor_authority_autoheal"),
+            "no autoheal may fire when the buffer is not a proven committed blob:\n{ops_log}"
         );
     }
 }

@@ -114,6 +114,84 @@ pub fn durable_buffer_state(file: &std::path::Path, disk: &str) -> Option<Buffer
     buffer_state_from_divergence(divergence.as_ref())
 }
 
+/// Detect a divergent live buffer that is **provably a stale-behind committed
+/// ancestor** of HEAD — the only case it is safe to auto-heal the editor from
+/// disk instead of promoting the buffer.
+///
+/// Returns `Some(stale buffer snapshot)` iff ALL of these hold:
+/// - the live buffer *diverges* from disk (the same classifier
+///   [`durable_buffer_state`] gates on — so a suppressed / in-sync buffer is
+///   never touched);
+/// - the snapshot carries the **full buffer content** (a len/hash-only digest
+///   proves *that* it diverged but not *what* it holds, so we cannot prove it is
+///   a committed ancestor — `None`);
+/// - `disk == git HEAD` for `file` (agent-doc just committed; the clean
+///   post-commit case). This guarantees any matched ancestor is strictly older
+///   than disk, so the buffer cannot hold unsaved-ahead operator work;
+/// - the buffer's full content byte-matches the file's blob at one of the recent
+///   commits reachable from HEAD — an actual previously-saved committed state.
+///
+/// A committed-ancestor blob is by definition a previously-saved state, never new
+/// unsaved work. If any condition is unprovable (including *any* git error), we
+/// return `None` and the caller falls through to the existing promote-or-disk
+/// behavior unchanged. This never keys off timestamps or heuristics.
+fn stale_behind_committed_buffer(
+    file: &std::path::Path,
+    disk: &str,
+) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
+    // Only proceed when the classifier proves the buffer diverges from disk.
+    let divergence =
+        agent_doc_debounce::live_buffer_diverges_from_content(&indicator_path(file), disk)?;
+    // Need the FULL buffer text to prove it equals a committed blob; a
+    // len/hash-only digest cannot be proven a committed ancestor → fall through.
+    let buf = divergence.content.clone()?;
+    // Require the clean post-commit case: disk == HEAD. Any git error → None.
+    let head = agent_doc_git_io::revision::show_rev(file, "HEAD")
+        .ok()
+        .flatten()?;
+    if disk != head {
+        return None;
+    }
+    // Look for a recent committed blob that byte-equals the buffer. Because
+    // divergence already proved `buf != disk` and `disk == head`, any match here
+    // is necessarily an OLDER committed version (never HEAD, never unsaved work).
+    if content_matches_recent_committed_blob(file, &buf, 15) {
+        return Some(divergence);
+    }
+    None
+}
+
+/// True iff `content` byte-matches the file's blob at one of the last `limit`
+/// commits reachable from HEAD (a previously-committed state — never unsaved
+/// work). Best-effort: any git error → `false`.
+///
+/// A committed blob is by definition a previously-saved, recoverable state, so a
+/// match proves `content` holds no unsaved operator edits. This is the shared
+/// safety predicate both the READ auto-heal ([`stale_behind_committed_buffer`])
+/// and the WRITE/FINALIZE capability gate key off of. It never consults
+/// timestamps.
+pub(crate) fn content_matches_recent_committed_blob(
+    file: &std::path::Path,
+    content: &str,
+    limit: usize,
+) -> bool {
+    let lines = match agent_doc_git_io::revision::recent_commit_lines(file, None, limit) {
+        agent_doc_git_io::revision::RecentCommitLog::Lines(lines) => lines,
+        _ => return false,
+    };
+    for line in lines {
+        let Some(sha) = line.split_whitespace().next() else {
+            continue;
+        };
+        if let Ok(Some(blob)) = agent_doc_git_io::revision::show_rev(file, sha)
+            && blob == content
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Resolve the authoritative "current document" for a cycle read: reconcile the
 /// on-disk `disk` content against the durable editor-buffer feed for `file`.
 ///
@@ -122,7 +200,45 @@ pub fn durable_buffer_state(file: &std::path::Path, disk: &str) -> Option<Buffer
 /// newest-of(disk, editor buffer) instead of bare disk. Emits a grep-able
 /// `realtime_doc_resolve` ops.log marker so a live edit-during-finalize run can
 /// prove which source won.
+///
+/// Before the normal promote path, a provably **stale-behind committed** buffer
+/// (see [`stale_behind_committed_buffer`]) is treated as disk-authoritative and
+/// the editor is auto-healed from disk via the `refresh_content` IPC primitive —
+/// so a JetBrains buffer left showing an older committed version (e.g. after a
+/// `--force-disk` commit whose stale sidecar re-emitted with a fresh timestamp,
+/// defeating `#pcp2`) no longer wrongly promotes into the guards and no manual
+/// "Reload from Disk" is needed.
 pub fn resolve_current_doc(file: &std::path::Path, disk: &str) -> Reconciliation {
+    if let Some(stale) = stale_behind_committed_buffer(file, disk) {
+        // Best-effort auto-heal: push disk content to the editor, keyed on the
+        // STALE buffer hash/len as the precondition proof (mirrors the
+        // `send_refresh_content` call shape in write/converge.rs). Any failure is
+        // ignored — the resolution below still makes disk authoritative.
+        if let Some(stale_content) = stale.content.as_deref() {
+            let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+            let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+            let stale_hash = agent_doc_hash::content_hash(stale_content);
+            let _ = agent_doc_ipc_io::send_refresh_content(
+                &project_root,
+                &indicator_path(file),
+                disk,
+                &stale_hash,
+                stale_content.len(),
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "realtime_doc_autoheal action=refresh_editor_from_disk reason=stale_behind_committed_ancestor file={} stale_len={} stale_hash={} target_len={}",
+                    file.display(),
+                    stale_content.len(),
+                    &stale_hash[..stale_hash.len().min(12)],
+                    disk.len(),
+                ),
+            );
+        }
+        // Disk is authoritative: guards must see disk/HEAD, not the stale buffer.
+        return reconcile_current_doc(disk, None);
+    }
     let buffer = durable_buffer_state(file, disk);
     let reconciliation = reconcile_current_doc(disk, buffer.as_ref());
     agent_doc_ops_log_io::log_op(
@@ -625,6 +741,193 @@ mod tests {
         assert!(
             deliveries.is_empty(),
             "a dead originator must not broadcast"
+        );
+    }
+
+    // ── `#rtheal` — auto-heal a stale-behind committed editor buffer ──
+
+    /// Build a temp git repo containing `doc.md`, apply each `commits` snapshot
+    /// as its own commit in order, and return `(TempDir, file, canonical)` with
+    /// the working tree at the LAST snapshot (== HEAD). The canonical path string
+    /// keys the live-buffer sidecar, matching what the editor plugin reports.
+    fn temp_git_doc(commits: &[&str]) -> (tempfile::TempDir, std::path::PathBuf, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        let file = root.join("doc.md");
+        for (i, body) in commits.iter().enumerate() {
+            std::fs::write(&file, body).unwrap();
+            git(&["add", "doc.md"]);
+            git(&["commit", "-m", &format!("commit {i}")]);
+        }
+        let canonical = std::fs::canonicalize(&file)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        (dir, file, canonical)
+    }
+
+    const HEAL_A: &str = concat!(
+        "# Doc\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#a] first\n",
+        "- [ ] [#b] second\n",
+        "- [ ] [#c] third\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    const HEAL_B: &str = concat!(
+        "# Doc\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#a] first\n",
+        "- [ ] [#b] second\n",
+        "- [ ] [#c] third\n",
+        "- [ ] [#d] fourth\n",
+        "<!-- /agent:backlog -->\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: work — gpt-5\n\n",
+        "Done.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+
+    #[test]
+    fn stale_behind_committed_buffer_heals_when_buffer_is_older_commit() {
+        // disk == HEAD == B; the editor buffer still shows the committed ancestor A.
+        let (_dir, file, canonical) = temp_git_doc(&[HEAL_A, HEAL_B]);
+        let disk = HEAL_B;
+        agent_doc_debounce::record_live_buffer_digest_content(&canonical, HEAL_A).unwrap();
+
+        // Detector proves the divergent buffer is a stale committed ancestor.
+        let stale = stale_behind_committed_buffer(&file, disk)
+            .expect("buffer holding committed ancestor A must be detected as stale-behind");
+        assert_eq!(stale.content.as_deref(), Some(HEAL_A));
+
+        // resolve_current_doc makes disk authoritative (content B, NOT the stale A).
+        // The IPC refresh no-ops with no live editor — that is fine.
+        let r = resolve_current_doc(&file, disk);
+        assert_eq!(r.authority, agent_doc_document_realtime::DocAuthority::Disk);
+        assert_eq!(r.content, disk);
+        assert!(r.content.contains("#d"), "healed to disk B (has #d)");
+
+        // An autoheal ops-log marker was emitted.
+        let ops_log = file.parent().unwrap().join(".agent-doc/logs/ops.log");
+        if let Ok(log) = std::fs::read_to_string(&ops_log) {
+            assert!(
+                log.contains("realtime_doc_autoheal")
+                    && log.contains("reason=stale_behind_committed_ancestor"),
+                "autoheal marker should be logged:\n{log}"
+            );
+        }
+    }
+
+    #[test]
+    fn stale_behind_committed_buffer_never_heals_unsaved_ahead_edit() {
+        // SAFETY INVARIANT: disk == HEAD == B, but the buffer holds a genuine
+        // unsaved operator edit ("X") that matches NO commit. It must NEVER be
+        // treated as stale-behind, and must still promote as today.
+        let (_dir, file, canonical) = temp_git_doc(&[HEAL_A, HEAL_B]);
+        let disk = HEAL_B;
+        let unsaved = format!("{HEAL_B}\n<!-- operator note -->\nGENUINELY UNSAVED X\n");
+        agent_doc_debounce::record_live_buffer_digest_content(&canonical, &unsaved).unwrap();
+
+        assert!(
+            stale_behind_committed_buffer(&file, disk).is_none(),
+            "an unsaved-ahead buffer matching no commit must not be treated stale-behind"
+        );
+
+        // Existing behavior preserved: the buffer wins and its unsaved content shows.
+        let r = resolve_current_doc(&file, disk);
+        assert_eq!(
+            r.authority,
+            agent_doc_document_realtime::DocAuthority::EditorBuffer,
+            "unsaved operator work must still be promoted, never clobbered"
+        );
+        assert!(r.content.contains("GENUINELY UNSAVED X"));
+    }
+
+    #[test]
+    fn stale_behind_committed_buffer_none_when_disk_not_head() {
+        // Uncommitted disk changes: disk != HEAD. Conservative fall-through even
+        // if the buffer happens to equal a commit.
+        let (_dir, file, canonical) = temp_git_doc(&[HEAL_A, HEAL_B]);
+        let disk = concat!(
+            "# Doc\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#a] first\n",
+            "- [ ] [#b] second\n",
+            "- [ ] [#c] third\n",
+            "- [ ] [#d] fourth\n",
+            "- [ ] [#e] uncommitted work on disk\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&file, disk).unwrap();
+        // Buffer shows committed ancestor A, but disk != HEAD, so no heal.
+        agent_doc_debounce::record_live_buffer_digest_content(&canonical, HEAL_A).unwrap();
+        assert!(
+            stale_behind_committed_buffer(&file, disk).is_none(),
+            "disk != HEAD must conservatively fall through (no heal)"
+        );
+    }
+
+    #[test]
+    fn content_matches_recent_committed_blob_true_for_prior_commit_false_for_uncommitted() {
+        // Two commits: A then B (HEAD). Both A and B are committed blobs; a string
+        // that was never committed must not match.
+        let (_dir, file, _canonical) = temp_git_doc(&[HEAL_A, HEAL_B]);
+        assert!(
+            content_matches_recent_committed_blob(&file, HEAL_A, 15),
+            "the older committed version A must be recognized as a committed blob"
+        );
+        assert!(
+            content_matches_recent_committed_blob(&file, HEAL_B, 15),
+            "the HEAD committed version B must be recognized as a committed blob"
+        );
+        assert!(
+            !content_matches_recent_committed_blob(&file, "never committed content\n", 15),
+            "content that matches no commit must return false"
+        );
+        // A tiny limit still finds the most recent commit (B) but can miss the
+        // older one; the never-committed content stays false regardless.
+        assert!(content_matches_recent_committed_blob(&file, HEAL_B, 1));
+        assert!(!content_matches_recent_committed_blob(&file, "still never\n", 1));
+    }
+
+    #[test]
+    fn content_matches_recent_committed_blob_false_outside_git_repo() {
+        // No git repo (best-effort): any git error → false, never a panic.
+        let (_dir, file, _canonical) = temp_doc("plain body\n");
+        assert!(!content_matches_recent_committed_blob(&file, "plain body\n", 15));
+    }
+
+    #[test]
+    fn stale_behind_committed_buffer_none_when_len_hash_only_snapshot() {
+        // A len/hash-only digest (no full content) cannot be proven a committed
+        // ancestor even though it diverges → None.
+        let (_dir, file, canonical) = temp_git_doc(&[HEAL_A, HEAL_B]);
+        let disk = HEAL_B;
+        agent_doc_debounce::record_live_buffer_digest(
+            &canonical,
+            HEAL_A.len(),
+            &agent_doc_hash::content_hash(HEAL_A),
+        )
+        .unwrap();
+        assert!(
+            stale_behind_committed_buffer(&file, disk).is_none(),
+            "a content-absent digest cannot be proven a committed ancestor"
         );
     }
 

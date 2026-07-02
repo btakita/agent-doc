@@ -225,10 +225,10 @@ use agent_doc_harness::HarnessConfig;
 use agent_doc_hash::short_content_hash;
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_supervisor::route_runtime::{
-    RouteActorState, SupervisorHealth, SupervisorRuntime,
+    DeferToBoundaryRestartRecoveryFacts, RouteActorState, SupervisorHealth, SupervisorRuntime,
     authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason,
     authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
-    effective_authoritative_actor_state,
+    defer_to_boundary_restart_recovery_hint, effective_authoritative_actor_state,
 };
 use agent_doc_supervisor::startup_miss::{
     StartingPaneRecoveryTarget, starting_pane_recovery_target,

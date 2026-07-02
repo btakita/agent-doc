@@ -119,7 +119,14 @@ pub(crate) fn load_authoritative_actor_binding(
                     queue_paused,
                 ),
             );
-            let recovery_hint = defer_recovery_hint(&runtime, effective_state, queue_paused, file);
+            let recovery_cmd = format!("agent-doc session restart-supervisor {}", file.display());
+            let recovery_hint =
+                defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
+                    supervisor_health: runtime.health,
+                    actor_state: effective_state,
+                    queue_paused,
+                    recovery_command: &recovery_cmd,
+                });
             anyhow::bail!(
                 "authoritative actor record for {} is running harness {}, but frontmatter now resolves to {}; deferring to boundary agent restart instead of replacing live pane{}",
                 file.display(),
@@ -177,43 +184,6 @@ pub(crate) fn load_authoritative_actor_binding(
         tmux, file, file_path, record, runtime, harness,
     );
     Ok(Some(AuthoritativeActorDispatchTarget { record, runtime }))
-}
-
-/// Build the operator-actionable recovery suffix for the `defer_to_boundary_restart`
-/// bail (`#actorswitchdefer` Part A). Examines supervisor health, queue pause state,
-/// and actor state to produce the correct recovery path instead of a dead-end bail.
-fn defer_recovery_hint(
-    runtime: &SupervisorRuntime,
-    actor_state: RouteActorState,
-    queue_paused: bool,
-    file: &Path,
-) -> String {
-    let recovery_cmd = format!("agent-doc session restart-supervisor {}", file.display());
-    if queue_paused
-        || runtime.health == SupervisorHealth::Unreachable
-        || runtime.health == SupervisorHealth::NoSocket
-    {
-        let blocker = if queue_paused {
-            "queue is paused"
-        } else {
-            "supervisor is unreachable"
-        };
-        format!(
-            ". {} — the boundary restart will not fire until it is healthy and resumed. Run: {}",
-            blocker, recovery_cmd
-        )
-    } else if actor_state == RouteActorState::Busy || actor_state == RouteActorState::Starting {
-        format!(
-            ". pane is {} (not dispatch-ready) — run: {} --force",
-            actor_state.as_str(),
-            recovery_cmd
-        )
-    } else {
-        format!(
-            ". The supervisor idle-watch will restart the harness at the next idle boundary. To force it now: {}",
-            recovery_cmd
-        )
-    }
 }
 
 fn document_declares_expected_harness(file: &Path, expected_harness: &str) -> bool {

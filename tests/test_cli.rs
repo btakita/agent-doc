@@ -7576,6 +7576,8 @@ fn test_agent_doc_supervisor_owns_route_runtime_policy() {
         "pub fn effective_authoritative_actor_state",
         "pub fn authoritative_actor_dispatch_guard_reason",
         "pub fn authoritative_actor_dispatch_target_eligible",
+        "pub struct DeferToBoundaryRestartRecoveryFacts",
+        "pub fn defer_to_boundary_restart_recovery_hint",
     ] {
         assert!(
             route_runtime.contains(required),
@@ -7585,6 +7587,10 @@ fn test_agent_doc_supervisor_owns_route_runtime_policy() {
 
     let route =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_authoritative_actor = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/route/authoritative_actor.rs"),
+    )
+    .unwrap();
     for forbidden in [
         "pub enum RouteActorState",
         "enum SupervisorHealth",
@@ -7592,17 +7598,20 @@ fn test_agent_doc_supervisor_owns_route_runtime_policy() {
         "fn supervisor_health_label(",
         "fn runtime_actor_state_label(",
         "fn authoritative_actor_dispatch_target_eligible(",
+        "fn defer_recovery_hint(",
     ] {
         assert!(
-            !route.contains(forbidden),
-            "route.rs must adapt runtime IO, not re-own or facade supervisor route policy: {forbidden}"
+            !route.contains(forbidden) && !route_authoritative_actor.contains(forbidden),
+            "route must adapt runtime IO, not re-own or facade supervisor route policy: {forbidden}"
         );
     }
     assert!(
         route.contains("use agent_doc_supervisor::route_runtime::{")
             && route.contains("effective_authoritative_actor_state")
-            && route.contains("supervisor_authoritative_actor_dispatch_target_eligible"),
-        "route.rs should call focused supervisor route runtime policy directly"
+            && route.contains("DeferToBoundaryRestartRecoveryFacts")
+            && route.contains("supervisor_authoritative_actor_dispatch_target_eligible")
+            && route_authoritative_actor.contains("defer_to_boundary_restart_recovery_hint("),
+        "route should call focused supervisor route runtime policy directly"
     );
 }
 

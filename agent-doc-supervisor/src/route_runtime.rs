@@ -142,6 +142,48 @@ pub fn authoritative_actor_dispatch_target_eligible(runtime: &SupervisorRuntime)
     authoritative_actor_dispatch_guard_reason(runtime.facts()).is_none()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeferToBoundaryRestartRecoveryFacts<'a> {
+    pub supervisor_health: SupervisorHealth,
+    pub actor_state: RouteActorState,
+    pub queue_paused: bool,
+    pub recovery_command: &'a str,
+}
+
+/// Build the operator-actionable recovery suffix for a route defer to the
+/// supervisor's boundary restart.
+pub fn defer_to_boundary_restart_recovery_hint(
+    facts: DeferToBoundaryRestartRecoveryFacts<'_>,
+) -> String {
+    if facts.queue_paused
+        || facts.supervisor_health == SupervisorHealth::Unreachable
+        || facts.supervisor_health == SupervisorHealth::NoSocket
+    {
+        let blocker = if facts.queue_paused {
+            "queue is paused"
+        } else {
+            "supervisor is unreachable"
+        };
+        format!(
+            ". {} — the boundary restart will not fire until it is healthy and resumed. Run: {}",
+            blocker, facts.recovery_command
+        )
+    } else if facts.actor_state == RouteActorState::Busy
+        || facts.actor_state == RouteActorState::Starting
+    {
+        format!(
+            ". pane is {} (not dispatch-ready) — run: {} --force",
+            facts.actor_state.as_str(),
+            facts.recovery_command
+        )
+    } else {
+        format!(
+            ". The supervisor idle-watch will restart the harness at the next idle boundary. To force it now: {}",
+            facts.recovery_command
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,5 +339,52 @@ mod tests {
             !transition_proves_current_generation_ready(facts),
             "a non-Ready actor must not satisfy the ready barrier even with a matching reason"
         );
+    }
+
+    #[test]
+    fn defer_to_boundary_restart_recovery_names_unhealthy_or_paused_blocker() {
+        let command = "agent-doc session restart-supervisor doc.md";
+
+        let paused = defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
+            supervisor_health: SupervisorHealth::Healthy,
+            actor_state: RouteActorState::Ready,
+            queue_paused: true,
+            recovery_command: command,
+        });
+        assert!(paused.contains("queue is paused"));
+        assert!(paused.contains(command));
+
+        let unreachable =
+            defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
+                supervisor_health: SupervisorHealth::NoSocket,
+                actor_state: RouteActorState::Ready,
+                queue_paused: false,
+                recovery_command: command,
+            });
+        assert!(unreachable.contains("supervisor is unreachable"));
+        assert!(unreachable.contains(command));
+    }
+
+    #[test]
+    fn defer_to_boundary_restart_recovery_can_force_busy_or_wait_for_idle() {
+        let command = "agent-doc session restart-supervisor doc.md";
+
+        let busy = defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
+            supervisor_health: SupervisorHealth::Healthy,
+            actor_state: RouteActorState::Busy,
+            queue_paused: false,
+            recovery_command: command,
+        });
+        assert!(busy.contains("pane is busy"));
+        assert!(busy.contains("--force"));
+
+        let ready = defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
+            supervisor_health: SupervisorHealth::Healthy,
+            actor_state: RouteActorState::Ready,
+            queue_paused: false,
+            recovery_command: command,
+        });
+        assert!(ready.contains("idle-watch will restart"));
+        assert!(ready.contains(command));
     }
 }

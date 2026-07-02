@@ -277,6 +277,12 @@ seams:
   `route/dispatch_only.rs` to `agent-doc-controller::dispatch`; route keeps
   authoritative actor loading, prompt probing, and runtime eligibility
   projection while calling `dispatch_only_starting_pane_actor_ready`.
+- Dispatch-only refusal/recovery message policy moved from
+  `route/dispatch_only.rs` to `agent-doc-controller::dispatch`; route keeps
+  file display projection and flow outcome field rendering while calling
+  `dispatch_only_starting_pane_not_ready_message`,
+  `dispatch_only_recycle_inflight_message`, and
+  `dispatch_only_blocker_recovery_hint`.
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.

@@ -942,6 +942,53 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         });
     }
 
+    // #fmdrop — stale-CRDT / synthetic-reap corruption self-heal. The commit
+    // path stages the snapshot (the agent-response image), not the working
+    // tree, so a corrupt snapshot — a stale-base CRDT merge, or a
+    // `no_liveness_signals` synthetic auto-reap that serialized a scaffold/empty
+    // base — would persist to HEAD even though the operator's live document is
+    // intact. Preflight then collapses the snapshot back to that corrupt HEAD
+    // every cycle, so `doc != snapshot` never converges and the supervisor spins
+    // the open cycle (`suprecyclespin` `cycle_never_closed`).
+    //
+    // Frontmatter is config, never selectively committed, so it is always
+    // authoritative from the live document. Rather than fail closed (which would
+    // itself let the snapshot interfere with the hot path), overlay the live
+    // frontmatter onto the staged content and regenerate the snapshot sidecar in
+    // the background. A corrupt snapshot self-heals instead of poisoning HEAD.
+    if let (Some(snapshot), Some(head)) = (snapshot_content.as_deref(), head_doc.as_deref()) {
+        let dropped = crate::commit_integrity::dropped_committed_frontmatter_keys(
+            snapshot,
+            head,
+            &file_content,
+        );
+        if !dropped.is_empty() {
+            let corrected = crate::commit_integrity::overlay_live_frontmatter(snapshot, &file_content);
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "commit_frontmatter_self_heal file={} restored={} basis=live (#fmdrop)",
+                    file.display(),
+                    dropped.join(",")
+                ),
+            );
+            eprintln!(
+                "[commit] snapshot dropped operator frontmatter key(s) [{}] — restoring from the live document and regenerating the snapshot (#fmdrop)",
+                dropped.join(", ")
+            );
+            // Best-effort snapshot-sidecar regeneration so recovery state matches
+            // the corrected hot-path content; never blocks the commit.
+            if let Err(e) =
+                agent_doc_snapshot_io::save(file, &corrected, crate::ops_log::log_op)
+            {
+                eprintln!(
+                    "[commit] warning: snapshot regenerate after frontmatter self-heal failed: {e} (non-fatal)"
+                );
+            }
+            snapshot_content = Some(corrected);
+        }
+    }
+
     // Reposition boundary BEFORE staging so the commit captures the new
     // boundary id atomically. Previously this ran post-commit, which left
     // the boundary-id delta to be picked up by the next turn's preflight

@@ -47,6 +47,7 @@ pub mod backlog_cmd;
 pub mod capture;
 pub mod claim;
 pub mod codex_hook;
+pub mod commit_integrity;
 pub mod compact;
 pub mod crdt_relay_host;
 pub mod cycle_state;

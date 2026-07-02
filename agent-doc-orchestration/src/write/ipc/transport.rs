@@ -3176,6 +3176,87 @@ mod submodule_patch_routing_tests {
         );
     }
 
+    // #stale-already-applied — when the `already_applied` visible-buffer repair
+    // cannot go idle (the ack-content `current` diverges from a disk that keeps
+    // changing — e.g. a stale/dead IPC endpoint oscillating a phantom buffer, or
+    // a real editor mid-type), the guard defers. That deferral must NOT hard-error
+    // finalize (which wedges the cycle at `response_captured` and can leave a
+    // scrambled partial write); it must fall back to file-IPC.
+    #[test]
+    fn already_applied_socket_missing_disk_response_not_idle_falls_back_to_file_ipc() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in ["ack-content", "snapshots", "crdt", "logs", "state/cycles"] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        // Disk and the ack-content `current` both lack the response, but differ
+        // from each other, so the visible-write guard re-reads disk, sees drift,
+        // and defers.
+        let disk_now = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ disk keystroke A\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let ack_current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ buffer keystroke B\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        fs::write(&doc, disk_now).unwrap();
+        let patch_id = "already-applied-not-idle";
+        fs::write(
+            root.join(".agent-doc/ack-content")
+                .join(format!("{patch_id}.md")),
+            ack_current,
+        )
+        .unwrap();
+
+        let outcome = persist_already_applied_socket_content_ours_snapshot(
+            &doc,
+            patch_id,
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            AlreadyAppliedSnapshotOutcome::NeedsFileFallback,
+            "a non-idle already_applied repair must fall back to file-IPC, not hard-error"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_socket_already_applied_visible_not_idle_file_fallback"),
+            "deferred visible repair must be recorded as a file-IPC fallback:\n{log}"
+        );
+        // The scrambling / partial write must NOT have landed: disk is untouched.
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            disk_now,
+            "a deferred repair must not write a partial/scrambled document to disk"
+        );
+    }
+
     #[test]
     fn already_applied_without_response_in_content_ours_falls_back() {
         let dir = TempDir::new().unwrap();

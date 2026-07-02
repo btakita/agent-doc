@@ -1527,11 +1527,33 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                         agent_doc_hash::content_hash(&repaired_current)
                     ),
                 );
-                guard_visible_write_idle_and_current(
+                // #stale-already-applied — the visible-buffer repair is only safe
+                // when the buffer is idle and matches `current`. If the guard
+                // defers (buffer still changing) do NOT hard-error finalize: that
+                // wedges the cycle at `response_captured` and can leave a scrambled
+                // partial write on disk (a stale/dead IPC endpoint — e.g. an exited
+                // `sync` process or a 0-byte socket — that keeps oscillating a
+                // phantom buffer never goes idle, so "retry after typing stops"
+                // never converges). Fall back to file-IPC, which writes the
+                // response from the authoritative base instead of a phantom buffer.
+                // A real live editor mid-type also lands here and is served by the
+                // file-IPC transport / retry rather than a hard failure.
+                if let Err(defer) = guard_visible_write_idle_and_current(
                     file,
                     "socket_already_applied_missing_disk_response",
                     current,
-                )?;
+                ) {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "ipc_socket_already_applied_visible_not_idle_file_fallback file={} patch_id={} reason={}",
+                            file.display(),
+                            patch_id,
+                            defer.to_string().replace('\n', " ")
+                        ),
+                    );
+                    return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+                }
                 atomic_write_pub(file, &repaired_current)?;
                 crate::ops_log::log_op(
                     file,

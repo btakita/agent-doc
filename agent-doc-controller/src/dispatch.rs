@@ -1162,6 +1162,22 @@ pub fn classify_auto_start_dispatch_ready_block(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeadHarnessShellDispatchFacts {
+    pub pane_shows_harness_prompt: bool,
+    pub bare_shell_command: Option<String>,
+}
+
+pub fn classify_dead_harness_shell_dispatch_block(
+    facts: DeadHarnessShellDispatchFacts,
+) -> Option<String> {
+    if facts.pane_shows_harness_prompt {
+        None
+    } else {
+        facts.bare_shell_command
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FreshStartAckOutcome {
     CycleAcknowledged,
@@ -3319,6 +3335,32 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 bare_shell_command: None,
             }),
             Some(AutoStartDispatchBlock::StartingPane)
+        );
+    }
+
+    #[test]
+    fn dead_harness_shell_dispatch_block_requires_shell_without_visible_prompt() {
+        assert_eq!(
+            classify_dead_harness_shell_dispatch_block(DeadHarnessShellDispatchFacts {
+                pane_shows_harness_prompt: true,
+                bare_shell_command: Some("zsh".to_string()),
+            }),
+            None,
+            "a visible harness prompt wins over a shell-looking foreground command"
+        );
+        assert_eq!(
+            classify_dead_harness_shell_dispatch_block(DeadHarnessShellDispatchFacts {
+                pane_shows_harness_prompt: false,
+                bare_shell_command: Some("bash".to_string()),
+            }),
+            Some("bash".to_string())
+        );
+        assert_eq!(
+            classify_dead_harness_shell_dispatch_block(DeadHarnessShellDispatchFacts {
+                pane_shows_harness_prompt: false,
+                bare_shell_command: None,
+            }),
+            None
         );
     }
 

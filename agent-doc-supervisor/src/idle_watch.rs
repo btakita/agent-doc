@@ -50,6 +50,16 @@ pub fn paused_idle_watch_should_skip(
     loop_owner_lease_fresh || !has_drainable_head
 }
 
+/// Select the submit-mode diagnostic for an idle-queue dispatch from scalar
+/// supervisor facts.
+pub fn idle_queue_submit_mode(has_inject_pane: bool, harness_binary: &str) -> &'static str {
+    if has_inject_pane {
+        agent_doc_tmux_commands::tmux_submit_mode_for_harness(harness_binary)
+    } else {
+        "pty_cr"
+    }
+}
+
 pub fn idle_queue_context_reset_ops_log_message(
     file: &Path,
     harness_binary: &str,
@@ -111,6 +121,16 @@ mod tests {
         );
         assert!(!paused_idle_watch_should_skip(false, true, false));
         assert!(!paused_idle_watch_should_skip(false, false, true));
+    }
+
+    #[test]
+    fn idle_queue_submit_mode_uses_enter_for_codex_owner_pane() {
+        assert_eq!(idle_queue_submit_mode(true, "codex"), "tmux_text_enter");
+    }
+
+    #[test]
+    fn idle_queue_submit_mode_uses_pty_cr_without_owner_pane() {
+        assert_eq!(idle_queue_submit_mode(false, "codex"), "pty_cr");
     }
 
     #[test]

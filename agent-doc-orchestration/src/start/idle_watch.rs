@@ -2813,7 +2813,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         "idle_queue_watch_drain harness={} payload_kind={} submit_mode={}",
                                         harness.binary,
                                         payload_kind,
-                                        idle_queue_submit_mode(&shared, &harness)
+                                        agent_doc_supervisor::idle_watch::idle_queue_submit_mode(
+                                            shared.inject_pane.is_some(),
+                                            &harness.binary,
+                                        )
                                     ),
                                 );
                                 // Already recorded in session_log above; only

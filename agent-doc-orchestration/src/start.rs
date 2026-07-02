@@ -419,17 +419,6 @@ fn complete_idle_queue_slash_command_head(
     }
 }
 
-fn idle_queue_submit_mode(
-    shared: &SupervisorShared,
-    harness: &agent_doc_harness::HarnessConfig,
-) -> &'static str {
-    if shared.inject_pane.is_some() {
-        agent_doc_tmux_commands::tmux_submit_mode_for_harness(&harness.binary)
-    } else {
-        "pty_cr"
-    }
-}
-
 fn log_idle_queue_drain_submit(
     file: &Path,
     shared: &SupervisorShared,
@@ -446,7 +435,10 @@ fn log_idle_queue_drain_submit(
             file.display(),
             harness.binary,
             payload_kind,
-            idle_queue_submit_mode(shared, harness),
+            agent_doc_supervisor::idle_watch::idle_queue_submit_mode(
+                shared.inject_pane.is_some(),
+                &harness.binary,
+            ),
             target,
             active_head.len(),
             agent_doc_hash::content_hash(active_head),
@@ -2641,38 +2633,6 @@ mod tests {
                 None
             ),
             IdleQueueDrainDecision::Dispatch
-        );
-    }
-    #[test]
-    fn idle_queue_submit_mode_uses_enter_for_codex_owner_pane() {
-        let shared = SupervisorShared::with_actor_runtime(
-            "test",
-            "test-instance".to_string(),
-            "codex",
-            None,
-            Some(agent_doc_sqlite::state_store::ActorState::Ready),
-            Some("%owner".to_string()),
-        );
-
-        assert_eq!(
-            idle_queue_submit_mode(&shared, &agent_doc_harness::HarnessConfig::codex()),
-            "tmux_text_enter"
-        );
-    }
-    #[test]
-    fn idle_queue_submit_mode_uses_pty_cr_without_owner_pane() {
-        let shared = SupervisorShared::with_actor_runtime(
-            "test",
-            "test-instance".to_string(),
-            "codex",
-            None,
-            Some(agent_doc_sqlite::state_store::ActorState::Ready),
-            None,
-        );
-
-        assert_eq!(
-            idle_queue_submit_mode(&shared, &agent_doc_harness::HarnessConfig::codex()),
-            "pty_cr"
         );
     }
     #[test]

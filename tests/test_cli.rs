@@ -10843,6 +10843,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn startup_miss_should_fail_closed(",
         "pub enum FreshStartAckOutcome",
         "pub const fn fresh_start_ack_outcome(",
+        "pub struct DeadHarnessShellDispatchFacts",
+        "pub fn classify_dead_harness_shell_dispatch_block(",
         "pub enum DirectPaneSubmitStatus",
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
@@ -11190,6 +11192,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_should_await_dispatch_start_proof(",
         "fn busy_dispatch_start_outcome(",
         "fn dispatch_start_busy_probe_timeout(",
+        "fn classify_dead_harness_shell_dispatch_block(",
         "fn resubmit_result_label(",
         "fn route_submit_resubmit_proof_line(",
         "fn routed_trigger_payload(",
@@ -11215,6 +11218,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("routed_dispatch_start_timeout_for_binary(")
             && route_dispatch_source.contains("busy_dispatch_start_outcome(true, probe_proof)")
             && route_dispatch_source.contains("dispatch_start_busy_probe_timeout(cfg!(test))")
+            && route_dispatch_source.contains("DeadHarnessShellDispatchFacts")
+            && route_dispatch_source.contains("classify_dead_harness_shell_dispatch_block(")
             && route_dispatch_source.contains("Some(harness.binary.as_str())")
             && route_dispatch_source.contains("cfg!(test)")
             && route_dispatch_source.contains("RoutedTriggerPayloadFacts")
@@ -12973,6 +12978,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum SupervisorAutoInstallPhase",
         "pub fn supervisor_auto_install_pane_message(",
         "pub fn paused_idle_watch_should_skip(",
+        "pub fn idle_queue_submit_mode(",
         "pub fn idle_queue_context_reset_ops_log_message(",
     ] {
         assert!(
@@ -13059,10 +13065,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "fn supervisor_auto_install_pane_message(",
         "pub fn paused_idle_watch_should_skip(",
         "fn paused_idle_watch_should_skip(",
+        "fn idle_queue_submit_mode(",
         "fn idle_queue_context_reset_ops_log_message(",
     ] {
         assert!(
-            !idle_watch.contains(forbidden_snippet),
+            !idle_watch.contains(forbidden_snippet)
+                && !orchestration_start.contains(forbidden_snippet),
             "orchestration idle_watch must not re-own pure supervisor idle-watch policy: {forbidden_snippet}"
         );
     }

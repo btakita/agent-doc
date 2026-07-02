@@ -3,8 +3,9 @@
 use super::*;
 
 use agent_doc_controller::dispatch::{
-    AutoStartDispatchBlock, AutoStartDispatchReadyFacts, DirectPaneFullResendFacts,
-    DirectPaneNotDispatchedFacts, DispatchInjectLogFacts, classify_auto_start_dispatch_ready_block,
+    AutoStartDispatchBlock, AutoStartDispatchReadyFacts, DeadHarnessShellDispatchFacts,
+    DirectPaneFullResendFacts, DirectPaneNotDispatchedFacts, DispatchInjectLogFacts,
+    classify_auto_start_dispatch_ready_block, classify_dead_harness_shell_dispatch_block,
     direct_pane_can_full_resend_not_landed, direct_pane_fast_accept_on_processing,
     direct_pane_not_dispatched, dispatch_inject_log_line, recent_lines_contain_trigger,
     route_trigger_visible_in_current_draft,
@@ -348,21 +349,19 @@ pub(crate) fn dead_harness_shell_dispatch_block(
     pane: &str,
     harness: &HarnessConfig,
 ) -> Option<String> {
-    let current_command = super::pane_display_value(tmux, pane, "#{pane_current_command}")
+    let bare_shell_command = super::pane_display_value(tmux, pane, "#{pane_current_command}")
         .map(|c| c.trim().to_string())
-        .filter(|c| !c.is_empty())?;
-    if !pane_current_command_is_bare_shell(&current_command) {
-        return None;
-    }
+        .filter(|c| !c.is_empty())
+        .filter(|cmd| pane_current_command_is_bare_shell(cmd))?;
     let pane_shows_harness_prompt = sessions::capture_pane(tmux, pane)
         .ok()
         .and_then(|content| harness.last_prompt_candidate(&content))
         .map(|line| harness.is_dispatch_ready_prompt_line(&line))
         .unwrap_or(false);
-    if pane_shows_harness_prompt {
-        return None;
-    }
-    Some(current_command)
+    classify_dead_harness_shell_dispatch_block(DeadHarnessShellDispatchFacts {
+        pane_shows_harness_prompt,
+        bare_shell_command: Some(bare_shell_command),
+    })
 }
 
 /// `#jbtsiftnosub`: re-verify, immediately before an auto-start send, that the

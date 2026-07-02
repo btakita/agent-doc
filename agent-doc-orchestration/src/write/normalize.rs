@@ -40,7 +40,7 @@ pub fn enforce_imperative_response_contract_for_diff(
         ImperativeResponseContractDecision::Rejected { trigger } => trigger,
     };
     let trigger = truncate_imperative_trigger(&trigger, 80);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "imperative_response_rejected file={} trigger={}",
@@ -102,7 +102,7 @@ pub fn normalize_user_prompts_in_exchange_safe(
         snapshot,
         file,
         |file| agent_doc_git_io::revision::show_head(file).ok().flatten(),
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     )
 }
 

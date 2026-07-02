@@ -304,7 +304,7 @@ fn route_write_document(
 ) -> Result<()> {
     if FORCE_DISK_ROUTE_WRITES.with(Cell::get) {
         crate::write::atomic_write_pub(file, next_content)?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{}_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
@@ -466,7 +466,7 @@ fn preserve_route_pane_snapshot(
         &harness.binary,
         phase,
         content,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
     if let Some(err) = outcome.warning.as_deref() {
         eprintln!(
@@ -546,7 +546,7 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
     }) {
         Ok(item) => item,
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 facts.file,
                 &format!(
                     "route_dispatch_bug_backlog_item_failed file={} pane={} harness={} phase={} issue={} error={}",
@@ -567,7 +567,7 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
         Ok(Some(target)) => target,
         Ok(None) => facts.file.to_path_buf(),
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 facts.file,
                 &format!(
                     "route_dispatch_bug_target_resolve_failed file={} pane={} harness={} phase={} issue={} error={}",
@@ -593,7 +593,7 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
                 .first()
                 .map(|id| id.as_str())
                 .unwrap_or("deduped_existing");
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 facts.file,
                 &format!(
                     "route_dispatch_bug_backlog_filed file={} target_file={} pane={} harness={} phase={} issue={} id={} inserted={}",
@@ -609,7 +609,7 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
             );
         }
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 facts.file,
                 &format!(
                     "route_dispatch_bug_backlog_file_failed file={} target_file={} pane={} harness={} phase={} issue={} error={}",
@@ -643,12 +643,12 @@ fn log_route_submit_observation(facts: RouteSubmitObservationLogFacts<'_>) {
         proof: facts.proof,
         editor_attempt_id: editor_attempt_id.as_deref(),
     };
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         facts.file,
         &route_submit_observation_message(controller_facts),
     );
     if let Some(issue) = route_submit_issue_message(controller_facts) {
-        crate::ops_log::log_op(facts.file, &issue);
+        agent_doc_ops_log_io::log_op(facts.file, &issue);
     }
 }
 
@@ -673,7 +673,7 @@ fn log_route_latency(
         outcome,
         editor_attempt_id: editor_attempt_id.as_deref(),
     });
-    crate::ops_log::log_op(file, &message);
+    agent_doc_ops_log_io::log_op(file, &message);
     if route_latency_status(elapsed_ms, budget_ms) == RouteLatencyStatus::OverBudget {
         eprintln!(
             "[route] latency budget exceeded: phase {} took {}ms (budget {}ms, pane={}, harness={}, outcome={})",
@@ -1073,7 +1073,7 @@ fn reapply_harness_launch_contract_after_clear(
         .filter(|prompt| !prompt.is_empty())
         .unwrap_or("<unknown>");
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_harness_clear_restart_fresh file={} pane={} harness={} latest_prompt={:?}",
@@ -1246,7 +1246,7 @@ fn reapply_capability_contract_before_reuse(
         }
     };
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_{}_capability_restart_fresh file={} pane={} harness={} reason={}",
@@ -1415,7 +1415,7 @@ fn fail_if_recent_session_loss_window(file: &Path, session_id: &str) -> Result<(
     let first = agent_doc_supervisor::startup_miss::format_timestamp(window.first_timestamp);
     let last = agent_doc_supervisor::startup_miss::format_timestamp(window.last_timestamp);
     let latest_reason = window.latest_reason.as_deref().unwrap_or("unknown");
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_repeated_session_loss_fail_closed file={} session={} count={} first={} last={} latest_reason={}",
@@ -1609,7 +1609,7 @@ pub fn run_with_tmux_with_options(
             "[route] warning: failed to clear queue cooldown marker for {}: {err:#}",
             file.display()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_clear_queue_cooldown_failed file={} error={:?}",
@@ -1658,7 +1658,7 @@ pub fn run_with_tmux_with_options(
             "route_dedup_scrub",
         )?;
         if cleanup.removed_answered_tail {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "duplicate_answered_exchange_prompt_tail_removed file={} source=route",
@@ -1671,7 +1671,7 @@ pub fn run_with_tmux_with_options(
             );
         }
         if cleanup.removed_comment {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "post_exchange_duplicate_prompt_comment_removed file={} source=route",
@@ -1752,7 +1752,7 @@ pub fn run_with_tmux_with_options(
             agent_doc_controller_io::editor_route_errors::clear_for_success(
                 file,
                 "route_success",
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             );
             Ok(())
         }
@@ -1822,7 +1822,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
         return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_dispatch_drain_closeout_started file={} cycle_id={} phase={:?}",
@@ -1861,7 +1861,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
             crate::preflight::run_pending_maintenance(file)
         };
         if let Err(e) = maintenance_result {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_drain_pending_maintenance_warning file={} error={}",
@@ -1875,7 +1875,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
             Ok(outcome) => match crate::session_check::inspect(file)? {
                 crate::session_check::SessionCheckStatus::Ok(_) => {
                     let label = format!("{outcome:?}");
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "route_dispatch_drain_closeout_recovered file={} cycle_id={} outcome={}",
@@ -1905,7 +1905,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
         last_reason = block_reason;
         match decision {
             DispatchDrainRetryDecision::ConcurrentlyClosed => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_dispatch_drain_closeout_concurrent_finalize_closed file={} cycle_id={}",
@@ -1916,7 +1916,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
                 return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
             }
             DispatchDrainRetryDecision::Retry => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_dispatch_drain_closeout_retry_concurrent_progress file={} cycle_id={} attempt={}",
@@ -1932,7 +1932,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
         }
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_dispatch_drain_closeout_blocked file={} cycle_id={} blocker={}",
@@ -2001,7 +2001,7 @@ fn enqueue_route_dispatch_prompt(
         // merged into the component by an earlier corruption). The focused queue
         // transform preserves the polluted body and appends the pending dispatch;
         // route owns only the effect-side diagnostic.
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
@@ -2023,14 +2023,16 @@ fn enqueue_route_dispatch_prompt(
                 )
             },
         )?;
-        agent_doc_snapshot_io::save(file, &content, crate::ops_log::log_op).with_context(|| {
-            format!(
-                "failed to sync snapshot after queueing dispatch for {}",
-                file.display()
-            )
-        })?;
+        agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op).with_context(
+            || {
+                format!(
+                    "failed to sync snapshot after queueing dispatch for {}",
+                    file.display()
+                )
+            },
+        )?;
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_dispatch_queued file={} source={} appended={} already_present={} superseded={} component_created={} activated={} prompt={:?}",
@@ -2063,7 +2065,7 @@ fn enqueue_exchange_slash_command_for_idle_drain(
         return Ok(None);
     };
     let queued = enqueue_route_dispatch_prompt(file, command, source, true)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_exchange_slash_command_queued file={} source={} command={:?} appended={} already_present={} superseded={} activated={}",
@@ -2098,7 +2100,7 @@ fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Op
     let committed_snapshot = match agent_doc_snapshot_io::load(file) {
         Ok(snapshot) => snapshot,
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_uncommitted_head_snapshot_unreadable file={} err={} decision=allow",
@@ -2119,7 +2121,7 @@ fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Op
             Ok(Some(head_text))
         }
         agent_doc_queue::route_dispatch::RouteInactiveQueueHead::Uncommitted(head_text) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_uncommitted_head file={} decision=defer reason=head_not_in_committed_snapshot head={:?}",
@@ -2148,14 +2150,16 @@ fn activate_existing_route_queue_head(
     if activated {
         route_write_document(file, &content, &original, "route_queue_activation")
             .with_context(|| format!("failed to activate queue in {}", file.display()))?;
-        agent_doc_snapshot_io::save(file, &content, crate::ops_log::log_op).with_context(|| {
-            format!(
-                "failed to sync snapshot after activating queue for {}",
-                file.display()
-            )
-        })?;
+        agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op).with_context(
+            || {
+                format!(
+                    "failed to sync snapshot after activating queue for {}",
+                    file.display()
+                )
+            },
+        )?;
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_existing_queue_head_activated file={} source={} activated={} prompt={:?}",
@@ -2383,7 +2387,7 @@ fn wait_for_authoritative_actor_ready(
     let override_timeout = wait_for_ready_override();
     let budget = match override_timeout {
         Some(timeout) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_wait_for_ready_override file={} harness={} timeout_secs={}",
@@ -2406,7 +2410,7 @@ fn wait_for_authoritative_actor_ready(
         && starting_actor_timeout_record_identity_matches(file_path, &last_facts)
     {
         clear_starting_actor_timeout_record(file_path);
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_starting_actor_timeout_cleared_nonstarting file={} pane={} generation={} actor_state={}",
@@ -2420,7 +2424,7 @@ fn wait_for_authoritative_actor_ready(
     if starting_actor_timeout_record_matches(file_path, &last_facts) {
         mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
         let file_display = file.display().to_string();
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &starting_actor_timeout_coalesced_log_line(
                 file_display.as_str(),
@@ -2450,7 +2454,7 @@ fn wait_for_authoritative_actor_ready(
                     let elapsed = start.elapsed();
                     let file_display = file.display().to_string();
                     clear_starting_actor_timeout_record(file_path);
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &starting_actor_ready_log_line(
                             file_display.as_str(),
@@ -2460,7 +2464,7 @@ fn wait_for_authoritative_actor_ready(
                         ),
                     );
                     if override_timeout.is_some() {
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "route_wait_for_ready_elapsed file={} harness={} elapsed_ms={} timeout_ms={}",
@@ -2477,7 +2481,7 @@ fn wait_for_authoritative_actor_ready(
                     let elapsed = start.elapsed();
                     let file_display = file.display().to_string();
                     clear_starting_actor_timeout_record(file_path);
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &starting_actor_terminal_log_line(
                             file_display.as_str(),
@@ -2505,20 +2509,20 @@ fn wait_for_authoritative_actor_ready(
     if last_facts.actor_state == ActorDispatchState::Starting {
         match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
             Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
-                crate::ops_log::log_op(file, &log_line);
+                agent_doc_ops_log_io::log_op(file, &log_line);
                 agent_doc_flow_io::log_flow_event(
                     file,
                     prompt_ready_barrier_failed_event(
                         RoutedReopenGuardReason::StartingActorNotReady,
                     ),
-                    crate::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 );
                 mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
             }
             Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
                 mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
                 let file_display = file.display().to_string();
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &starting_actor_timeout_coalesced_log_line(
                         file_display.as_str(),
@@ -2534,24 +2538,24 @@ fn wait_for_authoritative_actor_ready(
                     file.display(),
                     err
                 );
-                crate::ops_log::log_op(file, &log_line);
+                agent_doc_ops_log_io::log_op(file, &log_line);
                 agent_doc_flow_io::log_flow_event(
                     file,
                     prompt_ready_barrier_failed_event(
                         RoutedReopenGuardReason::StartingActorNotReadyUnpersisted,
                     ),
-                    crate::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 );
             }
         }
     } else {
         clear_starting_actor_timeout_record(file_path);
-        crate::ops_log::log_op(file, &log_line);
+        agent_doc_ops_log_io::log_op(file, &log_line);
         // Diagnostic: capture the pane content at timeout so we can analyze
         // why ready_prompt_candidate never matched.
         if let Ok(content) = tmux.capture_pane(&initial.record.pane_id, Some(80)) {
             let candidate = agent_doc_harness::ready_prompt_candidate(&content, harness);
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_wait_for_ready_timeout_diagnostic file={} pane={} harness={} candidate={:?} bottom_idle_chrome={} has_busy_cue={} lines={}",
@@ -2567,7 +2571,7 @@ fn wait_for_authoritative_actor_ready(
         }
     }
     if override_timeout.is_some() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_wait_for_ready_timeout file={} harness={} elapsed_ms={} timeout_ms={}",
@@ -2652,7 +2656,7 @@ fn route_via_authoritative_actor(
                 }
                 CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head } => {
                     let blocker = decision.route_terminal_reason();
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "route_dispatch_drain_closeout_wait_existing_queue file={} head={} blocker={}",
@@ -2706,7 +2710,7 @@ fn route_via_authoritative_actor(
             || refreshed.record.pane_id != actor.record.pane_id
             || refreshed.actor_state() != actor_state
         {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_starting_refreshed_ready file={} old_pane={} new_pane={} harness={} old_generation={} new_generation={} old_state={} new_state={}",
@@ -2753,7 +2757,7 @@ fn route_via_authoritative_actor(
     if actor_state == agent_doc_sqlite::state_store::ActorState::Ready
         && let Some(cue) = active_turn_busy_cue.as_deref()
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_ready_actor_active_turn_blocked file={} pane={} harness={} generation={} cue={:?}",
@@ -2774,7 +2778,7 @@ fn route_via_authoritative_actor(
         actor_state = agent_doc_sqlite::state_store::ActorState::Busy;
     }
     if let Some(cue) = active_turn_busy_cue.as_deref() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_busy_active_turn_skip_wait file={} pane={} harness={} generation={} cue={:?}",
@@ -2809,7 +2813,7 @@ fn route_via_authoritative_actor(
         if let Some(refreshed) =
             wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
         {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_only_busy_actor_refreshed_ready file={} old_pane={} new_pane={} harness={} old_generation={} new_generation={}",
@@ -2847,7 +2851,7 @@ fn route_via_authoritative_actor(
                     dispatch_pane, e
                 );
             }
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_starting_timeout_durable_error file={} pane={} harness={} generation={}",
@@ -2870,7 +2874,7 @@ fn route_via_authoritative_actor(
     if lookup_dispatch_registration(file_path, session_id)?.as_deref()
         != Some(dispatch_pane.as_str())
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_actor_projection_reregistered file={} session={} pane={} generation={}",
@@ -2912,7 +2916,7 @@ fn route_via_authoritative_actor(
             runtime: refreshed_runtime,
         };
         if refreshed.actor_state() == agent_doc_sqlite::state_store::ActorState::Ready {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_post_rescue_promoted_ready file={} pane={} generation={}",
@@ -2927,7 +2931,7 @@ fn route_via_authoritative_actor(
         } else if let Some(after_wait) = wait_for_authoritative_actor_ready(
             tmux, file, session_id, file_path, harness, &refreshed,
         )? {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_post_rescue_ready_after_wait file={} pane={} generation={}",
@@ -2943,7 +2947,7 @@ fn route_via_authoritative_actor(
             // Bind the unused refreshed target back so the diagnostic log captures
             // the post-rescue facts even when the wait still failed.
             refreshed.runtime = query_supervisor_runtime(file, session_id);
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_post_rescue_still_starting file={} pane={} generation={} runtime_state={}",
@@ -2974,7 +2978,7 @@ fn route_via_authoritative_actor(
             file.display(),
             actor.record.generation
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_authoritative_actor_busy_projection_repaired_by_ready_prompt file={} pane={} generation={} prior_state={}",
@@ -3004,7 +3008,7 @@ fn route_via_authoritative_actor(
                 "[route] timeout-idle recovery for {}: waited full timeout but pane has no busy cue; promoting stale busy projection to ready and dispatching",
                 file.display()
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_timeout_idle_recovery file={} pane={} harness={} generation={} actor_state={} busy_cue=false pane_tail={:?}",
@@ -3026,7 +3030,7 @@ fn route_via_authoritative_actor(
             );
             actor_state = agent_doc_sqlite::state_store::ActorState::Ready;
         } else {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_timeout_idle_recovery_blocked file={} pane={} harness={} generation={} actor_state={} busy_cue=true",
@@ -3061,7 +3065,7 @@ fn route_via_authoritative_actor(
             "[route] eager busy-cue check for {}: actor projected busy but pane has no busy cue (queue fallback skipped the wait); promoting stale busy projection to ready and dispatching",
             file.display()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_eager_busy_cue_recovery file={} pane={} harness={} generation={} actor_state={} busy_cue=false pane_tail={:?}",
@@ -3130,7 +3134,7 @@ fn route_via_authoritative_actor(
                 let reason = actor_dispatch_blocker_reason(actor_dispatch_state)
                     .unwrap_or("actor not ready");
                 if let Some(queued) = activate_existing_route_queue_head(file, reason)? {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "route_dispatch_only_busy_existing_queue_deferred file={} pane={} harness={} generation={} actor_state={} prompt={:?}",
@@ -3169,7 +3173,7 @@ fn route_via_authoritative_actor(
                 // "auto-loop active, will continue" acknowledgment instead of an
                 // error, mirroring the existing `*_busy_existing_queue_deferred` path.
                 if let Some(continuation) = crate::queue_continuation::detect(file)? {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "route_dispatch_only_busy_active_auto_loop_deferred file={} pane={} harness={} generation={} actor_state={} head={:?}",
@@ -3193,7 +3197,7 @@ fn route_via_authoritative_actor(
                     );
                     return Ok(dispatch_pane);
                 }
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched file={} pane={} harness={} generation={} actor_state={}",
@@ -3209,7 +3213,7 @@ fn route_via_authoritative_actor(
                     prompt_ready_barrier_failed_event(
                         RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
                     ),
-                    crate::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 );
                 let file_display = file.display().to_string();
                 let recovery_hint = authoritative_actor_dispatch_recovery_hint(actor_state, file);
@@ -3263,7 +3267,7 @@ fn route_via_authoritative_actor(
         AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue => {
             let reason =
                 actor_dispatch_blocker_reason(actor_dispatch_state).unwrap_or("actor not ready");
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_only_authoritative_actor_busy_not_ready file={} pane={} harness={} generation={} actor_state={} flow_reason={}",
@@ -3280,7 +3284,7 @@ fn route_via_authoritative_actor(
                 prompt_ready_barrier_failed_event(
                     RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
                 ),
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             );
             if let Some(context) = prompt_context {
                 // #jb-run-preempt-autoloop-priority: busy-actor Run Agent Doc preempts.
@@ -3304,7 +3308,7 @@ fn route_via_authoritative_actor(
                 // #jb-busy-reopen-auto-drain-when-idle: a bare reopen (no prompt to
                 // queue) against a busy actor whose document already has an active
                 // queue continuation defers to that loop instead of erroring.
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_dispatch_only_busy_active_auto_loop_deferred file={} pane={} harness={} generation={} actor_state={} head={:?}",
@@ -3373,7 +3377,7 @@ fn route_via_authoritative_actor(
             )
         }
         AuthoritativeActorDispatchAction::ManagedSupervisorQueue => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_actor_dispatch_optimistic_queue file={} pane={} harness={} generation={} actor_state={} flow_reason={}",
@@ -3527,7 +3531,7 @@ fn route_via_authoritative_actor(
                     queue_prompt_text: queue_prompt.as_deref(),
                 },
             )?;
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_only_via_actor_direct_pane_submit file={} pane={} harness={} generation={}",
@@ -4633,7 +4637,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
@@ -4706,7 +4710,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _listener =
             crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), expected.into());
@@ -4758,7 +4762,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         // The polluted free-text line is preserved as a non-actionable Freeform
         // entry (tolerant parse) rather than failing the consume/dispatch guards.
@@ -4816,7 +4820,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
@@ -4864,7 +4868,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap().as_deref(),
@@ -4922,7 +4926,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         assert_eq!(inactive_route_queue_head(&doc).unwrap(), None);
         assert_eq!(
@@ -4970,7 +4974,7 @@ mod tests {
         );
         std::fs::write(&doc, on_disk).unwrap();
         // Committed snapshot only knows about `#committed`.
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
 
         assert!(
             !agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
@@ -5027,7 +5031,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap().as_deref(),
@@ -5056,7 +5060,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         assert!(
             !agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
                 Some(committed),
@@ -5100,7 +5104,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         // No INACTIVE head — the queue is already active, so the activate path no-ops.
         assert_eq!(
@@ -5144,7 +5148,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap().as_deref(),
@@ -5194,7 +5198,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap(),
@@ -5234,7 +5238,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
@@ -5275,7 +5279,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
@@ -5328,7 +5332,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
@@ -5370,7 +5374,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
@@ -5414,7 +5418,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome =
@@ -5453,7 +5457,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
@@ -5769,7 +5773,7 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         // Open cycle so the drain actually runs (is_open()).
         agent_doc_cycle_state_io::start_preflight(&doc, None, Some(content)).unwrap();
 

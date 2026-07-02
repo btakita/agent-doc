@@ -60,7 +60,7 @@ static DISPATCH_INJECT_ATTEMPTS: std::sync::atomic::AtomicUsize =
 fn log_dispatch_inject(file: &Path, pane: &str, harness: &HarnessConfig, transport: &str) {
     let attempt = DISPATCH_INJECT_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     let file_display = file.display().to_string();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &dispatch_inject_log_line(DispatchInjectLogFacts {
             file_display: &file_display,
@@ -255,7 +255,7 @@ fn send_direct_pane_enter_resubmit(
 ) -> DirectPaneAcceptance {
     let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
     agent_doc_tmux_io::input_diag::log_text_submit(
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
         "route.direct_pane_resubmit",
         &format!("pane:{pane}"),
         "",
@@ -268,7 +268,7 @@ fn send_direct_pane_enter_resubmit(
         pane,
         "",
         &harness.binary,
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "sessions.send_submitted_text_for_harness",
     ) {
         eprintln!(
@@ -279,7 +279,7 @@ fn send_direct_pane_enter_resubmit(
     let second = poll_direct_pane_acceptance(tmux, pane, file, harness, trigger, phase);
     let file_display = file.display().to_string();
     let editor_attempt_id = editor_route_attempt_id();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &direct_pane_resubmit_proof_line(DirectPaneResubmitProofFacts {
             file_display: &file_display,
@@ -439,7 +439,7 @@ pub(crate) fn reverify_auto_start_dispatch_ready(
                 // operator test of this gate is provable/disprovable from ops.log
                 // (auto-verify resolves the gate via `--pending-set-verify
                 // verify=ops_log:auto_start_dispatch_ready_confirmed`).
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "auto_start_dispatch_ready_confirmed file={} pane={} harness={} elapsed_secs={} #jbtsiftnosub",
@@ -458,7 +458,7 @@ pub(crate) fn reverify_auto_start_dispatch_ready(
     };
     match last_block {
         AutoStartDispatchBlock::StartingPane => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "dispatch_into_starting_pane file={} pane={} harness={} timeout_secs={} reason=harness_not_dispatch_ready_before_auto_start_send",
@@ -478,7 +478,7 @@ pub(crate) fn reverify_auto_start_dispatch_ready(
             );
         }
         AutoStartDispatchBlock::DeadShell(shell) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "dispatch_into_shell file={} pane={} harness={} pane_current_command={} timeout_secs={} reason=harness_exited_to_bare_shell_before_auto_start_send",
@@ -511,7 +511,7 @@ pub(crate) fn send_command_unchecked(
     // Closes the crash-mid-dispatch race where the harness was dispatch-ready at
     // the readiness check but exited to a bare shell before the send.
     if let Some(shell) = dead_harness_shell_dispatch_block(tmux, pane, harness) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_into_dead_shell_blocked file={} pane={} harness={} pane_current_command={} reason=harness_exited_to_bare_shell",
@@ -581,7 +581,7 @@ pub(crate) fn send_command_unchecked(
             .as_deref()
             .map(|preview| format!(" draft_preview={preview:?}"))
             .unwrap_or_default();
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_direct_pane_blocked file={} pane={} harness={} protected_input={}{}",
@@ -663,7 +663,7 @@ pub(crate) fn send_command_unchecked(
             agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT,
             agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL,
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_submit_recycle_settle file={} pane={} harness={} settled={} action=submit_once_after_settle",
@@ -698,7 +698,7 @@ pub(crate) fn send_command_unchecked(
         max_attempts: max_full_resends,
     }) {
         full_resends += 1;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_redispatch_not_landed file={} pane={} attempt={} harness={}",
@@ -783,7 +783,7 @@ pub(crate) fn send_command_once_unchecked(
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(
             Some(Path::new(file_path)),
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         ),
         "route.direct_pane_submit",
         &format!("pane:{pane}"),
@@ -798,7 +798,7 @@ pub(crate) fn send_command_once_unchecked(
         pane,
         &payload,
         &harness.binary,
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "sessions.send_submitted_text_for_harness",
     )?;
     if let Err(e) = tmux.select_pane(pane) {
@@ -854,7 +854,7 @@ fn short_circuit_dispatch_start_when_pane_busy(
     let outcome = busy_dispatch_start_outcome(true, probe_proof);
     if outcome == Some(RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn) {
         emit_busy_route_queued_diagnostic(tmux, pane, file, harness);
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_start_queued_behind_active_turn file={} pane={} harness={} busy_proof={:?}",
@@ -914,7 +914,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
             .to_string(),
     };
     agent_doc_tmux_io::input_diag::log_text_submit(
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
         "route.supervisor_ipc",
         &format!("socket:{}:pane:{pane}", sock.display()),
         &payload,
@@ -1003,7 +1003,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
             capture_hash: None,
             proof: Some(proof),
         });
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_actor_dispatch_start_proven file={} pane={} harness={} proof={} timeout_secs={}",
@@ -1026,7 +1026,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
         harness,
         "unproven_but_accepted",
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_actor_dispatch_start_unproven_but_accepted file={} pane={} harness={} timeout_secs={}",
@@ -1283,7 +1283,7 @@ fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
         return Ok(None);
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_submit_late_resubmit file={} pane={} harness={} cause=dispatch_start_unproven_prompt_visible",
@@ -1333,7 +1333,7 @@ fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
             capture_hash: None,
             proof: Some(proof),
         });
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_start_late_resubmit_proven file={} pane={} harness={} dispatch_stage={} timeout_secs={} retry=late_enter",
@@ -1497,7 +1497,7 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
             capture_hash: None,
             proof: Some(proof),
         });
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_start_proven file={} pane={} harness={} proof={} timeout_secs={}",
@@ -1536,7 +1536,7 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
                 harness,
                 "unproven_but_accepted",
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_start_unproven_but_accepted file={} pane={} harness={} timeout_secs={}",

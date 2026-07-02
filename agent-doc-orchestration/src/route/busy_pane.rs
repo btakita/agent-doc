@@ -85,7 +85,7 @@ pub(crate) fn attempt_busy_existing_pane_auto_fix(
         file_path,
         file.display()
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_busy_existing_pane_auto_fix_started file={} pane={}",
@@ -132,7 +132,7 @@ pub(crate) fn attempt_busy_existing_pane_auto_fix(
         supervisor_health,
         restarted_supervisor: restarted,
     });
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_busy_existing_pane_auto_fix_finished file={} pane={} pruned_dead_entries={} reregistered_owner={} killed_redundant_stash_panes={} fixed_issues={} restarted_supervisor={} outcome={:?}",
@@ -197,7 +197,7 @@ pub(crate) fn attempt_busy_existing_pane_interrupt_recovery(
         return Ok(BusyPaneInterruptRecoveryOutcome::Skipped);
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_busy_existing_pane_interrupt_started file={} pane={} harness={} blocker={}",
@@ -229,7 +229,7 @@ pub(crate) fn attempt_busy_existing_pane_interrupt_recovery(
         let ctrl_g_probe =
             wait_for_agent_ready_outcome(tmux, pane, Duration::from_secs(2), harness);
         if ctrl_g_probe.is_ready() {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_busy_existing_pane_interrupt_finished file={} pane={} harness={} recovered=true outcome=ready stage=ctrl_g_probe",
@@ -241,7 +241,7 @@ pub(crate) fn attempt_busy_existing_pane_interrupt_recovery(
             return Ok(BusyPaneInterruptRecoveryOutcome::Recovered);
         }
     } else {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_busy_existing_pane_interrupt_skipped_ctrl_g file={} pane={} harness={} reason=not_shell_search",
@@ -265,7 +265,7 @@ pub(crate) fn attempt_busy_existing_pane_interrupt_recovery(
         harness,
     );
     let recovered = ready.is_ready();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_busy_existing_pane_interrupt_finished file={} pane={} harness={} recovered={} outcome={} stage=escape_ctrl_c",
@@ -296,7 +296,7 @@ pub(crate) fn attempt_opencode_busy_interrupt_recovery(
     harness: &HarnessConfig,
     blocker_reason: Option<&str>,
 ) -> Result<BusyPaneInterruptRecoveryOutcome> {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_busy_existing_pane_opencode_interrupt_started file={} pane={} harness={} blocker={}",
@@ -332,7 +332,7 @@ pub(crate) fn attempt_opencode_busy_interrupt_recovery(
         );
     }
     let recovered = ready.is_ready();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_busy_existing_pane_opencode_interrupt_finished file={} pane={} harness={} recovered={} outcome={}",
@@ -372,7 +372,7 @@ pub(crate) fn ensure_existing_pane_ready_for_dispatch(
     let provenance = pane_route_provenance(tmux, pane);
     let blocker_reason = ready_outcome.blocker_reason().map(str::to_string);
     if prompt_bearing_marker.is_none() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_existing_pane_already_running file={} pane={} harness={} {}",
@@ -393,7 +393,7 @@ pub(crate) fn ensure_existing_pane_ready_for_dispatch(
         );
         return Ok(ExistingPaneDispatchReadiness::BusyAlreadyRunning);
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_existing_pane_not_idle file={} pane={} harness={} blocker={} {}",

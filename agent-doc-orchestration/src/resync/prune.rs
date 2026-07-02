@@ -296,7 +296,7 @@ pub(crate) fn purge_unregistered_stash_panes_with_registry_and_supervisors(
                 // preservation, not an error. Route it to ops_log telemetry instead of
                 // stderr so it does not pollute the IDE/route error surface (the JB
                 // plugin renders resync stderr as an error). Keep the skip behavior.
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &current_root,
                     &format!(
                         "resync: stash pane {} ({}) is registered in its own project root — skipping kill",

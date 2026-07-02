@@ -151,17 +151,17 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         &content_current,
         Some(&final_content),
     )?;
-    agent_doc_snapshot_io::save(file, &snapshot_content, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
 
     atomic_write(file, &final_content)?;
 
-    crate::ops_log::log_cycle(
+    agent_doc_ops_log_io::log_cycle(
         file,
         "write_inline",
         Some(&content_ours),
         Some(&final_content),
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "write_inline_done file={} snap_len={}",
@@ -234,7 +234,7 @@ pub fn run_template(
         file,
         &response,
         "run_template",
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     )?;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
@@ -459,20 +459,20 @@ pub fn run_template(
         &unmatched,
     );
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
-    agent_doc_snapshot_io::save(file, &snapshot_content, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
 
     // `#fcc0`: template (non-CRDT) mode must converge through the editor path;
     // if editor convergence is unavailable or unproven, fail closed instead of
     // writing the merged document straight to disk.
     try_editor_converge(file, &final_content, &content_current, "write_template")?;
 
-    crate::ops_log::log_cycle(
+    agent_doc_ops_log_io::log_cycle(
         file,
         "write_template",
         Some(&content_ours),
         Some(&final_content),
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "write_template_done file={} snap_len={} patches={}",
@@ -573,7 +573,7 @@ pub fn run_stream(
         file,
         &response,
         "run_stream",
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     )?;
     let parsed_marker_count = parsed.marker_count;
     let mut patches = parsed.patches;
@@ -636,7 +636,7 @@ pub fn run_stream(
              Only normalization/boundary changes will be applied.",
             file.display()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "zero_patches_warning file={} source=run_stream markers=0 response may be empty or malformed",
@@ -731,7 +731,7 @@ pub fn run_stream(
                 eprintln!(
                     "[write] WARNING: baseline missing snapshot content — stale baseline detected, using current file as baseline"
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "stale_baseline_detected file={} base_len={} snap_len={} file_len={}",
@@ -820,7 +820,7 @@ pub fn run_stream(
                     eprintln!("[perf] run_stream total: {}ms", elapsed_total);
                 }
                 // IPC succeeded — plugin applied patches
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "ipc_write_consumed file={} patches={}",
@@ -846,7 +846,7 @@ pub fn run_stream(
             eprintln!(
                 "[write] editor IPC did not prove the write — refusing direct document write; retry after the editor applies the queued patch"
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "run_stream_ipc_retry_required_no_disk_write file={} patch_id={} patches={} recovery=retry_without_disk_write",
@@ -982,7 +982,7 @@ pub fn run_stream(
                 file,
                 base,
                 agent_doc_op_capture_io::has_pending_editor_ops,
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             )?
             .state;
             // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
@@ -993,7 +993,7 @@ pub fn run_stream(
                 Some(&base_state),
                 &content_ours,
                 content_current,
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             ) {
                 Ok(merged) => merged,
                 Err(e) => {
@@ -1141,7 +1141,7 @@ pub fn run_stream(
         &unmatched,
     );
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
-    agent_doc_snapshot_io::save(file, &snapshot_content, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
     agent_doc_merge_io::save_document_crdt(file, &snapshot_crdt_state, &snapshot_content)?;
 
     atomic_write(file, &final_content)?;
@@ -1176,13 +1176,13 @@ pub fn run_stream(
             );
         }
     }
-    crate::ops_log::log_cycle(
+    agent_doc_ops_log_io::log_cycle(
         file,
         "write_stream",
         Some(&content_ours),
         Some(&final_content),
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "write_stream_done file={} snap_len={}",
@@ -1269,7 +1269,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         file,
         &response,
         "run_ipc",
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     )?;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
@@ -1447,8 +1447,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 consumed_without_materialization = true;
                 break;
             }
-            agent_doc_snapshot_io::save(file, &content, crate::ops_log::log_op)?;
-            crate::ops_log::log_op(
+            agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)?;
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "snapshot_saved_file_ipc file={} snap_len={}",
@@ -1513,7 +1513,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "run_ipc_timeout_fallback_skip file={} cycle_id={} reason=already_committed",
@@ -1528,7 +1528,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     }
 
     drop(doc_lock);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "run_ipc_retry_required_no_disk_write file={} patch_id={} consumed_without_materialization={} recovery=retry_without_disk_write",
@@ -1556,7 +1556,7 @@ fn merge_recovery_content(
 
     if content_uses_crdt_write(base) {
         eprintln!("[write] File was modified during response recovery. CRDT merging...");
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "recovery_crdt_merge file={} source={} recovery=retry_crdt_instead",
@@ -1568,7 +1568,7 @@ fn merge_recovery_content(
             file,
             base,
             agent_doc_op_capture_io::has_pending_editor_ops,
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )?
         .state;
         let (merged, _) = agent_doc_merge_io::merge_contents_crdt_with_ops(
@@ -1576,7 +1576,7 @@ fn merge_recovery_content(
             Some(&base_state),
             content_ours,
             content_current,
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
         .with_context(|| format!("CRDT merge failed during {source}"))?;
         Ok(merged)
@@ -1586,7 +1586,7 @@ fn merge_recovery_content(
 }
 
 fn save_recovery_snapshot(file: &Path, content: &str, use_crdt: bool) -> Result<()> {
-    agent_doc_snapshot_io::save(file, content, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)?;
     if use_crdt {
         let doc = agent_doc_merge::crdt::CrdtDoc::from_text(content);
         agent_doc_merge_io::save_document_crdt(file, &doc.encode_state(), content)?;
@@ -1667,7 +1667,7 @@ pub fn apply_template_from_string_with_options(
         file,
         &response,
         "apply_template_from_string",
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     )?;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
@@ -1736,7 +1736,7 @@ pub fn apply_template_from_string_with_options(
 
     if options.force_disk {
         atomic_write(file, &final_content)?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "apply_template_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
@@ -1801,7 +1801,7 @@ mod tests {
             "<!-- /agent:pending -->\n",
         );
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         let response = "<!-- patch:exchange -->\nCompacted summary.\n<!-- /patch:exchange -->\n";
         apply_template_from_string_with_options(
@@ -1837,7 +1837,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -1914,7 +1914,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let response = concat!(
             "I am checking the write path and existing replay guard before editing.\n",
@@ -1980,7 +1980,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         // Operator pipes the raw template form (component markers) instead of
         // `<!-- patch:exchange -->` blocks — this is the shape that previously

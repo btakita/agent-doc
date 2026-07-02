@@ -513,7 +513,7 @@ pub fn clear(file: &Path) -> Result<()> {
     if supervisor_clear_inject_available(&ctx) {
         match send_clear_via_supervisor(&ctx)? {
             SupervisorClearDelivery::Sent => {
-                agent_doc_orchestration::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
                     &format!(
                         "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=supervisor_runtime",
@@ -539,7 +539,7 @@ pub fn clear(file: &Path) -> Result<()> {
     } else if !send_clear_to_resolved_pane(&ctx, &tmux, None)? {
         match send_clear_via_supervisor(&ctx)? {
             SupervisorClearDelivery::Sent => {
-                agent_doc_orchestration::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
                     &format!(
                         "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=none",
@@ -566,7 +566,7 @@ pub fn clear(file: &Path) -> Result<()> {
     }
     match agent_doc_queue_io::continuation_marker::write_clear_cooldown(&ctx.canonical_file) {
         Ok(()) => {
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "session_clear_queue_cooldown file={} harness={}",
@@ -580,7 +580,7 @@ pub fn clear(file: &Path) -> Result<()> {
                 "[clear] warning: failed to write queue cooldown marker for {}: {err:#}",
                 ctx.canonical_file.display()
             );
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "session_clear_queue_cooldown_failed file={} error={:?}",
@@ -613,7 +613,7 @@ pub fn clear(file: &Path) -> Result<()> {
 fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_turn::repair::CancelOutcome {
     match agent_doc_orchestration::repair::cancel_preflight_cycle(file) {
         Ok(outcome) => {
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "session_clear_cycle_reclaim file={} outcome={outcome:?}",
@@ -686,7 +686,7 @@ fn verify_supervisor_clear_submit(
     pane_source: &str,
 ) -> Result<()> {
     let Some(pane) = ctx.supervisor_runtime.actor_pane_id.as_deref() else {
-        agent_doc_orchestration::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &ctx.canonical_file,
             &format!(
                 "session_clear_submit_verification_skipped file={} harness={} delivery=supervisor_ipc pane_source={} reason=no_supervisor_actor_pane",
@@ -721,7 +721,7 @@ fn send_clear_to_resolved_pane(
     let fallback_suffix = fallback_reason
         .map(|reason| format!(" fallback_reason={reason}"))
         .unwrap_or_default();
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &ctx.canonical_file,
         &format!(
             "session_clear_sent file={} pane={} delivery=direct_pane_submit submit_mode={} pane_source={}{}",
@@ -774,7 +774,7 @@ fn reconcile_idle_projection_before_clear(
     agent_doc_flow_io::log_flow_event(
         &ctx.canonical_file,
         clear_guard_event(clear_state),
-        agent_doc_orchestration::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
 
     match clear_state {
@@ -785,7 +785,7 @@ fn reconcile_idle_projection_before_clear(
         OperatorClearInputState::ProtectedInput => {
             if let Some(reason) = protected_reason {
                 let log_reason = reason.replace(char::is_whitespace, "_");
-                agent_doc_orchestration::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
                     &format!(
                         "session_clear_protected_input_guard_refused file={} pane={} source={} reason={} current_command={} tail={:?}",
@@ -846,7 +846,7 @@ fn reconcile_idle_projection_before_clear(
                         &ctx.canonical_file,
                         harness_clear_command(&ctx.harness),
                     )?;
-                    agent_doc_orchestration::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         &ctx.canonical_file,
                         &format!(
                             "session_clear_queue_preempt_deferred file={} pane={} source={} reason={} current_command={} tail={:?}",
@@ -868,7 +868,7 @@ fn reconcile_idle_projection_before_clear(
                     return Ok(ClearPreflightOutcome::DeferredPreempt);
                 }
                 agent_doc_queue::queue_preemption::BusyClearOutcome::AlreadyDeferred => {
-                    agent_doc_orchestration::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         &ctx.canonical_file,
                         &format!(
                             "session_clear_queue_preempt_already_deferred file={} pane={} source={} reason={} current_command={} tail={:?}",
@@ -890,7 +890,7 @@ fn reconcile_idle_projection_before_clear(
                     return Ok(ClearPreflightOutcome::DeferredPreempt);
                 }
                 agent_doc_queue::queue_preemption::BusyClearOutcome::HardBlock => {
-                    agent_doc_orchestration::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         &ctx.canonical_file,
                         &format!(
                             "session_clear_live_busy_guard_blocked file={} pane={} source={} reason={} current_command={} tail={:?}",
@@ -970,7 +970,7 @@ fn guard_starting_actor_operator_command(
     }
 
     let reason = starting_operator_guard_reason(action, dirty, dispatch_ready, clean_exit_prompt);
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &ctx.canonical_file,
         &format!(
             "session_operator_starting_guard_refused kind={} file={} pane={} source={} reason={} actor_state={} supervisor_state={} lease_state={} prompt_ready={} tail={:?}",
@@ -1236,7 +1236,7 @@ pub fn cancel_turn(file: &Path) -> Result<()> {
     let turn_active = document_turn_active(&ctx);
     match cancel_turn_action(turn_active) {
         CancelTurnAction::NoOpIdle => {
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "cancel_turn_noop file={} reason=idle_no_active_turn harness={}",
@@ -1255,7 +1255,7 @@ pub fn cancel_turn(file: &Path) -> Result<()> {
             let Some(pane) = evidence.pane_id.as_deref() else {
                 // The marker says a turn is active but no pane can be resolved —
                 // there is nothing to interrupt. Stay safe: do not blind-send keys.
-                agent_doc_orchestration::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
                     &format!(
                         "cancel_turn_noop file={} reason=active_marker_no_live_pane harness={} action={}",
@@ -1271,7 +1271,7 @@ pub fn cancel_turn(file: &Path) -> Result<()> {
                 return Ok(());
             };
             if !tmux.pane_alive(pane) {
-                agent_doc_orchestration::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
                     &format!(
                         "cancel_turn_noop file={} pane={} reason=pane_already_closed harness={}",
@@ -1289,7 +1289,7 @@ pub fn cancel_turn(file: &Path) -> Result<()> {
             }
             let codex_shell_search = codex_pane_in_shell_search_state(&ctx, &tmux, &evidence);
             send_operator_interrupt_sequence(&tmux, pane, &ctx.harness, codex_shell_search)?;
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "cancel_turn_performed file={} action={} harness={} pane={} source={}",
@@ -1340,7 +1340,7 @@ pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
         .as_deref()
         .with_context(|| format!("no live pane evidence for {}", ctx.canonical_file.display()))?;
     if !tmux.pane_alive(pane) {
-        agent_doc_orchestration::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &ctx.canonical_file,
             &format!(
                 "session_interrupt_clear_skip_interrupt file={} pane={} reason=already_closed",
@@ -1354,7 +1354,7 @@ pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
     match interrupt_clear_initial_action(&evidence) {
         InterruptClearInitialAction::SkipInterruptAlreadyIdle => {
             let _ = reconcile_idle_projection_from_evidence(&ctx, &evidence);
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "session_interrupt_clear_skip_interrupt file={} pane={} reason=already_idle prompt_ready={} tail={:?}",
@@ -1372,7 +1372,7 @@ pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
     let codex_shell_search = codex_pane_in_shell_search_state(&ctx, &tmux, &evidence);
     send_operator_interrupt_sequence(&tmux, pane, &ctx.harness, codex_shell_search)?;
     let outcome = wait_for_interrupt_clear_settle(&ctx, &tmux, pane, Duration::from_secs(10));
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &ctx.canonical_file,
         &format!(
             "session_interrupt_clear_settled file={} pane={} harness={} outcome={} editor_recovery_attempted={} blocking_state={} blocking_source={} prompt_ready={} last_command={} tail={:?}",
@@ -1431,7 +1431,7 @@ fn force_interrupt_clear(file: &Path) -> Result<()> {
             "[interrupt-clear --force] warning: operator authorization failed for {}: {err:#}; continuing with explicit force cleanup",
             ctx.canonical_file.display()
         );
-        agent_doc_orchestration::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &ctx.canonical_file,
             &format!(
                 "session_interrupt_clear_force_authorization_failed file={} error={:?}",
@@ -1481,7 +1481,7 @@ fn force_interrupt_clear(file: &Path) -> Result<()> {
 
     reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
 
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &ctx.canonical_file,
         &format!(
             "session_interrupt_clear_force_cleanup file={} pane={} actor_closed={} registry_removed={} supervisor_pid={} supervisor_signaled={} child_pid={} child_signaled={} pane_killed={} socket_removed={} cooldown_written={}",
@@ -1546,7 +1546,7 @@ fn force_close_actor_record(ctx: &SessionContext) -> bool {
                 "[interrupt-clear --force] warning: failed to mark actor closed for {}: {err:#}",
                 ctx.canonical_file.display()
             );
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "session_interrupt_clear_force_actor_close_failed file={} error={:?}",
@@ -1595,7 +1595,7 @@ fn signal_pid_for_force_clear(file: &Path, kind: &str, pid: Option<u32>) -> bool
         return false;
     };
     let signaled = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) == 0 };
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "session_interrupt_clear_force_signal file={} kind={} pid={} signaled={}",
@@ -1611,7 +1611,7 @@ fn signal_pid_for_force_clear(file: &Path, kind: &str, pid: Option<u32>) -> bool
 #[cfg(not(unix))]
 fn signal_pid_for_force_clear(file: &Path, kind: &str, pid: Option<u32>) -> bool {
     if let Some(pid) = pid {
-        agent_doc_orchestration::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "session_interrupt_clear_force_signal file={} kind={} pid={} signaled=false platform=non_unix",
@@ -1629,7 +1629,7 @@ fn kill_pane_for_force_clear(file: &Path, tmux: &Tmux, pane: Option<&str>) -> bo
         return false;
     };
     if !tmux.pane_alive(pane) {
-        agent_doc_orchestration::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "session_interrupt_clear_force_kill_pane file={} pane={} killed=false reason=already_closed",
@@ -1640,7 +1640,7 @@ fn kill_pane_for_force_clear(file: &Path, tmux: &Tmux, pane: Option<&str>) -> bo
         return false;
     }
     let killed = tmux.raw_cmd(&["kill-pane", "-t", pane]).is_ok();
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "session_interrupt_clear_force_kill_pane file={} pane={} killed={}",
@@ -1719,10 +1719,7 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Re
         pane,
         command,
         harness,
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(
-            None,
-            agent_doc_orchestration::ops_log::log_op,
-        ),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "sessions.send_submitted_text_for_harness",
     )
     .with_context(|| {
@@ -1769,7 +1766,7 @@ fn verify_context_clear_submit_after_delivery(
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(
                 Some(file),
-                agent_doc_orchestration::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             ),
             resubmit_source,
             &format!("pane:{pane}"),
@@ -1783,10 +1780,7 @@ fn verify_context_clear_submit_after_delivery(
             pane,
             "",
             harness,
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                None,
-                agent_doc_orchestration::ops_log::log_op,
-            ),
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "sessions.send_submitted_text_for_harness",
         ) {
             eprintln!(
@@ -1801,7 +1795,7 @@ fn verify_context_clear_submit_after_delivery(
             command,
             resubmit_phase,
         );
-        agent_doc_orchestration::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &context_clear_submit_resubmit_proof_line(
                 file.display(),
@@ -1910,7 +1904,7 @@ fn log_context_clear_submit_observation(
     capture_len: Option<usize>,
     capture_hash: Option<&str>,
 ) {
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &context_clear_submit_observation_line(
             file.display(),
@@ -1943,7 +1937,7 @@ fn require_context_clear_submit_accepted(
         phase,
         observation,
     );
-    agent_doc_orchestration::ops_log::log_op(file, &line);
+    agent_doc_ops_log_io::log_op(file, &line);
     anyhow::bail!(
         "{}",
         context_clear_submit_blocked_message(
@@ -2099,7 +2093,7 @@ fn wait_for_interrupt_clear_settle(
         {
             editor_recovery_attempted = true;
             let command = evidence.current_command.as_deref().unwrap_or("unknown");
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "session_interrupt_clear_editor_recovery file={} pane={} command={}",
@@ -2261,7 +2255,7 @@ fn busy_proof_for_pane(
 }
 
 fn log_restart_evidence_event(ctx: &SessionContext, event: &str, evidence: &LivePaneEvidence) {
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &ctx.canonical_file,
         &format!(
             "{} file={} pane={} source={} state={} current_command={} prompt_ready={} tail={:?}",
@@ -2324,7 +2318,7 @@ fn reconcile_idle_projection_from_evidence(
             },
         )?;
     }
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &ctx.canonical_file,
         &format!(
             "session_operator_reconciled_idle_projection file={} pane={} source={} prior_actor_state={} prior_supervisor_state={} prior_lease_state={}",

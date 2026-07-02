@@ -35,7 +35,7 @@ pub(crate) fn ipc_response_materialized_or_fallback(
         source,
         file.display()
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_materialization_missing_response file={} source={} response_sha256={} content_len={} content_hash={}",
@@ -80,7 +80,7 @@ pub(crate) fn log_ipc_proof_failure(
         if detail.is_empty() { "" } else { " " },
         detail
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_proof_insufficient file={} source={} patch_id={} invariant={} recovery={}{}{}",
@@ -123,7 +123,7 @@ pub(crate) fn log_partial_response_materialization_for_retry(
         source,
         file.display()
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_partial_materialization_retained_for_retry file={} source={} response_sha256={} current_len={} stripped_len={}",
@@ -265,7 +265,7 @@ pub fn normalize_backlog_patch_response(
                 file.display()
             )
         })?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "normalize_pending_patch file={} added={} done={}",

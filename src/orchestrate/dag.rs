@@ -250,7 +250,7 @@ pub(crate) fn run_ordered_tasks_internal(
     agent_doc_flow_io::log_flow_event(
         file,
         agent_doc_work_graph::queue_freeze_event(tasks.len(), options.exchange_source.is_some()),
-        agent_doc_orchestration::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
 
     for (idx, task) in tasks.iter().enumerate() {
@@ -308,7 +308,7 @@ pub(crate) fn run_ordered_tasks_internal(
                         agent_doc_flow_io::log_flow_event(
                             file,
                             agent_doc_work_graph::child_closeout_event(&child),
-                            agent_doc_orchestration::ops_log::log_op,
+                            agent_doc_ops_log_io::log_op,
                         );
                         return Err(err);
                     }
@@ -316,7 +316,7 @@ pub(crate) fn run_ordered_tasks_internal(
                 agent_doc_flow_io::log_flow_event(
                     file,
                     agent_doc_work_graph::child_closeout_event(&child_result),
-                    agent_doc_orchestration::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 );
                 if idx + 1 < tasks.len()
                     && agent_doc_work_graph::classify_batch_progress(
@@ -407,7 +407,7 @@ pub(crate) fn run_auto_dag_mode(
             schedule.nodes.len(),
             schedule.batches.len(),
         ),
-        agent_doc_orchestration::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
     if let Some(blocker) = schedule_blocker {
         anyhow::bail!(blocker);
@@ -480,7 +480,7 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
     agent_doc_flow_io::log_flow_event(
         file,
         agent_doc_work_graph::queue_freeze_event(schedule.nodes.len(), true),
-        agent_doc_orchestration::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
 
     for batch in &schedule.batches {
@@ -563,7 +563,7 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                     agent_doc_flow_io::log_flow_event(
                         file,
                         agent_doc_work_graph::child_closeout_event(&child),
-                        agent_doc_orchestration::ops_log::log_op,
+                        agent_doc_ops_log_io::log_op,
                     );
                 }
                 Err(err) => {
@@ -581,7 +581,7 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                     agent_doc_flow_io::log_flow_event(
                         file,
                         agent_doc_work_graph::child_closeout_event(&child),
-                        agent_doc_orchestration::ops_log::log_op,
+                        agent_doc_ops_log_io::log_op,
                     );
                     return Err(err);
                 }

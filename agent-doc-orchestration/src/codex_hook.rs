@@ -244,7 +244,10 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         }
         crate::session_check::SessionCheckStatus::Interrupted(reason) => {
             if is_editor_convergence_required_interruption(&reason) {
-                crate::ops_log::log_op(&file, "codex_stop_editor_convergence_required_blocked");
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    "codex_stop_editor_convergence_required_blocked",
+                );
                 let display = file.display();
                 let message = format!(
                     "agent-doc Stop hook found an editor-convergence blocked closeout for {display}. {reason} Do not send the final answer yet. Retry through the editor/CRDT path after the editor frontend has the required capability or the live editor state is otherwise proven. Do not run `--force-disk` unless the operator explicitly chooses that recovery."
@@ -264,7 +267,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
                 let stop_closeout = match attempt_stop_closeout(&file, &state, input) {
                     Ok(stop_closeout) => stop_closeout,
                     Err(err) => {
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             &file,
                             &format!("codex_stop_auto_close_failed err={err}"),
                         );
@@ -503,8 +506,8 @@ fn codex_continuation_clear_reason(
         let threshold = agent_doc_session_accretion_io::clear_threshold_for_doc(file);
         let pct = codex_live_context_pct(file);
         let decision = clear_decision(true, pct, threshold);
-        crate::ops_log::log_op(file, &decision.diagnostic);
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(file, &decision.diagnostic);
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "[clearcodex] codex-continuation optIn=true reason={:?} clear_instructed=false background_clear_suppressed={}",
@@ -517,7 +520,7 @@ fn codex_continuation_clear_reason(
 }
 
 fn log_codex_stop_queue_continuation(file: &Path, prompt: &str, source: &str) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "codex_stop_queue_continuation file={} source={} mcp_configured={} prompt_bytes={} prompt_sha256={}",
@@ -536,7 +539,7 @@ fn log_codex_background_context_clear_suppressed(
     source: &str,
     reason: &str,
 ) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "codex_background_context_clear_suppressed file={} source={} result=in_pane_continuation prompt_bytes={} prompt_sha256={} reason={:?}",
@@ -687,7 +690,7 @@ fn try_recover_repeated_queue_head_response(
         .collect::<Vec<_>>();
 
     crate::repair::save_pending(file, &response_to_write)?;
-    crate::ops_log::log_op(file, "codex_stop_repeated_queue_response_saved");
+    agent_doc_ops_log_io::log_op(file, "codex_stop_repeated_queue_response_saved");
     let mut note = format!(
         " The hook replayed the last assistant response into `agent:exchange` for repeated queue head {:?}.",
         prompt
@@ -739,7 +742,7 @@ fn try_recover_repeated_queue_head_response(
         }
         Ok(false) => {}
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!("codex_stop_repeated_queue_closeout_failed err={err}"),
             );
@@ -751,7 +754,7 @@ fn try_recover_repeated_queue_head_response(
         }
     }
 
-    crate::ops_log::log_op(file, "codex_stop_repeated_queue_recovery_success");
+    agent_doc_ops_log_io::log_op(file, "codex_stop_repeated_queue_recovery_success");
     Ok(RepeatedQueueHeadRecovery::Recovered { note })
 }
 
@@ -1168,7 +1171,7 @@ fn attempt_stop_closeout(
     match payload {
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
             crate::repair::save_pending(file, response.as_ref())?;
-            crate::ops_log::log_op(file, "codex_stop_capture_saved");
+            agent_doc_ops_log_io::log_op(file, "codex_stop_capture_saved");
             note.push_str(
                 " The latest assistant text was captured into the pending/capture ledger before auto-close.",
             );
@@ -1226,7 +1229,7 @@ fn attempt_stop_closeout(
         }
         Ok(false) => {}
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!("codex_stop_auto_close_closeout_failed err={err}"),
             );
@@ -1236,7 +1239,7 @@ fn attempt_stop_closeout(
             return Ok(StopCloseAttempt::StillOpen { note });
         }
     }
-    crate::ops_log::log_op(file, "codex_stop_auto_close_success");
+    agent_doc_ops_log_io::log_op(file, "codex_stop_auto_close_success");
     Ok(StopCloseAttempt::Closed)
 }
 
@@ -1248,7 +1251,7 @@ fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) 
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
             match crate::repair::save_pending(file, response.as_ref()) {
                 Ok(()) => {
-                    crate::ops_log::log_op(file, "codex_stop_capture_saved");
+                    agent_doc_ops_log_io::log_op(file, "codex_stop_capture_saved");
                     " The latest assistant text was captured into the pending/capture ledger before the turn stopped.".to_string()
                 }
                 Err(err) => format!(
@@ -1277,7 +1280,7 @@ fn capture_missing_stop_response(file: &Path, last_prompt: Option<&str>) -> Stri
         last_prompt,
     ) {
         Ok(path) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "codex_stop_capture_missing_response path={} reason={reason}",
@@ -1309,7 +1312,7 @@ fn capture_blocked_stop_payload(
         last_prompt,
     ) {
         Ok(path) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "codex_stop_capture_blocked path={} reason={}",
@@ -1690,7 +1693,7 @@ mod tests {
         let doc = dir.path().join("task.md");
         let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         doc
     }
 
@@ -1704,7 +1707,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         doc
     }
 
@@ -1731,7 +1734,7 @@ Done.\n\
 <!-- /agent:queue -->\n"
         );
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         doc
     }
 
@@ -1758,7 +1761,7 @@ Done.\n\
 <!-- no-free-text-queue-head-guard -->\n"
         );
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         doc
     }
 
@@ -1774,7 +1777,7 @@ Done.\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         doc
     }
 
@@ -1811,7 +1814,7 @@ Done.\n\
         let doc = project.join("task.md");
         let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         apply_user_prompt_submit(&UserPromptSubmitInput {
             session_id: "codex-session".to_string(),
@@ -2244,7 +2247,7 @@ agent-doc {}\n",
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         git(&submodule_root, &["add", "session.md"]);
         git(&submodule_root, &["commit", "-m", "add doc", "--no-verify"]);
         git(&parent, &["add", "src/submodule"]);
@@ -2328,7 +2331,7 @@ agent-doc {}\n",
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
 
         let current = concat!(
@@ -2378,7 +2381,7 @@ agent-doc {}\n",
             "<!-- /agent:backlog -->\n"
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -2433,7 +2436,7 @@ agent-doc {}\n",
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -2493,7 +2496,7 @@ agent-doc {}\n",
             "<!-- /agent:backlog -->\n"
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -2927,7 +2930,7 @@ agent-doc {}\n",
             "<!-- /agent:queue -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
         track_doc(&dir, &doc, "turn-1");
 

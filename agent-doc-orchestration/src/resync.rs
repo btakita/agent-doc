@@ -1457,7 +1457,7 @@ fn apply_stash_ttl_prune(tmux: &Tmux) {
     let current_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     for pane_id in &targets {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &current_root,
             &format!(
                 "stash_ttl_prune_candidate pane={} idle_secs={} ttl={} kill_enabled={}",
@@ -2646,7 +2646,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         std::process::Command::new("git")
             .current_dir(root)
             .args(["add", "-A"])
@@ -2687,7 +2687,7 @@ mod tests {
         let doc = root.join("doc.md");
         let content = "---\nagent_doc_session: test\n---\n\nplain body\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         // No pending/cycle state → no-op, no error, content unchanged.
         finish_unfinished_turn(&doc).unwrap();

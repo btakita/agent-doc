@@ -252,9 +252,7 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
         .with_context(|| format!("failed to persist to {}", file.display()))?;
 
     // Update snapshot (best-effort — may fail in environments without .agent-doc/)
-    if let Err(e) =
-        agent_doc_snapshot_io::save(file, &new_doc, agent_doc_orchestration::ops_log::log_op)
-    {
+    if let Err(e) = agent_doc_snapshot_io::save(file, &new_doc, agent_doc_ops_log_io::log_op) {
         eprintln!("[history] Warning: failed to update snapshot: {}", e);
     }
 

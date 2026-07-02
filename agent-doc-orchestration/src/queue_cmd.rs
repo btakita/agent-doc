@@ -194,7 +194,7 @@ pub fn prune_noise(file: &Path) -> Result<()> {
 pub fn sync(file: &Path) -> Result<()> {
     match agent_doc_queue_io::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(
         file,
-        |path, content| agent_doc_snapshot_io::save(path, content, crate::ops_log::log_op),
+        |path, content| agent_doc_snapshot_io::save(path, content, agent_doc_ops_log_io::log_op),
     )? {
         OneShotQueueSyncResult::AlreadyInSync {
             requested_count,
@@ -258,7 +258,7 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         sync(&doc).expect("enqueue marker should append to queue");
         let result = std::fs::read_to_string(&doc).unwrap();
@@ -297,7 +297,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         consume_with_options(&doc, 2, ConsumeOptions { force_disk: true })
             .expect("consume two answered free-text heads");
@@ -331,7 +331,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         consume_with_options(&doc, 5, ConsumeOptions { force_disk: true })
             .expect("consume should stop at the id-backed head");
@@ -359,7 +359,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = consume(&doc, 1).unwrap_err();
         assert!(
@@ -385,7 +385,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = consume(&doc, 1).unwrap_err();
         assert!(

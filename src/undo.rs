@@ -39,7 +39,7 @@ pub fn run(file: &Path) -> Result<()> {
             write::atomic_write_pub(file, &content)?;
 
             // Update the main snapshot to match the restored state
-            agent_doc_snapshot_io::save(file, &content, agent_doc_orchestration::ops_log::log_op)?;
+            agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)?;
 
             // Delete the pre-response snapshot (consumed)
             agent_doc_snapshot_io::delete_pre_response(file)?;

@@ -139,7 +139,7 @@ pub(crate) fn ipc_direct_disk_degraded(project_root: &Path, file: &Path) -> Resu
         }
         Ok(false) => {}
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "ipc_socket_degraded_self_heal_probe_failed file={} reason={}",
@@ -161,7 +161,7 @@ fn ipc_dewedge_probe_timeout() -> std::time::Duration {
 }
 
 pub(crate) fn log_ipc_dewedge_direct_disk_skip(file: &Path, transport: &str) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_listener_degraded_direct_disk file={} transport={} reason=repeated_ack_timeout",
@@ -178,7 +178,7 @@ pub(crate) fn log_ipc_dewedge_direct_disk_skip(file: &Path, transport: &str) {
 /// a raw disk write that manufactures an IDEA "File Cache Conflict". If file IPC
 /// also fails to prove delivery, the write fails closed for retry.
 pub(crate) fn log_ipc_dewedge_prefer_file_ipc(file: &Path, transport: &str) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_socket_degraded_prefer_file_ipc file={} transport={} reason=repeated_ack_timeout disk_write=disabled",
@@ -224,7 +224,7 @@ pub(crate) fn record_ipc_socket_ack_timeout(
         "last_transport": transport,
     });
     atomic_write(&marker, &serde_json::to_string_pretty(&value)?)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_socket_ack_timeout_recorded file={} transport={} patch_id={} consecutive_timeouts={} degraded={}",
@@ -248,7 +248,7 @@ pub(crate) fn remove_ipc_dewedge_marker(
         std::fs::remove_file(&marker).with_context(|| {
             format!("failed to remove IPC degraded marker {}", marker.display())
         })?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ipc_socket_ack_timeouts_cleared file={} reason={}",
@@ -346,7 +346,7 @@ pub(crate) fn content_ours_merged_with_disk_edits(
         eprintln!(
             "[write] normalization fallback: response delta already in current file; adopting current content"
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "sidecar_normalization_fallback_adopted_current_delta file={} delta=response_contained",
@@ -360,7 +360,7 @@ pub(crate) fn content_ours_merged_with_disk_edits(
         file,
         base,
         agent_doc_op_capture_io::has_pending_editor_ops,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     ) {
         Ok(base) => base.state,
         Err(e) => {
@@ -376,7 +376,7 @@ pub(crate) fn content_ours_merged_with_disk_edits(
         Some(&base_state),
         content_ours,
         &on_disk_content,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     ) {
         Ok((merged, _)) => merged,
         Err(e) => {
@@ -456,7 +456,7 @@ pub(crate) fn ack_content_disk_write_proof(
             ACK_CONTENT_TYPING_SETTLE_MS,
             ACK_CONTENT_TYPING_TIMEOUT_MS,
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ack_content_disk_write_proof_typing_settle file={} settled={} settle_ms={} timeout_ms={} key={}",
@@ -776,7 +776,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     // snapshot stays as the base — the corrupt buffer never reaches disk, where
     // the lint-gate could only flag it after the fact.
     if let Some(reason) = element::structural_corruption_reason(ours) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "content_ours_adoption_refused_structural file={} source={} patch_id={} reason={} content_ours_len={} content_ours_hash={}",
@@ -819,9 +819,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             agent_doc_flow::types::FlowOutcome::Blocked,
         )
         .with_reason("live_prompt_drift_after_preflight"),
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=live_prompt_drift_after_preflight candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
@@ -860,7 +860,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     let (queue_reconciled_ours, ignored_queue_deletions) =
         preserve_content_ours_over_live_queue_deletions(base, &candidate, ours);
     if !ignored_queue_deletions.is_empty() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "queue_live_deletion_ignored file={} source={} patch_id={} count={} reason=unproven_ipc_candidate_queue_deletion",
@@ -882,7 +882,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
         let merged_doc = sm.merged_doc.clone();
         let outcome_count = sm.outcomes.len();
         let ack_count = sm.requires_ack.len();
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "live_prompt_drift_semantic_merged file={} source={} patch_id={} base_len={} base_hash={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={} merged_len={} merged_hash={} outcomes={} acks={} reason=node_keyed_semantic_merge",
@@ -913,7 +913,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 .iter()
                 .map(|ack| format!("{}:{}:{}", ack.component, ack.id, ack.reason.token()))
                 .collect();
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "semantic_merge_ack_pending file={} source={} patch_id={} ack_count={} reasons={}",
@@ -960,7 +960,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
         agent_doc_merge_io::merge_contents(base, &queue_reconciled_ours, &candidate)
         && !union.contains("<<<<<<<")
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "live_prompt_drift_forward_merged file={} source={} patch_id={} candidate_len={} candidate_hash={} union_len={} union_hash={} reason=independent_concurrent_edit",
@@ -995,7 +995,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 e
             );
         }
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "dropped_exchange_prompt_recorded file={} source={} patch_id={} count={}",
@@ -1021,7 +1021,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 e
             );
         }
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "dropped_queue_prompt_recorded file={} source={} patch_id={} count={}",
@@ -1034,7 +1034,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     }
     let live_candidate_contains_response =
         ack_content_contains_latest_response(&candidate, &queue_reconciled_ours);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "live_prompt_drift_agent_target_not_snapshot_authority file={} source={} patch_id={} live_candidate_contains_response={} candidate_len={} candidate_hash={} agent_target_len={} agent_target_hash={}",
@@ -1067,7 +1067,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
     // #dupcontent: same fail-closed refusal on the prompt-duplication path — a
     // structurally-corrupt `content_ours` buffer must never become the snapshot.
     if let Some(reason) = element::structural_corruption_reason(ours) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "content_ours_adoption_refused_structural file={} source={} patch_id={} reason={} guard=prompt_duplication content_ours_len={} content_ours_hash={}",
@@ -1108,9 +1108,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
             agent_doc_flow::types::FlowOutcome::Blocked,
         )
         .with_reason("prompt_duplication_in_ack_content"),
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=prompt_duplication_in_ack_content duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
@@ -1175,7 +1175,7 @@ pub(crate) fn log_ipc_snapshot_adoption_allowed(
     let dup_recheck = content_ours
         .map(|ours| user_prompt_count_growth(ours, &decision.snapshot_content))
         .unwrap_or(0);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_snapshot_adoption_allowed file={} source={} patch_id={} snap_source={} snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={} drift_recheck={} dup_growth_recheck={}",
@@ -1232,7 +1232,7 @@ pub(crate) fn log_ipcfullprompt_corruption_if_any(
     }
     let base = baseline.unwrap_or("");
     let summary = agent_doc_document_realtime::ipc_corruption::summarize_findings(&findings);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipcfullprompt_corruption_suspected file={} source={} patch_id={} candidate_len={} candidate_hash={} baseline_len={} baseline_hash={} {}",
@@ -1321,7 +1321,7 @@ pub(crate) fn materialize_missing_response_for_socket_ack_drift(
         decision.editor_bad_state = Some(EditorBadStateFingerprint::new(pre_materialize));
     }
     decision.redeliver_editor = true;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_socket_ack_drift_missing_response_materialized file={} patch_id={} repaired_len={} repaired_hash={} response_sha256={}",
@@ -1372,7 +1372,7 @@ fn visible_content_supersedes_ack_content(
         }
         _ => false,
     };
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         context.file,
         &format!(
             "{source}_ack_content_stale_visible_adopted file={} patch_id={} visible_len={} visible_hash={} ack_len={} ack_hash={} response_present=true prompt_drift={}",
@@ -1436,7 +1436,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
     expected_response: &str,
 ) -> Result<AlreadyAppliedSnapshotOutcome> {
     let Some(ours) = content_ours else {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ipc_socket_already_applied_no_content_ours_snapshot file={} patch_id={}",
@@ -1477,7 +1477,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         let prompt_drift = baseline.is_some_and(|base| {
             ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(base, current, ours)
         });
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ipc_socket_already_applied_live_buffer_diverged file={} patch_id={} response_present={} current_len={} current_hash={} content_ours_len={} content_ours_hash={} prompt_drift={}",
@@ -1499,7 +1499,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         // grepping `finalize_typing_during_write` verifies a typing-during-finalize
         // run was exercised and whether the response survived intact.
         if prompt_drift {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "finalize_typing_during_write file={} patch_id={} typed_delta_bytes={} response_present={} resolution=content_ours_adopted",
@@ -1546,7 +1546,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                     "socket_already_applied_missing_disk_response",
                     current,
                 ) {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "ipc_socket_already_applied_visible_not_idle_file_fallback file={} patch_id={} reason={}",
@@ -1558,7 +1558,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                     return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
                 }
                 atomic_write_pub(file, &repaired_current)?;
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "ipc_socket_already_applied_missing_disk_response_repaired file={} patch_id={} visible_len={} visible_hash={} content_ours_len={} content_ours_hash={}",
@@ -1737,7 +1737,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
     agent_doc_snapshot_io::save(
         file,
         &repair_decision.snapshot_content,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     )?;
     let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
     agent_doc_merge_io::save_document_crdt(
@@ -1745,7 +1745,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         &crdt_doc.encode_state(),
         &repair_decision.snapshot_content,
     )?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_socket_already_applied_snapshot file={} patch_id={} snap_source={} snap_len={} snap_hash={}",
@@ -1766,7 +1766,7 @@ pub(crate) fn mark_ack_content_live_buffer_synced(
     content: &str,
 ) {
     let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ack_content_live_buffer_sync_skipped file={} patch_id={} reason=no_editor_id",
@@ -1789,7 +1789,7 @@ pub(crate) fn mark_ack_content_live_buffer_synced(
         "unknown",
         &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
     ) {
-        Ok(()) => crate::ops_log::log_op(
+        Ok(()) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ack_content_live_buffer_synced file={} patch_id={} editor_id={} len={} hash={}",
@@ -1800,7 +1800,7 @@ pub(crate) fn mark_ack_content_live_buffer_synced(
                 agent_doc_hash::content_hash(content)
             ),
         ),
-        Err(err) => crate::ops_log::log_op(
+        Err(err) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ack_content_live_buffer_sync_failed file={} patch_id={} editor_id={} error={}",
@@ -1827,7 +1827,7 @@ pub(crate) fn write_ack_content_through_to_disk(
         enabled: true,
     });
     if decision.action != WholeBufferDeliveryAction::Apply {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ack_content_disk_write_through_blocked file={} patch_id={} authority={} source_buffer_matches={} action={} reason={} len={} hash={}",
@@ -1848,7 +1848,7 @@ pub(crate) fn write_ack_content_through_to_disk(
 
     let before = std::fs::read_to_string(file).ok();
     if before.as_deref() == Some(content) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ack_content_disk_write_through_skipped file={} patch_id={} authority={} reason=already_current len={} hash={}",
@@ -1868,7 +1868,7 @@ pub(crate) fn write_ack_content_through_to_disk(
             file.display()
         )
     })?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ack_content_disk_write_through file={} patch_id={} authority={} before_len={} before_hash={} ack_len={} ack_hash={}",
@@ -1900,7 +1900,7 @@ pub(crate) fn mark_ack_content_live_buffer_synced_after_write(
         return;
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ack_content_live_buffer_sync_skipped file={} patch_id={} reason=post_write_source_unproven authority={} source_buffer_matches={}",
@@ -1943,7 +1943,7 @@ pub(crate) fn ipc_repair_decision_from_sidecar(
             "[write] sidecar normalization diverged — retrying from ACK sidecar ({} bytes)",
             repaired.len()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "sidecar_normalization_fallback file={} patch_id={} snap_source=ack_content_sidecar reason=prefix_divergence bad_len={} bad_hash={} fallback_len={} fallback_hash={} required_prefix_count={} observed_prefix_count={} duplicate_prompt_count={}",
@@ -1982,7 +1982,7 @@ fn redelivery_missing_operator_text_authority(
         "[write] {label} editor repair skipped: live editor buffer {editor_id} lacks required capability {}",
         agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "{label}_editor_redelivery_skipped file={} patch_id={} skip=editor_capability_missing capability={} editor_id={} live_len={} live_hash={}",
@@ -2013,7 +2013,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
                 file.display(),
                 e
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{}_editor_redelivery_skipped file={} patch_id={} skip=read_failed error={}",
@@ -2026,7 +2026,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
             return false;
         }
     };
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "{}_editor_redelivery_proof file={} patch_id={} proof_source=bad_editor_state expected_len={} expected_hash={} current_len={} current_hash={} redeliver={}",
@@ -2065,7 +2065,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
                 "[write] {} editor repair skipped: visible buffer no longer matches the bad state",
                 kind.label()
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{}_editor_redelivery_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={} table_reason={}",
@@ -2080,7 +2080,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
                 ),
             );
         } else if decision.reason != "missing_operator_text_authority" {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{}_editor_redelivery_skipped file={} patch_id={} skip=authority_table action={} reason={} authority={}",
@@ -2117,7 +2117,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
             "[write] {} editor repair skipped: live editor buffer has unsaved edits ahead of the bad state",
             kind.label()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{}_editor_redelivery_skipped file={} patch_id={} skip=live_buffer_diverges expected_len={} expected_hash={} live_len={} live_hash={}",
@@ -2140,7 +2140,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
     ) {
         Ok(true) => {
             eprintln!("{}", kind.success_message());
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{}_redelivered_editor file={} patch_id={} bytes={} expected_bad_len={} expected_bad_hash={}",
@@ -2156,7 +2156,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
         }
         Ok(false) => {
             eprintln!("{}", kind.not_consumed_message());
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{}_editor_repair_not_consumed file={} patch_id={} bytes={}",
@@ -2170,7 +2170,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
         }
         Err(e) => {
             eprintln!("{}", kind.failed_message(&e));
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{}_editor_repair_failed file={} patch_id={} error={}",
@@ -2201,7 +2201,7 @@ pub(crate) fn verify_normalization_repair_observed(
         Ok(Some(content)) => content,
         Ok(None) => std::fs::read_to_string(file).unwrap_or_default(),
         Err(e) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "sidecar_normalization_fallback_narrow_repair_ack_read_failed file={} patch_id={} transport={} error={}",
@@ -2217,7 +2217,7 @@ pub(crate) fn verify_normalization_repair_observed(
 
     let observed_matches =
         strip_boundary_for_dedup(&observed) == strip_boundary_for_dedup(repaired_content);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "sidecar_normalization_fallback_narrow_repair_observed file={} patch_id={} transport={} observed_len={} observed_hash={} expected_len={} expected_hash={} matched={}",
@@ -2246,7 +2246,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
         repaired_content,
         normalize_prefix_lines,
     ) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "sidecar_normalization_fallback_narrow_repair_ineligible file={} patch_id={} skip=normalization_only_patch_not_equivalent normalize_targets={}",
@@ -2265,7 +2265,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
         )
     })?;
     if current_content != expected_bad_state {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "sidecar_normalization_fallback_narrow_repair_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={}",
@@ -2304,7 +2304,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
         proof.expected_content_len,
         true,
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "sidecar_normalization_fallback_narrow_repair_attempt file={} patch_id={} source_patch_id={} normalize_targets={} expected_bad_len={} expected_bad_hash={} repaired_len={} repaired_hash={}",
@@ -2329,7 +2329,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
                     repaired_content,
                     "socket",
                 ) {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "sidecar_normalization_fallback_narrow_repaired_editor file={} patch_id={} transport=socket",
@@ -2342,7 +2342,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
                 return Ok(false);
             }
             Ok(None) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "sidecar_normalization_fallback_narrow_repair_not_consumed file={} patch_id={} transport=socket",
@@ -2352,7 +2352,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
                 );
             }
             Err(e) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "sidecar_normalization_fallback_narrow_repair_failed file={} patch_id={} transport=socket error={}",
@@ -2394,7 +2394,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
                 repaired_content,
                 "file",
             ) {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "sidecar_normalization_fallback_narrow_repaired_editor file={} patch_id={} transport=file",
@@ -2409,7 +2409,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
         std::thread::sleep(poll_interval);
     }
     let _ = std::fs::remove_file(&patch_file);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "sidecar_normalization_fallback_narrow_repair_not_consumed file={} patch_id={} transport=file",
@@ -2446,7 +2446,7 @@ pub(crate) fn redeliver_normalization_fallback_to_editor(
         Ok(true) => return true,
         Ok(false) => {}
         Err(e) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "sidecar_normalization_fallback_narrow_repair_failed file={} patch_id={} error={}",
@@ -2501,7 +2501,7 @@ pub(crate) fn repair_ipc_decision_visible_state(
         .map(|state| state.hash.as_str())
         .unwrap_or("-");
     let current = std::fs::read_to_string(file).ok();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_repair_decision file={} patch_id={} snap_source={} repair_reason={} redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={} current_len={} current_hash={} normalize_targets={} duplicate_prompt_count={}",
@@ -2591,7 +2591,7 @@ pub(crate) fn repair_ipc_decision_visible_state(
                 &file_content,
             )
         {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "ipc_visible_repair_incycle_editor_converged file={} patch_id={} repair_reason={} redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={} transport=editor_ipc",
@@ -2644,7 +2644,7 @@ pub(crate) fn repair_ipc_decision_visible_state(
             file.display()
         );
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_visible_repair_retry_required_no_disk_write file={} patch_id={} repair_reason={} recovery=retry_without_disk_write",
@@ -2680,7 +2680,7 @@ pub fn dedupe_ipc_snapshot_content(
     )?;
     let changed = singleton_changed || deduped != content;
     if let Some(repair) = &singleton_repair {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "duplicate_singleton_component_repaired file={} source={} groups={} removed={} canonical_source=before before_commit=true",
@@ -2692,7 +2692,7 @@ pub fn dedupe_ipc_snapshot_content(
         );
     }
     if singleton_changed {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ipc_snapshot_singleton_components_deduped file={} source={} before_commit=true",
@@ -2702,7 +2702,7 @@ pub fn dedupe_ipc_snapshot_content(
         );
     }
     if singleton_changed || report.changed() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ipc_snapshot_deduped file={} source={} before_commit=true",
@@ -2739,7 +2739,7 @@ fn log_content_ours_adoption_refused_stale_supervisor(
     stale_message: &str,
 ) {
     let stale_message = stale_message.replace('\n', " ");
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "content_ours_adoption_refused_stale_supervisor file={} source={} patch_id={} guard={} reason=supervisor_binary_stale content_ours_len={} content_ours_hash={} warning={:?}",

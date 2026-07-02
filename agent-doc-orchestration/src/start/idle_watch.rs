@@ -173,7 +173,7 @@ fn record_convergence_gate_blocked(
     match agent_doc_workflow_io::convergence_playback::record_blocked_boundary_with_logger(
         file,
         &playback,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     ) {
         // `record_blocked_boundary_with_logger` already emits the canonical ERROR-level
         // `convergence_gate_blocked severity=error ... playback=<path>`
@@ -185,7 +185,7 @@ fn record_convergence_gate_blocked(
                 "[agent-doc] warning: failed to persist convergence blocked-boundary playback for {}: {err}",
                 file.display()
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "convergence_gate_blocked severity=error file={} reason=editor_ipc_convergence_boundary_failed action=fail_closed unmet={} inflight={} elapsed_ms={} timeout_ms={} playback=unwritten playback_error={} (#fbwire)",
@@ -275,7 +275,7 @@ fn log_idle_queue_context_reset_submit(
     reason: &str,
 ) {
     let target = shared.inject_pane.as_deref().unwrap_or("child_pty");
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &idle_queue_context_reset_ops_log_message(
             file,
@@ -329,7 +329,7 @@ fn record_context_clear_in_flight_marker(
             "[agent-doc] idle-queue watch: failed to record context-clear marker for {}: {err:#}",
             file.display()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "idle_queue_watch_context_clear_marker_failed file={} harness={} error={:?}",
@@ -343,7 +343,7 @@ fn record_context_clear_in_flight_marker(
 
 fn log_between_turn_enqueue_delivery(file: &Path, clear_cmd: &str, drain_payload: &str) {
     let plan = between_turn_enqueue_plan([clear_cmd, drain_payload], clear_cmd, drain_payload);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "between_turn_enqueue deduped={} kept={} result=delivered",
@@ -393,7 +393,7 @@ fn idle_queue_resubmit_pending_payload(
     };
     let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
     agent_doc_tmux_io::input_diag::log_text_submit(
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
         "supervisor.idle_queue_resubmit",
         &format!("pane:{pane}"),
         "",
@@ -407,11 +407,11 @@ fn idle_queue_resubmit_pending_payload(
         &pane,
         "",
         &harness.binary,
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "sessions.send_submitted_text_for_harness",
     ) {
         Ok(()) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "idle_queue_watch_resubmit file={} harness={} action=submit_key key={} result=sent target={} payload_kind={} head_bytes={} head_sha256={} payload_bytes={}",
@@ -428,7 +428,7 @@ fn idle_queue_resubmit_pending_payload(
             AutoTriggerOutcome::Sent
         }
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "idle_queue_watch_resubmit file={} harness={} action=submit_key key={} result=send_failed target={} payload_kind={} head_bytes={} head_sha256={} error={:?}",
@@ -699,7 +699,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             head
                         );
                         log_event(&mut session_log, &event);
-                        crate::ops_log::log_op(&path, &event);
+                        agent_doc_ops_log_io::log_op(&path, &event);
                         ready_busy_logged_key = Some(key);
                     }
                 }
@@ -732,7 +732,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         let already_logged =
                             agent_change_logged_for.as_deref() == Some(resolved.binary.as_str());
                         if !already_logged {
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "harness_change_detected file={} old={} new={} gate={:?}",
@@ -779,7 +779,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             *shared.restart_mode.lock().unwrap() = "fresh".to_string();
                             shared.restart_requested.store(true, Ordering::Relaxed);
                             agent_change_restart_requested_for = Some(resolved.binary.clone());
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "agent_restart_triggered file={} old={} new={} action=request_fresh_restart",
@@ -833,7 +833,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 path.display()
                             ),
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
                                 "idle_queue_watch_skipped file={} harness={} reason=route_submit_in_flight",
@@ -858,7 +858,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             path.display()
                         ),
                     );
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(
                             "idle_queue_watch_skipped file={} harness={} reason=editor_typing_active",
@@ -903,7 +903,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         harness.binary, source, marker.target, marker.command
                     ),
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &path,
                     &format!(
                         "idle_queue_watch_context_clear_marker_dropped file={} harness={} reason=background_context_clear_disabled source={} target={} cmd={:?}",
@@ -941,7 +941,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 turn_active
                             ),
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
                                 "idle_queue_watch_context_clear_marker_wait file={} harness={} reason=route_submit_in_flight target={} cmd={:?} prompt_visible={} turn_active={}",
@@ -1052,7 +1052,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 "[agent-doc] idle-queue watch: failed to clear context-clear marker for {}: {err:#}",
                                 path.display()
                             );
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "idle_queue_watch_context_clear_marker_clear_failed file={} error={:?}",
@@ -1061,7 +1061,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 ),
                             );
                         } else {
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "idle_queue_watch_context_clear_marker_cleared file={} harness={} after_ticks={}",
@@ -1132,7 +1132,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     CLEAR_COOLDOWN_RESUME_IDLE_TICKS
                                 ),
                             );
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "idle_queue_watch_clear_cooldown_resumed file={} harness={} head={:?}",
@@ -1154,7 +1154,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 "[agent-doc] idle-queue watch: failed to drop clear cooldown marker for {}: {err:#}",
                                 path.display()
                             );
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "idle_queue_watch_clear_cooldown_resume_failed file={} error={:?}",
@@ -1299,7 +1299,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     crate_root.display(),
                                 ),
                             );
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "supervisor_auto_install_started file={} crate_root={} caller=idle_watch",
@@ -1323,7 +1323,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         &mut session_log,
                                         "supervisor_auto_install_succeeded next=recycle_onto_fresh_binary",
                                     );
-                                    crate::ops_log::log_op(
+                                    agent_doc_ops_log_io::log_op(
                                         &path,
                                         &format!(
                                             "supervisor_auto_install_succeeded file={} next=recycle_onto_fresh_binary",
@@ -1346,7 +1346,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             "supervisor_auto_install_failed fallback=operator_refresh auto_install_disabled=true error={err}"
                                         ),
                                     );
-                                    crate::ops_log::log_op(
+                                    agent_doc_ops_log_io::log_op(
                                         &path,
                                         &format!(
                                             "supervisor_auto_install_failed file={} fallback=operator_refresh error={:?}",
@@ -1438,7 +1438,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 None,
                                 None,
                             ) {
-                                crate::ops_log::log_op(
+                                agent_doc_ops_log_io::log_op(
                                     &path,
                                     &format!(
                                         "supervisor_cycle_stale_resolve_failed file={} cycle={} err={err:#} (#suprecyclespin)",
@@ -1447,7 +1447,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     ),
                                 );
                             }
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "supervisor_cycle_stale_resolved file={} cycle={} turn={} phase={} stalled_secs={} inflight={} reason=abandoned_older_turn_superseded (#suprecyclespin)",
@@ -1486,7 +1486,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 );
                 if escalate_cycle_open && !cycle_open_defer_escalated_logged {
                     cycle_open_defer_escalated_logged = true;
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(
                             "supervisor_recycle_cycle_open_escalated file={} pane={} streak={} threshold={} inflight={} action=force_recycle reason=cycle_never_closed (#midturn-recycle-resume)",
@@ -1539,7 +1539,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 std::env::current_exe().ok(),
                             ),
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
                                 "supervisor_restart_drain_reexec file={} pane={} action=drain_and_supersede caller=operator",
@@ -1578,7 +1578,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         "supervisor_restart_reexec_failed fallback=relaunch_current_binary error={err}"
                                     ),
                                 );
-                                crate::ops_log::log_op(
+                                agent_doc_ops_log_io::log_op(
                                     &path,
                                     &format!(
                                         "supervisor_restart_reexec_failed file={} pane={} fallback=relaunch_current_binary error={:?}",
@@ -1652,7 +1652,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     effective_cycle_open,
                 );
                 if matches!(recycle_action, SupervisorRecycleAction::DeferCycleOpen) {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(
                             "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open (#midturn-recycle-resume)",
@@ -1749,7 +1749,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     turn_active,
                                 ),
                             );
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "supervisor_recycle_yield_requested file={} pane={} reason={yield_reason} action=signal_loop_yield",
@@ -1801,7 +1801,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 MAX_REEXEC_ESCALATIONS,
                             ),
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
                                 "supervisor_reexec_escalate_kill_relaunch file={} pane={} attempt={}/{} action=request_kill_relaunch reason=reexec_failed",
@@ -1825,7 +1825,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 reexec_escalation_attempts,
                             ),
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
                                 "supervisor_reexec_escalation_exhausted file={} pane={} attempts={} fallback=continue_current_binary",
@@ -1913,7 +1913,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 std::env::current_exe().ok(),
                             ),
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
                                 "supervisor_binary_stale_self_recycled file={} pane={} boundary={} via=execve_preserve_child child_pid={} master_fd={} candidates=[{candidate_notes}]",
@@ -1965,7 +1965,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         "supervisor_reexec_failed fallback=continue_current_binary recycle_disabled=true error={err}"
                                     ),
                                 );
-                                crate::ops_log::log_op(
+                                agent_doc_ops_log_io::log_op(
                                     &path,
                                     &format!(
                                         "supervisor_reexec_failed file={} pane={} boundary={} fallback=continue_current_binary error={:?}",
@@ -2246,7 +2246,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     harness.binary, head
                                 ),
                             );
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "queue_dispatch_skipped file={} harness={} reason=clear_already_pending",
@@ -2356,7 +2356,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     harness.binary, head
                                 ),
                             );
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "idle_queue_watch_orphan_context_clear_wait file={} harness={} reason=route_submit_in_flight head_bytes={} head_sha256={} cmd={:?}",
@@ -2467,7 +2467,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 path.display()
                             ),
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
                                 "queue_dispatch_skipped file={} harness={} reason=queue_control_paused",
@@ -2563,7 +2563,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     // signal) — a steady-state quiescent dispatch needs no marker,
                                     // keeping ops.log quiet on the common path.
                                     if let Some(since) = convergence_gate_deferring_since {
-                                        crate::ops_log::log_op(
+                                        agent_doc_ops_log_io::log_op(
                                             &path,
                                             &format!(
                                                 "convergence_gate_converged_dispatch file={} waited_ms={} inflight={} editor_converged={} (#fbwire #j9ja)",
@@ -2595,7 +2595,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             facts.elapsed_ms
                                         ),
                                     );
-                                    crate::ops_log::log_op(
+                                    agent_doc_ops_log_io::log_op(
                                         &path,
                                         &format!(
                                             "convergence_gate_defer file={} unmet={} committed={} editor_converged={} inflight={} actor_idle={} elapsed_ms={} timeout_ms={} (#fbwire)",
@@ -2675,7 +2675,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                                 path.display()
                                             ),
                                         );
-                                        crate::ops_log::log_op(
+                                        agent_doc_ops_log_io::log_op(
                                             &path,
                                             &format!(
                                                 "queue_paused_failsafe_single_owner_drain file={} harness={} reason=no_in_session_loop_owner action=resubmit (#qstallguard Layer D)",
@@ -2731,7 +2731,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     harness.binary, payload_kind
                                 ),
                             );
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
                                     "queue_dispatch_skipped file={} harness={} reason=trigger_already_pending payload_kind={}",
@@ -2753,7 +2753,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             path.display()
                                         ),
                                     );
-                                    crate::ops_log::log_op(
+                                    agent_doc_ops_log_io::log_op(
                                         &path,
                                         &format!(
                                             "queue_paused_failsafe_single_owner_drain file={} harness={} reason=no_in_session_loop_owner action=dispatch (#qstallguard Layer D)",

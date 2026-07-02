@@ -75,7 +75,7 @@ pub fn run(files: &[PathBuf], all: bool, dry_run: bool) -> Result<()> {
         }
 
         write::atomic_write_pub(file, &result)?;
-        agent_doc_snapshot_io::save(file, &result, agent_doc_orchestration::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &result, agent_doc_ops_log_io::log_op)?;
         eprintln!("[migrate] migrated: {}", file.display());
         migrated += 1;
     }

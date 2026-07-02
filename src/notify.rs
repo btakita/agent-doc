@@ -301,7 +301,7 @@ fn save_snapshot(file: &Path, doc: &str, rc: &RunContext) -> Result<()> {
         std::fs::write(&snap_abs, doc)
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     } else {
-        agent_doc_snapshot_io::save(file, doc, agent_doc_orchestration::ops_log::log_op)
+        agent_doc_snapshot_io::save(file, doc, agent_doc_ops_log_io::log_op)
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     }
     Ok(())

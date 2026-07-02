@@ -119,7 +119,7 @@ pub(crate) fn decode_controller_response<T: DeserializeOwned>(
                     } else {
                         project_root.join(file)
                     };
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         &log_file,
                         &format!(
                             "controller_response_missing_data command={} raw={}",
@@ -366,7 +366,7 @@ pub fn authorize_dispatch(
     // flood repro reveals which path re-invokes dispatch while the pane is
     // mid-turn. Pure observability: no behavior change, paired with the existing
     // dispatch receipt (the outcome) to show invoke→outcome per dispatch.
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &request.file,
         &format!(
             "queue_dispatch_invoked file={} pane={} generation={} command_kind={} payload={}",
@@ -418,7 +418,7 @@ pub fn authorize_dispatch(
                 if let Some(target) =
                     dispatch_error_stale_generation_redirect_target(&format!("{err:#}"))
                 {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         &request.file,
                         &format!(
                             "dispatch_retry_after_stale_generation file={} prior_generation={} next_generation={}",
@@ -460,7 +460,7 @@ pub fn authorize_dispatch(
         match request_controller::<DispatchAuthorization>(project_root, controller_request.clone())
         {
             Err(err) if err.to_string().contains("controller_binary_stale") => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &request.file,
                     &format!(
                         "dispatch_retry_after_stale_binary file={}",
@@ -477,7 +477,7 @@ pub fn authorize_dispatch(
                 // target so racing dispatch self-heals instead of failing closed.
                 let target =
                     dispatch_error_stale_generation_redirect_target(&err.to_string()).unwrap();
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &request.file,
                     &format!(
                         "dispatch_retry_after_stale_generation file={} next_generation={}",
@@ -1281,7 +1281,7 @@ fn resume_document_queue_control(
             operation_receipt_id: None,
         },
     )?;
-    crate::ops_log::log_op(file, reason);
+    agent_doc_ops_log_io::log_op(file, reason);
     Ok(())
 }
 
@@ -1660,7 +1660,7 @@ impl Drop for HandoffDropGuard<'_> {
         // already gone (the abort happened before the replacement came up) the
         // request fails harmlessly and M1's self-watchdog remains the backstop.
         let _ = request_path(self.temp_sock, "shutdown");
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             self.project_root,
             &format!(
                 "handoff_drop_guard_aborted_handoff_shutdown temp_sock={}",
@@ -1841,7 +1841,7 @@ fn log_launch_lock_waiter_adopted(
     active_status: &ControllerStatus,
     phase: &str,
 ) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         project_root,
         &format!(
             "controller_launch_lock_waiter_adopted_published_controller phase={} pid={} generation={}",
@@ -2066,7 +2066,7 @@ pub(crate) fn serve_with_options(
                             continue;
                         }
                         Err(err) => {
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 project_root,
                                 &format!(
                                     "controller_self_promote_failed temp={} err={err}",
@@ -2203,7 +2203,7 @@ pub(crate) fn controller_self_promote_to_public(
     state.handoff_state = ControllerHandoffState::Stable;
     state.handoff_started_at = None;
     write_bootstrap_state(&state)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &state.project_root,
         &format!(
             "controller_self_promoted pid={} generation={} public_sock={} reason=client_died_before_rename",
@@ -2249,7 +2249,7 @@ pub(crate) fn controller_self_watchdog_suicide(runtime: &ControllerRuntime, thre
             );
         }
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &project_root,
         &format!(
             "stale_preparing_controller_self_reaped pid={pid} generation={generation} age_secs={age} threshold_secs={} caller=self_watchdog",
@@ -2326,7 +2326,7 @@ pub(crate) fn controller_self_recycle(runtime: &ControllerRuntime, reason: &str)
     let new_version = current_binary_identity()
         .map(|id| id.version)
         .unwrap_or_default();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
             "controller_self_recycled pid={} generation={} reason={reason} old_version={old_version} new_version={new_version}",
@@ -2479,7 +2479,7 @@ pub(crate) fn handle_request_locked(
             // serve-loop idle poll honors it only once no dispatch is in flight, so
             // an explicit recycle never interrupts an in-flight turn.
             runtime.request_recycle();
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &bootstrap_snapshot.project_root,
                 &format!(
                     "controller_recycle_requested pid={} generation={} reason={}",
@@ -2497,7 +2497,7 @@ pub(crate) fn handle_request_locked(
             // forced, so the recycle is NOT deferred behind an open dispatch — an
             // explicit operator override that MAY interrupt an in-flight turn.
             runtime.request_recycle_force();
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &bootstrap_snapshot.project_root,
                 &format!(
                     "controller_recycle_requested pid={} generation={} reason={} forced=true",
@@ -2547,7 +2547,7 @@ pub(crate) fn handle_request_locked(
             if let Some(client_version) = client_binary_version.as_deref()
                 && client_version != identity_version()
             {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &bootstrap_snapshot.project_root,
                     &format!(
                         "dispatch_refused_client_binary_mismatch controller_version={} client_version={}",
@@ -2695,7 +2695,7 @@ pub(crate) fn handle_start_session(
     })?;
     refresh_runtime_after_actor_write(runtime)?;
     let _ = project_sessions_projection_for_actor(&bootstrap.project_root, &record.document_id);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &file,
         &format!(
             "controller_session_start session={} pane={} generation={} state={}",
@@ -2776,7 +2776,7 @@ fn replace_closed_actor_from_same_supervisor_report(
     refresh_runtime_after_actor_write(runtime)?;
     let _ =
         project_sessions_projection_for_actor(&bootstrap.project_root, &replacement.document_id);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "controller_supervisor_replaced_closed_session file={} prior_session={} new_session={} pane={} prior_generation={} new_generation={} state={}",
@@ -2839,7 +2839,7 @@ pub(crate) fn handle_register_supervisor(
         request.supervisor_socket.as_deref(),
         runtime_state,
     )?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &file,
         &format!(
             "controller_supervisor_registered session={} pane={} generation={} state={}",
@@ -2928,7 +2928,7 @@ pub(crate) fn handle_mark_lifecycle(
         match open_state_db(&bootstrap.project_root)
             .and_then(|conn| state_store::mark_open_dispatches_consumed(&conn, &document_id))
         {
-            Ok(released) if released > 0 => crate::ops_log::log_op(
+            Ok(released) if released > 0 => agent_doc_ops_log_io::log_op(
                 &file,
                 &format!(
                     "dispatch_in_flight_released document_id={} count={} reason=actor_ready",
@@ -2949,7 +2949,7 @@ pub(crate) fn handle_mark_lifecycle(
         request.supervisor_socket.as_deref(),
         state.as_str(),
     )?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &file,
         &format!(
             "controller_lifecycle session={} pane={} generation={} state={} caller={} reason={}",
@@ -3011,7 +3011,7 @@ pub(crate) fn handle_supervisor_heartbeat(
         request.supervisor_socket.as_deref(),
         runtime_state,
     )?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &file,
         &format!(
             "controller_supervisor_heartbeat session={} pane={} generation={} state={}",
@@ -3107,7 +3107,7 @@ pub(crate) fn handle_dispatch(
                 dispatch_start_proven: false,
             },
         )?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
                 "dispatch_refused_stale_binary file={} generation={} receipt_id={}",
@@ -3146,7 +3146,7 @@ pub(crate) fn handle_dispatch(
                 dispatch_start_proven: false,
             },
         )?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
                 "dispatch_refused_non_stable_controller file={} handoff_state={:?} generation={} receipt_id={}",
@@ -3267,7 +3267,7 @@ pub(crate) fn handle_dispatch(
             },
         )?;
         if !proof_fields.is_empty() {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &file,
                 &format!(
                     "dispatch_blocked_proof file={} failed_stage={} receipt_id={} {}",
@@ -3302,7 +3302,7 @@ pub(crate) fn handle_dispatch(
         {
             let stale_pid = stale_supervisor_pid_from_pause_reason(reason).unwrap_or(0);
             let recovery = StaleQueuePauseRecovery::new(stale_pid);
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &file,
                 &format!(
                     "dispatch_queue_paused_stale_supervisor file={} stale_pid={} marker={} {} {}",
@@ -3369,7 +3369,7 @@ pub(crate) fn handle_dispatch(
                 | agent_doc_sqlite::state_store::ActorState::Closed
         );
         if current_dispatchable {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &file,
                 &format!(
                     "dispatch_stale_generation_redirect session={} pane={} prior_generation={} next_generation={} kind={}",
@@ -3456,7 +3456,7 @@ pub(crate) fn handle_dispatch(
                     dispatch_start_proven: false,
                 },
             )?;
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &file,
                 &format!(
                     "dispatch_coalesced_in_flight session={} pane={} generation={} state={} kind={} receipt_id={} reason=in_flight_redispatch",
@@ -3516,7 +3516,7 @@ pub(crate) fn handle_dispatch(
             dispatch_start_proven: false,
         },
     )?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &file,
         &format!(
             "controller_dispatch_accepted session={} pane={} generation={} state={} kind={} stage={} receipt_id={} proof_scope={}",
@@ -3992,7 +3992,7 @@ pub(crate) fn handle_attach_pane(
     };
     let record = store_actor_record(&bootstrap.project_root, Some(prior_generation), &record)?;
     refresh_runtime_after_actor_write(runtime)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &file,
         &format!(
             "controller_attach_pane session={} pane={} generation={} state={}",
@@ -4101,7 +4101,7 @@ pub(crate) fn handle_operator_command(
             dispatch_start_proven: false,
         },
     )?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &file,
         &format!(
             "controller_operator_command_accepted kind={} session={} pane={} generation={} stage={} receipt_id={} proof_scope={}",
@@ -4122,7 +4122,7 @@ pub(crate) fn handle_operator_command(
     if command_kind == "session_restart"
         && record.state == agent_doc_sqlite::state_store::ActorState::Closed
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &file,
             &format!(
                 "supervisor_restart_supersede file={} action=supersede_closed_actor prior_generation={} next_generation={} receipt_id={} caller=operator",
@@ -4213,7 +4213,7 @@ pub(crate) fn handle_supervisor_replacement(
         operator_receipt_id: authorization.receipt.receipt_id,
     };
     let background_started = spawn_supervisor_replacement_worker(work)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &file,
         &format!(
             "controller_supervisor_replacement_accepted mode={} force={} session={} pane={} generation={} stage={} receipt_id={} background_started={}",
@@ -4242,7 +4242,7 @@ pub(crate) fn handle_supervisor_replacement(
 
 #[cfg(any(test, feature = "test-support"))]
 fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Result<bool> {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(
             "controller_supervisor_replacement_background_stub mode={} force={} session={} pane={} generation={} receipt_id={} project_root={}",
@@ -4264,7 +4264,7 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
         .name("agent-doc-supervisor-replacement".to_string())
         .spawn(move || {
             if let Err(err) = drive_supervisor_replacement_background(work.clone()) {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     &work.file,
                     &format!(
                         "controller_supervisor_replacement_background_failed session={} pane={} generation={} receipt_id={} error={err:?}",
@@ -4282,7 +4282,7 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
     let initial_pid = agent_doc_supervisor_io::selfkill::supervisor_pid_for_doc(&work.file);
     let initial_host_stale = host_supervisor_stale_warning_for_doc(&work.file).is_some();
     let socket = agent_doc_supervisor_io::ipc::socket_path(&work.project_root, &work.session_id);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(
             "controller_supervisor_replacement_background_started mode={} force={} session={} pane={} generation={} receipt_id={} initial_pid={} initial_host_stale={} socket={}",
@@ -4307,7 +4307,7 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
         SupervisorReplacementIpcStatus::Failed => work.force || initial_host_stale,
     };
     if !needs_escalation {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &work.file,
             &format!(
                 "controller_supervisor_replacement_background_completed stage=ipc_only mode={} session={} pane={} generation={} receipt_id={} reason=fresh_supervisor_restart_accepted",
@@ -4320,7 +4320,7 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
     if ipc_status == SupervisorReplacementIpcStatus::Accepted
         && wait_for_supervisor_replacement_completion(&work.file, initial_pid, initial_host_stale)
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &work.file,
             &format!(
                 "controller_supervisor_replacement_background_completed stage=ipc_reexec mode={} session={} pane={} generation={} receipt_id={} initial_host_stale={}",
@@ -4335,7 +4335,7 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
         return Ok(());
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(
             "controller_supervisor_replacement_background_escalating mode={} force={} session={} pane={} generation={} receipt_id={} ipc_status={ipc_status:?} initial_host_stale={}",
@@ -4353,7 +4353,7 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
         agent_doc_supervisor_io::selfkill::selfkill_grace(),
         false,
     )?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(
             "controller_supervisor_replacement_kill_outcome mode={} session={} pane={} generation={} receipt_id={} outcome={kill_outcome:?}",
@@ -4362,7 +4362,7 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
     );
     reap_dead_supervisor_socket(&work.file, &socket);
     let pane = cold_start_supervisor_replacement(&work)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(
             "controller_supervisor_replacement_background_completed stage=cold_start mode={} session={} pane={} generation={} receipt_id={} replacement_pane={}",
@@ -4386,7 +4386,7 @@ fn request_supervisor_replacement_ipc(
         agent_doc_supervisor_io::ipc::probe_socket(socket),
         agent_doc_supervisor_io::ipc::SocketLiveness::Dead
     ) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &work.file,
             &format!(
                 "controller_supervisor_replacement_ipc_dead session={} pane={} generation={} receipt_id={} socket={}",
@@ -4406,7 +4406,7 @@ fn request_supervisor_replacement_ipc(
         },
     ) {
         Ok(response) if response.ok => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &work.file,
                 &format!(
                     "controller_supervisor_replacement_ipc_accepted mode={} session={} pane={} generation={} receipt_id={} socket={}",
@@ -4421,7 +4421,7 @@ fn request_supervisor_replacement_ipc(
             SupervisorReplacementIpcStatus::Accepted
         }
         Ok(response) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &work.file,
                 &format!(
                     "controller_supervisor_replacement_ipc_failed mode={} session={} pane={} generation={} receipt_id={} error={}",
@@ -4446,7 +4446,7 @@ fn request_supervisor_replacement_ipc(
             } else {
                 SupervisorReplacementIpcStatus::Failed
             };
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &work.file,
                 &format!(
                     "controller_supervisor_replacement_ipc_error mode={} session={} pane={} generation={} receipt_id={} status={status:?} error={err:?}",
@@ -4507,14 +4507,14 @@ fn reap_dead_supervisor_socket(file: &Path, socket: &Path) {
         return;
     }
     match std::fs::remove_file(socket) {
-        Ok(()) => crate::ops_log::log_op(
+        Ok(()) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "controller_supervisor_replacement_reaped_stale_socket socket={}",
                 socket.display()
             ),
         ),
-        Err(err) => crate::ops_log::log_op(
+        Err(err) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "controller_supervisor_replacement_reap_stale_socket_failed socket={} error={err}",
@@ -4536,7 +4536,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(
                 Some(&work.file),
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             ),
             "controller.supervisor_replacement.cold_start_preserve_pane",
             &format!("pane:{}", work.pane_id),
@@ -4549,7 +4549,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             &tmux,
             &work.pane_id,
             &start_cmd,
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "sessions.send_submitted_text",
         )
         .with_context(|| {

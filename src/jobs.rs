@@ -1603,8 +1603,7 @@ agent_doc_dispatch: auto
             "do [#docs1]\ndo [#spec2]\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         (dir, doc)
     }
 
@@ -1728,8 +1727,7 @@ agent_doc_dispatch: auto
             "do [#x63e] [#v4v0]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_orchestration::ops_log::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", "/no/such/tsift");
 
         let index = create_index(

@@ -187,7 +187,7 @@ pub fn run(
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     } else {
         // Fallback to CWD-relative (original behavior)
-        agent_doc_snapshot_io::save(file, &new_doc, agent_doc_orchestration::ops_log::log_op)
+        agent_doc_snapshot_io::save(file, &new_doc, agent_doc_ops_log_io::log_op)
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     }
 

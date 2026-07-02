@@ -46,7 +46,7 @@ pub(crate) fn check_expect_done_or_gate_guard(
         }
     };
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "expect_done_or_gate_guard_fired file={} unresolved={}",
@@ -137,7 +137,7 @@ pub(crate) fn check_queue_head_removal_guard(
     );
 
     for proof in &decision.removal_proofs {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "queue_head_removal_guard_proof file={} removed=#{} proof_source={}",
@@ -152,7 +152,7 @@ pub(crate) fn check_queue_head_removal_guard(
         return Ok(GuardResult::None);
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "queue_head_removal_guard_fired file={} lost={} proof_source=missing",
@@ -206,7 +206,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
     };
     if decision.suppressed {
         if decision.bare_heading_residue {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "free_text_queue_marker_residue_fired file={} residue=bare_heading",
@@ -229,7 +229,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
             .map(|h| format!("{:?}", h))
             .collect::<Vec<_>>()
             .join("; ");
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "free_text_queue_completed_residue_guard_fired file={} residue={}",
@@ -252,7 +252,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
             .map(|h| format!("{:?}", h))
             .collect::<Vec<_>>()
             .join("; ");
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "free_text_queue_head_provenance_proof file={} removed={} proof_source=committed_response",
@@ -270,7 +270,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
         .map(|h| format!("\"{}\"", h))
         .collect::<Vec<_>>()
         .join(", ");
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "free_text_queue_head_provenance_guard_fired file={} unresolved={}",
@@ -297,14 +297,14 @@ mod tests {
         fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("doc.md");
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         doc
     }
 
     fn mark_cycle_committed(doc: &Path, preflight: &str, committed: &str) {
         agent_doc_cycle_state_io::start_preflight(doc, Some(preflight), Some(preflight)).unwrap();
         fs::write(doc, committed).unwrap();
-        agent_doc_snapshot_io::save(doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             doc,
             "commit_success",

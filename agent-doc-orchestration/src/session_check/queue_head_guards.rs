@@ -50,7 +50,7 @@ pub(crate) fn check_no_response_active_queue_head(
         return Ok(GuardResult::None);
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "no_response_active_queue_head_fired file={} cycle_id={} last_event={} ids={}",
@@ -129,7 +129,7 @@ pub(crate) fn check_reaped_queue_head_without_response(
     for id in &ordered_ids {
         let source =
             agent_doc_turn::closeout_signal::directive_response_source(&content, &archives, id);
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "bkx9 directive_response_materialized id={} found={} source={}",
@@ -165,7 +165,7 @@ pub(crate) fn check_reaped_queue_head_without_response(
         return Ok(GuardResult::None);
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "reaped_queue_head_without_response_fired file={} cycle_id={} last_event={} ids={}",

@@ -177,10 +177,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
             &tmux,
             &pane_id,
             &cmd_str,
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                None,
-                agent_doc_orchestration::ops_log::log_op,
-            ),
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "sessions.send_submitted_text",
         )
         .with_context(|| format!("failed to send keys to pane {} for task {}", pane_id, i + 1))?;

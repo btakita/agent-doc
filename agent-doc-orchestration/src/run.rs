@@ -202,7 +202,7 @@ impl RunStderrRedirect {
         if redirected < 0 {
             anyhow::bail!("dup2(stderr) failed: {}", std::io::Error::last_os_error());
         }
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "run_stderr_redirect harness={} tmux_pane={} target={}",
@@ -608,7 +608,7 @@ fn run_once(
     {
         let document = file.display().to_string();
         let diagnostic = prompt_miss_message(&document, &detail, &unresolved);
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "run_owned_pane_prompt_miss file={} {}",
@@ -664,7 +664,7 @@ fn run_once(
                 );
             }
             agent_doc_owner_pane_io::clear(file)?;
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "recursive_self_invocation_wedge_halt file={} head_id={} count={} {}",
@@ -696,7 +696,7 @@ fn run_once(
                 id: continuation.head_id.as_deref(),
             },
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "run_owned_pane_queue_handoff file={} head_id={} self_invocation_count={} {}",
@@ -721,7 +721,7 @@ fn run_once(
         if !did_commit
             && !queue_synthetic_diff
             && agent_doc_diff_io::compute(
-                &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+                &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
                 file,
             )?
             .is_none()
@@ -833,7 +833,7 @@ fn run_once(
 
 fn compute_run_diff(file: &Path) -> Result<Option<(String, bool)>> {
     if let Some(d) = agent_doc_diff_io::compute(
-        &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+        &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
         file,
     )? {
         eprintln!("[run] diff computed ({} bytes)", d.len());
@@ -1205,7 +1205,7 @@ fn record_run_preflight_timeout(file: &Path, event: &str, diagnostic: &str) -> R
     let compact = diagnostic.split_whitespace().collect::<Vec<_>>().join(" ");
     let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
     agent_doc_cycle_state_io::mark_recoverable_preflight_timeout(file, &event)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "run_preflight_timeout file={} event={} diagnostic={}",
@@ -1235,7 +1235,7 @@ fn abandon_run_recursive_cycle(file: &Path, event: &str, diagnostic: &str) -> Re
         snapshot_content.as_deref(),
         file_content.as_deref(),
     )?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "run_recursive_direct_invocation_abandoned file={} diagnostic={}",
@@ -1418,7 +1418,7 @@ fn owner_pane_queue_edit_deferred_outcome(
         continuation.head_id.as_deref().unwrap_or("<none>"),
         detail
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "run_owned_pane_queue_edit_deferred file={} head_id={} {}",
@@ -1668,7 +1668,7 @@ fn apply_append_response(file: &Path, baseline: &str, response: &str) -> Result<
     };
 
     write::guard_visible_write_idle(file, "direct_run_append")?;
-    agent_doc_snapshot_io::save(file, &final_content, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
     atomic_write(file, &final_content)?;
     drop(doc_lock);
     Ok(())
@@ -1732,7 +1732,7 @@ fn apply_template_response(
             file,
             baseline,
             agent_doc_op_capture_io::has_pending_editor_ops,
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )?
         .state;
         // `#crdtauth4` — disk demotion (plan phase 6). Under `MultiReplica` (a live
@@ -1768,7 +1768,7 @@ fn apply_template_response(
     )?;
 
     write::guard_visible_write_idle(file, "direct_run_template")?;
-    agent_doc_snapshot_io::save(file, &final_content, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
     if let Some(state) = crdt_state {
         agent_doc_merge_io::save_document_crdt(file, &state, &final_content)?;
     }
@@ -1832,7 +1832,7 @@ fn update_resume_id(file: &Path, session_id: &str) -> Result<()> {
     let updated = frontmatter::set_resume_id(&current, session_id)?;
     write::guard_visible_write_idle(file, "direct_run_update_resume_id")?;
     atomic_write(file, &updated)?;
-    agent_doc_snapshot_io::save(file, &updated, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &updated, agent_doc_ops_log_io::log_op)?;
     Ok(())
 }
 
@@ -1972,7 +1972,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let node_key = first_queue_node_key(content);
         append_typed_selected_queue_head(dir.path(), &doc, &node_key, "  /clear  ", true);
 
@@ -2003,7 +2003,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         assert_eq!(
             active_queue_prompt_state(&doc).unwrap(),
@@ -2039,7 +2039,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
             .unwrap()
             .into_iter()
@@ -2087,7 +2087,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let outcome = RunCycleOutcome {
             dispatched: true,
             queue_synthetic_diff: true,
@@ -2128,7 +2128,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         append_typed_selected_queue_head(
             dir.path(),
             &doc,
@@ -2171,7 +2171,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
             .unwrap()
             .into_iter()
@@ -2220,7 +2220,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
             .unwrap()
             .into_iter()
@@ -2779,7 +2779,7 @@ old status\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -2836,7 +2836,7 @@ old status\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let diff_text = agent_doc_diff::unified_diff_from_contents(snapshot, baseline)
             .expect("snapshot and baseline differ");
@@ -2872,7 +2872,7 @@ old status\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = run(
             &doc,

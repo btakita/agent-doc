@@ -33,7 +33,7 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
         }
     };
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "partial_closeout_state_guard_fired file={} candidates={}",
@@ -58,7 +58,7 @@ pub(crate) fn check_partial_staging_closeout_guard(file: &Path) -> Result<GuardR
     }
 
     for finding in findings.iter().take(3) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "partial_staging_closeout_guard_fired file={} repo={} committed_paths={} dirty_paths={} literals={}",

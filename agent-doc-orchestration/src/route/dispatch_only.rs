@@ -17,7 +17,7 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
         Ok(Some(actor)) => actor,
         Ok(None) => return false,
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_only_starting_pane_actor_probe_failed file={} pane={} harness={} error={}",
@@ -40,7 +40,7 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
         return false;
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_dispatch_only_starting_pane_ready_via_actor_state file={} pane={} harness={} generation={} runtime_state={} transition={} prompt_ready={}",
@@ -90,7 +90,7 @@ pub(crate) fn dispatch_only_send_reopen(
         let reason = agent_doc_supervisor_io::recycle_inflight::read_recycle_inflight(file_path)
             .map(|m| m.reason)
             .unwrap_or_else(|| "unknown".to_string());
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_recycle_inflight_wait file={} pane={} harness={} reason={}",
@@ -102,7 +102,7 @@ pub(crate) fn dispatch_only_send_reopen(
         );
         while agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(file_path) {
             if started.elapsed() >= agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_dispatch_only_recycle_inflight_unsettled file={} pane={} harness={} reason={} waited_ms={}",
@@ -129,7 +129,7 @@ pub(crate) fn dispatch_only_send_reopen(
             }
             std::thread::sleep(agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL);
         }
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_recycle_inflight_settled file={} pane={} harness={} reason={} waited_ms={}",
@@ -213,7 +213,7 @@ pub(crate) fn dispatch_only_send_reopen(
                 recovery_attempts += 1;
                 match target {
                     StartingPaneRecoveryTarget::SamePane => {
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "route_dispatch_only_starting_pane_retry_same_pane file={} pane={} harness={} attempt={}",
@@ -231,7 +231,7 @@ pub(crate) fn dispatch_only_send_reopen(
                         continue;
                     }
                     StartingPaneRecoveryTarget::DifferentPane(next_pane) => {
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "route_dispatch_only_starting_pane_handoff file={} old_pane={} new_pane={} harness={} attempt={}",
@@ -254,7 +254,7 @@ pub(crate) fn dispatch_only_send_reopen(
             }
 
             let detail = ready_outcome.blocker_reason().unwrap_or("timed_out");
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={}",
@@ -283,7 +283,7 @@ pub(crate) fn dispatch_only_send_reopen(
     if let Ok(content) = agent_doc_tmux_io::capture_pane(tmux, &dispatch_pane)
         && let Some(reason) = agent_doc_harness::dispatch_only_blocker_reason(harness, &content)
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_blocked file={} pane={} harness={} reason={}",
@@ -335,7 +335,7 @@ pub(crate) fn dispatch_only_send_reopen(
         agent_doc_flow_io::log_flow_event(
             file,
             prompt_ready_barrier_failed_event(guard_reason),
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         );
         if guard_reason == RoutedReopenGuardReason::BlockedInInteractiveSubstate {
             anyhow::bail!(
@@ -404,7 +404,7 @@ pub(crate) fn dispatch_only_send_reopen(
         )
         .as_secs(),
     };
-    crate::ops_log::log_op(file, &dispatch_only_sent_log_message(proof_facts));
+    agent_doc_ops_log_io::log_op(file, &dispatch_only_sent_log_message(proof_facts));
     eprintln!("{}", dispatch_only_sent_console_message(proof_facts));
     Ok(dispatch_pane)
 }
@@ -450,7 +450,7 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
     agent_doc_flow_io::log_flow_event(
         file,
         dispatch_proof_failed_event(RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof),
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
     if let Err(err) = agent_doc_supervisor_io::route_submit_inflight::mark_route_submit_blocked(
         file,
@@ -463,7 +463,7 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
             file.display()
         );
     }
-    crate::ops_log::log_op(file, &accepted_only_dispatch_start_log_message(facts));
+    agent_doc_ops_log_io::log_op(file, &accepted_only_dispatch_start_log_message(facts));
     file_route_dispatch_bug_report(RouteDispatchBugReportFacts {
         file,
         pane,
@@ -551,7 +551,7 @@ pub(crate) fn dispatch_only_reopen_existing_pane(
             ),
         }
     } else {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_skip_capability_proof file={} pane={} harness={} reason=degraded_supervisor_unreachable",
@@ -588,7 +588,7 @@ pub(crate) fn dispatch_only_reopen_existing_pane(
             .flatten()
             .is_some_and(|miss| miss.pane_id == dispatch_pane)
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_startup_miss_bypass file={} pane={} harness={}",
@@ -725,7 +725,7 @@ pub(crate) fn retry_dispatch_only_after_busy_pane(
                 );
             }
             BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_dispatch_only_retry_after_fresh_restart file={} pane={} harness={}",

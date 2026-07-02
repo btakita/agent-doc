@@ -89,7 +89,7 @@ pub(crate) fn target_payload_to_live_editor(
 ) -> Option<String> {
     let editor_id = live_editor_delivery_target(file)?;
     payload["editor_id"] = serde_json::Value::String(editor_id.clone());
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_payload_targeted file={} transport={} editor_id={}",
@@ -120,7 +120,7 @@ pub fn queue_file_ipc_reposition_boundary(
         match serde_json::from_str::<serde_json::Value>(&existing) {
             Ok(payload) if existing_patch_is_reposition_only(&payload) => {}
             Ok(_) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "file_ipc_reposition_deferred_existing_patch file={} patch_file={}",
@@ -181,7 +181,7 @@ pub fn queue_file_ipc_reposition_boundary(
     target_payload_to_live_editor(file, &mut payload, "file_reposition");
 
     atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "file_ipc_reposition_queued file={} patch_file={} patch_id={}",
@@ -263,7 +263,7 @@ pub fn try_ipc(
                 file.display(),
                 cycle_id
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "mid_turn_cycle_rotation file={} prior_cycle={} patch_id={} action=fresh_cycle",
@@ -291,7 +291,7 @@ pub fn try_ipc(
                 agent_doc_flow::types::FlowOutcome::Blocked,
                 agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "late_fallback_patch_rejected file={} cycle_id={} patch_id={} reason=already_committed",
@@ -416,7 +416,7 @@ pub fn try_ipc(
         }
         let socket_editor_id =
             target_payload_to_live_editor(file, &mut socket_payload, "socket_patch");
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ipc_socket_attempt file={} hash={} patch_id={} patches={} ipc_patches={} unmatched_len={} effective_unmatched_len={} baseline_len={} normalize_targets={} unmatched_marker_count={}",
@@ -575,7 +575,7 @@ pub fn try_ipc(
                         repair_decision.snap_source.label(),
                         repair_decision.snapshot_content.len()
                     );
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "ipc_socket_ack_content file={} patch_id={} snap_source={} sidecar_len={} sidecar_hash={} disk_len={} disk_hash={}",
@@ -621,7 +621,7 @@ pub fn try_ipc(
                             &repair_decision.snapshot_content,
                         );
                     }
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "ipc_socket_delivered file={} snap_source={} snap_len={}",
@@ -646,14 +646,14 @@ pub fn try_ipc(
                     if let Err(e) = agent_doc_snapshot_io::save(
                         file,
                         &repair_decision.snapshot_content,
-                        crate::ops_log::log_op,
+                        agent_doc_ops_log_io::log_op,
                     ) {
                         eprintln!(
                             "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
                              Commit will auto-recover via divergence detection.",
                             e
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "snapshot_save_failed_after_ipc file={} error={}",
@@ -662,7 +662,7 @@ pub fn try_ipc(
                             ),
                         );
                     } else {
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "snapshot_saved_socket_ipc file={} snap_len={}",
@@ -703,7 +703,7 @@ pub fn try_ipc(
                 eprintln!(
                     "[write] socket delivered but content sidecar was slow — recovering snapshot via file-IPC fallback (no degrade vote)"
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "ipc_socket_sidecar_slow_no_degrade file={} patch_id={}",
@@ -714,7 +714,7 @@ pub fn try_ipc(
                 if fallback_patch_file.is_some() {
                     eprintln!("[write] fallback patch file left for file watcher recovery");
                 }
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "ipc_socket_sidecar_timeout file={} — retrying through file_ipc_without_disk_write",
@@ -740,7 +740,7 @@ pub fn try_ipc(
                         agent_doc_flow::types::FlowOutcome::Blocked,
                         agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
                     );
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "ipc_socket_sidecar_timeout_skip_file_fallback file={} cycle_id={} reason=already_committed",
@@ -770,7 +770,7 @@ pub fn try_ipc(
                     "[write] socket IPC reported already_applied: {} — skipping file IPC fallback (response already in live buffer)",
                     e
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "ipc_socket_already_applied_skip_file_fallback file={} patch_id={}",
@@ -802,7 +802,7 @@ pub fn try_ipc(
                 eprintln!(
                     "[write] socket already_applied could not prove the response on disk — falling back to file IPC"
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "ipc_socket_already_applied_fallback_to_file_ipc file={} patch_id={}",
@@ -865,7 +865,7 @@ pub fn try_ipc(
             agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "file_ipc_fallback_skip file={} cycle_id={} reason=already_committed",
@@ -959,7 +959,7 @@ pub fn try_ipc(
     target_payload_to_live_editor(file, &mut ipc_payload, "file_patch");
 
     // Log IPC write details for debugging cross-contamination
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_write_attempt file={} hash={} patches={} ipc_patches={} unmatched_len={}",
@@ -979,7 +979,7 @@ pub fn try_ipc(
              Does the target file have template components (<!-- agent:exchange -->)?",
             unmatched.trim().len()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ipc_unmatched_content_dropped file={} unmatched_len={}",
@@ -1021,7 +1021,7 @@ pub fn try_ipc(
         eprintln!(
             "[write] file IPC fallback: patches already present in live buffer — skipping file IPC write (defense-in-depth dedupe)"
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "file_ipc_fallback_skip_already_applied file={} patch_id={} patches={}",
@@ -1113,7 +1113,7 @@ pub(crate) fn log_full_content_ipc_disabled(
         "[write] full-content IPC disabled for {}: falling back to guarded disk path",
         file.display()
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "full_content_ipc_disabled file={} source={} patch_id={} reason=disabled_by_default target_len={} target_hash={} source_len={} source_hash={} current_len={} current_hash={}",
@@ -1152,7 +1152,7 @@ fn log_full_content_ipc_authority_rejected(facts: FullContentIpcAuthorityRejecti
         facts.file.display(),
         facts.reason
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         facts.file,
         &format!(
             "full_content_ipc_authority_rejected file={} source={} patch_id={} authority={} reason={} target_len={} target_hash={} source_len={} source_hash={} current_len={} current_hash={}",
@@ -1201,7 +1201,7 @@ pub(crate) fn full_content_ipc_scope_allows(
         file.display(),
         reason
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "full_content_ipc_scope_rejected file={} source={} patch_id={} scope={} target_len={} target_hash={} source_len={} source_hash={} current_len={} current_hash={}",
@@ -1261,7 +1261,7 @@ pub(crate) fn try_ipc_full_content_with_mode(
             agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "late_fallback_patch_rejected file={} cycle_id={} patch_id=full_content reason=already_committed transport=full_content",
@@ -1560,7 +1560,7 @@ pub(crate) fn write_ipc_and_poll(
                 agent_doc_flow::types::FlowOutcome::Blocked,
                 agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 doc_file,
                 &format!(
                     "file_ipc_poll_skip file={} cycle_id={} reason=already_committed",
@@ -1677,7 +1677,7 @@ pub(crate) fn write_ipc_and_poll(
                 eprintln!(
                     "[write] IPC full-content patch consumed but final content does not match payload — retry required."
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     doc_file,
                     &format!(
                         "full_content_ipc_post_apply_mismatch file={} expected_len={} actual_len={}",
@@ -1853,7 +1853,7 @@ pub(crate) fn write_ipc_and_poll(
                     &repair_decision.snapshot_content,
                 );
             }
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 doc_file,
                 &format!(
                     "ipc_file_delivered file={} snap_len={}",
@@ -1904,14 +1904,14 @@ pub(crate) fn write_ipc_and_poll(
             if let Err(e) = agent_doc_snapshot_io::save(
                 doc_file,
                 &repair_decision.snapshot_content,
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             ) {
                 eprintln!(
                     "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
                      Commit will auto-recover via divergence detection.",
                     e
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     doc_file,
                     &format!(
                         "snapshot_save_failed_after_ipc file={} error={}",
@@ -1920,7 +1920,7 @@ pub(crate) fn write_ipc_and_poll(
                     ),
                 );
             } else {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     doc_file,
                     &format!(
                         "snapshot_saved_file_ipc file={} snap_len={}",
@@ -2199,7 +2199,7 @@ mod submodule_patch_routing_tests {
             "### Re: reply — gpt-5\nbody\n<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, &updated).unwrap();
-        agent_doc_snapshot_io::save(&doc, &updated, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &updated, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = super::complete_required_closeout(&doc).unwrap_err();
         let message = err.to_string();
@@ -2511,7 +2511,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         fs::write(&doc, live_already_applied_with_user_edit).unwrap();
 
@@ -2627,7 +2627,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         let editor_id = "jetbrains-test-editor";
@@ -2756,7 +2756,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-stale-ack-content";
@@ -2847,7 +2847,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-unsaved-live-editor";
@@ -2948,7 +2948,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         let editor_id = "jetbrains-test-editor";
@@ -3060,7 +3060,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
         fs::write(&doc, duplicated_live_buffer).unwrap();
 
@@ -3142,7 +3142,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, stale_disk_with_live_prompt).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
@@ -3218,7 +3218,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, disk_now).unwrap();
         let patch_id = "already-applied-not-idle";
         fs::write(
@@ -3272,7 +3272,7 @@ mod submodule_patch_routing_tests {
         );
         let content_ours = baseline;
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &doc,
@@ -3314,7 +3314,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, content_ours).unwrap();
-        agent_doc_snapshot_io::save(&doc, content_ours, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content_ours, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &doc,
@@ -3384,7 +3384,7 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let _listener = start_fixed_ack_content_listener(&root, duplicated_ack_content.to_string());
@@ -5259,7 +5259,7 @@ Implemented.
             "test setup: duplicated content must actually dedupe"
         );
         fs::write(&doc, &deduped).unwrap();
-        agent_doc_snapshot_io::save(&doc, &deduped, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let head_before = head_count(root);
         let recovered =
@@ -5313,7 +5313,7 @@ Implemented.
 ";
         git_commit_file(root, "session.md", clean, "add clean");
         let doc = root.join("session.md");
-        agent_doc_snapshot_io::save(&doc, clean, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, clean, agent_doc_ops_log_io::log_op).unwrap();
 
         let recovered = recover_dedupe_only_drift(&doc).unwrap();
         assert!(
@@ -5348,7 +5348,7 @@ Implemented.
         // dedupe. Recovery must refuse so we don't auto-commit unrelated drift.
         let user_edit = original.replace("Implemented.", "Implemented and tested.");
         fs::write(&doc, &user_edit).unwrap();
-        agent_doc_snapshot_io::save(&doc, &user_edit, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &user_edit, agent_doc_ops_log_io::log_op).unwrap();
 
         let recovered = recover_dedupe_only_drift(&doc).unwrap();
         assert!(
@@ -5390,7 +5390,7 @@ Implemented.
 
         let deduped = agent_doc_turn::response_replay::dedupe_responses(duplicated);
         fs::write(&doc, &deduped).unwrap();
-        agent_doc_snapshot_io::save(&doc, &deduped, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let strict = WriteFlags {
             strict_closeout: true,
@@ -5445,7 +5445,7 @@ Implemented.
         let doc = root.join("session.md");
         let deduped = agent_doc_turn::response_replay::dedupe_responses(duplicated);
         fs::write(&doc, &deduped).unwrap();
-        agent_doc_snapshot_io::save(&doc, &deduped, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let lenient = WriteFlags::default();
         let head_before = head_count(root);

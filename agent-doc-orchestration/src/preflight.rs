@@ -477,7 +477,7 @@ fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> 
     };
 
     crate::write::atomic_write_pub(file, &cleaned_doc)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "duplicate_answered_exchange_prompt_tail_removed file={} source=preflight",
@@ -516,7 +516,7 @@ fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
     };
 
     crate::write::atomic_write_pub(file, &cleaned_doc)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "post_exchange_duplicate_prompt_comment_removed file={} source=preflight",
@@ -764,7 +764,7 @@ fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) 
             "[preflight] session drift detected {}x consecutively — running `resync --fix`",
             next
         );
-        crate::ops_log::log_op(file, &format!("auto_resync_on_drift consecutive={}", next));
+        agent_doc_ops_log_io::log_op(file, &format!("auto_resync_on_drift consecutive={}", next));
         if let Err(e) = resync::run(true, None, None) {
             eprintln!("[preflight] auto-resync failed: {}", e);
         } else {
@@ -871,7 +871,7 @@ fn maybe_auto_repair_base_index(file: &std::path::Path, layout_issues: &[String]
     };
 
     eprintln!("[preflight] window index 0 missing — running repair_layout immediately");
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!("auto_repair_base_index immediate session={}", name),
     );
@@ -1034,7 +1034,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             "[preflight] WARNING: previous cycle wrote the response but no commit followed ({}) — attempting commit-boundary recovery before diff",
             event
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "write_completed_commit_missing file={} last_event={}",
@@ -1042,7 +1042,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
                 event
             ),
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "resume_commit_attempt file={} last_event={}",
@@ -1079,7 +1079,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
 
         match crate::session_check::inspect(file)? {
             crate::session_check::SessionCheckStatus::Ok(_) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!("resume_commit_success file={}", file.display()),
                 );
@@ -1087,7 +1087,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             }
             crate::session_check::SessionCheckStatus::Interrupted(reason) => {
                 let reason = reason.replace('\n', " ");
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "resume_commit_blocked_drift file={} reason={}",
@@ -1123,7 +1123,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         state.last_event,
         ipc_hint
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "interrupted_cycle_detected file={} cycle_id={} phase={:?} event={}",
@@ -1134,7 +1134,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         ),
     );
     if matches!(state.phase, agent_doc_turn::CyclePhase::WriteApplied) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "resume_commit_attempt file={} cycle_id={}",
@@ -1209,7 +1209,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
     }
 
     if matches!(state.phase, agent_doc_turn::CyclePhase::WriteApplied) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!("resume_commit_success file={}", file.display()),
         );
@@ -1240,7 +1240,7 @@ pub(crate) fn append_ipc_dogfood_note_for_diagnostic(
     };
     std::fs::write(file, updated)
         .with_context(|| format!("failed to write IPC dogfood note to {}", file.display()))?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!("ipc_dogfood_note_appended file={}", file.display()),
     );
@@ -1272,7 +1272,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
             file, rc,
         )?
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "jb_cache_conflict_accept_duplicate_replay_repaired file={} heading={}",
@@ -1286,7 +1286,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
             file.display()
         );
         crate::write::atomic_write_pub(file, &replay.deduped_content)?;
-        agent_doc_snapshot_io::save(file, &replay.deduped_content, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &replay.deduped_content, agent_doc_ops_log_io::log_op)?;
         return Ok(());
     }
 
@@ -1299,7 +1299,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     if let Some(overapplication) =
         crate::session_check::detect_late_ipc_response_overapplication_with_context(file, rc)?
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "late_ipc_response_overapplication_repaired file={}",
@@ -1314,7 +1314,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
         agent_doc_snapshot_io::save(
             file,
             &overapplication.remediated_content,
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )?;
         return Ok(());
     }
@@ -1332,7 +1332,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     // `Ok(None)` for the same pattern, but the drift will recur on the next
     // call until something actually commits — that "something" lives here.
     if crate::session_check::detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "jb_cache_conflict_cancel_auto_recovery_attempt file={}",
@@ -1346,7 +1346,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
         match crate::git::commit(file) {
             Ok(_) => {
                 rc.invalidate_head_content();
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "jb_cache_conflict_cancel_auto_recovery_succeeded file={}",
@@ -1356,7 +1356,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
                 return Ok(());
             }
             Err(e) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "jb_cache_conflict_cancel_auto_recovery_failed file={} error={}",
@@ -1390,7 +1390,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     if let Some(message) =
         crate::session_check::detect_uncommitted_closeout_drift_with_context(file, rc)?
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "preflight_blocked_uncommitted_closeout_drift file={} reason={}",
@@ -1447,7 +1447,7 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
         .iter()
         .filter(|status| status.in_flight)
         .count();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "editor_sync_barrier file={} barrier=ipc_truncation_recover outcome={:?} statuses={} in_flight={} typing_recent={}",
@@ -1471,7 +1471,7 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
             Ok(false) | Err(_) => return Ok(false),
         }
         if poll_save_document_ack_content(&project_root, &patch_id)?.is_none() {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "ipc_truncation_recover_rejected file={} save_document_file_signal=unacked patch_id={}",
@@ -1493,7 +1493,7 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
         )
     })?;
     if !editor_buffer_preserved_head_exchange(&flushed, &head) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "ipc_truncation_recover_rejected file={} reason=editor_buffer_lost_committed_exchange flushed_len={} head_len={}",
@@ -1507,9 +1507,9 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
 
     // Reset the snapshot to HEAD: the editor's uncommitted edits now read as the
     // normal next-cycle prompt diff (editor-on-disk vs snapshot=HEAD).
-    agent_doc_snapshot_io::save(file, &head, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &head, agent_doc_ops_log_io::log_op)?;
     rc.invalidate_snapshot_content();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "ipc_truncation_recovered_from_editor_buffer file={} flushed_len={} head_len={} patch_id={}",
@@ -1555,7 +1555,7 @@ fn recover_route_queue_snapshot_commit_boundary(
     if !detect_route_queue_snapshot_commit_boundary_recoverable(file, rc)? {
         return Ok(false);
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_queue_snapshot_auto_recovery_attempt file={}",
@@ -1569,7 +1569,7 @@ fn recover_route_queue_snapshot_commit_boundary(
     match crate::git::commit(file) {
         Ok(_) => {
             rc.invalidate_head_content();
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_queue_snapshot_auto_recovery_succeeded file={}",
@@ -1579,7 +1579,7 @@ fn recover_route_queue_snapshot_commit_boundary(
             Ok(true)
         }
         Err(e) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_queue_snapshot_auto_recovery_failed file={} error={}",
@@ -1693,7 +1693,7 @@ fn wait_for_typing_idle_before_mutation(file: &Path, debounce_ms: u64) -> Result
             return Ok(());
         }
         if start.elapsed() >= max_wait {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "preflight_visible_mutation_deferred_active_typing file={} debounce_ms={} timeout_ms={}",
@@ -1740,7 +1740,7 @@ fn actor_sweep_owner(audit_file: &Path, root: &Path, doc_path: &Path) -> ActorSw
                 doc_path.display(),
                 err
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 audit_file,
                 &format!(
                     "foreign_owned_sweep_owner_warning file={} error={}",
@@ -1812,7 +1812,7 @@ fn log_and_skip_foreign_owned_sweep_if_needed(
         sibling_owner.pane,
         current_owner.pane
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         audit_file,
         &format!(
             "foreign_owned_sweep_skip file={} owner_pane={} owner_source={} current_pane={} current_source={}",
@@ -2365,7 +2365,7 @@ fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
                 match agent_doc_snapshot_io::save_baseline_model(
                     file,
                     content,
-                    crate::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 ) {
                     Ok(()) => {}
                     Err(e) => eprintln!("[preflight] #mps baseline model pin failed: {}", e),
@@ -2483,7 +2483,7 @@ mod th {
     ) -> PathBuf {
         let doc = root.join(rel);
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         commit_all(root, message, commit_date);
         doc
     }
@@ -2563,7 +2563,7 @@ mod th {
             predicate_annotation
         );
         std::fs::write(&doc, &file_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &file_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &file_content, agent_doc_ops_log_io::log_op).unwrap();
         doc
     }
     pub(crate) fn write_ops_log(dir: &TempDir, body: &str) {
@@ -2786,7 +2786,7 @@ mod tests {
         std::fs::write(&doc, original).unwrap();
 
         // Save snapshot of original, then add new content.
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         std::fs::write(
             &doc,
             "---\nsession: test\n---\n\n## User\n\nHello\n\nNew question here.\n",
@@ -2795,7 +2795,7 @@ mod tests {
 
         // diff::compute should detect changes → no_changes = false.
         let diff_result = agent_doc_diff_io::compute(
-            &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+            &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
             &doc,
         )
         .unwrap();
@@ -2863,7 +2863,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, active).unwrap();
-        agent_doc_snapshot_io::save(&doc, active, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, active, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2891,7 +2891,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, drained).unwrap();
-        agent_doc_snapshot_io::save(&doc, drained, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, drained, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -2950,7 +2950,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, active).unwrap();
-        agent_doc_snapshot_io::save(&doc, active, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, active, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2976,7 +2976,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, drained_plus_edit).unwrap();
-        agent_doc_snapshot_io::save(&doc, drained_plus_edit, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, drained_plus_edit, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -2998,7 +2998,7 @@ mod tests {
         let doc = root.join("session.md");
         let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3013,7 +3013,7 @@ mod tests {
         let patched =
             "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nRecovered answer\n";
         std::fs::write(&doc, patched).unwrap();
-        agent_doc_snapshot_io::save(&doc, patched, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, patched, agent_doc_ops_log_io::log_op).unwrap();
         let ops = root.join(".agent-doc/logs/ops.log");
         std::fs::write(
             &ops,
@@ -3256,7 +3256,7 @@ mod tests {
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3276,7 +3276,7 @@ mod tests {
             new body\n\
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
-        agent_doc_snapshot_io::save(&doc, visible_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, visible_snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
         std::fs::write(&doc, &with_user_edit).unwrap();
@@ -3475,7 +3475,7 @@ mod tests {
             prompt = prompt
         );
         std::fs::write(&doc, &snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3506,7 +3506,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Doc\n").unwrap();
-        agent_doc_snapshot_io::save(&doc, "# Doc\n", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "# Doc\n", agent_doc_ops_log_io::log_op).unwrap();
 
         // Write a claims log.
         let log_path = dir.path().join(".agent-doc/claims.log");

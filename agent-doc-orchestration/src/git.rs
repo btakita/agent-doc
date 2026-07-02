@@ -297,8 +297,8 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     if normalize_committed_exchange_artifacts(&current_doc)
         == normalize_committed_exchange_artifacts(&head_doc)
     {
-        agent_doc_snapshot_io::save(file, &current_doc, crate::ops_log::log_op)?;
-        crate::ops_log::log_op(
+        agent_doc_snapshot_io::save(file, &current_doc, agent_doc_ops_log_io::log_op)?;
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "snapshot_repair file={} reason={} basis=head",
@@ -321,7 +321,7 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
             &current_doc,
             "historical snapshot repair",
         )? {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "snapshot_repair file={} reason={} basis=visible_rebase_guard",
@@ -336,8 +336,8 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
         } else {
             "head_local_drift"
         };
-        agent_doc_snapshot_io::save(file, &head_doc, crate::ops_log::log_op)?;
-        crate::ops_log::log_op(
+        agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "snapshot_repair file={} reason={} basis={}",
@@ -382,7 +382,7 @@ fn strike_answered_free_text_heads_at_commit_seam(file: &Path) {
     // no editor listener is attached.
     match crate::write::strike_answered_free_text_queue_heads(file, &response_body, true) {
         Ok(0) => {}
-        Ok(n) => crate::ops_log::log_op(
+        Ok(n) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "commit_seam_free_text_strike file={} struck={} (#qheadstrike)",
@@ -429,7 +429,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             "[commit] file is in submodule {} — running git ops there",
             git_root.display()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "submodule_route file={} submodule={}",
@@ -487,7 +487,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         && !safe_out_of_band_exchange_only
         && !only_heading_attribution_drift
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "commit_blocked_bypassed_patchback file={} basis=head marker={}",
@@ -527,7 +527,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             });
     let file_len = file_content.len();
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "commit_staging file={} snap_len={} file_len={}",
@@ -588,7 +588,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             .map(|id| format!("#{}", id))
             .collect::<Vec<_>>()
             .join(", ");
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "commit_blocked_reintroduced_reaped_pending file={} ids={}",
@@ -613,7 +613,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         && !snapshot_matches_current_file
         && let Some((Some(kind), Some(marker))) = committed_historical_patchback.as_ref()
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "commit_blocked_committed_historical_patchback file={} kind={} marker={}",
@@ -644,7 +644,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 reason,
                 file.display()
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "snapshot_absorb_blocked_after_ipc_snapshot_adoption file={} blocked_by={} old_snap_len={} new_snap_len={}",
@@ -660,7 +660,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 reason,
                 file.display()
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "snapshot_absorb file={} reason={} old_snap_len={} new_snap_len={}",
@@ -670,7 +670,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                     file_len
                 ),
             );
-            agent_doc_snapshot_io::save(file, &file_content, crate::ops_log::log_op)?;
+            agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
             snapshot_content = Some(file_content.clone());
         }
     }
@@ -691,14 +691,14 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             "[commit] committing manual escaped conversation tail cleanup for {}",
             file.display()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "post_commit_escaped_tail_cleanup file={} basis=head",
                 file.display()
             ),
         );
-        agent_doc_snapshot_io::save(file, &cleaned, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &cleaned, agent_doc_ops_log_io::log_op)?;
         snapshot_content = Some(cleaned);
         snapshot_matches_head = false;
     }
@@ -733,7 +733,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             file.display(),
             added_prompts
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "snapshot_absorb file={} reason=preserved_queue_addition_replay_neutralized prompts={} old_snap_len={} new_snap_len={}",
@@ -743,7 +743,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 file_content.len()
             ),
         );
-        agent_doc_snapshot_io::save(file, &file_content, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
         snapshot_content = Some(file_content.clone());
         snapshot_matches_head = false;
     }
@@ -756,7 +756,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         let drift = file_len_after_repair - snap_len;
         // Log unclassified positive drift for aggregation/root-cause analysis.
         // Classified post-commit local edits have their own markers below.
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "out_of_band_write file={} drift={} snap_len={} file_len={}",
@@ -774,7 +774,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 snap_len,
                 file_len_after_repair
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "drift_warning file={} drift={} snap_len={} file_len={}",
@@ -801,7 +801,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                         "[commit] Extreme drift detected ({}x) — re-syncing bootstrap scaffold snapshot from file content",
                         file_len_after_repair / snap_len.max(1)
                     );
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "snapshot_resync file={} old_snap_len={} new_snap_len={}",
@@ -810,14 +810,14 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                             file_len_after_repair
                         ),
                     );
-                    agent_doc_snapshot_io::save(file, &file_content, crate::ops_log::log_op)?;
+                    agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
                     snapshot_content = Some(file_content.clone());
                 } else {
                     eprintln!(
                         "[commit] Extreme drift detected ({}x) — NOT re-syncing tracked/non-scaffold snapshot",
                         file_len_after_repair / snap_len.max(1)
                     );
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "snapshot_resync_blocked file={} head_exists={} scaffold_snapshot={} old_snap_len={} file_len={}",
@@ -846,7 +846,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             "[commit] WARNING: no snapshot exists for {}. Creating from file content.",
             file.display()
         );
-        agent_doc_snapshot_io::save(file, &file_content, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
         snapshot_content = Some(file_content.clone());
     }
 
@@ -870,7 +870,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                     file.display(),
                     file.display()
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "post_commit_user_follow_up file={} basis=head",
@@ -878,7 +878,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                     ),
                 );
                 if cycle_is_terminal(file) {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "commit_prompt_handoff_noop file={} basis=head",
@@ -901,7 +901,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                     kind.describe()
                 );
             }
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "post_commit_local_drift file={} kind={} basis=head",
@@ -967,7 +967,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 snapshot,
                 &file_content,
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "commit_frontmatter_self_heal file={} restored={} basis=live (#fmdrop)",
@@ -981,7 +981,9 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             );
             // Best-effort snapshot-sidecar regeneration so recovery state matches
             // the corrected hot-path content; never blocks the commit.
-            if let Err(e) = agent_doc_snapshot_io::save(file, &corrected, crate::ops_log::log_op) {
+            if let Err(e) =
+                agent_doc_snapshot_io::save(file, &corrected, agent_doc_ops_log_io::log_op)
+            {
                 eprintln!(
                     "[commit] warning: snapshot regenerate after frontmatter self-heal failed: {e} (non-fatal)"
                 );
@@ -1071,7 +1073,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                     "[commit] skipped ignored untracked path {} (matched .gitignore); not staging",
                     path
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "commit_skipped_ignored_path file={} rel_path={}",
@@ -1115,8 +1117,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         Ok(s) if s.success() => {
             did_commit = true;
             enforce_committed_single_boundary_invariant(file, &git_root, &resolved);
-            crate::ops_log::log_cycle(file, "commit", None, None);
-            crate::ops_log::log_op(file, &format!("commit_success file={}", file.display()));
+            agent_doc_ops_log_io::log_cycle(file, "commit", None, None);
+            agent_doc_ops_log_io::log_op(file, &format!("commit_success file={}", file.display()));
             agent_doc_flow_io::log_flow_event(
                 file,
                 agent_doc_flow::types::FlowEvent::new(
@@ -1125,7 +1127,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                     agent_doc_flow::types::FlowOutcome::Completed,
                 )
                 .with_reason("commit_success"),
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             );
             let snap = agent_doc_snapshot_io::load(file).ok().flatten();
             let file_content = std::fs::read_to_string(file).ok();
@@ -1151,7 +1153,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             // hook session state. (#codex-auto-queue-stalled-final-gate)
             if let Some(continuation) = crate::queue_continuation::reconcile_marker(file, "commit")
             {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "queue_continuation_required file={} head={}",
@@ -1172,7 +1174,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                         .head_id
                         .as_deref()
                         .unwrap_or(continuation.head_prompt.as_str());
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "drain_continue_after_review file={} next_head={} (#mphaseloop)",
@@ -1189,7 +1191,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             agent_doc_hooks_io::fire_doc_event(file, "post_commit");
         }
         Ok(s) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "commit_failed file={} exit_code={}",
@@ -1199,7 +1201,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             );
         }
         Err(e) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!("commit_error file={} err={}", file.display(), e),
             );
@@ -1316,14 +1318,14 @@ fn dedupe_snapshot_and_worktree_before_commit(
             "[commit] deduped consecutive duplicate response block(s) before staging {}",
             file.display()
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "commit_pre_stage_dedupe file={} before_commit=true",
                 file.display()
             ),
         );
-        agent_doc_snapshot_io::save(file, &deduped_snapshot, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &deduped_snapshot, agent_doc_ops_log_io::log_op)?;
         *snapshot_content = Some(deduped_snapshot);
     }
 
@@ -1335,7 +1337,7 @@ fn dedupe_snapshot_and_worktree_before_commit(
                 file.display()
             )
         })?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "commit_pre_stage_dedupe_repaired_worktree file={} before_commit=true",
@@ -1355,7 +1357,7 @@ fn dedupe_snapshot_and_worktree_before_commit(
         let mut snapshot_updated = false;
         if exchange_prompt_prefix_equivalent(snapshot, &repaired_file) {
             let clean_snapshot = strip_head_markers(&repaired_file);
-            agent_doc_snapshot_io::save(file, &clean_snapshot, crate::ops_log::log_op)?;
+            agent_doc_snapshot_io::save(file, &clean_snapshot, agent_doc_ops_log_io::log_op)?;
             *snapshot_content = Some(clean_snapshot);
             snapshot_updated = true;
         }
@@ -1368,7 +1370,7 @@ fn dedupe_snapshot_and_worktree_before_commit(
             })?;
             *file_content = repaired_file;
         }
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "commit_pre_stage_prompt_duplicate_repaired file={} snapshot_updated={} before_commit=true",
@@ -1387,7 +1389,8 @@ fn strip_guard_markers_from_disk(file: &Path) {
     if let Ok(Some(ref content)) = agent_doc_snapshot_io::load(file) {
         let cleaned = strip_guard_markers(content);
         if cleaned != *content
-            && let Err(e) = agent_doc_snapshot_io::save(file, &cleaned, crate::ops_log::log_op)
+            && let Err(e) =
+                agent_doc_snapshot_io::save(file, &cleaned, agent_doc_ops_log_io::log_op)
         {
             eprintln!("[commit] warning: failed to strip guard markers from snapshot: {e}");
         }
@@ -1456,7 +1459,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
         let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&snap_content);
         let new_snap = agent_doc_template::reposition_boundary_to_end_clean(&prompt_canonicalized);
         if new_snap != snap_content {
-            match agent_doc_snapshot_io::save(file, &new_snap, crate::ops_log::log_op) {
+            match agent_doc_snapshot_io::save(file, &new_snap, agent_doc_ops_log_io::log_op) {
                 Ok(()) => {
                     eprintln!("[commit] repositioned boundary in snapshot");
                     changed = true;
@@ -1606,7 +1609,7 @@ fn enforce_committed_single_boundary_invariant(file: &Path, git_root: &Path, res
         "[commit] boundary_invariant_violation: committed HEAD carries {} agent:boundary markers (expected 1) — self-healing collapse",
         boundary_count
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "boundary_invariant_violation phase=post_commit file={} committed_boundaries={}",
@@ -1627,7 +1630,7 @@ fn enforce_committed_single_boundary_invariant(file: &Path, git_root: &Path, res
     }
     // Keep the snapshot aligned with the collapsed blob so the next preflight
     // does not observe snapshot/HEAD drift.
-    if let Err(e) = agent_doc_snapshot_io::save(file, &collapsed, crate::ops_log::log_op) {
+    if let Err(e) = agent_doc_snapshot_io::save(file, &collapsed, agent_doc_ops_log_io::log_op) {
         eprintln!(
             "[commit] boundary_invariant self-heal snapshot save failed: {} (non-fatal)",
             e
@@ -1641,7 +1644,7 @@ fn enforce_committed_single_boundary_invariant(file: &Path, git_root: &Path, res
     ) {
         Ok(_) => {
             eprintln!("[commit] boundary_invariant self-heal collapse committed");
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "boundary_invariant_selfheal_committed file={}",
@@ -1874,10 +1877,10 @@ fn repair_stale_agent_response_collapse_worktree(
 
     crate::write::atomic_write_pub(file, &repaired)?;
     if repaired == head_doc {
-        agent_doc_snapshot_io::save(file, head_doc, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, head_doc, agent_doc_ops_log_io::log_op)?;
     }
     refresh_live_closeout_sidecars(file, &repaired, true)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "stale_agent_response_collapse_cleanup file={} basis=head preserved_local_drift={}",
@@ -1912,9 +1915,9 @@ fn repair_clean_head_if_only_transient_worktree_drift(
     }
 
     crate::write::atomic_write_pub(file, &head_doc)?;
-    agent_doc_snapshot_io::save(file, &head_doc, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
     refresh_live_closeout_sidecars(file, &head_doc, true)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!("transient_cleanup file={} basis=head", file.display()),
     );
@@ -1963,7 +1966,7 @@ fn emit_postcommit_worktree_check(file: &Path) {
     let head_sha = agent_doc_hash::content_hash(&head_norm);
     let tree_sha = agent_doc_hash::content_hash(&tree_norm);
     let matches = head_norm == tree_norm;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "postcommit_worktree_check file={} head={} tree={} match={} action=observe_only_realtime_replica_owns_disk",
@@ -2021,7 +2024,7 @@ fn ensure_active_capture_materialized_for_commit(
         return Ok(());
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "commit_blocked_missing_captured_response file={} capture_id={} response_sha256={} basis={}",
@@ -2062,7 +2065,7 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
         && snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
         && snapshot.edit_epoch <= snapshot.last_synced_epoch
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "commit_live_buffer_ahead_of_disk_allowed file={} basis={} editor_id={} edit_epoch={} last_synced_epoch={} buffer_len={} disk_len={} reason=staged_snapshot_matches_synced_operator_buffer",
@@ -2081,7 +2084,7 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
         && snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
         && live_buffer_insertions_are_materialized_in_file(&snapshot, staged, file_content)
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "commit_live_buffer_ahead_of_disk_allowed file={} basis={} editor_id={} edit_epoch={} last_synced_epoch={} buffer_len={} disk_len={} allowance=staged_snapshot_excludes_materialized_operator_buffer",
@@ -2096,7 +2099,7 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
         );
         return Ok(());
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "commit_blocked_live_buffer_ahead_of_disk file={} basis={} editor_id={} edit_epoch={} last_synced_epoch={} buffer_len={} disk_len={}",
@@ -2183,11 +2186,11 @@ fn finalize_already_committed_noop(
     file_content: Option<&str>,
     drift_kind: Option<PostCommitLocalDriftKind>,
 ) {
-    crate::ops_log::log_cycle(file, "commit_noop", snapshot_content, file_content);
+    agent_doc_ops_log_io::log_cycle(file, "commit_noop", snapshot_content, file_content);
     let drift_kind = drift_kind
         .map(PostCommitLocalDriftKind::as_str)
         .unwrap_or("none");
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "commit_noop file={} reason=already_current drift_kind={} basis=head",
@@ -2203,9 +2206,9 @@ fn finalize_already_committed_noop(
             agent_doc_flow::types::FlowOutcome::Completed,
         )
         .with_reason(format!("already_current_{drift_kind}")),
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!("commit_already_current file={} basis=head", file.display()),
     );
@@ -2436,7 +2439,7 @@ mod tests {
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2458,7 +2461,7 @@ mod tests {
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
         fs::write(&doc, cleaned).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
 
         let did_commit = commit(&doc).expect("escaped tail cleanup should commit");
         assert!(did_commit, "cleanup deletion should create a commit");
@@ -2524,7 +2527,7 @@ mod tests {
             "<!-- /agent:icebox -->\n",
         );
         fs::write(&doc, clean).unwrap();
-        agent_doc_snapshot_io::save(&doc, clean, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, clean, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2575,7 +2578,7 @@ mod tests {
             "<!-- /agent:icebox -->\n",
         );
         fs::write(&doc, compacted).unwrap();
-        agent_doc_snapshot_io::save(&doc, compacted, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, compacted, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(compacted), Some(compacted)).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
@@ -2642,7 +2645,7 @@ Implemented.
 ";
         let doc = root.join("session.md");
         fs::write(&doc, duplicated).unwrap();
-        agent_doc_snapshot_io::save(&doc, duplicated, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, duplicated, agent_doc_ops_log_io::log_op).unwrap();
 
         let before = Command::new("git")
             .current_dir(root)
@@ -2733,7 +2736,7 @@ Duplicate replay should stay live.
 ";
         let doc = root.join("session.md");
         fs::write(&doc, live).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(initial), Some(initial)).unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
@@ -3037,7 +3040,7 @@ Duplicate replay should stay live.
         fs::write(&doc, updated).unwrap();
         let snap_dir = root.join(".agent-doc/snapshots");
         fs::create_dir_all(&snap_dir).unwrap();
-        agent_doc_snapshot_io::save(&doc, updated, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, updated, agent_doc_ops_log_io::log_op).unwrap();
 
         let index_lock = root.join(".git/index.lock");
         fs::write(&index_lock, "held").unwrap();
@@ -3532,7 +3535,7 @@ Duplicate replay should stay live.
             - [ ] [#a1b2] existing\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3611,7 +3614,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:oldid -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3706,7 +3709,7 @@ Duplicate replay should stay live.
             <!-- agent:pending -->\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, scaffold).unwrap();
-        agent_doc_snapshot_io::save(&doc, scaffold, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, scaffold, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3805,7 +3808,7 @@ Duplicate replay should stay live.
             <!-- agent:pending -->\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, scaffold).unwrap();
-        agent_doc_snapshot_io::save(&doc, scaffold, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, scaffold, agent_doc_ops_log_io::log_op).unwrap();
 
         let live = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
             ## Status\n\n\
@@ -3888,7 +3891,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:oldid -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3965,7 +3968,7 @@ Duplicate replay should stay live.
             new body\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, tracked).unwrap();
-        agent_doc_snapshot_io::save(&doc, tracked, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, tracked, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4000,7 +4003,7 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, tracked, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, tracked, agent_doc_ops_log_io::log_op).unwrap();
 
         commit(&doc).expect("commit should repair the stale snapshot");
 
@@ -4067,7 +4070,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4087,7 +4090,7 @@ Duplicate replay should stay live.
             new body\n\
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
-        agent_doc_snapshot_io::save(&doc, visible_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, visible_snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
         fs::write(&doc, &with_user_edit).unwrap();
@@ -4158,7 +4161,7 @@ Duplicate replay should stay live.
         );
         commit_file(root, "session.md", committed, "add doc");
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::mark_response_captured(
             &doc,
@@ -4285,7 +4288,7 @@ Duplicate replay should stay live.
         );
         commit_file(root, "session.md", committed, "add committed response");
         fs::write(&doc, stale_disk).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
             &doc.display().to_string(),
             committed,
@@ -4354,7 +4357,7 @@ Duplicate replay should stay live.
             "current response\n",
             "<!-- /agent:exchange -->\n"
         );
-        agent_doc_snapshot_io::save(&doc, staged, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, staged, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
             &doc.display().to_string(),
             staged,
@@ -4423,7 +4426,7 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         // The `#qstrikeexplain` gate only strikes heads present in the pre-turn
         // baseline, so seed it.
         let baseline = agent_doc_fs::baseline_path_for(&doc).unwrap();
@@ -4481,7 +4484,7 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4569,7 +4572,7 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4599,7 +4602,7 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, stale_prompt_only).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_prompt_only, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, stale_prompt_only, agent_doc_ops_log_io::log_op).unwrap();
 
         let head_before = Command::new("git")
             .current_dir(root)
@@ -4686,7 +4689,7 @@ Duplicate replay should stay live.
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4709,7 +4712,7 @@ Duplicate replay should stay live.
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
         fs::write(&doc, mixed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
 
         let did_commit = commit(&doc).expect("mixed cleanup should close as no-op");
         assert!(
@@ -4803,7 +4806,7 @@ Duplicate replay should stay live.
             ),
             prompt = prompt
         );
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, &working).unwrap();
 
         let did_commit = commit(&doc).expect("prompt duplicate drift should repair and commit");
@@ -4885,7 +4888,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:old -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, stale_snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4917,7 +4920,7 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let working = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
@@ -5034,7 +5037,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:head -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -5389,7 +5392,7 @@ Duplicate replay should stay live.
             <!-- /agent:queue -->\n";
         commit_file(root, "session.md", head_doc, "agent-doc: prior response");
         let doc = root.join("session.md");
-        agent_doc_snapshot_io::save(&doc, head_doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, head_doc, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head_doc), Some(head_doc)).unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc)
             .unwrap()
@@ -5479,7 +5482,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:head-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -5498,7 +5501,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:fresh-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, transient).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         let stale_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(transient).encode_state();
         agent_doc_snapshot_io::save_crdt(&doc, &stale_crdt).unwrap();
 
@@ -5578,7 +5581,7 @@ Duplicate replay should stay live.
             ❯ Initial prompt\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, initial).unwrap();
-        agent_doc_snapshot_io::save(&doc, initial, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, initial, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -5607,7 +5610,7 @@ Duplicate replay should stay live.
             body\n\
             <!-- agent:boundary:fresh-boundary -->\n\
             <!-- /agent:exchange -->\n";
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, transient).unwrap();
         let stale_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(transient).encode_state();
         agent_doc_snapshot_io::save_crdt(&doc, &stale_crdt).unwrap();
@@ -5697,7 +5700,7 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, stale_snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -5754,7 +5757,7 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, working).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(stale_snapshot), Some(working))
             .unwrap();
         agent_doc_cycle_state_io::mark_response_captured(
@@ -5854,7 +5857,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:committed-id -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -5873,7 +5876,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:stale-id -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, drifted).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
 
         let did_commit = commit(&doc).expect("heading attribution drift should self-heal");
         assert!(!did_commit, "repair should close as already committed");
@@ -5961,7 +5964,7 @@ Duplicate replay should stay live.
             "<!-- /agent:queue -->\n"
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -6006,7 +6009,7 @@ Duplicate replay should stay live.
             "<!-- /agent:queue -->\n"
         );
         fs::write(&doc, drifted).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         let stale_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(drifted).encode_state();
         agent_doc_snapshot_io::save_crdt(&doc, &stale_crdt).unwrap();
 
@@ -6121,7 +6124,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:head-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -6141,7 +6144,7 @@ Duplicate replay should stay live.
             <!-- /agent:exchange -->\n\n\
             <!-- later local note -->\n";
         fs::write(&doc, working).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
 
         let did_commit = commit(&doc).expect("HEAD-current local edits should close as no-op");
         assert!(
@@ -6223,7 +6226,7 @@ Duplicate replay should stay live.
             "<!-- /agent:backlog -->\n"
         );
         fs::write(&doc, cleaned).unwrap();
-        agent_doc_snapshot_io::save(&doc, cleaned, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, cleaned, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -6314,7 +6317,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:head-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -6338,7 +6341,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:live-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, bypassed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(bypassed)).unwrap();
         agent_doc_cycle_state_io::mark_response_captured(
             &doc,
@@ -6417,7 +6420,7 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -6456,7 +6459,7 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
@@ -6540,7 +6543,7 @@ Duplicate replay should stay live.
             "<!-- /agent:backlog -->\n",
         );
         fs::write(&doc, pre_compact).unwrap();
-        agent_doc_snapshot_io::save(&doc, pre_compact, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, pre_compact, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -6572,7 +6575,7 @@ Duplicate replay should stay live.
             "<!-- /agent:backlog -->\n",
         );
         fs::write(&doc, post_compact).unwrap();
-        agent_doc_snapshot_io::save(&doc, post_compact, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, post_compact, agent_doc_ops_log_io::log_op).unwrap();
 
         commit(&doc).expect("clean exchange-only compaction must not fail closed");
 
@@ -6629,7 +6632,7 @@ Duplicate replay should stay live.
             "<!-- /agent:queue -->\n",
         );
         fs::write(&doc, stale_snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -6690,7 +6693,7 @@ Compacted content:\n\
 <!-- agent:queue -->\n\
 <!-- /agent:queue -->\n";
         fs::write(&doc, compacted).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
         let scope =
             agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
         agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
@@ -6759,7 +6762,7 @@ Compacted content:\n\
             "<!-- /agent:queue -->\n",
         );
         fs::write(&doc, pre_compact).unwrap();
-        agent_doc_snapshot_io::save(&doc, pre_compact, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, pre_compact, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -6795,7 +6798,8 @@ Compacted content:\n\
             "### Re: #compactdrift-agent - gpt-5 (HEAD)",
         );
         fs::write(&doc, &post_compact_worktree).unwrap();
-        agent_doc_snapshot_io::save(&doc, post_compact_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, post_compact_snapshot, agent_doc_ops_log_io::log_op)
+            .unwrap();
 
         let result = commit(&doc);
         assert!(
@@ -6863,7 +6867,7 @@ Compacted content:\n\
         );
         // HEAD is still the pre-compact committed state (compact's own commit failed).
         fs::write(&doc, pre_compact).unwrap();
-        agent_doc_snapshot_io::save(&doc, pre_compact, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, pre_compact, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -7112,7 +7116,7 @@ Compacted content:\n\
         // Create snapshot
         let snap_dir = root.join(".agent-doc/snapshots");
         fs::create_dir_all(&snap_dir).unwrap();
-        agent_doc_snapshot_io::save(&doc, doc_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, doc_content, agent_doc_ops_log_io::log_op).unwrap();
 
         // Initial commit
         Command::new("git")
@@ -7209,7 +7213,7 @@ Compacted content:\n\
         // Create snapshot
         let snap_dir = root.join(".agent-doc/snapshots");
         fs::create_dir_all(&snap_dir).unwrap();
-        agent_doc_snapshot_io::save(&doc, doc_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, doc_content, agent_doc_ops_log_io::log_op).unwrap();
 
         // Initial commit
         Command::new("git")
@@ -7315,7 +7319,7 @@ Compacted content:\n\
 
         let snap_dir = root.join(".agent-doc/snapshots");
         fs::create_dir_all(&snap_dir).unwrap();
-        agent_doc_snapshot_io::save(&doc, doc_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, doc_content, agent_doc_ops_log_io::log_op).unwrap();
 
         Command::new("git")
             .current_dir(root)
@@ -7379,7 +7383,7 @@ Compacted content:\n\
         fs::write(&doc, working_content).unwrap();
 
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         Command::new("git")
             .current_dir(root)

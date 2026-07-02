@@ -256,7 +256,7 @@ fn log_sync_latency(
     if let Some(focus) = focus {
         let path = Path::new(focus);
         if path.exists() {
-            crate::ops_log::log_op(path, &message);
+            agent_doc_ops_log_io::log_op(path, &message);
         }
     }
 }
@@ -272,7 +272,7 @@ fn parse_frontmatter_for_sync<'a>(
 }
 
 fn save_sync_status_snapshot(file: &Path, updated: &str) -> Result<()> {
-    agent_doc_snapshot_io::save(file, updated, crate::ops_log::log_op)
+    agent_doc_snapshot_io::save(file, updated, agent_doc_ops_log_io::log_op)
 }
 
 fn log_sync_status(message: String) {
@@ -1986,7 +1986,8 @@ fn run_with_options_internal(
                 // Save snapshot BEFORE committing — git::commit() uses the snapshot
                 // to determine what to stage. Without this, the snapshot has stale
                 // content and the commit fails with a drift warning.
-                if let Err(e) = agent_doc_snapshot_io::save(path, &scaffold, crate::ops_log::log_op)
+                if let Err(e) =
+                    agent_doc_snapshot_io::save(path, &scaffold, agent_doc_ops_log_io::log_op)
                 {
                     eprintln!(
                         "[sync] warning: failed to save scaffold snapshot for {}: {}",
@@ -2011,7 +2012,7 @@ fn run_with_options_internal(
         if let Err(e) = agent_doc_workflow_io::document_init::ensure_initialized(
             path,
             crate::git::commit,
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         ) {
             eprintln!(
                 "[sync] warning: ensure_initialized failed for {}: {}",
@@ -3055,7 +3056,7 @@ fn run_with_options_internal(
         agent_doc_controller_io::editor_route_errors::clear_for_success(
             Path::new(focus),
             "sync_success",
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         );
     }
 
@@ -3684,7 +3685,7 @@ fn reject_cross_document_owner_pane(
     let pane = candidate?;
     if pane_runs_other_document_owner(tmux, &pane, file) {
         if log_hits {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "[sync] owner candidate pane {} runs another document; not surfacing for {} (cross-document guard #jb-tsift-pane-sync)",
@@ -4089,7 +4090,7 @@ pub fn log_cross_document_execution_context(file: &Path, origin: &str) {
         _ => return,
     };
     if let Some(other) = pane_owned_document_other_than(&tmux, &current_pane, file) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "cross_document_execution_context file={} origin={} current_pane={} pane_owns={} note=agent-doc cycle running inside a pane that owns a different document (#jb-tsift-pane-sync contamination vector)",
@@ -4395,7 +4396,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(root, &doc);
 
         let materialized = original.replace(
@@ -4403,7 +4404,7 @@ mod tests {
             "### Re: crash recovery -- gpt-5\n\nRecovered by sync.\n<!-- agent:boundary:test -->",
         );
         std::fs::write(&doc, &materialized).unwrap();
-        agent_doc_snapshot_io::save(&doc, &materialized, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &materialized, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -4905,7 +4906,7 @@ mod tests {
         agent_doc_snapshot_io::save(
             &doc,
             "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n[agent-doc sync] malformed frontmatter during auto-start.\n\nsync auto-start frontmatter: invalid YAML frontmatter in tasks/bad.md: boom\n<!-- /agent:status -->\n",
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
         .unwrap();
 
@@ -4936,7 +4937,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let original = "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\nuser-owned status\n<!-- /agent:status -->\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
 
         agent_doc_sync_io::clear_frontmatter_status_with(
             &doc,
@@ -7021,8 +7022,8 @@ mod tests {
         );
         std::fs::write(&doc_a, content_a).unwrap();
         std::fs::write(&doc_b, content_b).unwrap();
-        agent_doc_snapshot_io::save(&doc_a, content_a, crate::ops_log::log_op).unwrap();
-        agent_doc_snapshot_io::save(&doc_b, content_b, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc_a, content_a, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc_b, content_b, agent_doc_ops_log_io::log_op).unwrap();
 
         let pane_a = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);

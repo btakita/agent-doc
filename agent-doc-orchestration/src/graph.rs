@@ -1128,7 +1128,7 @@ mod tests {
         setup_project(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "hello").unwrap();
-        agent_doc_snapshot_io::save(&doc, "snapshot body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "snapshot body", agent_doc_ops_log_io::log_op).unwrap();
 
         let rc = RunContext::new(doc);
         assert!(!rc.is_snapshot_content_cached());
@@ -1222,7 +1222,7 @@ mod tests {
         init_git_repo(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "committed\n").unwrap();
-        agent_doc_snapshot_io::save(&doc, "committed\n", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "committed\n", agent_doc_ops_log_io::log_op).unwrap();
         commit_path(dir.path(), "file.md", "add doc");
 
         let rc = RunContext::new(doc.clone());
@@ -1233,7 +1233,8 @@ mod tests {
         );
         assert!(rc.is_snapshot_commit_status_cached());
 
-        agent_doc_snapshot_io::save(&doc, "snapshot drift\n", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "snapshot drift\n", agent_doc_ops_log_io::log_op)
+            .unwrap();
         assert_eq!(
             rc.snapshot_commit_status(),
             agent_doc_snapshot_io::SnapshotCommitStatus::Committed,

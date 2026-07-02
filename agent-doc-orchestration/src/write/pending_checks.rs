@@ -858,7 +858,7 @@ pub(crate) fn run_closeout_pending_maintenance(
         return Ok(());
     }
     if !closeout_pending_maintenance_required(file)? {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "closeout_pending_maintenance_skipped file={} basis=no_tracked_work_closeout",
@@ -920,7 +920,7 @@ mod precommit_pending_capture_tests {
         let doc = root.join("doc.md");
         let content = format!("{frontmatter}## Exchange\n\nHello\n");
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if had_pending_mutations {
@@ -976,7 +976,7 @@ mod precommit_pending_capture_tests {
             content.push_str("<!-- /agent:icebox -->\n");
         }
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         if !pending_done_ids.is_empty() {
@@ -1631,7 +1631,7 @@ mod precommit_pending_capture_tests {
         );
         fs::write(&doc, initial).unwrap();
         init_git_repo(tmp.path(), &doc);
-        agent_doc_snapshot_io::save(&doc, initial, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, initial, agent_doc_ops_log_io::log_op).unwrap();
 
         let drifted = initial.replace(
             "<!-- /agent:exchange -->\n",

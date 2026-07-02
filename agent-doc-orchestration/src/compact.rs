@@ -298,7 +298,7 @@ pub fn run(
         // (corrected visible content, stale HEAD). Later JetBrains/route actions
         // then see mixed visible/HEAD/snapshot state. Surface it explicitly with
         // the exact recovery command instead of silently leaving it dirty.
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!("compact_left_uncommitted file={}", file.display()),
         );
@@ -356,7 +356,7 @@ fn commit_compacted_authoritative(file: &Path, authoritative_snapshot: &str) -> 
     // Re-assert the authoritative snapshot so a replay/lag between
     // `apply_compacted_document` and here cannot leave a pre-compact snapshot for
     // the selective commit to stage.
-    agent_doc_snapshot_io::save(file, authoritative_snapshot, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, authoritative_snapshot, agent_doc_ops_log_io::log_op)?;
     closeout_compact_with_commit(file)?;
     verify_compact_head_landed(file, authoritative_snapshot)
 }
@@ -374,7 +374,7 @@ fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Resu
             == normalize_transient_agent_doc_markers(authoritative_snapshot)
     });
     if !landed {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "compact_commit_head_mismatch file={} head_len={} authoritative_len={}",
@@ -452,7 +452,7 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path, expected_content: &str
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
     loop {
         if compact_disk_matches_expected(&canonical, expected_content) {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "compact_editor_buffer_flush file={} patch_id={} transport=save_document",
@@ -514,7 +514,7 @@ fn validate_compacted_exchange(file: &Path, compacted: &str) -> Result<()> {
     if malformed.is_empty() {
         return Ok(());
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "compact_malformed_summary_rejected file={} count={}",
@@ -554,7 +554,7 @@ fn assert_non_exchange_items_preserved(
         return Ok(());
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "compact_dropped_non_exchange_item file={} stage={} dropped={}",
@@ -601,7 +601,7 @@ fn assert_non_exchange_markers_preserved(
         return Ok(());
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "compact_altered_non_exchange_marker file={} stage={} changed={}",
@@ -642,7 +642,7 @@ fn apply_compacted_document(
 
     if force_disk {
         crate::write::atomic_write_pub(file, compacted)?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "compact_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
@@ -660,7 +660,7 @@ fn apply_compacted_document(
         crate::write::try_editor_converge(file, compacted, source_content, "compact")?;
     }
 
-    agent_doc_snapshot_io::save(file, snapshot_content, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, snapshot_content, agent_doc_ops_log_io::log_op)?;
 
     if refresh_crdt {
         let new_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(compacted).encode_state();
@@ -1127,7 +1127,8 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, COMPACTDROPITEM_DOC, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, COMPACTDROPITEM_DOC, agent_doc_ops_log_io::log_op)
+            .unwrap();
 
         // Full exchange compact must leave backlog (3) and review (1) intact and
         // must NOT trip the #compactdropitem guard.
@@ -1245,7 +1246,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run_component_compact_partial(&file, doc, "exchange", 1, None, false, true).unwrap();
 
@@ -1292,7 +1293,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, &doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, &doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run_component_compact_force_disk(&file, &doc, "exchange", None, false).unwrap();
 
@@ -1360,7 +1361,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         // Capture pending content before compact
         let components_before = element::parse(doc).unwrap();
@@ -1436,7 +1437,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run_component_compact_force_disk(
             &file,
@@ -1500,7 +1501,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, &doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, &doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run_component_compact_force_disk(
             &file,
@@ -1544,7 +1545,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(&patches_dir).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap();
@@ -1586,7 +1587,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         std::fs::create_dir_all(&patches_dir).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&file, Some(doc), Some(doc)).unwrap();
         agent_doc_cycle_state_io::mark_response_captured(
             &file,
@@ -1647,7 +1648,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap_err();
@@ -1688,7 +1689,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
         let file_str = file.canonicalize().unwrap().to_string_lossy().to_string();
         agent_doc_debounce::record_live_buffer_digest(
             &file_str,
@@ -1736,7 +1737,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        agent_doc_snapshot_io::save(&file, stale_snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
         let file_str = file.canonicalize().unwrap().to_string_lossy().to_string();
         agent_doc_debounce::record_live_buffer_digest(
             &file_str,
@@ -1787,7 +1788,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run_component_compact_force_disk(&file, doc, "exchange", Some(""), false).unwrap();
 
@@ -1832,7 +1833,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        agent_doc_snapshot_io::save(&file, &doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, &doc, agent_doc_ops_log_io::log_op).unwrap();
         // Seed both the legacy and overlay CRDT sidecars from the large document,
         // mirroring a live CRDT session before compaction.
         let legacy = agent_doc_merge::crdt::CrdtDoc::from_text(&doc).encode_state();
@@ -1920,7 +1921,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap_err();
@@ -1974,7 +1975,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         std::fs::create_dir_all(&patches_dir).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap_err();
@@ -2051,7 +2052,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run_component_compact_force_disk(&file, doc, "exchange", None, false).unwrap();
 
@@ -2125,7 +2126,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run_component_compact_force_disk(&file, doc, "exchange", None, false).unwrap();
 
@@ -2180,7 +2181,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted."), false)
             .unwrap();
@@ -2220,7 +2221,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         // Create and save initial CRDT state
         let initial_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(doc).encode_state();
@@ -2281,7 +2282,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         // Capture status with ❯ before compact
         let components_before = element::parse(doc).unwrap();
@@ -2337,7 +2338,7 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         // The verbatim opening marker line, captured before compaction.
         let queue_marker =
@@ -2419,7 +2420,7 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         let file_before = std::fs::read_to_string(&file).unwrap();
 
@@ -2490,7 +2491,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&file, doc).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
         std::process::Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2627,13 +2628,13 @@ mod tests {
 
         let file = root.join("session.md");
         fs::write(&file, PRECOMPACT_DOC).unwrap();
-        agent_doc_snapshot_io::save(&file, PRECOMPACT_DOC, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, PRECOMPACT_DOC, agent_doc_ops_log_io::log_op).unwrap();
         git_commit_file(root, "session.md"); // HEAD = pre-compact
 
         // Editor/plugin flushed the compacted content to disk...
         fs::write(&file, COMPACTED_DOC).unwrap();
         // ...but a stale-supervisor CRDT replay reverted the snapshot to pre-compact.
-        agent_doc_snapshot_io::save(&file, PRECOMPACT_DOC, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, PRECOMPACT_DOC, agent_doc_ops_log_io::log_op).unwrap();
 
         // Authoritative content is known in run() from the compaction itself.
         commit_compacted_authoritative(&file, COMPACTED_DOC).unwrap();
@@ -2665,7 +2666,7 @@ mod tests {
 
         let file = root.join("session.md");
         fs::write(&file, PRECOMPACT_DOC).unwrap();
-        agent_doc_snapshot_io::save(&file, PRECOMPACT_DOC, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, PRECOMPACT_DOC, agent_doc_ops_log_io::log_op).unwrap();
         git_commit_file(root, "session.md"); // HEAD = pre-compact
         // Disk still lags (editor holds the compacted buffer, no flush yet).
         assert_eq!(fs::read_to_string(&file).unwrap(), PRECOMPACT_DOC);
@@ -2720,7 +2721,7 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         fs::write(&file, doc).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
         git(root, &["add", "session.md"]);
         git(root, &["commit", "-q", "-m", "finalized response head"]);
 
@@ -2826,7 +2827,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&file, doc).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
         run(
             &file,
@@ -2991,7 +2992,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&file, doc).unwrap();
-        agent_doc_snapshot_io::save(&file, doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
         git(root, &["add", "session.md"]);
         git(root, &["commit", "-q", "-m", "seed"]);
 

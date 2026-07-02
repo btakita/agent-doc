@@ -86,7 +86,7 @@ impl DispatchContext {
 }
 
 fn log_dispatch_progress(ctx: &DispatchContext, event: String) {
-    agent_doc_orchestration::ops_log::log_op(&ctx.file, &event);
+    agent_doc_ops_log_io::log_op(&ctx.file, &event);
     if agent_doc_tmux_commands::input_diag::verbose_enabled() {
         eprintln!("[queue_dispatch] {event}");
     }
@@ -237,7 +237,7 @@ fn try_supervisor_dispatch(
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(
             Some(&ctx.file),
-            agent_doc_orchestration::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         ),
         "queue_dispatch.supervisor_ipc",
         &format!("socket:{}", sock.display()),
@@ -281,7 +281,7 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(
             Some(&ctx.file),
-            agent_doc_orchestration::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         ),
         "queue_dispatch.tmux_send_keys",
         &format!("pane:{pane_id}"),
@@ -295,10 +295,7 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
         &pane_id,
         &item.raw,
         &ctx.harness,
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(
-            None,
-            agent_doc_orchestration::ops_log::log_op,
-        ),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "sessions.send_submitted_text_for_harness",
     )?;
 

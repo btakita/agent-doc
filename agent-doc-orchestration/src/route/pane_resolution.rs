@@ -19,7 +19,7 @@ pub(crate) fn recover_dispatch_only_authoritative_waiting_input(
     pane: &str,
     generation: u64,
 ) -> Result<String> {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_dispatch_only_waiting_input_restart file={} pane={} harness={} generation={}",
@@ -167,7 +167,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
             let dispatch_pane = actor.record.pane_id.clone();
             let file_display = file.display().to_string();
             let supervisor_health = actor.runtime.health.label();
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &degraded_authoritative_actor_direct_submit_log_message(
                     DegradedAuthoritativeActorDirectSubmit {
@@ -231,7 +231,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
             );
         }
 
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_authoritative_fallback_skipped file={} actor_pane={} harness={} generation={} record_state={} supervisor_health={} runtime_actor_state={} registered_pane={} live_owner={} reason={}",
@@ -260,7 +260,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
                 candidates,
                 preferred_active_window.as_deref(),
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_only_associated_pane_ambiguous file={} count={}",
@@ -274,7 +274,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
             &associated_resolution
             && winner.pane_id != *registered_pane
         {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_dispatch_only_associated_pane_requires_manual_claim file={} pane={} sources={}",
@@ -323,7 +323,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
             candidates,
             preferred_active_window.as_deref(),
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_associated_pane_ambiguous file={} count={}",
@@ -337,7 +337,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
     if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
         &associated_resolution
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_only_associated_pane_requires_manual_claim file={} pane={} sources={}",
@@ -518,7 +518,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
             "[route] startup-miss on pane {} from {} for {} is superseded by newer registered owner {} — clearing stale marker",
             miss.pane_id, miss_ts, file_path, supersession.registered_pane
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_startup_miss_cleared_superseded_owner file={} stale_pane={} registered_pane={} miss_timestamp={} latest_start_timestamp={}",
@@ -552,7 +552,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
             supervisor_health,
             log_status.as_ref(),
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_startup_miss_detected file={} origin={:?} miss_timestamp={} {}",
@@ -572,7 +572,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 "[route] startup-miss for {} is stranded, not crashed: {}",
                 file_path, provenance
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_startup_miss_stranded file={} origin={:?} {}",
@@ -593,7 +593,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 "[route] registered pane {} has an unresolved startup-miss marker from {} for {} — deregistering and starting fresh",
                 registered_pane, miss_ts, file_path
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_startup_miss_deregistered file={} pane={} miss_timestamp={}",
@@ -630,7 +630,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 "[route] registered pane {} proves a newer open harness run after startup-miss {} for {} — clearing stale marker",
                 registered_pane, miss_ts, file_path
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_startup_miss_cleared_live_owner file={} pane={} miss_timestamp={}",
@@ -643,7 +643,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 "[route] registered pane {} still owns {} but startup-miss {} is not superseded by a newer open harness run — keeping marker until dispatch proves recovery",
                 registered_pane, file_path, miss_ts
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_startup_miss_retained_live_owner file={} pane={} miss_timestamp={}",
@@ -671,7 +671,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                     candidates,
                     preferred_active_window.as_deref(),
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_associated_pane_ambiguous file={} count={}",
@@ -685,7 +685,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 &associated_resolution
                 && winner.pane_id != *registered_pane
             {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_associated_pane_requires_manual_claim file={} pane={} sources={}",
@@ -709,7 +709,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                             "[route] registered pane {} has a healthy supervisor for {} despite missing actor/registered-owner proof — reusing registered pane",
                             registered_pane, file_path
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "route_registered_pane_reused_via_supervisor file={} pane={} health=healthy",
@@ -722,7 +722,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                             "[route] registered pane {} has a restartable supervisor for {} — restarting in place",
                             registered_pane, file_path
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "route_registered_pane_restart_via_supervisor file={} pane={}",
@@ -757,7 +757,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                             registered_pane
                         );
                         let provenance = pane_route_provenance(tmux, registered_pane);
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "route_registered_pane_restart_failed file={} {}",
@@ -773,7 +773,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                             "[route] registered pane {} for {} has a halted supervisor after {} restarts — refusing automatic restart",
                             registered_pane, file_path, restart_count
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "route_registered_pane_halted file={} pane={} restart_count={} {}",
@@ -794,7 +794,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                             "[route] registered pane {} is alive but no actor/registered owner for {} was proven and supervisor is unavailable — deregistering stale entry and continuing recovery",
                             registered_pane, file_path
                         );
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "route_registered_pane_deregistered_no_live_owner file={} {}",
@@ -841,7 +841,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                     ExistingPaneDispatchReadiness::BusyAlreadyRunning
                         if supervisor_recovered_without_path_owner =>
                     {
-                        crate::ops_log::log_op(
+                        agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
                                 "route_registered_pane_dispatch_via_healthy_supervisor file={} pane={} reason=missing_path_owner_prompt_probe_not_authoritative",
@@ -930,7 +930,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
             candidates,
             preferred_active_window.as_deref(),
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_associated_pane_ambiguous file={} count={}",
@@ -943,7 +943,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
     if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
         &associated_resolution
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_associated_pane_requires_manual_claim file={} pane={} sources={}",
@@ -1040,7 +1040,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
             candidates,
             tmux.active_window(target_session).as_deref(),
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_associated_pane_ambiguous_late file={} count={}",
@@ -1053,7 +1053,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
     if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
         &late_associated_resolution
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_associated_pane_requires_manual_claim_late file={} pane={} sources={}",
@@ -1148,7 +1148,7 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
                 );
             }
             BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_existing_pane_retry_route_after_fresh_restart file={} pane={} harness={}",
@@ -1315,7 +1315,7 @@ pub(crate) fn optimistic_busy_pane_dispatch(
     prompt_bearing_marker: Option<&str>,
     detail: &str,
 ) -> Result<String> {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_busy_existing_pane_optimistic_dispatch file={} pane={} harness={} detail={}",
@@ -1516,7 +1516,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -1605,7 +1605,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -1695,7 +1695,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -1839,7 +1839,7 @@ mod tests {
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2009,7 +2009,7 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2073,7 +2073,7 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2128,7 +2128,7 @@ mod tests {
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2231,7 +2231,7 @@ mod tests {
         agent_doc_snapshot_io::save(
             &doc,
             "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
         .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
@@ -2322,7 +2322,7 @@ mod tests {
         )
         .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2428,7 +2428,7 @@ mod tests {
             "busy mock session should be in reverse-i-search: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2536,7 +2536,7 @@ mod tests {
             "busy OpenCode mock should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2644,7 +2644,7 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2760,7 +2760,7 @@ mod tests {
         )
         .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2858,7 +2858,7 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2907,7 +2907,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3003,7 +3003,7 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3104,7 +3104,7 @@ mod tests {
         std::fs::write(&doc, current).unwrap();
         let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3301,7 +3301,7 @@ mod tests {
         let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3389,7 +3389,7 @@ mod tests {
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3536,7 +3536,7 @@ mod tests {
         let doc = dir.path().join("stale-starting-ready-prompt.md");
         let current = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,

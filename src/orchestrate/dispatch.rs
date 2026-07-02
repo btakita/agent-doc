@@ -217,7 +217,7 @@ pub(crate) fn run_ordered_task_step(
         agent_doc_flow_io::log_flow_event(
             file,
             agent_doc_template::patchback::child_patchback_normalization_event(&normalization),
-            agent_doc_orchestration::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         );
         normalization.response
     } else {
@@ -273,11 +273,7 @@ pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
     let file_content = fs::read_to_string(file)
         .with_context(|| format!("failed to read {} before orchestrating", file.display()))?;
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
-    agent_doc_snapshot_io::save(
-        file,
-        &file_content,
-        agent_doc_orchestration::ops_log::log_op,
-    )?;
+    agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
     agent_doc_cycle_state_io::mark_abandoned(
         file,
         "orchestrate_preflight_handoff_closed",
@@ -421,8 +417,7 @@ mod tests {
 
         let snapshot = template_doc();
         fs::write(&doc, &snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_orchestration::ops_log::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(dir.path())
             .args(["add", "session.md"])

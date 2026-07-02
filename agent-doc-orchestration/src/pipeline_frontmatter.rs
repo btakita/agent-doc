@@ -23,7 +23,7 @@ pub(crate) fn mirror_pipeline_frontmatter(
         }
         Ok(())
     })() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!("pipeline_mirror_failed file={} err={}", file.display(), e),
         );
@@ -48,7 +48,7 @@ pub(crate) fn clear_pipeline_frontmatter(file: &Path) {
         }
         Ok(())
     })() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!("pipeline_clear_failed file={} err={}", file.display(), e),
         );

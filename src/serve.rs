@@ -1385,8 +1385,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let mut writer = agent_doc_orchestration::capture::PartialCheckpointWriter::with_interval(
             &doc,

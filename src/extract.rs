@@ -242,11 +242,7 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     // Update source: replace exchange content with remaining
     let new_source = exchange.replace_content(&source_content, &remaining);
     write::atomic_write_pub(source, &new_source)?;
-    agent_doc_snapshot_io::save(
-        source,
-        &new_source,
-        agent_doc_orchestration::ops_log::log_op,
-    )?;
+    agent_doc_snapshot_io::save(source, &new_source, agent_doc_ops_log_io::log_op)?;
 
     // Append extracted content to target's exchange component with source annotation
     let annotation = format_source_annotation(source, "Extract");
@@ -281,11 +277,7 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     };
 
     write::atomic_write_pub(target, &new_target)?;
-    agent_doc_snapshot_io::save(
-        target,
-        &new_target,
-        agent_doc_orchestration::ops_log::log_op,
-    )?;
+    agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
     eprintln!(
         "[extract] Moved last entry from {}:{} → {}:{}",
@@ -402,11 +394,7 @@ pub fn transfer(
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(target, &target_content)?;
-        agent_doc_snapshot_io::save(
-            target,
-            &target_content,
-            agent_doc_orchestration::ops_log::log_op,
-        )?;
+        agent_doc_snapshot_io::save(target, &target_content, agent_doc_ops_log_io::log_op)?;
         eprintln!("[transfer] Auto-created {} (template)", target.display());
     }
 
@@ -439,11 +427,7 @@ pub fn transfer(
     // Clear source component
     let new_source = comp.replace_content(&source_content, "\n");
     write::atomic_write_pub(source, &new_source)?;
-    agent_doc_snapshot_io::save(
-        source,
-        &new_source,
-        agent_doc_orchestration::ops_log::log_op,
-    )?;
+    agent_doc_snapshot_io::save(source, &new_source, agent_doc_ops_log_io::log_op)?;
 
     // Append to target component (or end of file) with source annotation
     let annotation = format_source_annotation(source, "Transfer");
@@ -470,11 +454,7 @@ pub fn transfer(
     };
 
     write::atomic_write_pub(target, &new_target)?;
-    agent_doc_snapshot_io::save(
-        target,
-        &new_target,
-        agent_doc_orchestration::ops_log::log_op,
-    )?;
+    agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
     // Also transfer tracked list surfaces that belong with the moved context.
     if !is_backlog_component(component_name) && !is_icebox_component(component_name) {
@@ -491,13 +471,13 @@ pub fn transfer(
                 agent_doc_snapshot_io::save(
                     target,
                     &new_target_surface,
-                    agent_doc_orchestration::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 )?;
                 write::atomic_write_pub(source, &new_source_surface)?;
                 agent_doc_snapshot_io::save(
                     source,
                     &new_source_surface,
-                    agent_doc_orchestration::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 )?;
                 latest_source = new_source_surface;
                 latest_target = new_target_surface;
@@ -588,11 +568,7 @@ fn transfer_pending_items(
     };
     let new_source = source_pending.replace_content(&source_content, &new_pending_content);
     write::atomic_write_pub(source, &new_source)?;
-    agent_doc_snapshot_io::save(
-        source,
-        &new_source,
-        agent_doc_orchestration::ops_log::log_op,
-    )?;
+    agent_doc_snapshot_io::save(source, &new_source, agent_doc_ops_log_io::log_op)?;
 
     // Append matched items to target component
     let target_pending = target_comps
@@ -611,11 +587,7 @@ fn transfer_pending_items(
     };
 
     write::atomic_write_pub(target, &new_target)?;
-    agent_doc_snapshot_io::save(
-        target,
-        &new_target,
-        agent_doc_orchestration::ops_log::log_op,
-    )?;
+    agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
     agent_doc_orchestration::git::commit(target)?;
 
@@ -729,11 +701,7 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
     };
 
     write::atomic_write_pub(target, &new_target)?;
-    agent_doc_snapshot_io::save(
-        target,
-        &new_target,
-        agent_doc_orchestration::ops_log::log_op,
-    )?;
+    agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
     agent_doc_orchestration::git::commit(target)?;
 

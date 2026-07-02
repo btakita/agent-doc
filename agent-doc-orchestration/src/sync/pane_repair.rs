@@ -61,7 +61,10 @@ pub(crate) fn protected_registered_pane_state_from_capture(
         agent_doc_sync::protected_registered_pane_state_from_capture(&harness, capture)?;
     if protected.reason == "active permission prompt" {
         agent_doc_tmux_io::input_diag::log_prompt_detection(
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                Some(file),
+                agent_doc_ops_log_io::log_op,
+            ),
             "sync.protected_registered_pane",
             "registered_pane",
             &harness.binary,
@@ -477,7 +480,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let content = "---\nagent_doc_session: session-lost-pane\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
@@ -535,7 +538,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -593,7 +596,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -667,7 +670,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -688,7 +691,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, updated).unwrap();
-        agent_doc_snapshot_io::save(&doc, updated, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, updated, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
@@ -751,7 +754,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let content = "---\nagent_doc_session: dead-pane-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
@@ -846,7 +849,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(tmp.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -1185,7 +1188,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         assert_eq!(open_cycle_protected_file_state(&doc), None);
 

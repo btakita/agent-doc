@@ -51,7 +51,7 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
         std::fs::write(file, target)
             .with_context(|| format!("pending_write: failed to write {}", file.display()))?;
         crate::write::record_document_write_provenance(file, target);
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "pending_write_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
@@ -107,7 +107,7 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
 }
 
 fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &backlog::SymptomDedupeKey) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "symptom_dedupe_attached file={} surface={} id={} {}",

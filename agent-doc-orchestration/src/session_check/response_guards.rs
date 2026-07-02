@@ -41,7 +41,7 @@ pub(crate) fn check_dropped_queue_prompt_guard(
         agent_doc_cycle_state_io::clear_dropped_queue_prompts(file)?;
         return Ok(GuardResult::None);
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "dropped_queue_prompt_guard_failed file={} count={}",
@@ -87,7 +87,7 @@ pub(crate) fn check_queue_response_contamination_guard(
     if contaminated.is_empty() {
         return Ok(GuardResult::None);
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "queue_response_contamination_guard_failed file={} count={}",
@@ -128,7 +128,7 @@ pub(crate) fn check_dropped_exchange_prompt_guard(
         agent_doc_cycle_state_io::clear_dropped_exchange_prompts(file)?;
         return Ok(GuardResult::None);
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "dropped_exchange_prompt_guard_failed file={} count={}",
@@ -202,7 +202,7 @@ pub(crate) fn check_snapshot_committed_guard(
                 &recovery_hint,
             );
             eprintln!("{}", msg);
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "snapshot_committed_guard_failed file={} snapshot_len={} head_len={}",
@@ -282,7 +282,7 @@ pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result
             return Ok(GuardResult::None);
         }
         agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyDecision::SkipNoopCommit => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "committed_without_response_body_guard_skipped_noop_commit file={} cycle_id={} last_event={} pending_done={} reaped={}",
@@ -306,7 +306,7 @@ pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result
         &recovery_hint,
     );
     eprintln!("{}", msg);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "committed_without_response_body_guard_failed file={} cycle_id={} last_event={} had_pending_mutations={} pending_done={} reaped={}",
@@ -349,7 +349,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         agent_doc_cycle_state_io::record_pending_done_ids(
@@ -394,7 +394,7 @@ mod tests {
         let current =
             "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
         fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["nsga4verify".to_string()])

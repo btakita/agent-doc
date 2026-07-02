@@ -823,7 +823,7 @@ fn finalize_orchestration_batch_changed(
     agent_doc_flow_io::log_flow_event(
         file,
         agent_doc_work_graph::source_changed_event(completed_steps, total_steps),
-        agent_doc_orchestration::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
     eprintln!(
         "[orchestrate] source task list changed after step {}/{}; stopping before next step",
@@ -1916,12 +1916,7 @@ mod tests {
         );
 
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(
-            &doc,
-            snapshot_content,
-            agent_doc_orchestration::ops_log::log_op,
-        )
-        .unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         let batch = resolve_task_batch(
             &doc,
@@ -1982,12 +1977,7 @@ mod tests {
         );
 
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(
-            &doc,
-            snapshot_content,
-            agent_doc_orchestration::ops_log::log_op,
-        )
-        .unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         let batch = resolve_task_batch(
             &doc,
@@ -2093,12 +2083,7 @@ mod tests {
         );
 
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(
-            &doc,
-            snapshot_content,
-            agent_doc_orchestration::ops_log::log_op,
-        )
-        .unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         let batch = resolve_task_batch(
             &doc,

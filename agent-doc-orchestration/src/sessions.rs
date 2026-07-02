@@ -818,7 +818,7 @@ mod tests {
             &pane_id,
             "agent-doc plan.md\n",
             "opencode",
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "sessions.send_submitted_text_for_harness",
         )
         .unwrap();

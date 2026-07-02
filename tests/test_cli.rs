@@ -5770,6 +5770,8 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
     let ops_log_io_manifest: toml::Value = toml::from_str(&ops_log_io_manifest).unwrap();
     let ops_log_io_dependencies = ops_log_io_manifest["dependencies"].as_table().unwrap();
     for required in [
+        "agent-doc-cycle-state-io",
+        "agent-doc-frontmatter",
         "agent-doc-git-io",
         "agent-doc-hash",
         "agent-doc-log-time",
@@ -5786,7 +5788,6 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
     }
     for forbidden in [
         "agent-doc-fs",
-        "agent-doc-frontmatter",
         "agent-doc-orchestration",
         "agent-doc-sqlite",
         "agent-doc-tmux-io",
@@ -5812,6 +5813,8 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         "pub const LOG_ROTATE_MAX_BYTES",
         "fn rotate_log_if_oversized(",
         "pub struct OpsLogTracking",
+        "pub fn log_op(",
+        "pub fn log_cycle(",
         "pub fn append_ops_log_at_project(",
         "pub fn append_cycle_log_for_file(",
         "pub fn append_cycle_entry_at_project(",
@@ -5820,6 +5823,8 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         "pub fn latest_ipc_proof_diagnostic_hint(",
         "pub fn detect_write_completed_commit_missing(",
         "agent_doc_project_root_io::project_root_containing(",
+        "agent_doc_frontmatter::frontmatter::parse(",
+        "agent_doc_cycle_state_io::load(",
         "agent_doc_turn::op_log::{",
         "strip_timestamp_prefix",
         "IPC_PROOF_INSUFFICIENT_EVENT",
@@ -5836,29 +5841,15 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
             "agent-doc-ops-log-io must own ops-log read/write adapters: {required}"
         );
     }
-    let orchestration_ops_log =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ops_log.rs")).unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
-        orchestration_ops_log.contains("agent_doc_ops_log_io::append_cycle_log_for_file(")
-            && orchestration_ops_log.contains("agent_doc_ops_log_io::append_ops_log_at_project(")
-            && orchestration_ops_log.contains("agent_doc_ops_log_io::OpsLogTracking"),
-        "orchestration ops_log should adapt metadata into focused ops-log IO"
+        !orchestration_lib.contains("pub mod ops_log")
+            && !manifest_dir
+                .join("agent-doc-orchestration/src/ops_log.rs")
+                .exists(),
+        "orchestration must not keep an ops_log facade module"
     );
-    for forbidden in [
-        "pub use agent_doc_ops_log_io::CycleEntry;",
-        "fn rotate_log_if_oversized(",
-        "const LOG_ROTATE_MAX_BYTES",
-        "serde_json::to_string",
-        "std::fs::OpenOptions::new()",
-        "agent_doc_git_io::revision::last_commit_hash",
-        "agent_doc_hash::content_hash",
-        "agent_doc_log_time::format_ops_log_line",
-    ] {
-        assert!(
-            !orchestration_ops_log.contains(forbidden),
-            "orchestration ops_log must not re-own ops-log file append/rotation IO: {forbidden}"
-        );
-    }
     for (path, source) in [
         (
             "src/plan.rs",
@@ -6826,20 +6817,15 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
         "agent-doc-log-time must stay a first-class workspace crate"
     );
 
-    let ops_log_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ops_log.rs")).unwrap();
-    for forbidden_snippet in [
-        "pub use agent_doc_log_time",
-        "fn iso_timestamp(",
-        "fn ops_log_tracking_suffix(",
-        "pub fn format_log_timestamp",
-        "pub fn parse_log_timestamp",
-    ] {
-        assert!(
-            !ops_log_source.contains(forbidden_snippet),
-            "ops_log must not re-export or re-own log timestamp helpers: {forbidden_snippet}"
-        );
-    }
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod ops_log")
+            && !manifest_dir
+                .join("agent-doc-orchestration/src/ops_log.rs")
+                .exists(),
+        "orchestration must not keep an ops_log facade module"
+    );
     let ops_log_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-ops-log-io/src/lib.rs")).unwrap();
     assert!(
@@ -6880,7 +6866,7 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
     }
 
     for relative in [
-        "agent-doc-orchestration/src/ops_log.rs",
+        "agent-doc-ops-log-io/src/lib.rs",
         "agent-doc-orchestration/src/session_accretion.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/sync.rs",
@@ -7029,7 +7015,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "fn clear_threshold_for_doc(",
         "agent_doc_project_config_io::load_project_for_doc(file).agent_doc_queue_context_reset",
         "agent_doc_project_config_io::load_project_for_doc(file).agent_doc_clear_threshold",
-        "serde_json::from_str::<crate::ops_log::CycleEntry>",
+        "serde_json::from_str::<crate::agent_doc_ops_log_io::CycleEntry>",
         "agent_doc_log_time::parse_log_timestamp",
         "agent_doc_fs::read_optional_text(",
     ] {
@@ -9809,7 +9795,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             && orchestration_start_idle_watch.contains(
                 "agent_doc_workflow_io::convergence_playback::record_blocked_boundary_with_logger("
             )
-            && orchestration_start_idle_watch.contains("crate::ops_log::log_op"),
+            && orchestration_start_idle_watch.contains("agent_doc_ops_log_io::log_op"),
         "orchestration idle-watch should inject ops-log into focused convergence playback IO"
     );
     assert!(
@@ -11187,9 +11173,9 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
     assert!(
         orchestration_write.contains("agent_doc_lint_io::run_with_logger")
-            && orchestration_write.contains("crate::ops_log::log_op")
+            && orchestration_write.contains("agent_doc_ops_log_io::log_op")
             && orchestration_stream.contains("agent_doc_lint_io::run_with_logger")
-            && orchestration_stream.contains("crate::ops_log::log_op"),
+            && orchestration_stream.contains("agent_doc_ops_log_io::log_op"),
         "orchestration write/stream should inject ops-log into focused lint IO directly"
     );
     for forbidden in [
@@ -12313,7 +12299,7 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains("agent_doc_merge_io::merge_contents_crdt_with_ops(")
-                && source.contains("crate::ops_log::log_op")
+                && source.contains("agent_doc_ops_log_io::log_op")
                 && !source.contains("merge::merge_contents_crdt_with_ops("),
             "{relative} should call focused op-capture CRDT merge IO directly"
         );
@@ -18402,7 +18388,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
     );
 
     for relative in [
-        "agent-doc-orchestration/src/ops_log.rs",
+        "agent-doc-ops-log-io/src/lib.rs",
         "agent-doc-op-capture-io/src/lib.rs",
         "agent-doc-orchestration/src/backlog_cmd.rs",
         "agent-doc-orchestration/src/graph.rs",
@@ -18884,11 +18870,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "watch should call focused project-root IO instead of owning .agent-doc root discovery"
     );
     let ops_log_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ops_log.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-ops-log-io/src/lib.rs")).unwrap();
     assert!(
         !ops_log_source.contains("agent_doc_fs::find_project_root(")
             && ops_log_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "ops_log should call focused project-root IO instead of owning .agent-doc root discovery"
+        "ops-log IO should call focused project-root IO instead of owning .agent-doc root discovery"
     );
     let realtime_model_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/realtime_model.rs"))
@@ -19222,7 +19208,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let ffi_source = fs::read_to_string(manifest_dir.join("src/ffi.rs")).unwrap();
     assert!(
         ffi_source.contains("agent_doc_ipc_io::start_listener_with_logger(")
-            && ffi_source.contains("agent_doc_orchestration::ops_log::log_op")
+            && ffi_source.contains("agent_doc_ops_log_io::log_op")
             && ffi_source.contains("agent_doc_ipc_io::socket_path(")
             && !ffi_source.contains("agent_doc_orchestration::ipc_socket"),
         "FFI listener should call focused IPC IO directly while injecting the ops-log sink"
@@ -19698,7 +19684,7 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         status_adapter.contains("agent_doc_status_io::set_with_options(&STATUS_EFFECTS")
             && status_adapter.contains("converge_or_disk_write(file, previous, updated, phase)")
             && status_adapter.contains("record_document_write_provenance(file, updated)")
-            && status_adapter.contains("crate::ops_log::log_op(file, message)"),
+            && status_adapter.contains("agent_doc_ops_log_io::log_op(file, message)"),
         "write status adapter should only inject orchestration effects into focused status IO"
     );
     for forbidden in [
@@ -20005,7 +19991,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains("agent_doc_snapshot_io::mps_enabled()")
-                && source.contains("crate::ops_log::log_op")
+                && source.contains("agent_doc_ops_log_io::log_op")
                 && !source.contains("snapshot::mps_enabled(")
                 && !source.contains("snapshot::save_baseline_model(")
                 && !source.contains("snapshot::load_baseline_model(")

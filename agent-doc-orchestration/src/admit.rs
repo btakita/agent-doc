@@ -46,7 +46,7 @@ pub fn admit(file: &Path) -> Result<AdmitOutput> {
     let state =
         agent_doc_cycle_state_io::start_preflight(file, snapshot.as_deref(), Some(&current))?;
     let phase = state.phase.as_str().to_string();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "realtime_admit file={} cycle_id={} phase={} source=admit action=accepted maintenance_required=false preflight_required=false",

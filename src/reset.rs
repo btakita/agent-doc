@@ -66,7 +66,7 @@ pub fn run(
     let updated = frontmatter::write(&fm, body)?;
     if force_disk {
         agent_doc_orchestration::write::atomic_write_pub(file, &updated)?;
-        agent_doc_orchestration::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "reset_resume_clear_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
@@ -111,7 +111,7 @@ pub fn run(
 }
 
 fn rebuild_sidecars_from_current(file: &Path, content: &str, save_baseline: bool) -> Result<()> {
-    agent_doc_snapshot_io::save(file, content, agent_doc_orchestration::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)?;
     let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(content).encode_state();
     agent_doc_merge_io::save_document_crdt(file, &crdt, content)?;
     if save_baseline {
@@ -167,12 +167,7 @@ mod tests {
         let doc = dir.path().join("session.md");
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: old\n---\n\nBody\n";
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(
-            &doc,
-            "stale snapshot",
-            agent_doc_orchestration::ops_log::log_op,
-        )
-        .unwrap();
+        agent_doc_snapshot_io::save(&doc, "stale snapshot", agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_snapshot_io::save_crdt(&doc, b"stale crdt").unwrap();
 
         run(&doc, true, false, true).unwrap();
@@ -232,12 +227,7 @@ mod tests {
         let doc = dir.path().join("session.md");
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: keep-me\n---\n\nBody\n";
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(
-            &doc,
-            "stale snapshot",
-            agent_doc_orchestration::ops_log::log_op,
-        )
-        .unwrap();
+        agent_doc_snapshot_io::save(&doc, "stale snapshot", agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_snapshot_io::save_crdt(&doc, b"stale crdt").unwrap();
         std::fs::write(
             agent_doc_fs::baseline_path_for(&doc).unwrap(),
@@ -312,12 +302,7 @@ mod tests {
 
         // Current file (post-answer/compaction): queue has ONLY head A.
         std::fs::write(&doc, only_a).unwrap();
-        agent_doc_snapshot_io::save(
-            &doc,
-            "stale snapshot",
-            agent_doc_orchestration::ops_log::log_op,
-        )
-        .unwrap();
+        agent_doc_snapshot_io::save(&doc, "stale snapshot", agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_snapshot_io::save_crdt(&doc, b"stale crdt").unwrap();
         std::fs::write(
             agent_doc_fs::baseline_path_for(&doc).unwrap(),
@@ -376,12 +361,7 @@ mod tests {
         let doc = dir.path().join("session.md");
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: old\n---\n\nBody\n";
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(
-            &doc,
-            "stale snapshot",
-            agent_doc_orchestration::ops_log::log_op,
-        )
-        .unwrap();
+        agent_doc_snapshot_io::save(&doc, "stale snapshot", agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_snapshot_io::save_crdt(&doc, b"stale crdt").unwrap();
         agent_doc_snapshot_io::save_overlay_crdt(&doc, b"stale overlay").unwrap();
 

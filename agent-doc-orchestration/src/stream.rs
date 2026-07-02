@@ -140,7 +140,7 @@ pub fn run(
 
     // Compute diff
     let the_diff = match agent_doc_diff_io::compute(
-        &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+        &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
         file,
     )? {
         Some(d) => {
@@ -254,7 +254,7 @@ pub fn run(
         let current = std::fs::read_to_string(file)?;
         let updated = frontmatter::set_resume_id(&current, sid)?;
         crate::write::atomic_write_pub(file, &updated)?;
-        agent_doc_snapshot_io::save(file, &updated, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &updated, agent_doc_ops_log_io::log_op)?;
     }
 
     // Lint gate: runs on the merged document AFTER the final flush /
@@ -264,7 +264,7 @@ pub fn run(
     // `write::run_command` (Phase 3b.1). Mode resolution precedence:
     // CLI override > frontmatter `agent_doc_lint_dialect` > workspace
     // `.agent-doc/config.toml` `[lint] dialect` > default (`warn`).
-    agent_doc_lint_io::run_with_logger(file, lint_override, crate::ops_log::log_op)?;
+    agent_doc_lint_io::run_with_logger(file, lint_override, agent_doc_ops_log_io::log_op)?;
 
     // Final git commit
     if !no_git && let Err(e) = git::commit(file) {
@@ -482,7 +482,7 @@ fn stream_loop(
             )
             .unwrap_or_else(|_| std::fs::read_to_string(file).unwrap_or_default())
         };
-        agent_doc_snapshot_io::save(file, &content_ours, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &content_ours, agent_doc_ops_log_io::log_op)?;
         let doc = crdt::CrdtDoc::from_text(&content_ours);
         agent_doc_merge_io::save_document_crdt(file, &doc.encode_state(), &content_ours)?;
 
@@ -808,7 +808,7 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nagent_doc_session: sid\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let chunks = mock_chunks(vec![
@@ -1148,7 +1148,7 @@ user prompt here
             <!-- /agent:done -->\n";
         std::fs::write(&doc, post_flush).unwrap();
 
-        let err = agent_doc_lint_io::run_with_logger(&doc, None, crate::ops_log::log_op)
+        let err = agent_doc_lint_io::run_with_logger(&doc, None, agent_doc_ops_log_io::log_op)
             .expect_err("stream's lint gate must reject malformed directive");
         let msg = format!("{}", err);
         assert!(
@@ -1175,7 +1175,7 @@ user prompt here
             <!-- /agent:exchange -->\n";
         std::fs::write(&doc, post_flush).unwrap();
 
-        agent_doc_lint_io::run_with_logger(&doc, None, crate::ops_log::log_op)
+        agent_doc_lint_io::run_with_logger(&doc, None, agent_doc_ops_log_io::log_op)
             .expect("clean stream output must pass lint gate");
     }
 
@@ -1199,7 +1199,7 @@ user prompt here
         agent_doc_lint_io::run_with_logger(
             &doc,
             Some(agent_doc_frontmatter::lint::LintCliMode::Off),
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
         .expect("--lint=off must bypass the stream lint gate even with malformed directive");
     }

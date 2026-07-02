@@ -14,7 +14,7 @@ pub(crate) fn deliver_ipc_inject(
         let profile =
             agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
         agent_doc_tmux_io::input_diag::log_text_submit(
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             &format!("supervisor.{diag_op}"),
             &format!("pane:{pane_id}"),
             bytes,
@@ -31,7 +31,10 @@ pub(crate) fn deliver_ipc_inject(
                 let mut w = writer_arc.lock().unwrap();
                 let normalized = normalize_supervisor_inject_bytes(bytes);
                 agent_doc_tmux_io::input_diag::log_transform_event(
-                    agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+                    agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                        None,
+                        agent_doc_ops_log_io::log_op,
+                    ),
                     &format!("supervisor.{diag_op}"),
                     "child_pty",
                     "normalize_lf_to_cr",
@@ -520,7 +523,7 @@ pub(crate) fn spawn_writer_thread(
                         agent_doc_tmux_io::input_diag::log_transform_event(
                             agent_doc_tmux_io::input_diag::InputDiagSink::new(
                                 None,
-                                crate::ops_log::log_op,
+                                agent_doc_ops_log_io::log_op,
                             ),
                             "supervisor.stdin",
                             "child_pty",
@@ -545,7 +548,7 @@ pub(crate) fn spawn_writer_thread(
                         agent_doc_tmux_io::input_diag::log_prompt_detection(
                             agent_doc_tmux_io::input_diag::InputDiagSink::new(
                                 None,
-                                crate::ops_log::log_op,
+                                agent_doc_ops_log_io::log_op,
                             ),
                             "supervisor.stdin",
                             "child_pty",
@@ -556,7 +559,7 @@ pub(crate) fn spawn_writer_thread(
                         agent_doc_tmux_io::input_diag::log_transform_event(
                             agent_doc_tmux_io::input_diag::InputDiagSink::new(
                                 None,
-                                crate::ops_log::log_op,
+                                agent_doc_ops_log_io::log_op,
                             ),
                             "supervisor.stdin",
                             "child_pty",
@@ -571,7 +574,7 @@ pub(crate) fn spawn_writer_thread(
                         agent_doc_tmux_io::input_diag::log_byte_events(
                             agent_doc_tmux_io::input_diag::InputDiagSink::new(
                                 None,
-                                crate::ops_log::log_op,
+                                agent_doc_ops_log_io::log_op,
                             ),
                             "supervisor.stdin",
                             "child_pty",
@@ -665,7 +668,7 @@ pub(crate) fn spawn_writer_thread(
                             agent_doc_tmux_io::input_diag::log_byte_events(
                                 agent_doc_tmux_io::input_diag::InputDiagSink::new(
                                     None,
-                                    crate::ops_log::log_op,
+                                    agent_doc_ops_log_io::log_op,
                                 ),
                                 "supervisor.stdin",
                                 "child_pty",

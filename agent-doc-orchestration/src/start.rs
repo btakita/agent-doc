@@ -426,7 +426,7 @@ fn log_idle_queue_drain_submit(
     drain_payload: &str,
 ) {
     let target = shared.inject_pane.as_deref().unwrap_or("child_pty");
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "idle_queue_watch_drain file={} harness={} payload_kind={} submit_mode={} target={} head_bytes={} head_sha256={} payload_bytes={} proof=go_drain_dispatch",
@@ -666,7 +666,7 @@ fn spawn_route_owned_completion_thread(
                             state.last_event
                         );
                         log_event(&mut session_log, &event);
-                        crate::ops_log::log_op(&file, &event);
+                        agent_doc_ops_log_io::log_op(&file, &event);
                         ready_busy_logged_key = key.clone();
                     }
 
@@ -698,7 +698,7 @@ fn spawn_route_owned_completion_thread(
                     let busy_guard = decision.reason.starts_with("live_pane_busy_no_idle_prompt");
                     if !busy_guard || logged_busy_cycle.as_deref() != Some(&state.cycle_id) {
                         log_event(&mut session_log, &event);
-                        crate::ops_log::log_op(&file, &event);
+                        agent_doc_ops_log_io::log_op(&file, &event);
                     }
                     if decision.reap {
                         completed.store(true, Ordering::Relaxed);
@@ -939,7 +939,7 @@ fn auto_trigger_inject_command(
         let profile =
             agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
         agent_doc_tmux_io::input_diag::log_text_submit(
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "supervisor.auto_trigger",
             &format!("pane:{pane_id}"),
             &submitted_text,
@@ -963,7 +963,7 @@ fn auto_trigger_inject_command(
 
     let payload = submit_bytes(&submitted_text).into_bytes();
     agent_doc_tmux_io::input_diag::log_text_submit(
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "supervisor.auto_trigger",
         "child_pty",
         &submitted_text,
@@ -1007,7 +1007,7 @@ fn auto_trigger_clear_command(
         let profile =
             agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
         agent_doc_tmux_io::input_diag::log_text_submit(
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "supervisor.auto_trigger_clear",
             &format!("pane:{pane_id}"),
             &submitted_text,
@@ -1031,7 +1031,7 @@ fn auto_trigger_clear_command(
 
     let payload = submit_bytes(&submitted_text).into_bytes();
     agent_doc_tmux_io::input_diag::log_text_submit(
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "supervisor.auto_trigger_clear",
         "child_pty",
         &submitted_text,
@@ -1078,7 +1078,7 @@ fn dispatch_submit_text_to_tmux(
         pane,
         text,
         harness,
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "sessions.send_submitted_text_for_harness",
     )
     .with_context(|| format!("failed to inject submitted input into pane {}", pane))
@@ -2720,7 +2720,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         for args in [
             vec!["init"],
             vec!["config", "user.email", "test@example.com"],

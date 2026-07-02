@@ -185,7 +185,7 @@ pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(
                 .map(|()| hub.canonical_encoded_state())
         }
     })??;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={}",
@@ -208,7 +208,7 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
     }
     let client_id = mint_client_id(identity);
     let removed = with_hub_seeded_from_file(file, |hub| hub.deregister(client_id))?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "crdt_replica_deregister file={} authority=multi_replica client_id={} removed={}",
@@ -247,7 +247,7 @@ pub fn relay_replica_update_for_file(
     let packet = with_hub_seeded_from_file(file, |hub| hub.relay_update(client_id, update))??;
     let canonical_len =
         with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "crdt_replica_fanout file={} authority=multi_replica origin={} targets={} update_bytes={} canonical_len={}",
@@ -288,7 +288,7 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
     // ~800MB and starving the session) without recording anything actionable
     // (#crdtpullspam).
     if !updates.is_empty() || delivery.current_generation != delivery.last_ack_generation {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "crdt_replica_pull file={} authority=multi_replica client_id={} updates={} current_generation={} last_ack_generation={}",
@@ -323,7 +323,7 @@ pub fn ack_replica_update_for_file(
     let acknowledged = with_hub_seeded_from_file(file, |hub| {
         hub.ack_delivery(client_id, patch_id, generation)
     })??;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "crdt_replica_ack file={} authority=multi_replica client_id={} patch_id={} generation={} acknowledged={}",
@@ -439,7 +439,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
         match with_hub_seeded_from_file(file, |hub| {
             hub.reconcile_canonical_against_baseline(&on_disk)
         }) {
-            Ok(Ok(true)) => crate::ops_log::log_op(
+            Ok(Ok(true)) => agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "crdt_canonical_rebuilt_from_baseline file={} authority=multi_replica disk_len={}",
@@ -448,7 +448,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
                 ),
             ),
             Ok(Ok(false)) => {}
-            Ok(Err(e)) => crate::ops_log::log_op(
+            Ok(Err(e)) => agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "crdt_canonical_baseline_reconcile_error file={} error={}",
@@ -456,7 +456,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
                     e
                 ),
             ),
-            Err(e) => crate::ops_log::log_op(
+            Err(e) => agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "crdt_canonical_baseline_reconcile_registry_error file={} error={}",
@@ -470,7 +470,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
         Ok(Ok(ready)) => {
             let delivery_converged =
                 with_hub_seeded_from_file(file, |hub| hub.delivery_converged()).unwrap_or(false);
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "crdt_commit_barrier file={} authority=multi_replica ready={} delivery_converged={} live_editors={}",
@@ -483,7 +483,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
             ready && delivery_converged
         }
         Ok(Err(e)) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "crdt_commit_barrier_error file={} authority=multi_replica error={}",
@@ -494,7 +494,7 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
             false
         }
         Err(e) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "crdt_commit_barrier_registry_error file={} error={}",
@@ -525,7 +525,7 @@ pub fn record_committed_baseline_for_file(file: &Path) {
     let on_disk = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "crdt_record_committed_baseline_read_error file={} error={}",
@@ -539,7 +539,7 @@ pub fn record_committed_baseline_for_file(file: &Path) {
     let hash = match agent_doc_fs::document_state_hash(file) {
         Ok(h) => h,
         Err(e) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "crdt_record_committed_baseline_hash_error file={} error={}",
@@ -556,7 +556,7 @@ pub fn record_committed_baseline_for_file(file: &Path) {
                 hub.record_committed_baseline(&on_disk);
             }
         }
-        Err(e) => crate::ops_log::log_op(
+        Err(e) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "crdt_record_committed_baseline_registry_error file={} error={}",
@@ -597,7 +597,7 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
     let _ = settle_or_flush_editor_sync_barrier(file, "disk_projection_reconcile");
     let changed =
         with_hub_seeded_from_file(file, |hub| hub.reconcile_disk_projection(projection))??;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "crdt_disk_demotion_reconcile file={} authority=multi_replica disk_added_ops={}",
@@ -620,7 +620,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
         .iter()
         .filter(|status| status.in_flight)
         .count();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "editor_sync_barrier file={} reason={} outcome={:?} statuses={} in_flight={} typing_recent={}",
@@ -639,7 +639,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
     let canonical = match file.canonicalize() {
         Ok(path) => path,
         Err(e) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "editor_sync_barrier_flush_skipped file={} reason={} cause=canonicalize_error error={}",
@@ -676,7 +676,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
     };
     match publish_result {
         Ok(true) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "editor_sync_barrier_live_buffer_publish_requested file={} reason={} transport={} patch_id={}",
@@ -688,7 +688,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
             );
         }
         Ok(false) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "editor_sync_barrier_live_buffer_publish_not_acked file={} reason={} transport={} patch_id={}",
@@ -701,7 +701,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
             return false;
         }
         Err(e) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "editor_sync_barrier_live_buffer_publish_error file={} reason={} transport={} patch_id={} error={}",
@@ -728,7 +728,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
         .iter()
         .filter(|status| status.in_flight)
         .count();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "editor_sync_barrier_after_flush file={} reason={} outcome={:?} statuses={} in_flight={} typing_recent={}",
@@ -749,7 +749,7 @@ fn mark_published_live_buffer_snapshots_synced(file: &Path, file_key: &str, reas
             continue;
         }
         let Some(editor_id) = snapshot.editor_id.as_deref() else {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "editor_sync_barrier_live_buffer_publish_sync_skipped file={} reason={} cause=missing_editor_id len={} hash={}",
@@ -762,7 +762,7 @@ fn mark_published_live_buffer_snapshots_synced(file: &Path, file_key: &str, reas
             continue;
         };
         let Some(content) = snapshot.content.as_deref() else {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "editor_sync_barrier_live_buffer_publish_sync_skipped file={} reason={} editor_id={} cause=missing_content len={} hash={}",
@@ -784,7 +784,7 @@ fn mark_published_live_buffer_snapshots_synced(file: &Path, file_key: &str, reas
             snapshot.editor_version.as_deref().unwrap_or("unknown"),
             &capabilities,
         ) {
-            Ok(()) => crate::ops_log::log_op(
+            Ok(()) => agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "editor_sync_barrier_live_buffer_publish_synced file={} reason={} editor_id={} len={} hash={}",
@@ -795,7 +795,7 @@ fn mark_published_live_buffer_snapshots_synced(file: &Path, file_key: &str, reas
                     snapshot.hash
                 ),
             ),
-            Err(e) => crate::ops_log::log_op(
+            Err(e) => agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "editor_sync_barrier_live_buffer_publish_sync_error file={} reason={} editor_id={} len={} hash={} error={}",

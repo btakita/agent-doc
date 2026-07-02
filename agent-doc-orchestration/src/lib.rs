@@ -34,9 +34,6 @@
 //! for harness, git, editor, and remaining command ports while those ports are
 //! split into narrower crates.
 
-// Foundation utilities (increments 1–5).
-pub mod ops_log;
-
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod admin;
 pub mod admit;

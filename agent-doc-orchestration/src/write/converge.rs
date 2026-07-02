@@ -37,7 +37,7 @@ pub fn guard_no_stale_snapshot_reset_drift(
     let snapshot_len = drift.snapshot_len;
     let current_len = drift.current_len;
     if active_capture_response_removed(file, snapshot_doc, current_doc) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "stale_snapshot_rebase_skipped_active_capture file={} phase={} old_snap_len={} new_snap_len={}",
@@ -50,10 +50,10 @@ pub fn guard_no_stale_snapshot_reset_drift(
         return Ok(false);
     }
     if let Some(reason) = classify_stale_snapshot_visible_rebase(file, snapshot_doc, current_doc) {
-        agent_doc_snapshot_io::save(file, current_doc, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, current_doc, agent_doc_ops_log_io::log_op)?;
         let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(current_doc).encode_state();
         agent_doc_merge_io::save_document_crdt(file, &crdt, current_doc)?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "stale_snapshot_visible_rebased file={} phase={} reason={} old_snap_len={} new_snap_len={}",
@@ -67,7 +67,7 @@ pub fn guard_no_stale_snapshot_reset_drift(
         return Ok(true);
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "stale_snapshot_reset_drift_blocked file={} phase={} snap_len={} file_len={}",
@@ -338,7 +338,7 @@ pub fn try_auto_recover_live_prompt_drift(
                         agent_doc_flow::types::FlowOutcome::Completed,
                     )
                     .with_reason("live_prompt_drift_auto_recovered"),
-                    crate::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 );
                 eprintln!(
                     "[commit] auto-recovered live_prompt_drift wedge for {} via editor IPC convergence ({} bytes)",
@@ -349,7 +349,7 @@ pub fn try_auto_recover_live_prompt_drift(
             }
             Ok(None) => {}
             Err(err) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "[jbstalecache] editor_convergence_error file={} error={}",
@@ -362,7 +362,7 @@ pub fn try_auto_recover_live_prompt_drift(
     }
 
     if ipc_listener_active {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "[jbstalecache] auto_recovery_disk_write_blocked file={} target_len={} reason=editor_ipc_unconfirmed",
@@ -379,7 +379,7 @@ pub fn try_auto_recover_live_prompt_drift(
             file.display()
         )
     })?;
-    agent_doc_snapshot_io::save(file, &recovery_target, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &recovery_target, agent_doc_ops_log_io::log_op)?;
     let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&recovery_target);
     agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), &recovery_target)?;
     log_live_prompt_drift_auto_recovered(
@@ -397,7 +397,7 @@ pub fn try_auto_recover_live_prompt_drift(
             agent_doc_flow::types::FlowOutcome::Completed,
         )
         .with_reason("live_prompt_drift_auto_recovered"),
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
     eprintln!(
         "[commit] auto-recovered live_prompt_drift wedge for {} — merged the missing response into the realtime document ({} bytes) so operator-visible edits stay authoritative",
@@ -414,7 +414,7 @@ pub(crate) fn log_live_prompt_drift_auto_recovered(
     ipc_listener_active: bool,
     transport: &str,
 ) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "live_prompt_drift_auto_recovered file={} target_len={} file_len={} target_hash={} ipc_listener_active={} transport={}",
@@ -452,7 +452,7 @@ pub(crate) fn editor_ipc_write_wedged(project_root: &Path, file: &Path) -> bool 
 /// silently looping refusals. Emitted once when the de-wedge latch first trips so
 /// the wedge → recycle escalation is attributable in `ops.log`.
 pub(crate) fn log_write_wedge_requests_supervisor_recycle(file: &Path, source: &str) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "write_wedged_supervisor_recycle_requested file={} source={} action=request_recycle_through_owner reason=repeated_ack_timeout_active_listener",
@@ -502,7 +502,7 @@ pub(crate) fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -
         // Auto-recycle opted out → SurfaceStale: record advisory guidance, do not
         // force. The existing stale-supervisor warning already surfaces the manual
         // refresh path to the operator.
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "stale_supervisor_ipc_drift_surfaced file={} source={} action=advisory_only reason=auto_recycle_opted_out",
@@ -514,7 +514,7 @@ pub(crate) fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -
     }
     match crate::project_controller::recycle_controller_force(&project_root, true) {
         Ok(scheduled) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "stale_supervisor_ipc_drift_forced_recycle file={} source={} scheduled={} action=recycle_controller_force reason=stale_supervisor_ipc",
@@ -578,7 +578,7 @@ pub(crate) fn stale_supervisor_write_short_circuit(
     }
     let binary = agent_doc_flow::outcome::supervisor_stale_self_recycled_outcome();
     let ui = agent_doc_flow::outcome::deferred_for_recycle_outcome();
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "stale_supervisor_write_short_circuit file={} source={} {} {}",
@@ -604,7 +604,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
     let patches = live_prompt_drift_response_patches(file_content, target)?;
     let frontmatter = None;
     if patches.is_empty() && frontmatter.is_none() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "[jbstalecache] editor_convergence_skipped file={} skip=no_component_or_frontmatter_delta",
@@ -633,7 +633,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
         payload["cycle_id"] = serde_json::Value::String(cycle.cycle_id.clone());
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "[jbstalecache] editor_convergence_attempt file={} patch_id={} patches={} frontmatter={} target_hash={}",
@@ -665,7 +665,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                 std::time::Duration::from_millis(25),
             )?;
             let Some(recovered) = sidecar else {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "[jbstalecache] editor_convergence_no_ack_content file={} patch_id={} action=block_external_disk_write",
@@ -680,7 +680,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
             ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
                 target,
             ) {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "[jbstalecache] editor_convergence_succeeded file={} patch_id={} recovered_len={} transport=editor_ipc",
@@ -700,7 +700,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                 // worktree drift (`#pcwc`) is eliminated, rather than blocking and
                 // falling back to the `content_ours` disk write that drops the
                 // editor's components.
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "[jbstalecache] editor_convergence_succeeded file={} patch_id={} recovered_len={} target_len={} transport=editor_ipc resolution=editor_wins_outside_response #qpcwcmerge",
@@ -712,7 +712,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                 );
                 Ok(Some(recovered))
             } else {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "[jbstalecache] editor_convergence_ack_mismatch file={} patch_id={} recovered_len={} target_len={} action=block_external_disk_write",
@@ -726,7 +726,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
             }
         }
         Ok(None) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "[jbstalecache] editor_convergence_no_ack file={} action=block_external_disk_write",
@@ -736,7 +736,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
             Ok(None)
         }
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "[jbstalecache] editor_convergence_send_failed file={} error={} action=block_external_disk_write",
@@ -816,7 +816,7 @@ fn refuse_unproven_editor_delivery(
         } else {
             "absent"
         };
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "{source}_writeback file={} transport=blocked reason={reason} editor_endpoint={} action=editor_convergence_required",
@@ -898,7 +898,7 @@ fn try_detached_disk_write(
             file.display()
         )
     })?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "{source}_writeback file={} transport=disk_detached reason={} len={} hash={}",
@@ -933,7 +933,7 @@ fn refresh_editor_after_ack_mismatch(
         recovered,
         agent_doc_document::transient_markers::normalize_transient_agent_doc_markers,
     ) else {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason=untrusted_ack_content_contains_user_drift action=leave_editor_owned_ack_content stale_len={} stale_hash={}",
@@ -979,7 +979,7 @@ fn refresh_editor_after_ack_mismatch(
         recovered.len(),
     ) {
         Ok(true) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{source}_ack_mismatch_editor_refresh file={} transport=editor_ipc action={} stale_len={} stale_hash={} target_len={} target_hash={}",
@@ -994,7 +994,7 @@ fn refresh_editor_after_ack_mismatch(
             success_outcome
         }
         Ok(false) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason={} no_ack=true action={} stale_len={} stale_hash={}",
@@ -1008,7 +1008,7 @@ fn refresh_editor_after_ack_mismatch(
             AckMismatchRefreshOutcome::NoRecovery
         }
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason={} send_failed=true error={} action={} stale_len={} stale_hash={}",
@@ -1043,7 +1043,7 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
             &indicator_path,
         ) {
             Ok(true) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "{source}_editor_authority_refresh file={} transport=file_signal action=publish_live_buffer",
@@ -1053,7 +1053,7 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
                 wait_for_operator_text_authority_refresh(&indicator_path, content, missing)
             }
             Ok(false) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "{source}_editor_authority_refresh file={} transport=blocked outcome=publish_live_buffer_file_signal_unavailable action=editor_reload_required",
@@ -1063,7 +1063,7 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
                 Some(missing)
             }
             Err(err) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "{source}_editor_authority_refresh file={} transport=blocked outcome=publish_live_buffer_file_signal_failed error={} action=editor_reload_required",
@@ -1078,7 +1078,7 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
 
     match agent_doc_ipc_io::send_publish_live_buffer(&project_root, &indicator_path) {
         Ok(true) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{source}_editor_authority_refresh file={} transport=editor_ipc action=publish_live_buffer",
@@ -1088,7 +1088,7 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
             wait_for_operator_text_authority_refresh(&indicator_path, content, missing)
         }
         Ok(false) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{source}_editor_authority_refresh file={} transport=blocked reason=publish_live_buffer_failed action=editor_reload_required",
@@ -1098,7 +1098,7 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
             Some(missing)
         }
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{source}_editor_authority_refresh file={} transport=blocked reason=publish_live_buffer_failed error={} action=editor_reload_required",
@@ -1150,7 +1150,7 @@ pub fn try_editor_converge(
     // marker the moment the socket recovers.
     cleanup_legacy_ipc_degraded(&project_root);
     if current_content == target {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{source}_writeback file={} transport=already_current",
@@ -1165,7 +1165,7 @@ pub fn try_editor_converge(
         source,
     ) {
         let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{source}_writeback file={} transport=blocked reason=editor_capability_missing capability={} editor_id={} live_len={} live_hash={} action=editor_reload_required",
@@ -1200,7 +1200,7 @@ pub fn try_editor_converge(
                 )? {
                     return Ok(true);
                 }
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "{source}_writeback file={} transport=blocked degraded_cause=no_component_delta action=refuse_external_disk_write",
@@ -1233,7 +1233,7 @@ pub fn try_editor_converge(
             )? {
                 return Ok(true);
             }
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{source}_writeback file={} transport=blocked degraded_cause=listener_degraded action=refuse_external_disk_write",
@@ -1267,7 +1267,7 @@ pub fn try_editor_converge(
         if try_detached_disk_write(file, current_content, target, source, "no_component_delta")? {
             return Ok(true);
         }
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{source}_writeback file={} transport=blocked reason=no_component_delta action=refuse_external_disk_write",
@@ -1281,7 +1281,7 @@ pub fn try_editor_converge(
     };
     target_payload_to_live_editor(file, &mut payload, "editor_convergence");
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "{source}_editor_convergence_attempt file={} patch_id={} patches={} node_patches={} frontmatter={}",
@@ -1324,7 +1324,7 @@ pub fn try_editor_converge(
             ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
                 target,
             ) {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "{source}_writeback file={} patch_id={} recovered_len={} transport=editor_ipc",
@@ -1343,7 +1343,7 @@ pub fn try_editor_converge(
                 }
                 Ok(true)
             } else if convergence_recovered_editor_wins_for_payload(&recovered, target, &payload) {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "{source}_writeback file={} patch_id={} recovered_len={} target_len={} transport=editor_ipc resolution=editor_wins_outside_touched_components",
@@ -1373,7 +1373,7 @@ pub fn try_editor_converge(
                     source,
                 );
                 if recovery == AckMismatchRefreshOutcome::ReplayedTarget {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "{source}_writeback file={} patch_id={} recovered_len={} target_len={} transport=editor_ipc recovery=ack_mismatch_replayed_target",
@@ -1390,7 +1390,7 @@ pub fn try_editor_converge(
                     }
                     return Ok(true);
                 }
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "{source}_writeback file={} patch_id={} transport=blocked reason=ack_mismatch recovered_len={} target_len={} action=editor_convergence_required",
@@ -1414,7 +1414,7 @@ pub fn try_editor_converge(
             refuse_unproven_editor_delivery(file, source, "no_ack", Some(&patch_id))
         }
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "{source}_writeback file={} reason=send_failed error={} note=converge_send_error",
@@ -1487,7 +1487,7 @@ fn try_editor_converge_file_ipc(
 ) -> Result<bool> {
     let patches_dir = project_root.join(".agent-doc/patches");
     if !patches_dir.exists() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{source}_writeback file={} transport=blocked degraded_cause={reason}_no_file_ipc action=refuse_external_disk_write",
@@ -1508,7 +1508,7 @@ fn try_editor_converge_file_ipc(
             .map(Vec::len)
             .unwrap_or(0)
         + usize::from(payload.get("frontmatter").is_some());
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "{source}_file_ipc_convergence_attempt file={} patch_id={} degraded_cause={} patches={}",
@@ -1525,7 +1525,7 @@ fn try_editor_converge_file_ipc(
         patch_count,
         IpcPollOptions::convergence(project_root, Some(target)),
     )? {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{source}_writeback file={} patch_id={} transport=file_ipc degraded_cause={}",
@@ -1536,7 +1536,7 @@ fn try_editor_converge_file_ipc(
         );
         return Ok(true);
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "{source}_writeback file={} patch_id={} transport=blocked degraded_cause={reason}_file_ipc_unproven action=refuse_external_disk_write",
@@ -3086,7 +3086,7 @@ mod core_tests {
         );
         let current = preflight.replace(historical, "");
         fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         // Preflight observed the historical response. The operator deleted it
         // before auto-recovery ran, so recovery must not resurrect it while
         // trying to restore the new response.
@@ -3121,7 +3121,7 @@ mod core_tests {
             crate::test_support::drift_baseline()
         );
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -3151,7 +3151,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         // The drift guard fired this cycle and adopted content_ours.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
@@ -3185,7 +3185,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -3244,7 +3244,7 @@ mod core_tests {
         )
         .expect("partial exchange text should be preserved in the target");
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -3287,7 +3287,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -3331,7 +3331,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         // A cycle exists but the drift guard never fired (flag stays false) →
         // not the wedge we own.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
@@ -3357,7 +3357,7 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -3409,7 +3409,7 @@ mod core_tests {
         let fragmented =
             crate::test_support::drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -3494,7 +3494,7 @@ mod core_tests {
 ## Queue\n\n<!-- agent:queue auto -->\n- do [#active]\n- do [#sibling]\n<!-- /agent:queue -->\n"
         );
         fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         let active_node_key = queue_node_key_for_id(&snapshot, "active");
         let scope = agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
             Some(agent_doc_turn::turn_scope::Address::node(
@@ -3544,7 +3544,7 @@ mod core_tests {
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n- Prior summary/context: compacted prior responses\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
 ## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
         fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         let scope =
             agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
         agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
@@ -3596,7 +3596,7 @@ mod core_tests {
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n- Prior summary/context: compacted prior responses\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
 ## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
         fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         // No turn_scope saved (post-`/clear`). The binary-origin signal is the
         // recorded compaction marker.
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
@@ -3640,10 +3640,10 @@ mod core_tests {
             &format!("{response_body}<!-- agent:boundary:new -->"),
         );
         fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, current, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
         crate::capture::capture_response(&doc, &response_patch).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let rebased = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "commit")
             .expect("active captured response must not trip stale-snapshot reset repair");
@@ -3692,7 +3692,7 @@ mod core_tests {
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
 ## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
         fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         // No turn_scope and no compaction marker → no provenance signal.
 
         let err = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
@@ -3724,7 +3724,7 @@ mod core_tests {
         );
         let current = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\nOperator-authored replacement without compact archive proof.\n<!-- /agent:exchange -->\n";
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         let scope =
             agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
         agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
@@ -3766,7 +3766,7 @@ mod core_tests {
 ## Queue\n\n<!-- agent:queue auto -->\n- do [#sibling]\n<!-- /agent:queue -->\n"
         );
         fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         let active_node_key = queue_node_key_for_id(&snapshot, "active");
         let scope = agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
             Some(agent_doc_turn::turn_scope::Address::node(

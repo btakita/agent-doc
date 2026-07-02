@@ -57,7 +57,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
         return Ok(None);
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_cycle_start_retry_after_fresh_restart file={} pane={} harness={} marker={} timeout_secs={}",
@@ -85,7 +85,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
         harness,
     );
     if !ready.is_ready() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_cycle_start_retry_fresh_restart_not_ready file={} pane={} harness={} outcome={}",
@@ -114,7 +114,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                 baseline_id,
             )?;
             let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_cycle_start_retry_fresh_restart_not_ready_optimistic file={} pane={} harness={} marker={} timeout_secs={} startup_miss_timestamp={}",
@@ -165,7 +165,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
     ) {
         Ok(proof) => proof,
         Err(_) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_cycle_start_retry_fresh_restart_dispatch_not_consumed file={} pane={} harness={}",
@@ -180,7 +180,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
 
     match wait_for_start_ack(file, baseline, ack_timeout) {
         Some(state) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_cycle_start_acknowledged_after_fresh_restart file={} pane={} harness={} cycle={} phase={} marker={} timeout_secs={}",
@@ -223,7 +223,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                         miss_ts
                     ),
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_cycle_start_missing_after_fresh_restart_optimistic file={} pane={} harness={} marker={} timeout_secs={} startup_miss_timestamp={}",
@@ -308,7 +308,7 @@ pub(crate) fn require_routed_cycle_ack(
                 harness,
                 "acknowledged",
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_cycle_start_acknowledged file={} pane={} harness={} cycle={} phase={} marker={} timeout_secs={}",
@@ -354,7 +354,7 @@ pub(crate) fn require_routed_cycle_ack(
             {
                 return Ok(Some(dispatch_pane));
             }
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_cycle_start_missing file={} pane={} harness={} marker={} timeout_secs={}",
@@ -389,7 +389,7 @@ pub(crate) fn require_routed_cycle_ack(
                 ),
             );
             if optimistic_allowed {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_cycle_start_missing_optimistic file={} pane={} harness={} marker={} timeout_secs={} startup_miss_timestamp={}",
@@ -451,7 +451,7 @@ mod tests {
             "❯ /clear\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()
@@ -507,7 +507,7 @@ mod tests {
             "/clear\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()
@@ -712,7 +712,7 @@ Body\n\
 <!-- /agent:exchange -->\n";
         let current = snapshot.replacen("agent: claude", "agent: codex", 1);
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
@@ -747,7 +747,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
@@ -783,7 +783,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
@@ -816,7 +816,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()

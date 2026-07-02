@@ -191,7 +191,7 @@ impl PartialCheckpointWriter {
         } else {
             "cycle_closed"
         };
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &self.file,
             &format!(
                 "partial_response_checkpoint_stopped file={} writer_cycle={} current_cycle={} phase={:?} reason={}",
@@ -301,7 +301,7 @@ fn checkpoint_partial_response_for_cycle(
         response_body: redacted_response,
     };
     write_partial_record(file, &record)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "partial_response_checkpoint file={} cycle={} count={} sha256={}",
@@ -627,7 +627,7 @@ pub(crate) fn refresh_replay_baseline_for_recovery(
     }
     record.updated_at = now_secs();
     write_record(file, &record)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "{} file={} capture_id={}",
@@ -722,7 +722,7 @@ pub fn discard_captures_for_archived_responses(file: &Path, archived_text: &str)
         record.state = CaptureState::Discarded;
         record.updated_at = now_secs();
         write_record(file, &record)?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "capture_discarded_for_archived_response file={} capture_id={}",
@@ -814,7 +814,7 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
         && record.replayed_at.is_some()
         && !matches!(prior_state, CaptureState::Committed)
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "capture_committed_after_replay file={} capture_id={}",
@@ -912,7 +912,7 @@ mod tests {
         agent_doc_snapshot_io::save(
             &doc,
             &std::fs::read_to_string(&doc).unwrap(),
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
         .unwrap();
 
@@ -942,7 +942,7 @@ mod tests {
         agent_doc_snapshot_io::save(
             &doc,
             &std::fs::read_to_string(&doc).unwrap(),
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(
@@ -972,7 +972,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
@@ -990,7 +990,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
@@ -1018,7 +1018,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         // Capture A — a committed response that compaction is about to archive.
@@ -1066,7 +1066,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
 
         let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
         assert!(writer.maybe_checkpoint("same").unwrap().is_some());
@@ -1083,7 +1083,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         let capture = capture_response(&doc, "response body").unwrap();
 
         assert!(
@@ -1103,7 +1103,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         let capture = capture_response(&doc, "response body").unwrap();
 
         std::fs::write(&doc, "body changed").unwrap();
@@ -1133,7 +1133,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         let capture = capture_response(
             &doc,
             "<!-- patch:exchange -->\n### Re: first head — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
@@ -1181,7 +1181,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         let original = "## Exchange\n\nold body\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         let response = "### Re: topic — gpt-5\n\nIntact response body.\n";
         let capture = capture_response(&doc, response).unwrap();
 
@@ -1189,7 +1189,7 @@ mod tests {
         // left the response body untouched.
         let after_user_commit = "## Exchange\n\nold body\n### Re: topic — gpt-5\n\nIntact response body.\n\n## Backlog\n\n- new item added by user\n";
         std::fs::write(&doc, after_user_commit).unwrap();
-        agent_doc_snapshot_io::save(&doc, after_user_commit, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, after_user_commit, agent_doc_ops_log_io::log_op).unwrap();
         assert_ne!(
             agent_doc_hash::content_hash(after_user_commit),
             capture.file_hash.clone().unwrap()
@@ -1231,7 +1231,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         let original = "## Exchange\n\nuser prompt\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         // Captured body simulates the JB cache-conflict spill: a stray "❯ "
         // accidentally prepended to one of the agent's response prose lines.
         let captured_response =
@@ -1241,7 +1241,7 @@ mod tests {
         // User ran sed (or equivalent) to strip the spurious ❯ markers.
         let cleaned_doc = "## Exchange\n\nuser prompt\n### Re: topic — gpt-5\n\nImplemented and verified.\nSubmodule pointer updated.\n";
         std::fs::write(&doc, cleaned_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, cleaned_doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, cleaned_doc, agent_doc_ops_log_io::log_op).unwrap();
 
         validate_replay(&doc, &capture)
             .expect("user-normalized prefix strip must auto-refresh the baseline");
@@ -1267,7 +1267,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         let original = "## Exchange\n\nold body\n### Re: topic — gpt-5\n\nOriginal response.\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         let capture =
             capture_response(&doc, "### Re: topic — gpt-5\n\nOriginal response.\n").unwrap();
 
@@ -1288,7 +1288,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_committed(&doc).unwrap();
@@ -1302,7 +1302,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_committed(&doc).unwrap();
@@ -1317,7 +1317,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_committed(&doc).unwrap();
@@ -1334,7 +1334,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_replayed(&doc).unwrap();
@@ -1351,7 +1351,7 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body", crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
         capture_response(&doc, "response body").unwrap();
 
         mark_replayed(&doc).unwrap();

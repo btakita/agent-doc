@@ -380,7 +380,7 @@ fn read_response_input() -> Result<String> {
 }
 
 fn log_resolved_backlog_prompt_cleanup(file: &Path, removed_total: usize) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "cleanup_resolved_backlog_prompts file={} removed={}",
@@ -431,11 +431,11 @@ fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<O
         match agent_doc_snapshot_io::load_baseline_model(
             file,
             md_content.as_deref(),
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         ) {
             Ok(Some(projection)) => return Ok(Some(projection)),
             Ok(None) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "mps_baseline_resolve source=md_fallback reason=no_model file={}",
@@ -447,7 +447,7 @@ fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<O
                 // Fail-safe: a model-baseline error must never break finalize —
                 // fall back to the legacy `.md` baseline and log loudly.
                 eprintln!("[write] #mps baseline model resolve failed, using .md baseline: {e}");
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "mps_baseline_resolve source=md_fallback reason=model_error file={}",
@@ -561,7 +561,7 @@ fn guard_no_explicit_baseline_replay_after_committed_cycle(
     let head = agent_doc_git_io::revision::show_head(file).ok().flatten();
 
     let reject = |reason: &str| -> anyhow::Error {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "explicit_baseline_replay_rejected file={} cycle_id={} reason={reason}",
@@ -601,7 +601,7 @@ fn guard_no_explicit_baseline_replay_after_committed_cycle(
     // and hand the caller the HEAD baseline so the new response diffs against the
     // actual committed state (the stale explicit baseline is discarded).
     agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&head))?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "explicit_baseline_replay_auto_reopened file={} cycle_id={}",
@@ -802,7 +802,7 @@ impl agent_doc_status_io::StatusWriteEffects for WriteStatusEffects {
     }
 
     fn log_op(&self, file: &Path, message: &str) {
-        crate::ops_log::log_op(file, message);
+        agent_doc_ops_log_io::log_op(file, message);
     }
 }
 
@@ -816,7 +816,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let file = options.file.as_path();
 
     if let Some(ref origin) = options.origin {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!("write_origin file={} origin={}", file.display(), origin),
         );
@@ -839,7 +839,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     match std::fs::read_to_string(file) {
         Ok(live_doc) => {
             if let Err(err) = agent_doc_cycle_state_io::observe_live_queue_heads(file, &live_doc) {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "observe_live_queue_heads_failed file={} err={}",
@@ -850,7 +850,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             }
         }
         Err(err) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "observe_live_queue_heads_read_failed file={} err={}",
@@ -1134,7 +1134,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             agent_doc_lint_io::run_with_logger(
                 file,
                 options.lint_override,
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             )?;
         }
         return finalize_commit(file, commit_mode);
@@ -1228,7 +1228,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             eprintln!(
                 "[write] CRDT document received --template; routing through stream/CRDT write path"
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "template_flag_crdt_routed_to_stream file={} recovery=retry_crdt_instead",
@@ -1282,7 +1282,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 "[write] bare write placed a response body on session document {}; escalating to the commit boundary (#bare-write-captured-uncommitted)",
                 file.display()
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "bare_write_escalated_to_commit file={} reason=response_body_placed",
@@ -1322,7 +1322,11 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // > frontmatter `agent_doc_lint_dialect` > workspace `.agent-doc/
     // config.toml` `[lint] dialect` > default (`warn`).
     if write_result.is_ok() && commit_mode != CommitMode::None {
-        agent_doc_lint_io::run_with_logger(file, options.lint_override, crate::ops_log::log_op)?;
+        agent_doc_lint_io::run_with_logger(
+            file,
+            options.lint_override,
+            agent_doc_ops_log_io::log_op,
+        )?;
     }
 
     // Phase 3c: consume queue prompt after all other strict closeout gates
@@ -1624,7 +1628,7 @@ fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
     );
     guard_visible_write_idle_and_current(file, "recover_committed_head_response", &current)?;
     atomic_write(file, &recovered)?;
-    agent_doc_snapshot_io::save(file, &recovered, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &recovered, agent_doc_ops_log_io::log_op)?;
     crate::git::commit(file)?;
     Ok(true)
 }
@@ -1663,7 +1667,7 @@ fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
         "[write] empty response stdin; current file matches dedupe(HEAD) for {} — committing dedupe-only working-tree drift through the binary closeout path",
         file.display()
     );
-    agent_doc_snapshot_io::save(file, &current, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, &current, agent_doc_ops_log_io::log_op)?;
     crate::git::commit(file)?;
     Ok(true)
 }
@@ -1734,7 +1738,7 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
                 "[write] repaired: lifted agent:pending out of agent:exchange for {}",
                 file.display()
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!("lift_pending_from_exchange file={}", file.display()),
             );
@@ -1748,7 +1752,7 @@ fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
     agent_doc_element_exchange_io::dedupe_consecutive_response_blocks_with_log(
         content,
         file,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     )
 }
 
@@ -1761,7 +1765,7 @@ fn repair_duplicate_prompt_artifacts(
         content,
         file,
         options,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
         log_duplicate_prompt_residue_guard,
     )
 }
@@ -1775,7 +1779,7 @@ pub fn repair_commit_prompt_artifacts_against_snapshot(
         file,
         snapshot,
         current,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     )
 }
 
@@ -1784,7 +1788,7 @@ fn log_duplicate_prompt_residue_guard(file: &Path) {
         file,
         TemplateStructureGuardReason::DuplicatePromptResidue,
         FlowOutcome::FailedClosed,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
 }
 
@@ -1829,7 +1833,7 @@ pub fn normalize_template_structure_or_fail_preserving(
                     file,
                     TemplateStructureGuardReason::DuplicateScaffoldDropped,
                     FlowOutcome::Completed,
-                    crate::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 );
                 let (repaired, _) = repair_duplicate_prompt_artifacts(
                     &repaired,
@@ -1851,7 +1855,7 @@ pub fn normalize_template_structure_or_fail_preserving(
                     file,
                     TemplateStructureGuardReason::MixedDuplicateScaffoldTail,
                     FlowOutcome::FailedClosed,
-                    crate::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 );
                 anyhow::bail!(
                     "mixed duplicate scaffold tail for {}: live conversation text is interleaved with duplicated template scaffold; refusing automatic closeout repair",
@@ -1865,7 +1869,7 @@ pub fn normalize_template_structure_or_fail_preserving(
                     file,
                     TemplateStructureGuardReason::DuplicateCloseTailMoved,
                     FlowOutcome::Completed,
-                    crate::ops_log::log_op,
+                    agent_doc_ops_log_io::log_op,
                 );
                 let (repaired, _) = repair_duplicate_prompt_artifacts(
                     &repaired,
@@ -1936,13 +1940,13 @@ fn guard_visible_write_idle_with_budget(
     agent_doc_flow_io::log_flow_event(
         file,
         agent_doc_document_realtime::write_policy::visible_write_guard_event(decision, source),
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
     if decision == agent_doc_document_realtime::write_policy::VisibleWriteDecision::Apply {
         return Ok(());
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "visible_write_deferred_active_typing file={} source={} debounce_ms={} timeout_ms={}",
@@ -1982,9 +1986,9 @@ pub(crate) fn guard_visible_write_idle_current_or_target(
                 agent_doc_document_realtime::write_policy::visible_write_current_changed_event(
                     source,
                 ),
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "visible_write_deferred_current_changed file={} source={} expected_hash={} current_hash={}",
@@ -2037,7 +2041,7 @@ fn guard_visible_write_reconcile_with_target(
             live.len == actual_current.len() && live.hash.eq_ignore_ascii_case(&disk_hash);
         if editor_matches_disk {
             let expected_hash = agent_doc_hash::content_hash(expected_current);
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "visible_write_live_buffer_matches_disk file={} source={} expected_len={} expected_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
@@ -2056,7 +2060,7 @@ fn guard_visible_write_reconcile_with_target(
             && actual_current == expected_current
             && live_buffer_snapshot_matches_content(&live, target)
         {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "visible_write_live_buffer_matches_target file={} source={} expected_len={} expected_hash={} target_len={} target_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
@@ -2086,7 +2090,7 @@ fn guard_visible_write_reconcile_with_target(
             // baseline, or DiskDrifted so the caller re-merges the captured
             // response against fresh disk). Genuine unsaved operator edits carry
             // `no_unsaved_operator_edits == false` and still fail closed above.
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "visible_write_replica_churn_reconcile file={} source={} expected_len={} expected_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
@@ -2107,9 +2111,9 @@ fn guard_visible_write_reconcile_with_target(
                 agent_doc_document_realtime::write_policy::visible_write_current_changed_event(
                     source,
                 ),
-                crate::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "visible_write_deferred_live_buffer_changed file={} source={} expected_len={} expected_hash={} live_len={} live_hash={} live_ts={}",
@@ -2136,7 +2140,7 @@ fn guard_visible_write_reconcile_with_target(
     // agent-doc supervisor appended to the same document mid-generation. This
     // is reconcilable — report the fresh disk content so the caller re-merges
     // instead of failing closed and stranding the captured response.
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "visible_write_disk_drift_reconcilable file={} source={} expected_hash={} current_hash={}",
@@ -2205,7 +2209,7 @@ fn template_patch_application_base<'a>(
         "[write] explicit baseline is missing committed exchange content — using HEAD as {} patch base",
         input.source
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         input.file,
         &format!(
             "explicit_baseline_rebased_to_head file={} source={} base_len={} head_len={} patches={} unmatched_len={}",
@@ -2266,7 +2270,7 @@ fn log_exchange_write_diagnostic(
         })
         .unwrap_or_else(|| "-".to_string());
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "exchange_write_diagnostic file={} writer_pid={} writer_exe={} source={} write_mode={} patch_id={} cycle_id={} before_hash={} after_hash={} live_exchange_edited={} prompt_text_duplicated={} prompt_text_normalized={} normalized_prefix_delta={} patches={} unmatched_len={}",
@@ -2422,7 +2426,7 @@ fn normalize_final_template_content(
         normalized = normalize_user_prompts_in_exchange_safe(&normalized, base, snapshot_doc, file);
     }
     if let Some(stripped) = strip_prompt_prefix_from_response_body_first_lines(&normalized) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "flow=document_mutation stage=crdt_post_merge_guard reason=response_body_prompt_prefix_leak file={}",
@@ -2465,7 +2469,7 @@ fn normalize_final_template_content(
         )?;
     }
     if response_precedes_prompt_in_exchange(&normalized, response, Some(base)) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "response_prompt_order_rejected file={} reason=response_precedes_prompt",
@@ -2493,7 +2497,7 @@ pub(crate) fn repair_response_prompt_order_for_file(
             )
         })?;
     if repaired.is_some() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "response_prompt_order_repaired file={} before_commit=true",
@@ -2534,7 +2538,7 @@ fn log_fence_count_drop_if_any(path: &Path, new_content: &str) {
     let old_fences = count_code_fence_openings(&old_content);
     let new_fences = count_code_fence_openings(new_content);
     if new_fences < old_fences {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             path,
             &format!(
                 "fence_count_dropped file={} old_fences={} new_fences={} old_len={} new_len={}",
@@ -2572,7 +2576,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         if result.is_ok() {
             // Log after the write lands so the document path canonicalizes
             // (ops.log root resolution requires the file to exist).
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 path,
                 &format!(
                     "write_authority action=routed transport=write_queue len={} hash={}",
@@ -2832,7 +2836,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         std::process::Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3112,7 +3116,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        agent_doc_snapshot_io::save(&doc, &source, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
@@ -3167,7 +3171,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        agent_doc_snapshot_io::save(&doc, &source, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
@@ -3232,7 +3236,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        agent_doc_snapshot_io::save(&doc, &source, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
 
         let live_operator_buffer = source.replace(
             "<!-- /agent:backlog -->",
@@ -3292,7 +3296,7 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        agent_doc_snapshot_io::save(&doc, &source, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&source), Some(&source)).unwrap();
         crate::capture::capture_response(&doc, "Done.").unwrap();
 
@@ -3832,7 +3836,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = guard_no_exchange_compaction_request_between(&doc, Some(baseline), current)
             .expect_err("ordinary response write should be rejected");
@@ -3972,7 +3976,7 @@ scratch
         );
 
         // KEY: Save snapshot as final_content (the actual disk state after merge)
-        agent_doc_snapshot_io::save(&doc, &merged, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &merged, agent_doc_ops_log_io::log_op).unwrap();
 
         // Verify: snapshot matches what's on disk exactly
         let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
@@ -5947,7 +5951,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         git(&["add", "doc.md"]);
         git(&["commit", "-m", "commit response"]);
 
@@ -5966,7 +5970,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, visible).unwrap();
-        agent_doc_snapshot_io::save(&doc, visible, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, visible, agent_doc_ops_log_io::log_op).unwrap();
 
         assert!(
             recover_missing_committed_head_response(&doc).unwrap(),
@@ -6040,7 +6044,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         git(&["add", "doc.md"]);
         git(&["commit", "-m", "commit response"]);
 
@@ -6059,7 +6063,7 @@ scratch
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, visible).unwrap();
-        agent_doc_snapshot_io::save(&doc, visible, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, visible, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
 
         let strict = WriteFlags {

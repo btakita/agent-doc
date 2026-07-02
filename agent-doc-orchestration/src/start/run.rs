@@ -552,7 +552,7 @@ pub fn run_with_reap_policy(
     if let Some(diagnostic) =
         crate::run::recursive_codex_start_invocation_diagnostic(file, &session_id, &harness.binary)
     {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "start_recursive_self_owned_pane_refused file={} pane={} session_id={}",
@@ -582,7 +582,7 @@ pub fn run_with_reap_policy(
                 supersession.registered_pane
             ),
         );
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "start_startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} miss_timestamp={} latest_start_timestamp={}",
@@ -761,7 +761,7 @@ pub fn run_with_reap_policy(
                     )
                     .map(|m| m.reason)
                     .unwrap_or_else(|| "unknown".to_string());
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "start_session_recycle_retry file={} pane={} attempt={} reason={} err={}",
@@ -829,7 +829,7 @@ pub fn run_with_reap_policy(
     // drives the adapter's tick loop for exit reaping / heartbeat / crash-policy.
     // The old out-of-process `session.wait()` host path and the
     // `AGENT_DOC_SUPERVISOR` rollback flag were removed at the removal rung.
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "supervisor_host_gate file={} hosting=in-process",
@@ -845,7 +845,7 @@ pub fn run_with_reap_policy(
     match agent_doc_workflow_io::document_init::ensure_initialized(
         file,
         crate::git::commit,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     ) {
         Ok(true) => {
             log_event(&mut session_log, "snapshot_validated action=initialized");
@@ -1103,7 +1103,7 @@ pub fn run_with_reap_policy(
                         "supervisor_recycle_resume_redispatch cycle={cycle_id} target={target} reason=harness_child_died_across_recycle"
                     ),
                 );
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "supervisor_recycle_resume_redispatch file={} cycle={cycle_id} target={target} reason=harness_child_died_across_recycle action=spawn_fresh_and_retrigger (#midturn-recycle-resume)",
@@ -1191,7 +1191,7 @@ pub fn run_with_reap_policy(
                             // A harness change must spawn the NEW harness fresh — never
                             // adopt the OLD harness child preserved across a reexec.
                             pending_adopt = None;
-                            crate::ops_log::log_op(
+                            agent_doc_ops_log_io::log_op(
                                 file,
                                 &format!(
                                     "agent_restart_performed file={} old_harness={} new_harness={} action=spawn_fresh_harness",
@@ -1600,7 +1600,7 @@ pub fn run_with_reap_policy(
                 //
                 // Clear the flag so a later natural child exit re-enters normal handling.
                 shared.stop_agent_requested.store(false, Ordering::Relaxed);
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "stop_agent_performed file={} action=kill_child_keep_supervisor",

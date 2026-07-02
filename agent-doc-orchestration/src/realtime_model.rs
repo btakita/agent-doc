@@ -125,7 +125,7 @@ pub fn durable_buffer_state(file: &std::path::Path, disk: &str) -> Option<Buffer
 pub fn resolve_current_doc(file: &std::path::Path, disk: &str) -> Reconciliation {
     let buffer = durable_buffer_state(file, disk);
     let reconciliation = reconcile_current_doc(disk, buffer.as_ref());
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "realtime_doc_resolve authority={} reason={} diverged={} file={}",
@@ -200,7 +200,7 @@ pub fn broadcast_editor_change(
     // whole broadcast so we never storm patches to (and merge stale buffers from)
     // dead peers.
     if !editor_id_is_live(originator_editor_id) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "realtime_broadcast_skipped file={} origin_editor_id={} reason=dead_origin_editor",
@@ -250,7 +250,7 @@ pub fn broadcast_editor_change(
         })
         .collect();
     if reaped_dead_peers > 0 {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "realtime_broadcast_dead_peers_reaped file={} count={} reason=dead_editor_pid",
@@ -309,7 +309,7 @@ pub fn broadcast_editor_change(
             payload["frontmatter"] = serde_json::Value::String(frontmatter);
         }
         crate::write::atomic_write_pub(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "realtime_broadcast_queued file={} origin_editor_id={} target_editor_id={} patch_id={} merged_len={} node_patches={} component_patches={}",
@@ -364,7 +364,7 @@ fn broadcast_component_delta_for_peer(
         })
         .map(ToString::to_string);
     if patches.is_empty() && node_patches.is_empty() && frontmatter.is_none() {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "realtime_broadcast_skipped file={} target_editor_id={} reason=no_component_delta",

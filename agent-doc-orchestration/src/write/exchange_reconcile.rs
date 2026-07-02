@@ -21,7 +21,7 @@ pub(crate) fn check_exchange_shrink_guard(
         file,
         SHRINK_GUARD_MIN_BYTES,
         SHRINK_GUARD_MAX_RATIO,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     )
 }
 
@@ -42,7 +42,7 @@ pub(crate) fn file_ipc_consumed_without_live_exchange_ack(
         before,
         after,
         ack_content_proven,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
         log_ipc_proof_failure,
     )
 }

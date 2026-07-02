@@ -1185,7 +1185,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
                     Some(r#"{"type":"ack","status":"error"}"#.to_string())
                 }
             },
-            agent_doc_orchestration::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         );
         if let Err(e) = result {
             eprintln!("[ffi] IPC listener error: {}", e);
@@ -1248,7 +1248,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener_v2(
                     _ => Some(r#"{"type":"ack","status":"error"}"#.to_string()),
                 }
             },
-            agent_doc_orchestration::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         );
         if let Err(e) = result {
             eprintln!("[ffi] IPC listener v2 error: {}", e);
@@ -1519,7 +1519,7 @@ pub unsafe extern "C" fn agent_doc_plugin_watch_readonly(file_path: *const c_cha
         Err(_) => return 0,
     };
     if agent_doc_document_realtime::watch_authority::plugin_watch_is_readonly() {
-        agent_doc_orchestration::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             std::path::Path::new(file),
             "plugin_watch_readonly skipped file-apply (controller-owned watcher is sole writer) #dsqa",
         );
@@ -1666,7 +1666,7 @@ pub unsafe extern "C" fn agent_doc_reconnect_buffer_decision(
         buffer_matches_prior_commit,
     );
 
-    agent_doc_orchestration::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         &file_path_buf,
         &format!(
             "reconnect_buffer_decision decision={} buffer_matches_disk={} disk_is_head={} buffer_is_prior_commit={} #yzer",
@@ -1788,7 +1788,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
 
     match agent_doc_op_capture_io::record_editor_op(&file_path_buf, base, op) {
         Ok(()) => {
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!(
                     "editor_op_recorded kind={kind} offset={offset} {op_log_summary} base={} #qnodemerge4wire",
@@ -1798,7 +1798,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
             1
         }
         Err(e) => {
-            agent_doc_orchestration::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!("editor_op_record_failed kind={kind} error={e} #qnodemerge4wire"),
             );
@@ -1835,7 +1835,7 @@ pub unsafe extern "C" fn agent_doc_document_base_hash(file_path: *const c_char) 
                 doc,
                 baseline,
                 agent_doc_op_capture_io::has_pending_editor_ops,
-                agent_doc_orchestration::ops_log::log_op,
+                agent_doc_ops_log_io::log_op,
             )
             .map(|base| base.state)
         },

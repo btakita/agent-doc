@@ -131,7 +131,7 @@ fn refresh_node_snapshot_and_log(
     let events = project_watch_node_events(previous.as_deref(), &content);
     if !events.is_empty() {
         let payload = document_node_events_payload(&path.display().to_string(), &events);
-        crate::ops_log::log_op(path, &format!("document_node_events {payload}"));
+        agent_doc_ops_log_io::log_op(path, &format!("document_node_events {payload}"));
     }
     Ok(())
 }

@@ -315,7 +315,7 @@ pub(crate) fn purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
             // #cross-project-stash-pane-condition: correct cross-project preservation,
             // not an error — log as telemetry, not stderr, so the IDE/route error
             // surface stays clean. Skip behavior unchanged.
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 &current_root,
                 &format!(
                     "resync: stash pane {} is registered in its own project root — skipping kill",
@@ -802,7 +802,7 @@ pub(crate) fn purge_orphaned_agent_panes_with_registry(
                 if registered_in_pane_root {
                     // #cross-project-stash-pane-condition: correct cross-project
                     // preservation, not an error — telemetry, not stderr.
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         &current_root,
                         &format!(
                             "resync: non-stash pane {} is registered in its own project root — skipping kill",

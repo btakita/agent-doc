@@ -80,7 +80,7 @@ pub(crate) fn check_parent_submodule_pointer_guard(file: &Path) -> Result<GuardR
     let file_display = file.display().to_string();
     let msg = agent_doc_git::parent_submodule_pointer_guard_message(&drift, &file_display);
     eprintln!("{}", msg);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &agent_doc_git::parent_submodule_pointer_guard_log_line(&drift, &file_display),
     );
@@ -264,7 +264,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])
@@ -348,7 +348,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "doc.md"])

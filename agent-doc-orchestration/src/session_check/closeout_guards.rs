@@ -51,7 +51,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
         } => unresolved_ids,
     };
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "blocked_closeout_followup_guard_fired file={} unresolved={}",
@@ -139,7 +139,7 @@ pub(crate) fn check_gated_phase_split_guard(
         }
     };
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "gated_phase_split_guard_fired file={} flagged={}",
@@ -192,7 +192,7 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
         agent_doc_turn::closeout_signal::QueueAuditPartialCompletionDecision::Warn => {}
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "queue_audit_partial_completion_guard_fired file={}",

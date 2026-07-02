@@ -1244,7 +1244,7 @@ pub fn close_stale_starting_actors_for_caller(
             new_generation: record.generation,
         };
         store_actor_record(project_root, Some(record.generation), &next)?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             Path::new(&record.document_id),
             &format!(
                 "{}_closed_stale_starting_actor file={} session={} pane={} generation={} age_secs={}",
@@ -1337,7 +1337,7 @@ where
         };
         match store_actor_record(project_root, Some(record.generation), &next) {
             Ok(_) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     Path::new(&record.document_id),
                     &format!(
                         "{}_closed_stale_dead_pane_actor file={} session={} pane={} generation={} prior_state={} reason={}",
@@ -1353,7 +1353,7 @@ where
                 closed += 1;
             }
             Err(err) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     Path::new(&record.document_id),
                     &format!(
                         "{}_close_stale_dead_pane_actor_skipped file={} pane={} generation={} error={}",
@@ -1376,7 +1376,7 @@ pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
 ) -> Result<(usize, usize)> {
     let tmux = tmux_router::Tmux::default_server();
     if let Err(err) = agent_doc_tmux_io::list_panes(&tmux, None, "#{pane_id}") {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
                 "{caller}_stale_dead_pane_actor_gc_skipped reason=tmux_unavailable error={err}"
@@ -1466,7 +1466,7 @@ pub fn prune_dead_actors_for_caller(
                 record.state.as_str(),
                 age
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 Path::new(&record.document_id),
                 &format!(
                     "{}_would_prune_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
@@ -1483,7 +1483,7 @@ pub fn prune_dead_actors_for_caller(
 
         let removed = state_store::delete_actor_document_tx(&mut conn, &record.document_id)?;
         if removed > 0 {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 Path::new(&record.document_id),
                 &format!(
                     "{}_pruned_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
@@ -1574,7 +1574,7 @@ pub fn terminate_stale_preparing_controllers_for_caller(
 
     // Only reap a verified same-project controller process, and never ourselves.
     if pid == std::process::id() || !is_same_project_controller_pid(project_root, pid) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
                 "stale_preparing_controller_reaped_skipped reason=not_same_project_controller pid={pid} generation={generation} age_secs={age} caller={caller}"
@@ -1602,7 +1602,7 @@ pub fn terminate_stale_preparing_controllers_for_caller(
         );
     }
 
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         project_root,
         &format!(
             "stale_preparing_controller_reaped pid={pid} generation={generation} age_secs={age} caller={caller}"
@@ -1663,7 +1663,7 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
             continue;
         }
         reap_verified_controller_pid(project_root, pid, generation);
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
                 "orphaned_preparing_controller_reaped pid={pid} age_secs={age} threshold_secs={} caller={caller}",
@@ -1737,7 +1737,7 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
             .map(|bootstrap| bootstrap.controller_generation)
             .unwrap_or(0);
         reap_verified_controller_pid(&root, pid, generation);
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             &root,
             &format!(
                 "orphaned_preparing_controller_reaped_cross_project pid={pid} root={} age_secs={age} threshold_secs={} caller={caller}",
@@ -1786,7 +1786,7 @@ pub fn evict_cross_document_pane_bindings(
         };
         match store_actor_record(project_root, Some(record.generation), &next) {
             Ok(_) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     Path::new(&record.document_id),
                     &format!(
                         "{}_evicted_cross_document_pane_binding stale_document={} owner_document={} pane={} generation={} prior_state={}",
@@ -1801,7 +1801,7 @@ pub fn evict_cross_document_pane_bindings(
                 evicted += 1;
             }
             Err(err) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     Path::new(&record.document_id),
                     &format!(
                         "{}_evict_cross_document_pane_binding_skipped stale_document={} pane={} generation={} error={}",
@@ -2131,7 +2131,7 @@ fn record_projection_diagnostic_with_metadata(
             },
         );
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         Path::new(document_id),
         &format!(
             "projection_drift projection={} document={} source_generation={} intended_hash={} retry_status={} message={}",
@@ -4392,7 +4392,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
         crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)
@@ -4498,7 +4498,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
         crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)
@@ -4613,7 +4613,7 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
         crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)

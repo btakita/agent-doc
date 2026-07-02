@@ -148,7 +148,7 @@ fn enforce_cross_session_claim(
             // channel) and invisible to the ops.log gate-verify scan. Also record
             // it to ops.log so the #4wxr reject behavior is provable from ops.log
             // when driven live (claim from a pane in a non-configured session).
-            crate::ops_log::log_op(file, &marker);
+            agent_doc_ops_log_io::log_op(file, &marker);
             anyhow::bail!(
                 "pane {} is in tmux session '{}' but project session is '{}'; switch to the configured session or pass --force",
                 pane_id,
@@ -279,7 +279,7 @@ pub fn run(
             let session_id = uuid::Uuid::new_v4();
             let scaffold = render_empty_template_scaffold(&session_id.to_string());
             std::fs::write(file, &scaffold)?;
-            agent_doc_snapshot_io::save(file, &scaffold, crate::ops_log::log_op)?;
+            agent_doc_snapshot_io::save(file, &scaffold, agent_doc_ops_log_io::log_op)?;
             crate::git::commit(file).ok(); // best-effort commit
         }
     }
@@ -484,7 +484,7 @@ pub fn run(
     if let Err(e) = agent_doc_workflow_io::document_init::ensure_initialized(
         file,
         crate::git::commit,
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     ) {
         eprintln!("warning: failed to initialize document: {}", e);
     }

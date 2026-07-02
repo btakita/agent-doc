@@ -105,7 +105,7 @@ pub(crate) fn consume_queue_prompts_with_outcome(
             .context("queue consume: failed to write document")?;
     }
     if plan.save_snapshot {
-        agent_doc_snapshot_io::save(file, &plan.new_snapshot, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &plan.new_snapshot, agent_doc_ops_log_io::log_op)?;
     }
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
 
@@ -165,7 +165,7 @@ impl QueueConsumptionProofEffects for QueueConsumptionProofRuntimeEffects {
     }
 
     fn log_op(&self, file: &Path, message: &str) {
-        crate::ops_log::log_op(file, message);
+        agent_doc_ops_log_io::log_op(file, message);
     }
 
     fn now_millis(&self) -> u64 {
@@ -290,14 +290,14 @@ pub fn strike_answered_free_text_queue_heads(
             .context("free-text strike: failed to write document")?;
     }
     if let Some(snap) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &snap, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
     }
 
     eprintln!(
         "[queue] struck {} answered free-text head(s) by response match (#ftstrike)",
         keys.len()
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "freetext_head_strike file={} struck={}",
@@ -314,7 +314,7 @@ pub fn strike_answered_free_text_queue_heads(
                 continue;
             }
             let prefix: String = node.item.text.trim().chars().take(48).collect();
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "free_text_head_struck file={} note=auto_struck_answered head={:?} #qstrikenote",
@@ -380,14 +380,14 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
     converge_document_or_disk(file, &new_document, &content, "noise_prune")
         .context("noise prune: failed to write document")?;
     if let Some(snap) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &snap, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
     }
 
     let base_hash = agent_doc_hash::content_hash(&content);
     eprintln!(
         "[queue] pruned {struck} predicate-proven head(s): noise + orphan id-backed (#goqstall2/#orphanqhead)"
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "queue_noise_prune file={} struck={} base_hash={} source_component=queue operation=prune proof=predicate_noise_or_orphan_id",
@@ -460,13 +460,13 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
     converge_document_or_disk(file, &new_document, &content, "orphan_id_head_strike")
         .context("orphan strike: failed to write document")?;
     if let Some(snap) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &snap, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
     }
     eprintln!(
         "[queue] struck orphaned id-backed head [#{target_id}] ({} node(s); #orphanqhead)",
         keys.len()
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "orphan_id_head_strike file={} id={} struck={} base_hash={} source_component=queue operation=strike_head proof=orphan_id_no_open_backlog",
@@ -535,13 +535,13 @@ pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bo
     converge_document_or_disk(file, &new_document, &content, "open_id_head_ack")
         .context("open-id ack: failed to write document")?;
     if let Some(snap) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &snap, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
     }
     eprintln!(
         "[queue] acknowledged id-backed correction head [#{target_id}] ({} node(s); backlog left open; #freshqueueauth)",
         keys.len()
     );
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "open_id_head_ack file={} id={} struck={} base_hash={} source_component=queue operation=strike_head proof=operator_acknowledged_correction_preserve_open_backlog",
@@ -624,7 +624,7 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
             .context("queue done-id mark: failed to write document")?;
     }
     if let Some(new_snapshot) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &new_snapshot, crate::ops_log::log_op)?;
+        agent_doc_snapshot_io::save(file, &new_snapshot, agent_doc_ops_log_io::log_op)?;
     }
 
     eprintln!(
@@ -762,7 +762,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
                     agent_doc_queue::document_queue::prompts(&snap_new_entries).len();
                 let doc_remaining_prompts =
                     agent_doc_queue::document_queue::prompts(&new_entries).len();
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "queue_done_id_consume_divergence_reconciled file={} cause=done_id_authoritative consumed={} snap_remaining={} doc_remaining={}",
@@ -911,7 +911,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             .iter()
             .any(|text| !queue_prompt_text_is_free_text(content, text))
         {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "queue_consume_refused_id_backed_snapshot_head_without_explicit_signal file={} head={:?} doc_head={:?}",
@@ -928,7 +928,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             &snapshot_node_keys.keys,
         )?
         else {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "queue_consume_head_divergence_preserved_live_addition file={} reason=snapshot_active_head_missing snap_head={:?} doc_head={:?}",
@@ -942,7 +942,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         let Some(completed_entries) =
             mark_first_matching_prompts_completed_by_texts(&entries, &snapshot_consumed_texts)
         else {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "queue_consume_head_divergence_preserved_live_addition file={} reason=snapshot_active_head_unrenderable snap_head={:?} doc_head={:?}",
@@ -953,7 +953,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             );
             return Ok(None);
         };
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "queue_consume_head_divergence_reconciled file={} reason=snapshot_active_head_authoritative_preserved_live_addition consumed={} snap_head={:?} doc_head={:?}",
@@ -972,7 +972,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         (node_keys, completed_entries)
     } else {
         if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
@@ -1051,7 +1051,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         let snap_remaining_prompts =
             agent_doc_queue::document_queue::prompts(&snap_new_entries).len();
         let doc_remaining_prompts = agent_doc_queue::document_queue::prompts(&new_entries).len();
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "queue_consume_divergence_reconciled file={} reason=crdt_merge_authoritative consumed={} snap_remaining={} doc_remaining={}",
@@ -1292,7 +1292,7 @@ mod core_tests {
             prompt = prompt
         );
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
 
         let plan = plan_queue_prompt_consumption(&doc, &content, &[])
             .unwrap()
@@ -1366,7 +1366,7 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let marked =
             mark_completed_queue_prompts_for_done_ids(&doc, &["opportunistic".to_string()], true)
@@ -1569,7 +1569,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = consume_queue_prompt_with_outcome(&doc).unwrap();
         assert!(
@@ -1600,7 +1600,7 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .unwrap()
@@ -1734,7 +1734,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .unwrap()
@@ -1806,7 +1806,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .unwrap()
@@ -1875,7 +1875,7 @@ mod core_tests {
             "- do the thing\n",
             "<!-- /agent:queue -->\n",
         );
-        agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snap, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .expect("consume must not bail on a reconcilable divergence");
@@ -1926,7 +1926,7 @@ mod core_tests {
             "- handle the old request\n",
             "<!-- /agent:queue -->\n",
         );
-        agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snap, agent_doc_ops_log_io::log_op).unwrap();
 
         // Record the live-buffer drift evidence for the document head.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snap), Some(content)).unwrap();
@@ -1990,7 +1990,7 @@ mod core_tests {
             "- handle the old request\n",
             "<!-- /agent:queue -->\n",
         );
-        agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snap, agent_doc_ops_log_io::log_op).unwrap();
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snap), Some(content)).unwrap();
         agent_doc_cycle_state_io::record_dropped_queue_prompts(&doc, &["test".to_string()])
@@ -2049,7 +2049,7 @@ mod core_tests {
             "- handle the old request\n",
             "<!-- /agent:queue -->\n",
         );
-        agent_doc_snapshot_io::save(&doc, snap, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snap, agent_doc_ops_log_io::log_op).unwrap();
         // No cycle_state dropped-queue evidence recorded.
 
         let err = consume_queue_prompt_force_disk(&doc)
@@ -2084,7 +2084,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let keys = id_backed_head_node_keys(content, "orphangone").unwrap();
         assert_eq!(keys.len(), 1, "the orphaned head must be targetable");
@@ -2117,7 +2117,7 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = strike_orphan_id_backed_queue_head(&doc, "stillopen").unwrap_err();
         assert!(
@@ -2146,7 +2146,7 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .expect("node-keyed queue consume should handle duplicates")
@@ -2431,7 +2431,7 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let struck = strike_answered_free_text_queue_heads(&doc, FTSTRIKE_RESPONSE, true).unwrap();
         assert_eq!(struck, 2, "both answered free-text heads must be struck");
@@ -2705,7 +2705,7 @@ Old.
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(
@@ -2778,7 +2778,7 @@ Old.
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(struck, 1, "only the orphan #kcb5 head must be struck");
@@ -2819,7 +2819,7 @@ Old.
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let keys = id_backed_head_node_keys(content, "freshqueueauth").unwrap();
         assert_eq!(
@@ -2864,7 +2864,7 @@ Old.
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth")
             .expect_err("prose correction heads stay on the free-text consume path");
@@ -2895,7 +2895,7 @@ Old.
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         assert_eq!(
             prune_noise_queue_heads(&doc).unwrap(),
@@ -2942,7 +2942,7 @@ Old.
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(struck, 1, "only the all-log pasted block must be excised");

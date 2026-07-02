@@ -5,8 +5,10 @@ use agent_doc_turn::op_log::{
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 /// Structured cycle log entry for reproducible operation tracking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +39,72 @@ pub struct OpsLogTracking<'a> {
     pub doc_stem: Option<&'a str>,
     pub session_id: Option<&'a str>,
     pub turn_id: Option<&'a str>,
+}
+
+/// Process-local cache of `agent_doc_session` keyed by canonical document path.
+static SESSION_ID_CACHE: LazyLock<Mutex<HashMap<PathBuf, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Best-effort `agent_doc_session` for `file`, cached per process.
+fn cached_session_id(file: &Path) -> Option<String> {
+    let key = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if let Ok(cache) = SESSION_ID_CACHE.lock()
+        && let Some(sid) = cache.get(&key)
+    {
+        return Some(sid.clone());
+    }
+    let content = std::fs::read_to_string(file).ok()?;
+    let session = agent_doc_frontmatter::frontmatter::parse(&content)
+        .ok()?
+        .0
+        .session?;
+    if session.is_empty() {
+        return None;
+    }
+    if let Ok(mut cache) = SESSION_ID_CACHE.lock() {
+        cache.insert(key, session.clone());
+    }
+    Some(session)
+}
+
+/// Append a timestamped line to `.agent-doc/logs/ops.log`.
+///
+/// Best-effort: silently returns on I/O errors. Each line includes document,
+/// session, and turn attribution when those facts are available.
+pub fn log_op(file: &Path, message: &str) {
+    let _ = try_log_op(file, message);
+}
+
+fn try_log_op(file: &Path, message: &str) -> Option<()> {
+    let canonical = file.canonicalize().ok()?;
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
+    let doc_stem = file.file_stem().and_then(|n| n.to_str());
+    let session = cached_session_id(file);
+    let turn = agent_doc_cycle_state_io::load(file)
+        .ok()
+        .flatten()
+        .map(|cs| cs.cycle_id);
+    append_ops_log_at_project(
+        &project_root,
+        message,
+        OpsLogTracking {
+            doc_stem,
+            session_id: session.as_deref(),
+            turn_id: turn.as_deref(),
+        },
+    )
+}
+
+/// Append a structured cycle entry to `.agent-doc/logs/cycles.jsonl`.
+///
+/// Best-effort: silently returns on I/O errors.
+pub fn log_cycle(
+    file: &Path,
+    op: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) {
+    let _ = append_cycle_log_for_file(file, op, snapshot_content, file_content);
 }
 
 /// Best-effort size-based rotation for an append-only log.

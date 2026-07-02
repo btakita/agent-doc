@@ -139,7 +139,7 @@ pub fn advisory_snapshot(file: &Path) -> String {
 /// effort: never fails the caller, never changes closeout behavior.
 pub fn log_advisory_snapshot(file: &Path) {
     let snapshot = advisory_snapshot(file);
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!("adstatechart_snapshot advisory=1 {snapshot}"),
     );

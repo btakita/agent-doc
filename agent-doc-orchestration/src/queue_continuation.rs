@@ -145,7 +145,7 @@ pub fn pending_marker_continuation_for_roots(
         if let Some(current) = current_pane
             && is_foreign_owned_marker(root, doc, current)
         {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 doc,
                 &format!(
                     "codex_stop_foreign_queue_marker_skip file={} current_pane={}",
@@ -246,7 +246,7 @@ mod tests {
 ## Queue\n\n<!-- agent:queue{queue_attrs} -->\n{queue_body}<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         doc
     }
 
@@ -469,7 +469,7 @@ mod tests {
             ],
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         // No socket → not live IPC. operator-verify (#b) is deferred regardless,
         // so continuation must land on the drainable #c head.
         let continuation = detect(&doc).unwrap().expect("drainable head remains");
@@ -491,7 +491,7 @@ mod tests {
             ],
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         assert!(
             detect(&doc).unwrap().is_none(),
             "all-deferred heads must not require continuation"
@@ -685,7 +685,7 @@ mod tests {
 ## Backlog\n\n<!-- agent:backlog priority queue -->\n- [ ] [#ov] [operator-verify] live drive\n<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
 
         assert_eq!(
             detect(&doc)
@@ -848,7 +848,7 @@ mod tests {
             .unwrap()
             .replace("- -- stop placeholder\n", "--- stop\n- do [#x]\n");
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
         // A stop fence at the head must not force continuation.
         assert!(detect(&doc).unwrap().is_none());
     }

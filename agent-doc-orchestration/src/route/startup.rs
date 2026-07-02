@@ -416,7 +416,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
     // Start agent-doc start in the new pane
     let start_cmd = format!("{} start --route-owned {}", agent_doc_bin, start_path);
     agent_doc_tmux_io::input_diag::log_text_submit(
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
         "route.auto_start",
         &format!("pane:{new_pane}"),
         &start_cmd,
@@ -428,7 +428,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
         tmux,
         &new_pane,
         &start_cmd,
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "sessions.send_submitted_text",
     )?;
 
@@ -466,7 +466,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                 "[route] fresh start pane {} handed ownership for {} back to existing pane {} during startup; dispatching follow-up there",
                 new_pane, file_path, dispatch_pane
             );
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "fresh_route_dispatch_handoff file={} fresh_pane={} dispatch_pane={} harness={}",
@@ -540,7 +540,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
             };
             match dispatch_result {
                 Ok(proof) => {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "fresh_route_trigger_recovered file={} pane={} harness={}",
@@ -556,7 +556,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                     proof
                 }
                 Err(err) => {
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "fresh_route_trigger_missing file={} pane={} harness={}",
@@ -571,7 +571,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
         };
 
         if dispatch_only {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "fresh_route_dispatch_only file={} pane={} harness={}",
@@ -587,7 +587,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
         let ack_timeout = fresh_route_start_ack_timeout(cfg!(test));
         match wait_for_start_ack(file, cycle_baseline.as_ref(), ack_timeout) {
             Some(state) => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "fresh_route_start_acknowledged file={} pane={} harness={} cycle={} phase={} timeout_secs={}",
@@ -616,7 +616,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                 // cannot start lazily-rs.md, killed immediately" symptom). Genuine
                 // misses (pane never ready / hung) still fall through to the reap
                 // branch below.
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "fresh_route_start_idle_no_op file={} pane={} harness={} timeout_secs={} note=trigger dispatched, pane dispatch-ready, no-op first cycle kept as idle session",
@@ -635,7 +635,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                 let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
             }
             None => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "fresh_route_start_missing file={} pane={} harness={} timeout_secs={}",
@@ -746,7 +746,7 @@ pub(crate) fn wait_for_agent_ready_outcome(
                         agent_doc_tmux_io::input_diag::log_prompt_detection(
                             agent_doc_tmux_io::input_diag::InputDiagSink::new(
                                 None,
-                                crate::ops_log::log_op,
+                                agent_doc_ops_log_io::log_op,
                             ),
                             "route.wait_for_agent_ready",
                             &format!("pane:{pane_id}"),
@@ -1815,7 +1815,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -1987,7 +1987,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         agent_doc_snapshot_io::save(
             &doc,
             "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
         .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
@@ -2087,7 +2087,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2263,7 +2263,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2428,7 +2428,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2586,7 +2586,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &live_pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2694,7 +2694,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -2831,7 +2831,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         agent_doc_snapshot_io::save(
             &doc,
             "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(
@@ -2966,7 +2966,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3119,7 +3119,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "---\nagent_doc_session: route-dispatch-only-authoritative-unproven\nagent: codex\ncodex_network_access: enabled\n---\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3230,7 +3230,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
             let current = format!("{snapshot}❯ follow-up question\n");
             std::fs::write(&doc, &current).unwrap();
-            agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+            agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
             agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot))
                 .unwrap();
             crate::pipeline_frontmatter::mark_committed(
@@ -3348,7 +3348,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3488,7 +3488,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3625,7 +3625,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3744,7 +3744,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
@@ -3864,7 +3864,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,

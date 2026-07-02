@@ -207,8 +207,7 @@ mod tests {
     }
 
     fn save_snapshot(doc: &Path, content: &str) {
-        agent_doc_snapshot_io::save(doc, content, agent_doc_orchestration::ops_log::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::save(doc, content, agent_doc_ops_log_io::log_op).unwrap();
     }
 
     #[test]

@@ -54,7 +54,7 @@ pub(crate) fn load_authoritative_actor_binding(
             &runtime,
             effective_state,
         ) {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_harness_mismatch_stale file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} frontmatter_harness_changed={}",
@@ -85,7 +85,7 @@ pub(crate) fn load_authoritative_actor_binding(
             let agent_change_restart_enabled =
                 agent_doc_supervisor_io::config::agent_change_restart_enabled(file);
             if !agent_change_restart_enabled {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_authoritative_actor_harness_mismatch_deferred file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} queue_paused={} frontmatter_harness_changed=true agent_change_restart=disabled action=bail_restart_disabled",
@@ -107,7 +107,7 @@ pub(crate) fn load_authoritative_actor_binding(
                     record.harness,
                 );
             }
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_harness_mismatch_deferred file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} queue_paused={} frontmatter_harness_changed=true action=defer_to_boundary_restart",
@@ -165,7 +165,7 @@ pub(crate) fn load_authoritative_actor_binding(
                 );
             }
             ManagedCapabilityProofStatus::Missing => {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "route_authoritative_actor_missing_{}_capability_proof file={} pane={} harness={} generation={}",
@@ -245,7 +245,7 @@ pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
     ) {
         Ok(updated) => {
             runtime.actor_state = Some(RouteActorState::Ready);
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_promoted_ready file={} session={} pane={} generation={} reason=dispatch_ready_prompt",
@@ -338,7 +338,7 @@ pub(crate) fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
             clear_starting_actor_timeout_record(file_path);
             let mut runtime = actor.runtime.clone();
             runtime.actor_state = Some(RouteActorState::Ready);
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_starting_timeout_recovered_ready file={} session={} pane={} generation={}",
@@ -483,7 +483,7 @@ fn recover_dispatch_via_supervisor_restart(
     let stale_pid = recovery.stale_pid;
     let outcome_fields = recovery.outcome.log_fields();
     if !restart_via_supervisor(file, session_id) {
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=reexec_failed {outcome_fields}"
@@ -509,7 +509,7 @@ fn recover_dispatch_via_supervisor_restart(
             file.display()
         ),
     }
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=restarted {outcome_fields}"
@@ -536,7 +536,7 @@ pub(crate) fn route_dispatch_deduped_pane(
     dispatch_pane: String,
     detail: &str,
 ) -> String {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "route_dispatch_deduped file={} pane={} command_kind={} reason=in_flight_coalesce detail={}",
@@ -657,7 +657,7 @@ pub(crate) fn mark_starting_actor_timeout_blocked(
         },
     ) {
         Ok(updated) => {
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "route_authoritative_actor_starting_marked_blocked file={} session={} pane={} generation={} blocker=starting_actor_timeout",

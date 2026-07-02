@@ -226,14 +226,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             match crate::write::atomic_write_pub(file, &migrated) {
                 Ok(()) => {
                     if let Err(err) =
-                        agent_doc_snapshot_io::save(file, &migrated, crate::ops_log::log_op)
+                        agent_doc_snapshot_io::save(file, &migrated, agent_doc_ops_log_io::log_op)
                     {
                         eprintln!(
                             "[preflight] warning: dropped deprecated queue_active line but failed to update snapshot for {}: {err}",
                             file.display()
                         );
                     }
-                    crate::ops_log::log_op(
+                    agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "deprecated_queue_active_line_dropped file={}",
@@ -325,7 +325,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         && let Err(e) = agent_doc_workflow_io::document_init::ensure_initialized(
             file,
             crate::git::commit,
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
     {
         eprintln!("[preflight] warning: auto-init failed: {}", e);
@@ -427,7 +427,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?
     {
         crate::write::atomic_write_pub(file, &repaired_doc)?;
-        crate::ops_log::log_op(
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "preflight_repair_prompt_tail_outside_exchange file={}",
@@ -668,7 +668,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
     let diff_result_with_current = agent_doc_diff_io::compute_with_current(
-        &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+        &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
         file,
     )?;
     // Save the response baseline from the exact stable document projection used
@@ -862,7 +862,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !no_changes {
         if let Some(commands) = slash_command_only_diff_commands.as_ref() {
             if !options.probe {
-                crate::ops_log::log_op(
+                agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "preflight_slash_command_only_handoff file={} commands={:?}",
@@ -888,7 +888,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
             let file_len = file_content.len();
             agent_doc_cycle_state_io::start_preflight(file, snap.as_deref(), Some(&file_content))?;
-            crate::ops_log::log_op(
+            agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "preflight_diff_start file={} snap_len={} file_len={}",
@@ -1490,7 +1490,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             };
             if let StallVerdict::Stalled(message) = classify_stall(&facts) {
                 if !options.probe {
-                    crate::ops_log::log_op(file, &message);
+                    agent_doc_ops_log_io::log_op(file, &message);
                 }
                 warnings.push(PreflightWarning {
                     code: "queue_stall_detected".to_string(),
@@ -1590,7 +1590,7 @@ mod tests {
         agent_doc_snapshot_io::save(
             &doc,
             &std::fs::read_to_string(&doc).unwrap(),
-            crate::ops_log::log_op,
+            agent_doc_ops_log_io::log_op,
         )
         .unwrap();
 
@@ -1619,7 +1619,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(dir.path())
             .args(["add", "session.md"])
@@ -1689,7 +1689,7 @@ mod tests {
         std::fs::write(&doc, old_doc).unwrap();
         std::fs::write(&news_index, "old news index\n").unwrap();
         std::fs::write(&news_day, "old news day\n").unwrap();
-        agent_doc_snapshot_io::save(&doc, old_doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, old_doc, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args([
@@ -1708,7 +1708,7 @@ mod tests {
 
         let new_doc = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nold body\n### Re: create today's news — codex\nresponse\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, new_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, new_doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, new_doc, agent_doc_ops_log_io::log_op).unwrap();
         std::fs::write(&news_index, "new news index\n").unwrap();
         std::fs::write(&news_day, "new news day\n").unwrap();
 
@@ -1737,7 +1737,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "sampleorders.md"])
@@ -1783,7 +1783,7 @@ mod tests {
         let doc = dir.path().join("session.md");
         let content = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         std::fs::write(dir.path().join(".agent-doc/gc.stamp"), "").unwrap();
 
         let stale_doc = dir.path().join("tasks/stale-starting.md");
@@ -1843,7 +1843,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _prompt = EnvGuard::set(
             "AGENT_DOC_HARNESS_PROMPT",
@@ -1884,7 +1884,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -1927,7 +1927,7 @@ mod tests {
         );
         let current_content = snapshot_content.replace("do [#future-old]", "do [#future-new]");
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -1979,7 +1979,7 @@ mod tests {
         );
         let current_content = snapshot_content.replace("do [#old]", "do [#blocker]");
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -2029,7 +2029,7 @@ mod tests {
                 "Done.\n\nOperator follow-up.\n<!-- /agent:exchange -->",
             );
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -2080,7 +2080,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -2121,7 +2121,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -2171,7 +2171,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let snapshot_before = agent_doc_snapshot_io::load(&doc).unwrap();
         let baseline_path = agent_doc_fs::baseline_path_for(&doc).unwrap();
         let claims_log = dir.path().join(".agent-doc/claims.log");
@@ -2220,7 +2220,7 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, pre).unwrap();
-        agent_doc_snapshot_io::save(&doc, pre, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, pre, agent_doc_ops_log_io::log_op).unwrap();
 
         // Simulate run.rs:570 — baseline captured from pre-maintenance content.
         save_baseline_content(&doc, pre);
@@ -2317,7 +2317,7 @@ mod tests {
             "<!-- /agent:icebox -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -2353,7 +2353,7 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -2409,7 +2409,7 @@ mod tests {
             "<!-- agent:queue -->\n- do [#freshly-added]\n<!-- /agent:queue -->",
         );
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -2445,7 +2445,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -2485,7 +2485,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -2520,7 +2520,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -2553,7 +2553,7 @@ mod tests {
         );
         let current_content = snapshot_content.replace("queue_active: true", "queue_active: false");
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -2604,7 +2604,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
 
@@ -2617,7 +2617,7 @@ mod tests {
         let doc = dir.path().join("session.md");
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nAnswer\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
@@ -2648,7 +2648,7 @@ mod tests {
 
         let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2664,7 +2664,7 @@ mod tests {
         // contain the response, HEAD does not, cycle is marked Committed.
         let patched = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
         std::fs::write(&doc, patched).unwrap();
-        agent_doc_snapshot_io::save(&doc, patched, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, patched, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
@@ -2719,7 +2719,7 @@ mod tests {
 
         let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2733,7 +2733,7 @@ mod tests {
 
         let patched = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
         std::fs::write(&doc, patched).unwrap();
-        agent_doc_snapshot_io::save(&doc, patched, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, patched, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
@@ -2791,7 +2791,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2826,7 +2826,7 @@ mod tests {
             ),
         );
         std::fs::write(&doc, &materialized).unwrap();
-        agent_doc_snapshot_io::save(&doc, &materialized, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &materialized, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -2904,7 +2904,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2972,7 +2972,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3055,7 +3055,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3132,7 +3132,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3171,7 +3171,7 @@ mod tests {
                 ),
             );
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &current, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &current, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3219,7 +3219,7 @@ mod tests {
             "-->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = run(&doc).unwrap_err();
         assert!(
@@ -3243,7 +3243,7 @@ mod tests {
             "-->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         run(&doc).unwrap();
     }
@@ -3254,7 +3254,7 @@ mod tests {
         let doc = dir.path().join("session.md");
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         crate::git::commit(&doc).unwrap();
         let prior =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -3288,7 +3288,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3349,7 +3349,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3387,7 +3387,7 @@ mod tests {
             "the inline #next-steps prompt should still require backlog capture"
         );
         let diff = agent_doc_diff_io::compute(
-            &agent_doc_snapshot_io::DiffSnapshotStore::new(crate::ops_log::log_op),
+            &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
             &doc,
         )
         .unwrap()
@@ -3439,7 +3439,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3522,7 +3522,7 @@ mod tests {
         let live = queued.replacen(original_prompt, edited_prompt, 1);
 
         std::fs::write(&doc, head).unwrap();
-        agent_doc_snapshot_io::save(&doc, head, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, head, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3534,7 +3534,7 @@ mod tests {
             .output()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, &queued, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &queued, agent_doc_ops_log_io::log_op).unwrap();
         std::fs::write(&doc, &live).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         crate::pipeline_frontmatter::mark_committed(
@@ -3598,7 +3598,7 @@ mod tests {
         let doc = root.join("session.md");
         let snapshot = "---\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3658,7 +3658,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
 
         let live = concat!(
@@ -3699,7 +3699,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3756,7 +3756,7 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3834,7 +3834,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3915,7 +3915,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4029,7 +4029,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4104,7 +4104,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4194,7 +4194,7 @@ mod tests {
             prompt = prompt
         );
         std::fs::write(&doc, &snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4257,7 +4257,7 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4326,7 +4326,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4415,7 +4415,7 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4499,7 +4499,7 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4573,7 +4573,7 @@ mod tests {
             <!-- agent:boundary:head -->\n\
             <!-- /agent:exchange -->\n";
         std::fs::write(&doc, tracked).unwrap();
-        agent_doc_snapshot_io::save(&doc, tracked, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, tracked, agent_doc_ops_log_io::log_op).unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4623,7 +4623,7 @@ mod tests {
         let doc = dir.path().join("session.md");
         let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         crate::repair::save_pending(&doc, "Recovered answer.").unwrap();
         let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         std::fs::remove_file(&pending).unwrap();
@@ -4685,7 +4685,8 @@ mod tests {
         let primary = root.join("primary.md");
         let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
         fs::write(&primary, primary_content).unwrap();
-        agent_doc_snapshot_io::save(&primary, primary_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&primary, primary_content, agent_doc_ops_log_io::log_op)
+            .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "primary.md"])
@@ -4701,7 +4702,8 @@ mod tests {
         let secondary = root.join("secondary.md");
         let secondary_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
         fs::write(&secondary, secondary_content).unwrap();
-        agent_doc_snapshot_io::save(&secondary, secondary_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&secondary, secondary_content, agent_doc_ops_log_io::log_op)
+            .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "secondary.md"])
@@ -4779,7 +4781,8 @@ mod tests {
         let primary = root.join("primary.md");
         let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
         fs::write(&primary, primary_content).unwrap();
-        agent_doc_snapshot_io::save(&primary, primary_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&primary, primary_content, agent_doc_ops_log_io::log_op)
+            .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "primary.md"])
@@ -4797,7 +4800,8 @@ mod tests {
         // Document has user additions not in the snapshot
         let doc_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\nNew question from user\n";
         fs::write(&secondary, doc_content).unwrap();
-        agent_doc_snapshot_io::save(&secondary, snap_content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&secondary, snap_content, agent_doc_ops_log_io::log_op)
+            .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "secondary.md"])

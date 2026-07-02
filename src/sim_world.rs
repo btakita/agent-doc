@@ -1469,8 +1469,7 @@ fn setup_baseline_drift_capture(
     let mut world = SimWorld::new(seed);
     world.apply(SimCommand::EditPrompt).unwrap();
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_orchestration::ops_log::log_op)
-        .unwrap();
+    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
     let capture = agent_doc_orchestration::capture::capture_response(&doc, response).unwrap();
     (dir, doc, capture, world)
 }
@@ -1480,7 +1479,7 @@ fn apply_response_and_save_current(doc: &Path, world: &mut SimWorld, response: &
     world.apply_captured_response()?;
     world.apply(SimCommand::Commit)?;
     std::fs::write(doc, &world.doc)?;
-    agent_doc_snapshot_io::save(doc, &world.doc, agent_doc_orchestration::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(doc, &world.doc, agent_doc_ops_log_io::log_op)?;
     Ok(())
 }
 
@@ -6088,7 +6087,7 @@ fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
         "<!-- /agent:queue -->\n",
     );
     std::fs::write(&doc, content).unwrap();
-    agent_doc_snapshot_io::save(&doc, content, agent_doc_orchestration::ops_log::log_op).unwrap();
+    agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
     // A halt response that names the head with a trailing modifier must NOT
     // register as targeting the head (exact-topic match only).
@@ -6145,8 +6144,7 @@ fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
         )
         .unwrap();
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_orchestration::ops_log::log_op)
-        .unwrap();
+    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
 
     agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect("benign user commit outside response must auto-refresh");
@@ -6182,8 +6180,7 @@ fn baseline_drift_user_edit_inside_committed_response_fails_closed() {
         "User rewrote the committed response.",
     );
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_orchestration::ops_log::log_op)
-        .unwrap();
+    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
 
     let err = agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect_err("editing the committed response body must fail closed");
@@ -6204,8 +6201,7 @@ fn baseline_drift_user_edit_matches_normalized_response_adopts() {
         .doc
         .replace("❯ Submodule pointer updated.", "Submodule pointer updated.");
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_orchestration::ops_log::log_op)
-        .unwrap();
+    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
 
     agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect("user-normalized response body should be adopted");

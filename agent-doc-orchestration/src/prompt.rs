@@ -30,8 +30,6 @@ use agent_doc_turn_executor_tmux::prompt::{
 use serde::Serialize;
 use tmux_router::{Registry as SessionRegistry, Tmux};
 
-use crate::ops_log;
-
 pub fn run(file: &Path) -> Result<()> {
     run_with_tmux(file, &Tmux::default_server())
 }
@@ -198,7 +196,10 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
                 tmux,
                 &pane_id,
                 keys.prev,
-                agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), ops_log::log_op),
+                agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                    Some(file),
+                    agent_doc_ops_log_io::log_op,
+                ),
                 "prompt.answer",
             )?;
             std::thread::sleep(std::time::Duration::from_millis(30));
@@ -209,7 +210,10 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
                 tmux,
                 &pane_id,
                 keys.next,
-                agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), ops_log::log_op),
+                agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                    Some(file),
+                    agent_doc_ops_log_io::log_op,
+                ),
                 "prompt.answer",
             )?;
             std::thread::sleep(std::time::Duration::from_millis(30));
@@ -222,7 +226,7 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
         tmux,
         &pane_id,
         "Enter",
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), ops_log::log_op),
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
         "prompt.answer",
     )?;
     if navigation_axis_for_prompt(&pane_content) == PromptNavigationAxis::Horizontal
@@ -233,7 +237,10 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
             tmux,
             &pane_id,
             "Enter",
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), ops_log::log_op),
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                Some(file),
+                agent_doc_ops_log_io::log_op,
+            ),
             "prompt.answer",
         )?;
     }

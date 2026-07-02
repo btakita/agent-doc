@@ -23,7 +23,7 @@ pub fn log_closeout_guard_event(
     agent_doc_flow_io::log_flow_event(
         file,
         agent_doc_turn::closeout_guard::closeout_guard_event(stage, outcome, reason),
-        crate::ops_log::log_op,
+        agent_doc_ops_log_io::log_op,
     );
 }
 
@@ -323,7 +323,7 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
         return Ok(false);
     }
     crate::capture::mark_discarded(file)?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "reconcile_compacted_committed_capture file={} capture_id={} cycle_id={}",
@@ -543,7 +543,7 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
         &canonical,
         &record,
     )?;
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "terminal_closeout_proof_recorded file={} operation_id={} ledger={}",
@@ -1005,7 +1005,7 @@ fn log_closeout_recovery_mutation(
     action: &str,
     reason: CloseoutRecoveryMutationReason,
 ) {
-    crate::ops_log::log_op(
+    agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "closeout_recovery_mutation file={} action={} reason={}",
@@ -1101,7 +1101,7 @@ fn apply_metadata_drift_recovery(
 /// preflight-owned baseline is intentionally left untouched (it is re-taken at the
 /// next stable post-commit point).
 fn rebuild_sidecars_from_content(file: &Path, content: &str) -> Result<()> {
-    agent_doc_snapshot_io::save(file, content, crate::ops_log::log_op)?;
+    agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)?;
     let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(content).encode_state();
     agent_doc_merge_io::save_document_crdt(file, &crdt, content)?;
     Ok(())
@@ -1237,7 +1237,7 @@ impl<'a> CloseoutTimer<'a> {
         }
         let message = closeout_latency_message(self.file, total_ms, &self.phases);
         eprintln!("[perf] {message}");
-        crate::ops_log::log_op(self.file, &message);
+        agent_doc_ops_log_io::log_op(self.file, &message);
     }
 }
 
@@ -1251,7 +1251,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["init"]);
         run_git(dir.path(), &["config", "user.email", "test@example.com"]);
         run_git(dir.path(), &["config", "user.name", "Test User"]);
@@ -1387,7 +1387,7 @@ mod tests {
             "### Re: repair closeout - gpt-5\n\nRecovered.\n<!-- agent:boundary:repair -->",
         );
         std::fs::write(&doc, &closed).unwrap();
-        agent_doc_snapshot_io::save(&doc, &closed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &closed, agent_doc_ops_log_io::log_op).unwrap();
 
         complete_required_closeout(&doc)
             .expect("abandoned stale cycle must not block terminal closeout proof");
@@ -1518,7 +1518,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::pipeline_frontmatter::mark_committed(
@@ -1545,7 +1545,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, &full_doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::pipeline_frontmatter::mark_committed(
@@ -1578,7 +1578,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, captured).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, &full_doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::pipeline_frontmatter::mark_committed(
@@ -1825,7 +1825,7 @@ mod tests {
         let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -1850,7 +1850,7 @@ mod tests {
         let snapshot = head.replace("Done.\n", "Done.\n\nReal unreviewed user content.\n");
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -1878,7 +1878,7 @@ mod tests {
         );
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
             .unwrap();
         // Patch a visible response directly into the working file (bypassing write).
@@ -1957,7 +1957,7 @@ mod tests {
         // Document itself is clean: snapshot == HEAD == working.
         let doc = subwt.join("doc.md");
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -2021,7 +2021,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         // The snapshot AND the visible file carry the drift; only HEAD is behind.
         std::fs::write(&doc, &snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -2068,7 +2068,7 @@ mod tests {
         let snapshot = head.replace("queue_active: true", "queue_active: false");
         let (dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -2116,7 +2116,7 @@ mod tests {
         let visible = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, head, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, head, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(head), Some(head))
             .unwrap();
         std::fs::write(&doc, &visible).unwrap();
@@ -2162,7 +2162,7 @@ mod tests {
         let snapshot = head.replace("- do [#a]", "- do [#z]");
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -2205,7 +2205,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, &full_doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::pipeline_frontmatter::mark_committed(
@@ -2243,7 +2243,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         // Snapshot carries the un-canonicalized prompt prefix; HEAD has the bare
         // form. Artifact normalization makes them equal; transient does not.
-        agent_doc_snapshot_io::save(&doc, &snapshot, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         crate::pipeline_frontmatter::mark_committed(
             &doc,
             "commit_success",
@@ -2302,7 +2302,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, full_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, full_doc, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         crate::pipeline_frontmatter::mark_committed(
@@ -2353,7 +2353,7 @@ mod tests {
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &compacted).unwrap();
-        agent_doc_snapshot_io::save(&doc, &compacted, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &compacted, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
         crate::pipeline_frontmatter::mark_committed(
@@ -2408,7 +2408,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::capture::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &compacted).unwrap();
-        agent_doc_snapshot_io::save(&doc, &compacted, crate::ops_log::log_op).unwrap();
+        agent_doc_snapshot_io::save(&doc, &compacted, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
         crate::pipeline_frontmatter::mark_committed(

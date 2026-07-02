@@ -759,6 +759,8 @@ dependencies = [
 name = "agent-doc-ops-log-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-cycle-state-io",
+ "agent-doc-frontmatter",
  "agent-doc-git-io",
  "agent-doc-hash",
  "agent-doc-log-time",

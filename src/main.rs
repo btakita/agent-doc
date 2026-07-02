@@ -2423,9 +2423,7 @@ fn main() -> anyhow::Result<()> {
                 history::git_diff(&file, &from_ref, to_ref)
             } else {
                 agent_doc_diff_io::run(
-                    &agent_doc_snapshot_io::DiffSnapshotStore::new(
-                        agent_doc_orchestration::ops_log::log_op,
-                    ),
+                    &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
                     &file,
                     wait,
                 )

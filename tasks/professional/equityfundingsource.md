@@ -74,7 +74,7 @@ After 20:30
 
 <!-- agent:queue preset="#spec-test-commit-push" stop -->
 - ~~On https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=advance-lender, the upload fields should be replaced by the questionaire. Remove all lender annual requirements uploads.~~
-- deploy
+- ~~deploy~~ ✅ live — worker version 56d33654, https://equityfundingsource.brian-takita.workers.dev/
 <!-- /agent:queue -->
 
 ## Backlog

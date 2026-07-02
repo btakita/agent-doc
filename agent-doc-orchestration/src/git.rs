@@ -2737,31 +2737,6 @@ mod th {
             .output()
             .unwrap();
     }
-    pub(crate) fn add_submodule(repo: &Path, origin: &Path, target: &str, msg: &str) {
-        let url = format!("file://{}", origin.display());
-        let output = Command::new("git")
-            .current_dir(repo)
-            .args([
-                "-c",
-                "protocol.file.allow=always",
-                "submodule",
-                "add",
-                &url,
-                target,
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "submodule add failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        Command::new("git")
-            .current_dir(repo)
-            .args(["commit", "-m", msg, "--no-verify"])
-            .output()
-            .unwrap();
-    }
     // --- Bug 2B regression tests ---
     // Verify that commit does NOT overwrite the snapshot with user edits.
     // The divergence detection was removed from commit because is_stale_baseline

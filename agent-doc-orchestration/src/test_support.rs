@@ -6,7 +6,7 @@
 //! serialize env-mutating tests within *this* crate's test process — no
 //! cross-crate sharing is required (or possible) for a `#[cfg(test)]` static.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::MutexGuard;
 
 thread_local! {
@@ -47,35 +47,6 @@ pub fn env_lock() -> ProcessGlobalLockGuard {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     ProcessGlobalLockGuard {
         _guard: Some(guard),
-    }
-}
-
-/// RAII guard that sets the process current directory for the duration of a
-/// test and restores it on drop, holding the process-global env lock so
-/// cwd-mutating tests stay serialized. Shared helper for `claim`/`git` tests.
-pub struct ScopedCurrentDir {
-    prev_cwd: PathBuf,
-    _env_guard: ProcessGlobalLockGuard,
-}
-
-impl ScopedCurrentDir {
-    pub fn set(path: &Path) -> Self {
-        let env_guard = env_lock();
-        let prev_cwd = std::env::current_dir()
-            .ok()
-            .filter(|cwd| cwd.exists())
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
-        std::env::set_current_dir(path).unwrap();
-        Self {
-            prev_cwd,
-            _env_guard: env_guard,
-        }
-    }
-}
-
-impl Drop for ScopedCurrentDir {
-    fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.prev_cwd);
     }
 }
 

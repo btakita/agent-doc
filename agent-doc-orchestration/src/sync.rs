@@ -4586,6 +4586,7 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
+    #[test]
     fn sync_repair_closes_jb_cache_conflict_cancel_commit_boundary() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -6208,6 +6209,7 @@ mod tests {
             "log line should start with timestamp bracket, got: {matching_line}"
         );
     }
+    #[test]
     fn safe_passive_prune_state_skips_stash_cleanup_from_first_pass() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state_path = tmp.path().join(".agent-doc/sync-prune-state.json");
@@ -6493,6 +6495,7 @@ mod tests {
         assert_eq!(entry.file, old_file);
         assert_eq!(entry.pane, "%42");
     }
+    #[test]
     fn rename_debounce_suppresses_auto_start() {
         let tmp = tempfile::TempDir::new().unwrap();
         let debounce_dir = tmp.path().join(".agent-doc/rename-debounce");
@@ -6523,6 +6526,7 @@ mod tests {
             "marker should be fresh"
         );
     }
+    #[test]
     fn rename_debounce_does_not_affect_other_files() {
         let tmp = tempfile::TempDir::new().unwrap();
         let debounce_dir = tmp.path().join(".agent-doc/rename-debounce");

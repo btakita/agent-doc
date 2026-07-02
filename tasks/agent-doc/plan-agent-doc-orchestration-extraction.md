@@ -229,6 +229,10 @@ seams:
   `agent-doc-tmux-commands::input_diag`; route keeps redaction, timestamping,
   file writes, ops-log emission, and stderr output while calling the focused
   filename/log/hint formatters directly.
+- Associated-pane ambiguity/manual-claim diagnostic formatting moved from
+  `route.rs`, `route/pane_resolution.rs`, and `resync.rs` to `agent-doc-tmux`;
+  orchestration keeps pane discovery, logging, tmux effects, and error
+  propagation while calling the focused formatters directly.
 - Controller self-watchdog and stranded handoff-replacement policy moved from
   `project_controller/rpc.rs` to `agent-doc-controller::status`; orchestration
   now supplies bootstrap/socket/time facts.
@@ -253,6 +257,9 @@ seams:
   `agent-doc-supervisor::crash_policy`; start keeps the `portable_pty`
   `ExitStatus` adapter and passes rendered status/success facts to the focused
   formatter.
+- Forwarded Ctrl-C interrupt-exit classification moved from `start.rs` to
+  `agent-doc-supervisor::crash_policy`; start now only adapts the
+  `portable_pty` rendered status and exit code into the focused classifier.
 - Response-capture repairability moved from `repair.rs` to
   `agent-doc-workflow::capture`; repair now filters active captures through
   `capture_state_is_repairable`.
@@ -277,6 +284,9 @@ seams:
   `agent-doc-workflow::capture`; repair now gathers the individual repair facts,
   then uses `RepairTemplateChanges` for persist and ordered log decisions while
   keeping file/snapshot IO and ops-log effects.
+- Non-exchange component drift blocking policy moved from `git.rs` to
+  `agent-doc-git`; git orchestration keeps snapshot/HEAD/turn-scope IO and
+  calls `has_blocking_non_exchange_component_drift` directly.
 
 The no-shim policy remains active for these layer extractions: old helper names
 were removed or confined to static test strings, and boundary tests now assert

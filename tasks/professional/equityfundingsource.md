@@ -38,7 +38,22 @@ complete
 Compacted content:
 - Archived 5 response topic(s): #ccpz; IPC proof diagnostic (interrupted-cycle recovery); lender-pipeline modal header cut off by long email; 2 more
 - Prior summary/context: prior compacted content: Archived 11 response topic(s): compaction recovery and queue state; IPC proof diagnostic (in...
-<!-- agent:boundary:872d251a -->
+
+### Re: Advance-lender dialog — questionnaire replaces uploads — opus-4-8
+
+Done. On the Lender Pipeline **Advance lender** dialog, the lender-document upload checklist is replaced by the annual accreditation questionnaire + Requirements decision, and the annual-requirements upload fields are removed.
+
+**What changed** (`src/equityfundingsource-dev`):
+- `investor_pipeline.tsx` — `AdvanceLenderModal` now renders `<InvestorAccreditationControl>` (the annual questionnaire + Accredit/Reject decision) in place of `<LenderDocumentChecklist>`; the hold-explainer copy points at the questionnaire instead of "documents shown below".
+- `lender_documents.tsx` — removed the now-orphaned upload UI (`LenderDocumentChecklist`, `LenderRequirementRow`, `LenderCategoryUpload`) and the unused `AdminDocumentUploadField` import. Pure helpers (`LENDER_DOCUMENT_REQUIREMENTS`, `lender_document_requirement_status_`) kept; the `AdminLenderDocuments` documents tab is untouched.
+- Tests updated to assert the dialog renders the questionnaire and that the upload components are gone.
+
+**Verification:** full suite **1377 pass / 0 fail**; `bun run build` + `build:worker` both green.
+
+**Committed + pushed:** EFS `d52d7d9` → `origin/main`; superproject submodule pointer bumped (`83cd4f3`).
+
+`deploy` is still queued but the queue is paused — unpause (or say the word) and I'll ship it to production.
+<!-- agent:boundary:4d751826 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,10 +73,12 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" start -->
+- 🚧 On https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=advance-lender, the upload fields should be replaced by the questionaire. Remove all lender annual requirements uploads.
+- :pushpin: deploy
 /goal Implement backlog item(s): #zhfn
-- ~~/goal Implement backlog item(s): #ccpz~~
 - https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4046fa5a-65d4-4292-bfa6-59b66376cf6c&deal_tab=interests -> Messages should have the interested lender conversations as separate tabs.
 - deploy
+- On https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=advance-lender, the upload fields should be replaced by the questionaire. Remove all lender annual requirements uploads.
 <!-- /agent:queue -->
 
 ## Backlog

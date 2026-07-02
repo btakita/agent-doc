@@ -192,7 +192,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 const EDITOR_PLUGIN_KIND = 'vscode';
-const EDITOR_PLUGIN_VERSION = '0.2.39';
+const EDITOR_PLUGIN_VERSION = '0.2.40';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 
 function findLibrary(projectRoot?: string): string | null {

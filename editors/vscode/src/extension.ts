@@ -2266,7 +2266,19 @@ class PatchWatcher implements vscode.Disposable {
                     'file_apply_failed',
                     projectRoot,
                 );
-                this.outputChannel.appendLine(`PatchWatcher: patch not applied, leaving for retry: ${uri.fsPath}`);
+                // #af88 file-IPC negative-ack: signal the apply failure to the binary
+                // with a sibling <patch>.nack so its poll fails closed immediately
+                // instead of waiting out the full no_ack timeout. Leave the JSON patch
+                // in place — the binary removes both on nack.
+                try {
+                    const nackPath = uri.fsPath.endsWith('.json')
+                        ? uri.fsPath.slice(0, -'.json'.length) + '.nack'
+                        : uri.fsPath + '.nack';
+                    fs.writeFileSync(nackPath, 'file_apply_failed');
+                } catch (e: any) {
+                    this.outputChannel.appendLine(`PatchWatcher: failed to write nack sidecar: ${e.message}`);
+                }
+                this.outputChannel.appendLine(`PatchWatcher: patch not applied, wrote nack + left for retry: ${uri.fsPath}`);
             }
         } catch (e: any) {
             this.outputChannel.appendLine(`PatchWatcher: failed to process ${uri.fsPath}: ${e.message}`);

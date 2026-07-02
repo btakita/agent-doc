@@ -1004,7 +1004,17 @@ class PatchWatcher(private val project: Project) : Disposable {
                         stateGeneration,
                         "file_apply_failed",
                     )
-                    LOG.warn("Patch not applied, leaving file for retry: ${patchFile.name}")
+                    // #af88 file-IPC negative-ack: signal the apply failure to the
+                    // binary with a sibling <patch>.nack so its poll fails closed
+                    // immediately instead of waiting out the full no_ack timeout.
+                    // Leave the JSON patch in place — the binary removes both on nack.
+                    try {
+                        File(patchFile.parentFile, patchFile.nameWithoutExtension + ".nack")
+                            .writeText("file_apply_failed")
+                    } catch (e: Exception) {
+                        LOG.warn("Failed to write nack sidecar for ${patchFile.name}", e)
+                    }
+                    LOG.warn("Patch not applied, wrote nack + left file for retry: ${patchFile.name}")
                 }
             }
         } catch (e: Exception) {

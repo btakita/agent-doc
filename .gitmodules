@@ -175,3 +175,6 @@
 [submodule "src/patchboard-mcp"]
 	path = src/patchboard-mcp
 	url = git@github.com:btakita/patchboard-mcp.git
+[submodule "src/lazily-formal"]
+	path = src/lazily-formal
+	url = git@github.com:lazily-hub/lazily-formal.git

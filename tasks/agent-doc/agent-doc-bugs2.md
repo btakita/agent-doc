@@ -34,72 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-220435.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260702-035644.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JB Run Agent Doc dispatch hang (#kjw0)
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): Claim for Tmux Pane should open a NEW pane in the same session
-
-### Re: next-steps to fix bugs (and "clear the review items") — opus-4-8
-
-
-**Review is already empty.** `agent:review` has no gated items, so the "make backlog replacements for all gated review items / clear the review items" ask is already satisfied — there is nothing left to convert or clear this round.
-
-**I'm not bulk-closing the queue tail.** The plan machinery wanted to `--done r4gq/af88/qeditrace/falsetyping-guard` in one shot. Three of those are `[focused-cycle]` deep code items and one is `[operator-verify]`; marking them done without real work + proof would be a false closeout, so I left them open.
-
-**Why I'm holding off on install/commit/push this cycle:** the live controller (pid 986050) is running the installed binary from 19:56, which is behind the committed refactors, and `src/agent-doc` has 3 uncommitted WIP files (`agent-doc-orchestration/src/flow/closeout.rs`, `agent-doc-turn/src/closeout_recovery.rs`, `tests/test_cli.rs`). A concurrent session also owns `equityfundingsource.md` (pane %87). A `make install` / push now would build+ship that half-finished WIP and risk the concurrent-session force-push + `live_prompt_drift` failure mode. Commit/land the 3 WIP files (or tell me they're mine to finish) before any install.
-
-**The remaining backlog splits cleanly — here are the next steps:**
-
-Ready for *your* live testing (fixes already shipped; grep the named ops.log marker after each):
-- `#r4gq` — Run Agent Doc into a BUSY codex pane, expect fast queued-behind-active-turn; grep `route_dispatch_start_queued_behind_active_turn` present, `accepted_without_dispatch_start_proof` absent.
-- `#jbcompactcommit` — JB Compact Exchange on a large doc, HEAD lands compacted content; `compact_commit_head_mismatch` must be absent.
-- `#2y8j` — sustained typing burst in a large doc, smooth; `crdt_merge_base` no longer per-keystroke.
-- `#nsfz` — hung/auth-walled harness, fail-closed within 30s with startup_miss marker.
-- `#tmuxsynccrashlog`, `#kj5flive`, `#crdtauth6`, `#suprestassoc-live` — live editor/pane proofs per their plan files.
-
-Each needs a *dedicated agent focused-cycle* (I can take one at a time — say which):
-- `#qeditrace` — pre-run multi-add queue revert; investigate `preflight/maintenance.rs` + add SimWorld coverage. Plan: `plan-queue-edit-race-consolidated.md`.
-- `#af88` — remaining IPC wedge hardening (E: pty.rs stdin.lock across blocking read; B/D: editor IPC listener read_line backstop; F: connect_sync timeout).
-- `#boundaryaccum1` — self-healing single-boundary invariant in the binary-owned snapshot.
-- `#falsetyping-guard` — provenance-aware visible-write guard (deep/live-CRDT-critical; also needs operator proof).
-- `#qactsync`, `#claimnewpane`, `#cdtcutover`, `#coredecomp`, `#orchdecomp`, `#skillharnessplugin` — larger, each own cycle.
-
-Recommendation: run the operator-verify live proofs now (they only need your editor + a log grep), and pick **one** focused-cycle code item for me to actually implement + test in isolation. I did not edit the queue (supervisor is active — avoiding go-queue churn).
-
-### Re: wedge root cause + "should we retry until states match?" — opus-4-8
-
-
-**Short answer: no, not a blind retry loop.** The states diverged because the stale JB cdylib produced a bad CRDT merge — first duplicating the prompt 10×, then scrambling my response's bullets *into* the compacted Session Summary instead of appending a clean `### Re:` block. Retrying `finalize` against that corrupt live buffer merges *more* onto a corrupt base; CRDT retries accrete rather than converge (that is exactly how the 10× dup grew). The clean, complete response was already in the capture ledger — the fix was to replace the corrupt base and write once, not to regenerate.
-
-**Root cause:** stale install. The controller (pid 986050) and the JB cdylib were the 0.34.66 build from 19:57, behind the committed source, so the plugin ran old CRDT-apply code that corrupts the live buffer. JB restart/reopen can't fix this (reloads the same stale cdylib) — only a fresh `make install` (or `--force-disk`) resolves it.
-
-**What I did to fix it:**
-1. `make install` in `src/agent-doc` — rebuilt binary + cdylib (fresh 22:41 build); `lib-install` updated the cdylib symlink so JB hot-reloads it. Auto-recycle marked 2 controllers + 3 route-owned supervisors to recycle at their idle boundary.
-2. `agent-doc admin recycle` for this project's controller.
-3. Recovered this document: `git checkout HEAD` (discarded only the scrambled response + queue-reconcile churn — no operator content; your prompt was safe in HEAD), reset sidecars from the clean base, moved the stuck `response_captured` cycle-state aside, and wrote this response via `--force-disk`.
-
-**Heads-up — the extractor is still running.** After my install, 10 `src/agent-doc` source files are already newer than it and 4 are uncommitted (route/dispatch/maintenance), so the `stale_install` warning has reappeared. Those are route/dispatch files, *not* the CRDT-apply path, so they didn't cause this wedge — but the install will keep re-staling until the extractor finishes. I used `--force-disk` deliberately to bypass the flaky editor-IPC/CRDT path during that churn; a clean IPC-path validation (your "retry until it converges" as a live proof that the fresh cdylib fixed it) should wait until the extractor settles and one more `make install` + recycle lands.
-
-### Re: do #falsetyping-guard — opus-4-8
-
-Implemented and committed on an **isolated worktree** branch `falsetyping-guard-wt` (off `src/agent-doc` HEAD `4adf538e`) — not integrated/installed yet, because the extractor is still actively churning `src/agent-doc` (8 files touched in the last 3 min). Gating this rather than marking done: the item explicitly requires operator live proof, and integration must wait for the extractor to settle.
-
-**Fix.** New `LiveBufferSnapshot.no_unsaved_operator_edits: bool` (`#[serde(default)]` → `false`, backward-compatible). The visible-write guard (`write.rs`) now: on a live-buffer divergence where the editor proves no unsaved *local operator* edits (the change was a `remoteCrdtApply` / replica churn), falls through to the existing Clean/`DiskDrifted` re-merge path instead of failing closed; a genuine unsaved operator edit keeps `no_unsaved_operator_edits = false` and **still fails closed** (operator text stays authoritative). I verified this invariant by reading the guard branch and the plugin flag logic — the mixed case (operator types, then a remote apply, still unsaved) correctly stays `false`.
-
-**Editor parity (both plugins, FFI-first).** New shared FFI `..._v3(..., no_unsaved_operator_edits)`; JB (`TypingTracker.kt`, `NativeLib.kt`) and VS Code (`native.ts`, `extension.ts`) both track a sticky "unsaved local edit" flag (set on non-remote change, cleared on save/close/clean) and call v3; older cdylibs fall back to v2/v1 → conservative `false`. JB 0.2.204→0.2.205, VS Code 0.2.37→0.2.38.
-
-**Specs + TDD.** Updated `SPEC.md`, `editors/SPEC.md`, `specs/11-debounce.md`. Red-green: `visible_write_reconcile_replica_churn_does_not_fail_closed` and `..._with_disk_drift_remerges` were **red** first (panicked on the old "buffer differs" bail), green after; `..._genuine_operator_edit_still_fails_closed` green throughout (invariant preserved), confirmed in the same run.
-
-**Verification.** `cargo clippy --workspace -D warnings` clean; workspace nextest **6774 passed, 2 failed**. I checked the 2 failures myself: they are a worktree sibling-path artifact — the worktree sits at `~/work/btakita/`, so `../tmux-router` resolves to the standalone **v0.1.0** instead of the workspace **v0.3.12**; the two tests (`test_manifest_uses_publishable_dependency_contract`, `test_tmux_router_owns_session_registry_normalization_policy`) assert manifest/tmux-router version policy and the change touches none of it. Not a regression.
-
-**What unblocks closing this (all after the extractor settles):**
-1. Merge `falsetyping-guard-wt` into `src/agent-doc`, run `make check` in-tree (green — tmux-router resolves correctly there).
-2. Compile the plugins (JB gradle, VS Code `tsc`) — not compiler-verified in the worktree (no gradle/network, no `node_modules`).
-3. `make install` + recycle, then your live proof: type during replica churn → no wedge; confirm a genuine unsaved operator edit still fails closed.
-
-**Two smaller flags:** JB calls `FileDocumentManager.isDocumentUnsaved` on the report executor thread — if IntelliJ demands a read action there, wrap in `runReadAction`. And `audit-docs` fails on a stale managed `.claude/skills/agent-doc/SKILL.md` — pre-existing (regenerated by `agent-doc skill install`, unrelated to this change).
-<!-- agent:boundary:0575a633 -->
+- Archived 3 response topic(s): next-steps to fix bugs (and "clear the review items"); wedge root cause + "should we retry until states match?"; do #falsetyping-guard
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): JB Run Agent Doc dispatch hang (#kjw0)
+<!-- agent:boundary:b8ac4063 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -133,7 +73,7 @@ Error: timed out waiting for project controller at /home/brian/work/btakita/agen
 - do [#r4gq]
 - do [#af88]
 - do [#qeditrace]
-- ~~do [#falsetyping-guard]~~
+- do [#falsetyping-guard]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

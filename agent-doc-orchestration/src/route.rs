@@ -173,8 +173,8 @@ use agent_doc_controller::dispatch::{
     DispatchStartProofDecision, DispatchStartProofFacts, DuplicatePanePolicyErrorFacts,
     MissingCycleAckFacts, OpenCodePaneDispatchStartProofFacts, PromptReadyBarrierDecision,
     ReopenMode, RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
-    RouteDispatchBugReportItemFacts, RouteLatencyFacts, RouteLatencyStatus,
-    RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
+    RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteLatencyFacts,
+    RouteLatencyStatus, RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
     RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
     RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
     RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON, StartingActorLogFacts,
@@ -203,8 +203,9 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
     existing_pane_ready_timeout, failclosed_wait_context, fresh_route_start_ack_timeout,
     opencode_pane_state_changed_from_idle, route_busy_diagnostic_message,
-    route_busy_queued_diagnostic_message, route_dispatch_bug_report_item, route_latency_message,
-    route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
+    route_busy_queued_diagnostic_message, route_closeout_user_outcome_fields,
+    route_dispatch_bug_report_item, route_latency_message, route_latency_status,
+    route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_cycle_ack_timeout,
     routed_dispatch_start_timeout_for_binary, routed_trigger_payload_rejection,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
@@ -394,13 +395,6 @@ pub(crate) struct PendingPromptBearingRouteContext {
     marker: String,
     prompt_text: String,
     slash_command: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum RouteCloseoutDrainOutcome {
-    NoOpenCycle,
-    Recovered(String),
-    Blocked(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2204,37 +2198,14 @@ fn classify_route_closeout_block(
     (recovery_decision, dispatch_decision)
 }
 
-/// `#routedrainnextaction`: format the user-facing outcome fields for a route
-/// closeout block. When the underlying closeout recovery decision is `Blocked`
-/// (a stuck cycle with a recommended recovery command — captured-response
-/// baseline drift, IPC no_ack, etc.), surface `BlockedWithExactUnblocker` so
-/// the operator sees the actual next action instead of the misleading
-/// `wait_for_owner_turn_to_drain` (which implies a live owner turn is running).
-///
-/// The recovery command (`agent-doc reset ...` / `agent-doc write --commit
-/// ...`) contains spaces, so it cannot ride in the validated single-token
-/// `unblocker` field. Keep `unblocker` a short action token
-/// (`run_recovery_command`) and append the literal command as a trailing
-/// free-text `recovery_command=` field — it is always last on the log line, so
-/// `key=value` parsing of the structured fields still works.
-///
-/// For every other decision variant (genuine queue-behind, replay-safe, etc.)
-/// keep the historical `QueuedBehindOwner` outcome — those really are "wait for
-/// the owner turn to drain" cases.
-fn route_closeout_user_outcome_fields(decision: &CloseoutRecoveryDecision) -> String {
-    use agent_doc_flow::outcome::UserFacingOutcomeKind;
-    use agent_doc_turn::closeout_recovery::CloseoutRecoveryDecision as Decision;
-    if let Decision::Blocked { recommended, .. } = decision {
-        let command = short_recovery_command_from_recommendation(recommended)
-            .unwrap_or_else(|| recommended.clone());
-        if let Ok(outcome) = agent_doc_flow::outcome::UserFacingOutcome::with_unblocker(
-            UserFacingOutcomeKind::BlockedWithExactUnblocker,
-            "run_recovery_command",
-        ) {
-            return format!("{} recovery_command={}", outcome.log_fields(), command);
-        }
-    }
-    agent_doc_flow::outcome::user_outcome_fields(UserFacingOutcomeKind::QueuedBehindOwner)
+fn route_closeout_blocked_recovery_command(decision: &CloseoutRecoveryDecision) -> Option<String> {
+    let CloseoutRecoveryDecision::Blocked { recommended, .. } = decision else {
+        return None;
+    };
+    Some(
+        short_recovery_command_from_recommendation(recommended)
+            .unwrap_or_else(|| recommended.clone()),
+    )
 }
 
 /// Enqueue a routed dispatch prompt into a document's `agent:queue`.
@@ -2894,7 +2865,9 @@ fn route_via_authoritative_actor(
                         queued.appended,
                         queued.already_present,
                         queued.superseded,
-                        route_closeout_user_outcome_fields(&decision)
+                        route_closeout_user_outcome_fields(
+                            route_closeout_blocked_recovery_command(&decision).as_deref(),
+                        )
                     );
                     return Ok(dispatch_pane);
                 }
@@ -2913,7 +2886,9 @@ fn route_via_authoritative_actor(
                         "[route] active closeout for {} could not be drained before reroute; existing queue head {:?} remains queued behind the closeout {}",
                         file.display(),
                         head,
-                        route_closeout_user_outcome_fields(&decision)
+                        route_closeout_user_outcome_fields(
+                            route_closeout_blocked_recovery_command(&decision).as_deref(),
+                        )
                     );
                     return Ok(dispatch_pane);
                 }
@@ -4483,61 +4458,6 @@ mod tests {
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     use agent_doc_turn::closeout_recovery::CloseoutRecoveryState;
-
-    #[test]
-    fn route_closeout_user_outcome_surfaces_unblocker_for_stuck_cycle() {
-        // #routedrainnextaction: a stuck `Blocked` closeout recovery decision
-        // (captured-response baseline drift / IPC no_ack) must surface the
-        // specific recovery command via BlockedWithExactUnblocker instead of
-        // the misleading `wait_for_owner_turn_to_drain` (no live owner turn).
-        let decision = CloseoutRecoveryDecision::Blocked {
-            state: CloseoutRecoveryState::OpenCycle,
-            missing_proof: "open cycle must finish, be replayed, or be explicitly queued behind"
-                .to_string(),
-            recommended: "finish the response, then `agent-doc finalize /abs/path/session.md` (or `agent-doc write --commit /abs/path/session.md` to absorb an already-visible response)".to_string(),
-        };
-        let fields = route_closeout_user_outcome_fields(&decision);
-        assert!(
-            fields.contains("ui_outcome=blocked_with_exact_unblocker"),
-            "stuck-cycle decision must surface BlockedWithExactUnblocker, not QueuedBehindOwner: {fields}"
-        );
-        assert!(
-            fields.contains("next_action=follow_unblocker"),
-            "stuck-cycle next_action must point at the unblocker: {fields}"
-        );
-        assert!(
-            fields.contains("unblocker=run_recovery_command"),
-            "stuck-cycle unblocker must be the short run-recovery action token: {fields}"
-        );
-        assert!(
-            fields.contains("recovery_command=agent-doc finalize /abs/path/session.md"),
-            "stuck-cycle must surface the literal recovery command as trailing free text: {fields}"
-        );
-        assert!(
-            !fields.contains("wait_for_owner_turn_to_drain"),
-            "stuck-cycle must NOT use the live-owner-turn next_action: {fields}"
-        );
-    }
-
-    #[test]
-    fn route_closeout_user_outcome_keeps_queued_behind_owner_for_genuine_wait() {
-        // #routedrainnextaction: a non-Blocked recovery decision (the operator's
-        // turn is genuinely running, prompt is queued behind it) keeps the
-        // historical QueuedBehindOwner / wait_for_owner_turn_to_drain wording.
-        let decision = CloseoutRecoveryDecision::QueuePromptForAfterCloseout {
-            state: CloseoutRecoveryState::OpenCycle,
-            reason: "live owner turn in progress".to_string(),
-        };
-        let fields = route_closeout_user_outcome_fields(&decision);
-        assert!(
-            fields.contains("ui_outcome=queued_behind_owner"),
-            "genuine queue-behind must keep QueuedBehindOwner: {fields}"
-        );
-        assert!(
-            fields.contains("next_action=wait_for_owner_turn_to_drain"),
-            "genuine queue-behind must keep the live-owner-turn next_action: {fields}"
-        );
-    }
 
     struct EnvGuard {
         key: &'static str,

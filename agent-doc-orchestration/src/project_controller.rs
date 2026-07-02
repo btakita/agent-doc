@@ -14,9 +14,10 @@ use agent_doc_controller::paths::{
 use agent_doc_controller::status::{
     self, ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
     ControllerBootstrapStatusFacts, ControllerFreshnessFacts, ControllerFreshnessStatus,
-    ControllerHandoffState, ControllerStatus, LaunchMode, controller_restart_recovery_needed,
-    default_controller_generation, preparing_controller_is_stale,
-    resolve_controller_identity_version, stale_preparing_controller_threshold_from_env_value,
+    ControllerHandoffState, ControllerStatus, CrashRecoveryStats, LaunchMode,
+    controller_restart_recovery_needed, default_controller_generation,
+    preparing_controller_is_stale, resolve_controller_identity_version,
+    stale_preparing_controller_threshold_from_env_value,
 };
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
@@ -253,25 +254,11 @@ impl ControllerRuntime {
     }
 }
 
-#[derive(Debug, Default)]
-struct CrashRecoveryStats {
-    actor_records: usize,
-    supervisor_reattached: usize,
-    supervisor_stale: usize,
-    dispatch_retryable: usize,
-    dispatch_blocked: usize,
-    open_cycles_preserved: usize,
-    projections_emitted: usize,
-}
-
 fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<CrashRecoveryStats> {
     let project_root = &bootstrap.project_root;
     let conn = open_state_db(project_root)?;
     let store = load_actor_store_from_db(&conn)?;
-    let mut stats = CrashRecoveryStats {
-        actor_records: store.len(),
-        ..CrashRecoveryStats::default()
-    };
+    let mut stats = CrashRecoveryStats::new(store.len());
 
     reconcile_supervisor_leases_after_restart(&conn, &store, &mut stats)?;
     reconcile_open_dispatch_receipts_after_restart(&conn, &mut stats)?;
@@ -281,7 +268,7 @@ fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<C
     if !store.is_empty() {
         let actor_projection_hash = actor_projection_intended_hash(project_root).ok();
         match emit_actor_projection(project_root) {
-            Ok(()) => stats.projections_emitted += 1,
+            Ok(()) => stats.record_projection_emitted(),
             Err(err) => {
                 let document_id = store
                     .keys()
@@ -305,14 +292,14 @@ fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<C
         project_sessions_projection_for_actor(project_root, &record.document_id)?;
     }
     if !store.is_empty() {
-        stats.projections_emitted += 1;
+        stats.record_projection_emitted();
     }
 
     let conn = open_state_db(project_root)?;
     if state_store::layout_scope_exists(&conn, DEFAULT_LAYOUT_SCOPE)? {
         drop(conn);
         match emit_layout_projection(project_root) {
-            Ok(()) => stats.projections_emitted += 1,
+            Ok(()) => stats.record_projection_emitted(),
             Err(err) => record_projection_diagnostic_with_metadata(
                 project_root,
                 LAYOUT_PROJECTION_FILE,
@@ -332,16 +319,7 @@ fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<C
         None,
         None,
         "completed",
-        Some(&format!(
-            "actor_records={} supervisor_reattached={} supervisor_stale={} dispatch_retryable={} dispatch_blocked={} open_cycles_preserved={} projections_emitted={}",
-            stats.actor_records,
-            stats.supervisor_reattached,
-            stats.supervisor_stale,
-            stats.dispatch_retryable,
-            stats.dispatch_blocked,
-            stats.open_cycles_preserved,
-            stats.projections_emitted
-        )),
+        Some(&stats.completion_payload()),
     )?;
     Ok(stats)
 }
@@ -367,29 +345,20 @@ fn reconcile_supervisor_leases_after_restart(
             now,
             Duration::from_secs(60),
         );
-        let status = if fresh {
-            stats.supervisor_reattached += 1;
-            "reattached"
-        } else {
-            stats.supervisor_stale += 1;
-            "stale"
-        };
+        let marker_status = stats.record_supervisor_lease_reconcile(fresh);
+        let marker_payload = status::supervisor_lease_reconcile_payload(
+            &record.session_id,
+            &record.pane_id,
+            lease.runtime_state.as_deref(),
+            lease.last_heartbeat,
+        );
         state_store::insert_crash_recovery_marker_in_db(
             conn,
             "supervisor_lease_reconcile",
             Some(&record.document_id),
             Some(record.generation),
-            status,
-            Some(&format!(
-                "session={} pane={} runtime_state={} heartbeat={}",
-                record.session_id,
-                record.pane_id,
-                lease.runtime_state.as_deref().unwrap_or("unknown"),
-                lease
-                    .last_heartbeat
-                    .map(|timestamp| timestamp.to_string())
-                    .unwrap_or_else(|| "unknown".to_string())
-            )),
+            marker_status,
+            Some(&marker_payload),
         )?;
     }
     Ok(())
@@ -417,27 +386,24 @@ fn reconcile_open_dispatch_receipts_after_restart(
         let result_status: Option<String> = row.get("result_status")?;
         let proof_scope: Option<String> = row.get("proof_scope")?;
         let dispatch_start_proven: i64 = row.get("dispatch_start_proven")?;
-        let status = if dispatch_start_proven == 0 {
-            stats.dispatch_retryable += 1;
-            "retryable"
-        } else {
-            stats.dispatch_blocked += 1;
-            "blocked"
-        };
+        let dispatch_start_proven = dispatch_start_proven != 0;
+        let marker_status = stats.record_dispatch_receipt_reconcile(dispatch_start_proven);
+        let receipt_id = state_store::sqlite_u64(receipt_id, "dispatch receipt id")?;
+        let generation = state_store::sqlite_u64(generation, "dispatch generation")?;
+        let marker_payload = status::dispatch_receipt_reconcile_payload(
+            receipt_id,
+            &command_kind,
+            result_status.as_deref(),
+            proof_scope.as_deref(),
+            dispatch_start_proven,
+        );
         state_store::insert_crash_recovery_marker_in_db(
             conn,
             "dispatch_receipt_reconcile",
             Some(&document_id),
-            Some(state_store::sqlite_u64(generation, "dispatch generation")?),
-            status,
-            Some(&format!(
-                "receipt_id={} command_kind={} result_status={} proof_scope={} dispatch_start_proven={}",
-                state_store::sqlite_u64(receipt_id, "dispatch receipt id")?,
-                command_kind,
-                result_status.as_deref().unwrap_or("unknown"),
-                proof_scope.as_deref().unwrap_or("unknown"),
-                dispatch_start_proven != 0
-            )),
+            Some(generation),
+            marker_status,
+            Some(&marker_payload),
         )?;
     }
     Ok(())
@@ -460,19 +426,16 @@ fn preserve_open_closeout_cycles_after_restart(
         let cycle_id: String = row.get("cycle_id")?;
         let state: String = row.get("state")?;
         let queue_head_id: Option<String> = row.get("queue_head_id")?;
-        stats.open_cycles_preserved += 1;
+        let marker_status = stats.record_open_closeout_preserved();
+        let marker_payload =
+            status::open_closeout_preserved_payload(&cycle_id, &state, queue_head_id.as_deref());
         state_store::insert_crash_recovery_marker_in_db(
             conn,
             "open_closeout_preserved",
             Some(&document_id),
             None,
-            "preserved",
-            Some(&format!(
-                "cycle_id={} state={} queue_head_id={}",
-                cycle_id,
-                state,
-                queue_head_id.as_deref().unwrap_or("none")
-            )),
+            marker_status,
+            Some(&marker_payload),
         )?;
     }
     Ok(())

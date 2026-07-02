@@ -2327,6 +2327,13 @@ pub fn direct_pane_can_enter_existing_draft(facts: DirectPaneExistingDraftSubmit
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RouteCloseoutDrainOutcome {
+    NoOpenCycle,
+    Recovered(String),
+    Blocked(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloseoutBlockDispatchFacts {
     pub recovery_queues_prompt_for_after_closeout: bool,
     pub active_queue_head: Option<String>,
@@ -2349,6 +2356,23 @@ pub fn classify_closeout_block_dispatch(
         return CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head };
     }
     CloseoutBlockDispatchDecision::FailClosed
+}
+
+/// `#routedrainnextaction`: format the user-facing outcome fields for a route
+/// closeout block. When route/turn recovery supplied a concrete command for a
+/// stuck cycle, surface the exact unblocker instead of the queue-behind-owner
+/// wait outcome.
+pub fn route_closeout_user_outcome_fields(blocked_recovery_command: Option<&str>) -> String {
+    if let Some(command) = blocked_recovery_command {
+        return format!(
+            "ui_outcome_contract={} ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command={}",
+            DISPATCH_BLOCKED_USER_FACING_OUTCOME_CONTRACT_VERSION, command
+        );
+    }
+    format!(
+        "ui_outcome_contract={} ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain",
+        DISPATCH_BLOCKED_USER_FACING_OUTCOME_CONTRACT_VERSION
+    )
 }
 
 /// Decision for the route-dispatch drain retry loop after a mid-drain `repair`
@@ -4573,6 +4597,52 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 active_queue_head: None,
             }),
             CloseoutBlockDispatchDecision::FailClosed
+        );
+    }
+
+    #[test]
+    fn route_closeout_user_outcome_surfaces_unblocker_for_stuck_cycle() {
+        // #routedrainnextaction: a stuck `Blocked` closeout recovery decision
+        // (captured-response baseline drift / IPC no_ack) must surface the
+        // specific recovery command via BlockedWithExactUnblocker instead of
+        // the misleading `wait_for_owner_turn_to_drain` (no live owner turn).
+        let fields =
+            route_closeout_user_outcome_fields(Some("agent-doc finalize /abs/path/session.md"));
+        assert!(
+            fields.contains("ui_outcome=blocked_with_exact_unblocker"),
+            "stuck-cycle decision must surface BlockedWithExactUnblocker, not QueuedBehindOwner: {fields}"
+        );
+        assert!(
+            fields.contains("next_action=follow_unblocker"),
+            "stuck-cycle next_action must point at the unblocker: {fields}"
+        );
+        assert!(
+            fields.contains("unblocker=run_recovery_command"),
+            "stuck-cycle unblocker must be the short run-recovery action token: {fields}"
+        );
+        assert!(
+            fields.contains("recovery_command=agent-doc finalize /abs/path/session.md"),
+            "stuck-cycle must surface the literal recovery command as trailing free text: {fields}"
+        );
+        assert!(
+            !fields.contains("wait_for_owner_turn_to_drain"),
+            "stuck-cycle must NOT use the live-owner-turn next_action: {fields}"
+        );
+    }
+
+    #[test]
+    fn route_closeout_user_outcome_keeps_queued_behind_owner_for_genuine_wait() {
+        // #routedrainnextaction: a non-Blocked recovery decision (the operator's
+        // turn is genuinely running, prompt is queued behind it) keeps the
+        // historical QueuedBehindOwner / wait_for_owner_turn_to_drain wording.
+        let fields = route_closeout_user_outcome_fields(None);
+        assert!(
+            fields.contains("ui_outcome=queued_behind_owner"),
+            "genuine queue-behind must keep QueuedBehindOwner: {fields}"
+        );
+        assert!(
+            fields.contains("next_action=wait_for_owner_turn_to_drain"),
+            "genuine queue-behind must keep the live-owner-turn next_action: {fields}"
         );
     }
 

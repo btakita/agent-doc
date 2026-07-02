@@ -33,6 +33,45 @@ pub const fn capture_state_is_repairable(state: CaptureState) -> bool {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaleCaptureRetirementDecision {
+    Keep,
+    RetireWedgedWriteApplied,
+    RetireSupersededCapturedOnlyOrphan,
+}
+
+/// Side-effect-free stale-capture retirement policy.
+///
+/// A drifted `WriteApplied` capture may be retired only after the captured body
+/// is missing from the live document: the write was already attempted, but
+/// replaying onto a drifted baseline risks duplication or reordering. A
+/// drifted `Captured`-only orphan is more conservative because the write never
+/// ran, so retirement also requires proof that the captured heading is already
+/// answered by a superseding live exchange turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaleCaptureRetirementEvidence {
+    pub state: CaptureState,
+    pub replay_baseline_drifted: bool,
+    pub captured_response_body_missing: bool,
+    pub captured_response_heading_answered: bool,
+}
+
+pub const fn decide_stale_capture_retirement(
+    evidence: StaleCaptureRetirementEvidence,
+) -> StaleCaptureRetirementDecision {
+    if !evidence.replay_baseline_drifted || !evidence.captured_response_body_missing {
+        return StaleCaptureRetirementDecision::Keep;
+    }
+
+    match evidence.state {
+        CaptureState::WriteApplied => StaleCaptureRetirementDecision::RetireWedgedWriteApplied,
+        CaptureState::Captured if evidence.captured_response_heading_answered => {
+            StaleCaptureRetirementDecision::RetireSupersededCapturedOnlyOrphan
+        }
+        _ => StaleCaptureRetirementDecision::Keep,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,5 +119,83 @@ mod tests {
     fn capture_state_is_repairable_rejects_terminal_states() {
         assert!(!capture_state_is_repairable(CaptureState::Committed));
         assert!(!capture_state_is_repairable(CaptureState::Discarded));
+    }
+
+    #[test]
+    fn stale_capture_retirement_retires_drifted_write_applied_capture() {
+        let decision = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
+            state: CaptureState::WriteApplied,
+            replay_baseline_drifted: true,
+            captured_response_body_missing: true,
+            captured_response_heading_answered: false,
+        });
+
+        assert_eq!(
+            decision,
+            StaleCaptureRetirementDecision::RetireWedgedWriteApplied
+        );
+    }
+
+    #[test]
+    fn stale_capture_retirement_keeps_write_applied_without_baseline_drift() {
+        let decision = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
+            state: CaptureState::WriteApplied,
+            replay_baseline_drifted: false,
+            captured_response_body_missing: true,
+            captured_response_heading_answered: true,
+        });
+
+        assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
+    }
+
+    #[test]
+    fn stale_capture_retirement_keeps_materialized_response_body() {
+        let decision = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
+            state: CaptureState::WriteApplied,
+            replay_baseline_drifted: true,
+            captured_response_body_missing: false,
+            captured_response_heading_answered: true,
+        });
+
+        assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
+    }
+
+    #[test]
+    fn stale_capture_retirement_requires_supersession_for_captured_only_orphan() {
+        let no_supersession = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
+            state: CaptureState::Captured,
+            replay_baseline_drifted: true,
+            captured_response_body_missing: true,
+            captured_response_heading_answered: false,
+        });
+        assert_eq!(no_supersession, StaleCaptureRetirementDecision::Keep);
+
+        let superseded = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
+            state: CaptureState::Captured,
+            replay_baseline_drifted: true,
+            captured_response_body_missing: true,
+            captured_response_heading_answered: true,
+        });
+        assert_eq!(
+            superseded,
+            StaleCaptureRetirementDecision::RetireSupersededCapturedOnlyOrphan
+        );
+    }
+
+    #[test]
+    fn stale_capture_retirement_does_not_retire_replayed_or_terminal_states() {
+        for state in [
+            CaptureState::Replayed,
+            CaptureState::Committed,
+            CaptureState::Discarded,
+        ] {
+            let decision = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
+                state,
+                replay_baseline_drifted: true,
+                captured_response_body_missing: true,
+                captured_response_heading_answered: true,
+            });
+            assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
+        }
     }
 }

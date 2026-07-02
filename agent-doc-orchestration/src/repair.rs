@@ -76,6 +76,10 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_workflow::capture::{
+    StaleCaptureRetirementDecision, StaleCaptureRetirementEvidence, capture_state_is_repairable,
+    decide_stale_capture_retirement,
+};
 
 use crate::{snapshot, write};
 
@@ -1012,148 +1016,87 @@ fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> 
     Ok(())
 }
 
-/// `#stale-capture-deadlock-autoretire`: retire a wedged `WriteApplied` capture
-/// whose written response has vanished from the document and whose baseline has
-/// drifted irreconcilably, instead of fail-closing with "captured response
-/// baseline no longer matches current document".
-///
-/// **Deadlock signature.** A `finalize` advanced the cycle to `write_applied`
-/// (the response was written to disk), but a concurrent editor edit / CRDT
-/// intermix then removed or fragmented that response body *and* drifted the
-/// captured baseline, so by the time `run` reaches this point the caller has
-/// already proved `response_already_applied*` is false (the body is not
-/// contiguously present in `doc_content`) and
-/// [`crate::capture::replay_baseline_drifted`] is true (the captured
-/// file/snapshot hashes no longer match), so [`crate::capture::validate_replay`]
-/// is about to fail closed. That combination wedges every later `commit` /
-/// `write --commit` / route closeout drain behind a manual
-/// `reset --from-current --preserve-session` — the compounding deadlock
-/// operators kept hitting in dogfooding.
-///
-/// **Why retiring is safe and strictly better than deadlocking.**
-///   1. Scoped to `WriteApplied` captures — the write was already attempted, so
-///      this is not a never-written pending body. A `Captured`-only orphan stays
-///      on the conservative `validate_replay` fail-closed path.
-///   2. Replaying a drifted baseline is exactly the duplicate / reorder
-///      corruption `validate_replay` exists to prevent; re-running the turn fresh
-///      on the rebuilt baseline is the correct recovery, not a regression. Queue
-///      prompts survive in `agent:queue` for the next drain to process.
-///   3. The captured body is preserved on disk as a `Discarded` record for
-///      forensics — never deleted — mirroring `reset --preserve-session`.
-///
-/// Mirrors `reset --from-current --preserve-session`: discards the capture and
-/// rebuilds the snapshot + CRDT sidecars from the current document so the merge
-/// layer cannot re-diverge, then closes the cycle as committed. Returns `true`
-/// when it retired a capture, `false` when the signature does not match (so the
-/// caller falls through to the normal `validate_replay` guard).
-fn retire_wedged_write_applied_capture_if_drifted(
+/// Applies the workflow-owned stale-capture retirement policy. Evidence
+/// collection stays here because baseline drift and live exchange supersession
+/// are file-backed orchestration inputs; the state/reason decision lives in
+/// `agent-doc-workflow`.
+fn retire_stale_capture_if_drifted(
     file: &Path,
     doc_content: &str,
     capture: &crate::capture::CaptureRecord,
 ) -> Result<bool> {
-    if capture.state != agent_doc_workflow::capture::CaptureState::WriteApplied {
-        return Ok(false);
-    }
-    if !crate::capture::replay_baseline_drifted(file, capture)? {
-        return Ok(false);
-    }
+    let captured_response_body_missing =
+        !response_replay::response_already_applied(doc_content, &capture.response_body)
+            && !response_replay::response_already_applied_after_prefix_strip(
+                doc_content,
+                &capture.response_body,
+            );
+    let captured_response_heading_answered = response_replay::first_response_heading_line(
+        &capture.response_body,
+    )
+    .is_some_and(|heading| response_replay::live_exchange_answers_heading(doc_content, heading));
+    let decision = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
+        state: capture.state,
+        replay_baseline_drifted: crate::capture::replay_baseline_drifted(file, capture)?,
+        captured_response_body_missing,
+        captured_response_heading_answered,
+    });
 
-    crate::flow::closeout::apply_closeout_recovery_mutation(
-        file,
-        crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
-            content: Some(doc_content),
-            clear_pending_response: true,
-            delete_pre_response: true,
-            mark_cycle_committed_event: Some("repair_retire_wedged_write_applied_capture"),
-            reason: CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
-        },
-    )?;
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "repair_retire_wedged_write_applied_capture file={} capture_id={} cycle_id={}",
-            file.display(),
-            capture.capture_id,
-            capture.cycle_id
-        ),
-    );
-    eprintln!(
-        "[repair] retired wedged write-applied capture for {} (response missing from document + baseline drifted); rebuilt snapshot/CRDT from current and preserved the captured body for forensics",
-        file.display()
-    );
-    Ok(true)
-}
-
-/// `#stale-capture-captured-only-drift`: extend the stale-capture retire path to
-/// a `Captured`-only orphan (write never attempted) whose baseline drifted — but
-/// ONLY when there is positive superseding-turn evidence.
-///
-/// [`retire_wedged_write_applied_capture_if_drifted`] is deliberately scoped to
-/// `WriteApplied` captures because the write was already attempted, so re-running
-/// fresh is safe. A bare `Captured` orphan could still be a legitimate pending
-/// response (captured but not yet written — e.g. a crash between capture and
-/// write), so blindly retiring it would lose that response. The conservative
-/// default therefore stays on the `validate_replay` fail-closed path.
-///
-/// The one safe exception: the captured response's prompt has **already been
-/// answered** in the live document. `run` only ever loads the *current* cycle's
-/// capture (`load_active` keys off `cycle_state.capture_id`), so the deadlock
-/// orphan is the current cycle's Captured body. Positive superseding-turn
-/// evidence is therefore that the captured response's `### Re:` heading already
-/// appears in the live `agent:exchange` — a later turn's answer to the same
-/// prompt landed — so this never-written body is a stale duplicate, not the only
-/// answer. (The `response_already_applied*` checks earlier in `run` already
-/// handle the case where the captured *body* itself is present; this covers the
-/// heading-present-but-body-differs supersession.) When that holds, retire the
-/// orphan — discard the body as a `Discarded` record (preserved on disk for
-/// forensics) and clear the pending sidecar — breaking the `validate_replay`
-/// deadlock that otherwise needs a manual `reset --from-current --preserve-session`.
-/// Without the evidence, stay on the conservative fail-closed path. Returns
-/// `true` when it retired the orphan.
-fn retire_superseded_captured_only_orphan_if_drifted(
-    file: &Path,
-    doc_content: &str,
-    capture: &crate::capture::CaptureRecord,
-) -> Result<bool> {
-    if capture.state != agent_doc_workflow::capture::CaptureState::Captured {
-        return Ok(false);
+    match decision {
+        StaleCaptureRetirementDecision::Keep => Ok(false),
+        StaleCaptureRetirementDecision::RetireWedgedWriteApplied => {
+            crate::flow::closeout::apply_closeout_recovery_mutation(
+                file,
+                crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
+                    content: Some(doc_content),
+                    clear_pending_response: true,
+                    delete_pre_response: true,
+                    mark_cycle_committed_event: Some("repair_retire_wedged_write_applied_capture"),
+                    reason: CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
+                },
+            )?;
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "repair_retire_wedged_write_applied_capture file={} capture_id={} cycle_id={}",
+                    file.display(),
+                    capture.capture_id,
+                    capture.cycle_id
+                ),
+            );
+            eprintln!(
+                "[repair] retired wedged write-applied capture for {} (response missing from document + baseline drifted); rebuilt snapshot/CRDT from current and preserved the captured body for forensics",
+                file.display()
+            );
+            Ok(true)
+        }
+        StaleCaptureRetirementDecision::RetireSupersededCapturedOnlyOrphan => {
+            crate::flow::closeout::apply_closeout_recovery_mutation(
+                file,
+                crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
+                    content: None,
+                    clear_pending_response: true,
+                    delete_pre_response: true,
+                    mark_cycle_committed_event: None,
+                    reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
+                },
+            )?;
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "repair_retire_superseded_captured_only_orphan file={} capture_id={} cycle_id={}",
+                    file.display(),
+                    capture.capture_id,
+                    capture.cycle_id
+                ),
+            );
+            eprintln!(
+                "[repair] retired superseded Captured-only orphan for {} (captured response's heading already answered in the live exchange + baseline drifted); preserved the captured body for forensics",
+                file.display()
+            );
+            Ok(true)
+        }
     }
-    if !crate::capture::replay_baseline_drifted(file, capture)? {
-        return Ok(false);
-    }
-    // Positive superseding-turn evidence: the captured response's heading is
-    // already answered in the live exchange.
-    let Some(heading) = response_replay::first_response_heading_line(&capture.response_body) else {
-        return Ok(false);
-    };
-    if !response_replay::live_exchange_answers_heading(doc_content, heading) {
-        return Ok(false);
-    }
-
-    crate::flow::closeout::apply_closeout_recovery_mutation(
-        file,
-        crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
-            content: None,
-            clear_pending_response: true,
-            delete_pre_response: true,
-            mark_cycle_committed_event: None,
-            reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
-        },
-    )?;
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "repair_retire_superseded_captured_only_orphan file={} capture_id={} cycle_id={}",
-            file.display(),
-            capture.capture_id,
-            capture.cycle_id
-        ),
-    );
-    eprintln!(
-        "[repair] retired superseded Captured-only orphan for {} (captured response's heading already answered in the live exchange + baseline drifted); preserved the captured body for forensics",
-        file.display()
-    );
-    Ok(true)
 }
 
 fn respect_manual_exchange_tail_removal_if_safe(
@@ -1203,7 +1146,7 @@ pub(crate) fn run_with_queue_completion_ids(
 
     let pending_path = agent_doc_fs::pending_response_path_for(&canonical)?;
     let capture = crate::capture::load_active(&canonical)?
-        .filter(|capture| agent_doc_workflow::capture::capture_state_is_repairable(capture.state));
+        .filter(|capture| capture_state_is_repairable(capture.state));
     let doc_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read document for repair {}", file.display()))?;
     let cycle_state = crate::cycle_state::load(file)?;
@@ -1358,10 +1301,7 @@ pub(crate) fn run_with_queue_completion_ids(
         if respect_manual_exchange_tail_removal_if_safe(&canonical, &doc_content, capture)? {
             return Ok(RepairOutcome::ManualTailRemovalRespected);
         }
-        if retire_wedged_write_applied_capture_if_drifted(&canonical, &doc_content, capture)? {
-            return Ok(RepairOutcome::StaleCaptureRetired);
-        }
-        if retire_superseded_captured_only_orphan_if_drifted(&canonical, &doc_content, capture)? {
+        if retire_stale_capture_if_drifted(&canonical, &doc_content, capture)? {
             return Ok(RepairOutcome::StaleCaptureRetired);
         }
         crate::capture::validate_replay(&canonical, capture)?;

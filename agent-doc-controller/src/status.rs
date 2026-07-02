@@ -306,6 +306,118 @@ impl ControlPlaneStoreCounts {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CrashRecoveryStats {
+    pub actor_records: usize,
+    pub supervisor_reattached: usize,
+    pub supervisor_stale: usize,
+    pub dispatch_retryable: usize,
+    pub dispatch_blocked: usize,
+    pub open_cycles_preserved: usize,
+    pub projections_emitted: usize,
+}
+
+impl CrashRecoveryStats {
+    pub fn new(actor_records: usize) -> Self {
+        Self {
+            actor_records,
+            ..Self::default()
+        }
+    }
+
+    pub fn record_supervisor_lease_reconcile(&mut self, fresh: bool) -> &'static str {
+        if fresh {
+            self.supervisor_reattached += 1;
+            "reattached"
+        } else {
+            self.supervisor_stale += 1;
+            "stale"
+        }
+    }
+
+    pub fn record_dispatch_receipt_reconcile(
+        &mut self,
+        dispatch_start_proven: bool,
+    ) -> &'static str {
+        if dispatch_start_proven {
+            self.dispatch_blocked += 1;
+            "blocked"
+        } else {
+            self.dispatch_retryable += 1;
+            "retryable"
+        }
+    }
+
+    pub fn record_open_closeout_preserved(&mut self) -> &'static str {
+        self.open_cycles_preserved += 1;
+        "preserved"
+    }
+
+    pub fn record_projection_emitted(&mut self) {
+        self.projections_emitted += 1;
+    }
+
+    pub fn completion_payload(&self) -> String {
+        format!(
+            "actor_records={} supervisor_reattached={} supervisor_stale={} dispatch_retryable={} dispatch_blocked={} open_cycles_preserved={} projections_emitted={}",
+            self.actor_records,
+            self.supervisor_reattached,
+            self.supervisor_stale,
+            self.dispatch_retryable,
+            self.dispatch_blocked,
+            self.open_cycles_preserved,
+            self.projections_emitted
+        )
+    }
+}
+
+pub fn supervisor_lease_reconcile_payload(
+    session_id: &str,
+    pane_id: &str,
+    runtime_state: Option<&str>,
+    last_heartbeat: Option<u64>,
+) -> String {
+    format!(
+        "session={} pane={} runtime_state={} heartbeat={}",
+        session_id,
+        pane_id,
+        runtime_state.unwrap_or("unknown"),
+        last_heartbeat
+            .map(|timestamp| timestamp.to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    )
+}
+
+pub fn dispatch_receipt_reconcile_payload(
+    receipt_id: u64,
+    command_kind: &str,
+    result_status: Option<&str>,
+    proof_scope: Option<&str>,
+    dispatch_start_proven: bool,
+) -> String {
+    format!(
+        "receipt_id={} command_kind={} result_status={} proof_scope={} dispatch_start_proven={}",
+        receipt_id,
+        command_kind,
+        result_status.unwrap_or("unknown"),
+        proof_scope.unwrap_or("unknown"),
+        dispatch_start_proven
+    )
+}
+
+pub fn open_closeout_preserved_payload(
+    cycle_id: &str,
+    state: &str,
+    queue_head_id: Option<&str>,
+) -> String {
+    format!(
+        "cycle_id={} state={} queue_head_id={}",
+        cycle_id,
+        state,
+        queue_head_id.unwrap_or("none")
+    )
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControllerHandoffState {
@@ -789,6 +901,69 @@ mod tests {
             default_controller_generation(),
             Some(42)
         ));
+    }
+
+    #[test]
+    fn crash_recovery_stats_classify_markers_and_summary_payload() {
+        let mut stats = CrashRecoveryStats::new(3);
+
+        assert_eq!(stats.record_supervisor_lease_reconcile(true), "reattached");
+        assert_eq!(stats.record_supervisor_lease_reconcile(false), "stale");
+        assert_eq!(stats.record_dispatch_receipt_reconcile(false), "retryable");
+        assert_eq!(stats.record_dispatch_receipt_reconcile(true), "blocked");
+        assert_eq!(stats.record_open_closeout_preserved(), "preserved");
+        stats.record_projection_emitted();
+
+        assert_eq!(
+            stats,
+            CrashRecoveryStats {
+                actor_records: 3,
+                supervisor_reattached: 1,
+                supervisor_stale: 1,
+                dispatch_retryable: 1,
+                dispatch_blocked: 1,
+                open_cycles_preserved: 1,
+                projections_emitted: 1,
+            }
+        );
+        assert_eq!(
+            stats.completion_payload(),
+            "actor_records=3 supervisor_reattached=1 supervisor_stale=1 dispatch_retryable=1 dispatch_blocked=1 open_cycles_preserved=1 projections_emitted=1"
+        );
+    }
+
+    #[test]
+    fn crash_recovery_marker_payloads_fill_unknowns() {
+        assert_eq!(
+            supervisor_lease_reconcile_payload("session-1", "%1", Some("ready"), Some(42)),
+            "session=session-1 pane=%1 runtime_state=ready heartbeat=42"
+        );
+        assert_eq!(
+            supervisor_lease_reconcile_payload("session-1", "%1", None, None),
+            "session=session-1 pane=%1 runtime_state=unknown heartbeat=unknown"
+        );
+        assert_eq!(
+            dispatch_receipt_reconcile_payload(
+                7,
+                "dispatch",
+                Some("accepted"),
+                Some("accepted_only"),
+                false,
+            ),
+            "receipt_id=7 command_kind=dispatch result_status=accepted proof_scope=accepted_only dispatch_start_proven=false"
+        );
+        assert_eq!(
+            dispatch_receipt_reconcile_payload(8, "dispatch", None, None, true),
+            "receipt_id=8 command_kind=dispatch result_status=unknown proof_scope=unknown dispatch_start_proven=true"
+        );
+        assert_eq!(
+            open_closeout_preserved_payload("cycle-1", "closing", Some("head-1")),
+            "cycle_id=cycle-1 state=closing queue_head_id=head-1"
+        );
+        assert_eq!(
+            open_closeout_preserved_payload("cycle-1", "closing", None),
+            "cycle_id=cycle-1 state=closing queue_head_id=none"
+        );
     }
 
     #[test]

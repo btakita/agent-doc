@@ -164,7 +164,10 @@ use agent_doc_supervisor::route_owned::{
     RouteOwnedReapPolicy, route_owned_cycle_committed_since_start,
     route_owned_liveness_reason_for_content, route_owned_reap_decision,
 };
-use agent_doc_supervisor::session_owner::ExistingSessionPaneAction;
+use agent_doc_supervisor::session_owner::{
+    ExistingPaneConflictFacts, ExistingSessionPaneAction,
+    format_existing_pane_conflict_error as format_existing_pane_conflict_error_from_facts,
+};
 use agent_doc_supervisor_io::cwd;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
@@ -1699,40 +1702,16 @@ fn format_existing_pane_conflict_error(
     let conflict_window = tmux.pane_window(conflicting_pane).unwrap_or_default();
     let current_session = tmux.pane_session(current_pane).unwrap_or_default();
     let current_window = tmux.pane_window(current_pane).unwrap_or_default();
-    format!(
-        "refusing to start {} in pane {} because pane {} is already bound to this document.\n\
-\n\
-Existing owner:\n\
-  pane={} session={} window={}\n\
-\n\
-Current launcher pane:\n\
-  pane={} session={} window={}\n\
-\n\
-Inspect the conflicting panes first:\n\
-  tmux list-panes -a -F '#{{session_name}} #{{window_name}} #{{pane_id}} #{{pane_current_command}} #{{pane_current_path}}'\n\
-  tmux capture-pane -pt {} | tail -n 80\n\
-  tmux capture-pane -pt {} | tail -n 80\n\
-\n\
-If you want to keep the existing owner, kill this launcher pane yourself and rerun from the owner pane:\n\
-  tmux kill-pane -t {}\n\
-\n\
-If you want to replace the existing owner, kill it yourself first and then rerun `agent-doc start` from pane {}:\n\
-  tmux kill-pane -t {}",
-        file.display(),
+    let document = file.display().to_string();
+    format_existing_pane_conflict_error_from_facts(&ExistingPaneConflictFacts {
+        document: &document,
         current_pane,
         conflicting_pane,
-        conflicting_pane,
-        conflict_session,
-        conflict_window,
-        current_pane,
-        current_session,
-        current_window,
-        conflicting_pane,
-        current_pane,
-        current_pane,
-        current_pane,
-        conflicting_pane
-    )
+        conflict_session: &conflict_session,
+        conflict_window: &conflict_window,
+        current_session: &current_session,
+        current_window: &current_window,
+    })
 }
 
 /// Put stdin into raw mode so the outer pty line discipline doesn't translate

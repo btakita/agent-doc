@@ -10536,6 +10536,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub const fn controller_restart_recovery_needed(",
         "pub fn supervisor_stale_warning_message(",
         "pub fn host_supervisor_stale_warning_message(",
+        "pub struct CrashRecoveryStats",
+        "pub fn supervisor_lease_reconcile_payload(",
+        "pub fn dispatch_receipt_reconcile_payload(",
+        "pub fn open_closeout_preserved_payload(",
     ] {
         assert!(
             controller_status.contains(required_snippet),
@@ -10597,6 +10601,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn supervisor_stale_warning_message(",
         "fn host_supervisor_stale_warning_message(",
         "fn controller_binary_is_stale(",
+        "struct CrashRecoveryStats",
+        "fn supervisor_lease_reconcile_payload(",
+        "fn dispatch_receipt_reconcile_payload(",
+        "fn open_closeout_preserved_payload(",
         "pub use agent_doc_controller::status",
     ] {
         assert!(
@@ -10627,6 +10635,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     assert!(
         rpc_source.contains("status::process_binary_is_stale("),
         "project_controller::rpc should call focused controller binary staleness policy directly"
+    );
+    assert!(
+        project_controller_source.contains("CrashRecoveryStats::new(")
+            && project_controller_source.contains("status::supervisor_lease_reconcile_payload(")
+            && project_controller_source.contains("status::dispatch_receipt_reconcile_payload(")
+            && project_controller_source.contains("status::open_closeout_preserved_payload("),
+        "project_controller should keep controller recovery IO and call focused crash-recovery marker policy directly"
     );
     assert!(
         rpc_source.contains(
@@ -10827,9 +10842,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn dispatch_only_should_probe_active_turn_cue(",
         "pub enum DispatchDrainRetryDecision",
         "pub fn dispatch_drain_retry_decision(",
+        "pub enum RouteCloseoutDrainOutcome",
         "pub struct CloseoutBlockDispatchFacts",
         "pub enum CloseoutBlockDispatchDecision",
         "pub fn classify_closeout_block_dispatch(",
+        "pub fn route_closeout_user_outcome_fields(",
         "pub struct RoutedCycleAckFacts",
         "pub fn should_require_routed_cycle_ack(",
         "pub struct MissingCycleAckFacts",
@@ -10903,8 +10920,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_acceptance_poll_status(",
         "enum DrainRetryDecision",
         "fn classify_drain_retry(",
+        "enum RouteCloseoutDrainOutcome",
         "enum RouteCloseoutBlockDecision",
         "fn classify_closeout_block_dispatch(",
+        "fn route_closeout_user_outcome_fields(",
         "enum RouteSubmitObservation",
         "fn route_submit_observation_message(",
         "fn route_submit_issue_message(",
@@ -11074,6 +11093,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("CloseoutBlockDispatchDecision")
             && route_source.contains("CloseoutBlockDispatchFacts")
             && route_source.contains("classify_closeout_block_dispatch")
+            && route_source.contains("RouteCloseoutDrainOutcome")
+            && route_source.contains("route_closeout_user_outcome_fields")
             && route_source.contains("dispatch_only_starting_pane_ready_timeout_for_binary")
             && route_source.contains("dispatch_only_starting_pane_recovery_retry_budget")
             && route_source.contains("dispatch_only_starting_pane_recovery_timeout_for_binary")
@@ -12126,6 +12147,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-supervisor/src/session_owner.rs")
+            .exists(),
+        "agent-doc-supervisor must own existing-session owner policy"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-supervisor/src/startup_miss.rs")
             .exists(),
         "agent-doc-supervisor must own pure startup-miss/session-log policy"
@@ -12212,6 +12239,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let supervisor_auto_install_stdio =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/auto_install_stdio.rs"))
             .unwrap();
+    let supervisor_session_owner =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/session_owner.rs")).unwrap();
     let supervisor_crash_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/crash_policy.rs")).unwrap();
     let supervisor_run_loop =
@@ -12288,6 +12317,32 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         session_actor_source.contains("use agent_doc_supervisor::{")
             && session_actor_source.contains("infer_latest_generation_from_content(&content)"),
         "session_actor should call focused supervisor lifecycle vocabulary directly"
+    );
+    for required_snippet in [
+        "pub enum ExistingSessionPaneAction",
+        "pub struct ExistingPaneConflictFacts",
+        "pub fn existing_session_pane_action(",
+        "pub fn format_existing_pane_conflict_error(",
+    ] {
+        assert!(
+            supervisor_session_owner.contains(required_snippet),
+            "agent-doc-supervisor must own existing-session owner policy: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "pub enum ExistingSessionPaneAction",
+        "struct ExistingPaneConflictFacts",
+        "refusing to start {} in pane {} because pane {} is already bound to this document",
+    ] {
+        assert!(
+            !orchestration_start.contains(forbidden_snippet),
+            "start.rs must not re-own existing-session owner policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_start.contains("agent_doc_supervisor::session_owner::{")
+            && orchestration_start.contains("format_existing_pane_conflict_error_from_facts("),
+        "start.rs should adapt tmux facts and call focused existing-session owner policy directly"
     );
     for required_snippet in [
         "pub enum AutoTriggerOutcome",
@@ -14377,16 +14432,35 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
         workflow_capture.contains("pub const fn capture_state_is_repairable("),
         "agent-doc-workflow must own pure capture repairability policy"
     );
+    for required in [
+        "pub enum StaleCaptureRetirementDecision",
+        "pub struct StaleCaptureRetirementEvidence",
+        "pub const fn decide_stale_capture_retirement(",
+    ] {
+        assert!(
+            workflow_capture.contains(required),
+            "agent-doc-workflow must own pure stale-capture retirement policy: {required}"
+        );
+    }
 
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    for forbidden in [
+        "fn capture_is_repairable(",
+        "fn retire_wedged_write_applied_capture_if_drifted(",
+        "fn retire_superseded_captured_only_orphan_if_drifted(",
+        "fn decide_stale_capture_retirement(",
+    ] {
+        assert!(
+            !repair.contains(forbidden),
+            "repair.rs must not re-own capture lifecycle policy: {forbidden}"
+        );
+    }
     assert!(
-        !repair.contains("fn capture_is_repairable("),
-        "repair.rs must not re-own capture repairability policy"
-    );
-    assert!(
-        repair.contains("agent_doc_workflow::capture::capture_state_is_repairable("),
-        "repair.rs should call capture repairability policy from agent-doc-workflow directly"
+        repair.contains("agent_doc_workflow::capture::{")
+            && repair.contains("capture_state_is_repairable(")
+            && repair.contains("decide_stale_capture_retirement("),
+        "repair.rs should gather file-backed evidence and call capture lifecycle policy from agent-doc-workflow directly"
     );
 }
 

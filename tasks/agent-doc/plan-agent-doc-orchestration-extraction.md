@@ -269,6 +269,10 @@ seams:
   `route/dispatch.rs` to `agent-doc-controller::dispatch`; route keeps registry
   reads, canonical path projection, handoff logging, and registration effects
   while calling `decide_fresh_dispatch_target_after_ready_wait`.
+- Dispatch-only starting-pane actor readiness gate moved from
+  `route/dispatch_only.rs` to `agent-doc-controller::dispatch`; route keeps
+  authoritative actor loading, prompt probing, and runtime eligibility
+  projection while calling `dispatch_only_starting_pane_actor_ready`.
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.

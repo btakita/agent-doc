@@ -280,7 +280,7 @@ Extensive across two decades — designing and consuming REST and GraphQL (the u
 Git daily for 15+ years — my agent-doc and corky tools are git-native at the core — with CI/CD on GitHub Actions and earlier Chef-based devops automation at TrueCar. I ship migrations to production routinely (74 D1 migrations on the Equity Funding Source platform).
 
 **6. Oracle PL/SQL, MS SQL, Cosmos.**
-I was a SQL Server DBA earlier in my career (NASPP; ASP/SQL Server at Flextronics) and built a .NET query analyzer over OleDB sources. My recent data work is Postgres, TimescaleDB, and SQLite/D1 — I haven't shipped Oracle PL/SQL or Cosmos directly, but the relational-at-scale and document-store patterns transfer and I ramp quickly.
+I've worked with MS SQL Server across my career — SQL Server DBA at NASPP, ASP/SQL Server at Flextronics, and again on projects at Pivotal Labs and menu.com. My recent data work is Postgres, TimescaleDB, and SQLite/D1; I haven't shipped Oracle PL/SQL or Cosmos directly, but the relational-at-scale and document-store patterns transfer and I ramp quickly.
 
 **6a. Production SQL scripts/procedures/queries.**
 Very comfortable — I write and operate production SQL regularly (74 D1 migrations live; heavy analytics queries for the Censible ESG platform). Stored-procedure work is stronger on SQL Server than Oracle, but it's familiar territory.
@@ -327,8 +327,25 @@ Good catch — that broadens the MS SQL story past the early-career DBA years. R
 **6. Oracle PL/SQL, MS SQL, Cosmos.**
 I've worked with MS SQL Server across my career — SQL Server DBA at NASPP, ASP/SQL Server at Flextronics, and again on projects at Pivotal Labs and menu.com. My recent data work is Postgres, TimescaleDB, and SQLite/D1; I haven't shipped Oracle PL/SQL or Cosmos directly, but the relational-at-scale and document-store patterns transfer and I ramp quickly.
 
-That keeps MS SQL as a genuine through-line rather than a one-off, while staying honest on the Oracle/Cosmos gap. Want me to fold this into 6a as well (production procedures/queries), or drop the full answer set into a `mail/contacts/laura-s/` file for the reply?
-<!-- agent:boundary:06e12d35 -->
+❯ That keeps MS SQL as a genuine through-line rather than a one-off, while staying honest on the Oracle/Cosmos gap. Want me to fold this into 6a as well (production procedures/queries), or drop the full answer set into a `mail/contacts/laura-s/` file for the reply?
+### Re: Gmail reply drafted (corky auth blocked) — opus-4.8
+
+Drafted the reply as a corky draft. I could **not** read/reply directly through corky as you preferred — the Gmail OAuth is expired: `btak.dev` (account `u/1`, where the thread lives) returns `invalid_grant` / "Token has been expired or revoked," and the message id from the URL wasn't resolvable via the API. Re-authing headless isn't possible; that path needs you.
+
+**Draft** → `mail` `0860085` (local, not pushed)
+`mail/drafts/2026-07-02-re-engineer-lead-at-lsac-answers-to-your-questions.md`
+- To `ldancovici@lsac.org`, from `btak.dev@gmail.com`, all 11 questions answered (short form, natural voice, no spaced em-dashes).
+- Folded in your answer-6 edit (MS SQL at Pivotal Labs + menu.com); honest on the Oracle PL/SQL / Cosmos / Azure gaps.
+- `corky draft validate` passes (only the expected `status: draft` notice).
+
+**Two things I need from you:**
+1. **Re-auth corky Gmail** so I can attach this to the real thread and push/send it. Run in this session:
+   `! corky sync refetch 'https://mail.google.com/mail/u/1/#search/laura/FMfcgzQgMgKRKtTWqMNMMGmlBkRrGnvc'`
+   That triggers the browser OAuth for `btak.dev`; once it succeeds I can refetch the thread, set `in-reply-to`/`thread-id` for proper threading, and `corky draft push` (Gmail Drafts, no auto-send).
+2. Confirm **`btak.dev@gmail.com`** is the right send-from address (that's where the LSAC thread is under `u/1`).
+
+Once re-authed, say the word and I'll thread + push it to your Drafts for a final look. Want me to bump the draft `status: review` now, or leave it?
+<!-- agent:boundary:e564596c -->
 <!-- /agent:exchange -->
 
 ## Queue

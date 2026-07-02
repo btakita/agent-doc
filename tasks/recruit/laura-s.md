@@ -328,7 +328,7 @@ Good catch — that broadens the MS SQL story past the early-career DBA years. R
 I've worked with MS SQL Server across my career — SQL Server DBA at NASPP, ASP/SQL Server at Flextronics, and again on projects at Pivotal Labs and menu.com. My recent data work is Postgres, TimescaleDB, and SQLite/D1; I haven't shipped Oracle PL/SQL or Cosmos directly, but the relational-at-scale and document-store patterns transfer and I ramp quickly.
 
 That keeps MS SQL as a genuine through-line rather than a one-off, while staying honest on the Oracle/Cosmos gap. Want me to fold this into 6a as well (production procedures/queries), or drop the full answer set into a `mail/contacts/laura-s/` file for the reply?
-<!-- agent:boundary:8c10e2a7 -->
+<!-- agent:boundary:06e12d35 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -340,6 +340,7 @@ That keeps MS SQL as a genuine through-line rather than a one-off, while staying
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#axgv] Please draft a gmail reply to Laura at https://mail.google.com/mail/u/1/#search/laura/FMfcgzQgMgKRKtTWqMNMMGmlBkRrGnvc. The tab is currently open. But if you can use corky to directly read the email and reply, that would be better.
 <!-- /agent:backlog -->
 
 ## Icebox

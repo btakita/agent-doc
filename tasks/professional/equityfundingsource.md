@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -91,7 +91,7 @@ Suite is green (**1376 pass, 0 fail**) and deployed. The 3 pre-existing failures
 Shipped `#spec-test-commit-push-deploy`: EFS `eec3c4e` (pushed), superproject gitlink `d7e1d4d45`. **Deployed to production** — worker version `d2788b20`, live HTTP 200 at https://equityfundingsource.brian-takita.workers.dev. This deploy also shipped the earlier lender-modal email-fit fix (`aab1c9c`) that was pending.
 
 Persisted via force-disk (editor still closed).
-<!-- agent:boundary:73a41961 -->
+<!-- agent:boundary:bc27572c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,7 +110,7 @@ After 20:30
 - TMO Syncs
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" start -->
 /goal Implement backlog item(s): #zhfn
 - ~~/goal Implement backlog item(s): #ccpz~~
 - https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?status=new&dialog=deal&dialog_deal_id=4046fa5a-65d4-4292-bfa6-59b66376cf6c&deal_tab=interests -> Messages should have the interested lender conversations as separate tabs.

@@ -213,7 +213,112 @@ Best,
 Brian
 
 Note: I added CopilotKit to the master resume based on your note that the experience is with the confidential ("Stealth") client. If that attribution isn't right, tell me and I'll move or reword it. Want me to push the submodules now?
-<!-- agent:boundary:00ea5899 -->
+
+Pleas give short 1-2 sentence answers for these questions sent by Laura
+```
+1. Describe your experience using AI as part of your professional career, and how it tied to SDLC.
+a. What experience do you have leading AI adoption and training?
+b. What are some best and worst practices you’ve learned?
+
+2. What is your experience leading teams from a technical perspective?
+a. What tools and techniques do you use when reviewing someone else’s code?
+b. What would be your approach to a junior developer on your team who typically questioned your solutions?
+
+3. Describe your experience with React. Have you used it with other languages?
+
+4. What is the extent of your experience with Web APIs?
+
+5. Describe your experience with CI/CD as well as code versioning.
+
+6. Describe your experience with Oracle PL/SQL, MS SQL, and Cosmos.
+a. How comfortable are you with writing scripts and/or operating production level SQL procedures and/or queries?
+b. Any experience with Azure Table Storage or other Azure tools?
+
+7. What is your preferred dev environment(s) and language(s)?
+8. Describe your experience with JavaScript and primary libraries you used (for example: JQuery, React, etc.)
+a. How comfortable are you with vanilla Javascript, with SPAs (Single Page Apps)?
+
+9. Describe an interesting project you worked on. Elaborate on what made it interesting to you.
+
+10. Describe your experience with Agile methodologies.
+a. What are the benefits and advantages of working in an Agile environment?
+b. Describe your teamwork experience (team size, agile, waterfall, etc.).
+c. What role(s) have you taken on in the team?
+
+11. Describe experience with Software Development Lifecycle tools (for example: Git, Jira, TeamCity, Azure DevOps, etc.)
+```
+
+### Re: Screening answers for Laura — opus-4.8
+
+Short answers below, first-person and honest about the two real stack gaps (Oracle PL/SQL, Cosmos, Azure DevOps/TeamCity) rather than padding them.
+
+**1. AI in your career, tied to SDLC.**
+I architected Presence AI's production real-time multimodal avatar pipeline and now build Rust agent tooling (agent-doc, tsift) that I use as my primary development interface. AI runs through my whole SDLC: spec-driven development, closed-loop agentic code auditing, and code-RAG to keep agents grounded from design through review.
+
+**1a. Leading AI adoption and training.**
+At Presence AI I defined the agentic development methodology the engineering team used — lightweight living specs refined through closed-loop agent auditing with human-in-the-loop feedback. I coach developers on where agents genuinely help versus where they mislead, and on integrating Claude Code / Codex into a real workflow.
+
+**1b. Best and worst practices learned.**
+Best: keep living specs, ground agents with retrieval/context engineering, and keep a human on review — treat agent output as a draft, not truth. Worst: letting agents run unbounded without specs or verification, which yields plausible-but-wrong code and erodes conceptual coherence.
+
+**2. Leading teams technically.**
+20+ years as architect/lead — Presence AI's backend/AI pipeline, Milyoni, Rundavoo, honk.com/TrueCar — plus mentoring developers across 20+ startups at Pivotal Labs. I lead through architecture, pairing, and flattening communication rather than top-down direction.
+
+**2a. Reviewing others' code.**
+I read for intent and design coherence first, then correctness, using AST-aware diff/search tooling (I built tsift for exactly this) to keep review grounded in the call graph. I favor pairing and small, well-specified changes over large drops.
+
+**2b. A junior who questions your solutions.**
+I welcome it — questioning is how juniors grow and how I catch my own blind spots. I'd have them walk through their alternative; either they're right, or the reasoning makes the tradeoff clear to both of us.
+
+**3. React (and with other languages).**
+10+ years of React, most recently the Next.js + React + GraphQL frontend at Presence AI and CopilotKit agent-native UIs. I've paired it with TypeScript, Python (FastAPI/Django), Ruby on Rails, and Node/Bun backends.
+
+**4. Web APIs.**
+Extensive across two decades — designing and consuming REST and GraphQL (the urql/Graphene layer at Presence AI, Hono/Elysia services on Cloudflare Workers), plus real-time transports (WebRTC, WebSockets, LiveKit).
+
+**5. CI/CD and versioning.**
+Git daily for 15+ years — my agent-doc and corky tools are git-native at the core — with CI/CD on GitHub Actions and earlier Chef-based devops automation at TrueCar. I ship migrations to production routinely (74 D1 migrations on the Equity Funding Source platform).
+
+**6. Oracle PL/SQL, MS SQL, Cosmos.**
+I was a SQL Server DBA earlier in my career (NASPP; ASP/SQL Server at Flextronics) and built a .NET query analyzer over OleDB sources. My recent data work is Postgres, TimescaleDB, and SQLite/D1 — I haven't shipped Oracle PL/SQL or Cosmos directly, but the relational-at-scale and document-store patterns transfer and I ramp quickly.
+
+**6a. Production SQL scripts/procedures/queries.**
+Very comfortable — I write and operate production SQL regularly (74 D1 migrations live; heavy analytics queries for the Censible ESG platform). Stored-procedure work is stronger on SQL Server than Oracle, but it's familiar territory.
+
+**6b. Azure Table Storage / Azure tools.**
+My recent cloud work is Cloudflare Workers/D1 and AWS (Lambda, CDK); Azure exposure is lighter and I haven't run Azure Table Storage in production. The key-value/document model overlaps closely with what I've built on D1, so it's a short ramp.
+
+**7. Preferred environment and languages.**
+Rust, TypeScript, and Python daily, in JetBrains IDEs with a tmux/agent-driven workflow I built tooling around. I lean into spec-driven, agent-assisted development.
+
+**8. JavaScript and primary libraries.**
+20+ years of JS/TS — React, Svelte, Vue, Angular, Backbone, Node/Bun, Next.js — and I've authored reactive libraries (ctx-core, rmemo/RelementJS, backbone-signal) and contributed queueing algorithms to Svelte and Nano Stores.
+
+**8a. Vanilla JS and SPAs.**
+Extremely comfortable — I've built SPAs since the Backbone era and wrote my own reactive/hydration libraries down to a 61-byte hydration core, so I work at the vanilla-JS level, not just inside a framework.
+
+**9. An interesting project.**
+The Presence AI real-time avatar pipeline — live lip-sync inference on NVIDIA H100 GPUs over WebRTC, scaled with Ray. It was compelling because it forced hard latency/quality/cost tradeoffs at every layer, from GPU-bound inference to frame sequencing to distributed compute.
+
+**10. Agile methodologies.**
+I learned XP-style agile at Pivotal Labs (TDD, pairing, standups, retros) and have practiced and taught it for 20 years, including leading agile-knowledge sharing at TrueCar.
+
+**10a. Benefits of Agile.**
+Tight feedback loops and small increments cut risk and keep the product aligned with reality — agile shines when requirements are evolving, which is most real software.
+
+**10b. Teamwork experience.**
+Small autonomous agile teams (3–8) up to cross-studio orgs — mostly agile/XP with some waterfall-influenced enterprise settings, comfortable both as IC and lead.
+
+**10c. Roles taken.**
+Architect, lead/senior engineer, and mentor most often, plus hands-on IC; at Pivotal I bootstrapped process and teams for 20+ startups.
+
+**11. SDLC tools (Git, Jira, TeamCity, Azure DevOps).**
+Git daily, GitHub/GitHub Actions, Jira and similar issue trackers, and earlier Chef for infra automation. I haven't used TeamCity or Azure DevOps specifically, but they're the same CI/CD + issue-tracking shape I work in constantly.
+
+---
+
+Two housekeeping notes: the `go` queue head still points at `#fcmm`, which isn't in the backlog (dangling — nothing drainable), so remove it or tell me what it should be. And preflight flags a stale `agent-doc` install; I left it alone mid-session since this is a doc turn, not code. Want these answers dropped into a `mail/contacts/laura-s/` file for the reply, or tightened further?
+<!-- agent:boundary:b0283c67 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -70,7 +70,31 @@ The rest of this session's work, all committed:
 - **Recycle via API** — `agent-doc admin reload-lib [--json]` re-announces the cdylib (verified: `editor_projects: 2`). Skill/runbook `#staleloop-recycle-restart` guidance now points at the auto-broadcast + API instead of the manual install/recycle dance.
 
 `make check` green (6827 tests). Installed 0.34.67 (binary + cdylib) — this very finalize proves the fresh cdylib cleared the drift. **`[operator-verify]`:** install the new plugin builds (JB 0.2.206 / VS Code 0.2.39) and confirm a live IDE force-reloads the cdylib on the next `make install` broadcast (no lazy-FFI wait, no wedge).
-<!-- agent:boundary:6071ded5 -->
+
+### Re: Would a lazily-rs State Chart improve state management / observability / locatability? — opus-4-8
+
+Yes — for the **per-process local** state, which is exactly where this doc's recurring bugs live. But it is not a fix for the cross-process/cross-host bugs, and it's worth being precise about the boundary.
+
+What lazily-rs actually gives us (`src/statechart.rs`, v0.16/0.17): a full Harel chart — compound + orthogonal (parallel) regions, shallow/deep history, entry/exit/transition actions, named guards, internal/external transitions — and it is **reactive compute, not a wire protocol**: the active configuration is a `CellHandle`, so anything reading `configuration()`/`active_leaves()`/`matches()` is invalidated on a real transition and a no-op self-transition is suppressed by the cell's `PartialEq` guard.
+
+**State management — real win.** Almost every bug in this doc is an *implicit* state machine encoded as scattered booleans and string enums, so impossible states are representable and reachable:
+- IPC transport: `socket -> degraded -> file-IPC fallback` (`recovery=retry_without_disk_write` / `direct_write_fallback`)
+- editor sync: `edit_epoch` vs `last_synced_epoch` (the "live editor buffer has unflushed changes ahead of disk; refusing to commit from stale disk" guard fired in *this* preflight)
+- closeout: `written -> committed -> session-check ok`
+- supervisor: `busy / idle / stale-binary / recycle-yield`
+
+These are three or four **orthogonal regions** — transport, editor-sync, closeout — which is precisely what parallel regions model. The payoff isn't prettier code; it's that the illegal transition (finalize while editor epoch is ahead) becomes a rejected edge instead of an ad-hoc guard re-checked at N call sites where one is eventually forgotten (`#boundaryaccum`, `#live_prompt_drift`).
+
+**Observability — real win.** Today diagnosing these means grepping `ops.log` for epoch numbers and *reconstructing* state. A chart gives one named `configuration()` snapshot — `ipc.file_fallback x editor.stale_disk_ahead x closeout.awaiting_commit` — directly loggable by `session-check`/status. And because it's a reactive cell, the status observer re-renders only on a *real* transition (no-op self-transition suppressed) — the exact "don't re-print unchanged status" behavior the loop wants.
+
+**Locatability — real win.** Named states + named transitions + named guards map onto this doc's tag-per-bug culture. `#live_prompt_drift` becomes "transition `finalize` fired in region `closeout` while guard `editor_synced` was false" — one edge, not a call-site hunt.
+
+**The honest boundary — where it does *not* help.** The chart is compute-not-protocol and per-process. It cannot solve the genuinely distributed failures: stale-**binary** supervisor vs newer finalize client (`stale_install`), concurrent sessions force-pushing the shared superproject, editor-plugin vs CLI skew. Those stay **git/CRDT authority + recycle**, not a statechart. This very cycle is an example: a stale JB cdylib buffer with no live supervisor wedged finalize — a per-process chart would not have prevented that. Also: this impl rejects `{"expr": ...}` extended-state guards and `run` actions — so an epoch comparison like `edit_epoch > last_synced_epoch` must be computed outside and passed in as a **named boolean guard** to `send(event, guards)`. Cleaner (guards stay testable), but it means the chart orchestrates transitions; it isn't a computation engine.
+
+This is not greenfield: `#mergestatemachine3` / `#lazilystatesync` already routes JB+VSCode attach/detach/ownership through a merge-ownership state machine. The Harel chart is the natural upgrade of that flat FSM once you add the orthogonal transport/closeout regions.
+
+Recommendation: worth doing, scoped to local process state. Queued as `[recommended] #adstatechart` (PRD-first) so it doesn't auto-drain without your go.
+<!-- agent:boundary:187af0a0 -->
 <!-- /agent:exchange -->
 ## Queue
 

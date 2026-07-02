@@ -261,6 +261,10 @@ seams:
   `route/dispatch.rs` to `agent-doc-controller::dispatch`; route keeps tmux
   current-command lookup, pane capture, and diagnostics while calling
   `classify_dead_harness_shell_dispatch_block` with scalar facts.
+- Dispatch target bind/match policy moved from `route/dispatch.rs` to
+  `agent-doc-controller::dispatch`; route keeps registry loading, canonical
+  path projection, and live-owner probing while calling
+  `classify_dispatch_target_bind` and `classify_dispatch_target_match`.
 - Auto-trigger outcome and capability-proof gate wire-state policy moved from
   `start.rs` to `agent-doc-supervisor::auto_trigger`; start keeps the atomics,
   cancellation, process IO, and send effects.

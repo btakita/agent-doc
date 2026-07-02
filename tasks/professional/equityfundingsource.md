@@ -72,7 +72,7 @@ After 20:30
 - TMO Syncs
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" start -->
+<!-- agent:queue preset="#spec-test-commit-push" stop -->
 - ~~On https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=advance-lender, the upload fields should be replaced by the questionaire. Remove all lender annual requirements uploads.~~
 - deploy
 <!-- /agent:queue -->

@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use agent_doc_turn::CyclePhase;
 use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 
+/// Phase E (`#adstatechart`) local-process Harel state chart consolidation.
+pub mod adstatechart;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StateDomain {

@@ -11,6 +11,6 @@ name = "agent_doc_state_backbone"
 
 [dependencies]
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
-lazily = "0.13.1"
+lazily = { version = "0.18", features = ["thread-safe", "statechart"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

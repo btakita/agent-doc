@@ -55,6 +55,22 @@ Done. Restored VS Code parity for the editor-save / live-buffer flush, updated s
 
 **Residual parity (from a full JB↔VS Code diff).** Filed `#vscsaveproj` for the one remaining actionable gap: VS Code's `save_document` outcome only logs to the output channel, whereas JB records StateProjectionBridge surface ops (observability parity). Two divergences left intentionally: VS Code republishes the live buffer after a successful save (JB doesn't — harmless), and VS Code has no negative-ack channel for save failure (by design — the binary discovers it via ack-content poll timeout).
 <!-- agent:boundary:79dc58c4 -->
+### Re: restart bleed observation + VS Code parity + cdylib-recycles-on-upgrade — opus-4-8 (HEAD)
+
+> **Queue prompt:** I saw serious bleeding into Claude Code during a previous restart. Also, a split pane was opened with Claude Code `/usage` somehow called.
+
+That bleed is the already-diagnosed `#restartstderrbleed` (committed `e2ec31e55`): a restart `make install` child inherited **fd1 (the agent pane)**, and tmux/Claude Code interpreting those raw build bytes is what opened the split pane and submitted `/usage`. Fix (`auto_install_child_stdio`) is in the tree; the follow-ups are `#restartbleednonroute` (non-route fd2 hardening) and `#gd88` (operator live re-proof).
+
+The rest of this session's work, all committed:
+
+**VS Code `publish_live_buffer` parity (`a435d7bd`).** The editor-sync-barrier flush sent `publish_live_buffer` over the socket only and skipped with `cause=no_ipc_listener` when no socket owned the project — so VS Code / pluginless editors silently missed the live-buffer publish. Mirrored the converge fallback to the `.agent-doc/patches/publish-live-buffer.signal` file signal. Regression test + SPEC. Follow-up `#vscsaveproj` (save_document observability parity).
+
+**cdylib recycles on upgrade (`c012e9b6`).** Root-fix for the mid-session drift you hit: an install bumped the cdylib but editor plugins only reloaded lazily on their next FFI call, so a live IDE kept running old native code (`live_prompt_drift`). Now:
+- **Install broadcasts** — `lib-install` writes a global `agent-doc-reload-broadcast.json` (version + mtime) after the symlink swap. Verified live this install: `[lib-install] broadcast: cdylib reload announced to editor plugins`.
+- **Plugins detect** — JetBrains (Alarm poller + `reload_lib` socket message) and VS Code (interval poller) watch the broadcast and force-reload the cdylib through the existing native path. Versions bumped JB 0.2.206 / VS Code 0.2.39.
+- **Recycle via API** — `agent-doc admin reload-lib [--json]` re-announces the cdylib (verified: `editor_projects: 2`). Skill/runbook `#staleloop-recycle-restart` guidance now points at the auto-broadcast + API instead of the manual install/recycle dance.
+
+`make check` green (6827 tests). Installed 0.34.67 (binary + cdylib) — this very finalize proves the fresh cdylib cleared the drift. **`[operator-verify]`:** install the new plugin builds (JB 0.2.206 / VS Code 0.2.39) and confirm a live IDE force-reloads the cdylib on the next `make install` broadcast (no lazy-FFI wait, no wedge).
 <!-- /agent:exchange -->
 ## Queue
 
@@ -64,9 +80,9 @@ Done. Restored VS Code parity for the editor-save / live-buffer flush, updated s
 - [#claimnewpane]
 - [#boundaryaccum1]
 - [#qactsync]
-- 🚧 :pushpin: do [#restartstderrbleed]
+- ~~:pushpin: do [#restartstderrbleed]~~
 Error: timed out waiting for project controller at /home/brian/work/btakita/agent-loop/.agent-doc/controller.sock`
-- I saw serious bleeding into Claude Code during a previous restart. Also, a split pane was opened with Claude Code `/usage` somehow called.
+- ~~I saw serious bleeding into Claude Code during a previous restart. Also, a split pane was opened with Claude Code `/usage` somehow called.~~ — auto-struck: answered this cycle (#ftstrike)
 - :pushpin: do [#jbcompactcommit]
 - ~~:pushpin: do [#kjw0]~~
 - :pushpin: do [#2y8j]
@@ -89,6 +105,9 @@ Error: timed out waiting for project controller at /home/brian/work/btakita/agen
 - do [#r4gq]
 - do [#af88]
 - do [#qeditrace]
+- do [#vscsaveproj]
+- do [#restartbleednonroute]
+- do [#gd88]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

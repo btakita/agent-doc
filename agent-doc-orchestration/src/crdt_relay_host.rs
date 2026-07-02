@@ -651,28 +651,37 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
         }
     };
     let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
-    if !crate::ipc_socket::is_listener_active(&project_root) {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "editor_sync_barrier_flush_skipped file={} reason={} cause=no_ipc_listener",
-                file.display(),
-                reason
-            ),
-        );
-        return false;
-    }
-
     let patch_id = uuid::Uuid::new_v4().to_string();
     let path_str = canonical.to_string_lossy().to_string();
-    match crate::ipc_socket::send_publish_live_buffer(&project_root, &path_str) {
+    // `#vscodepublishparity` — mirror `converge.rs`'s
+    // `live_buffer_delivery_missing_operator_text_authority_after_refresh`: when no
+    // socket listener owns this project (the VS Code / pluginless / file-IPC editor
+    // case, which runs no socket), fall back to the publish-live-buffer FILE signal
+    // those editors watch instead of skipping the editor-sync-barrier flush entirely.
+    // Skipping (the old `cause=no_ipc_listener` early return) left VS Code sessions
+    // silently missing this live-buffer publish even though the sibling converge path
+    // already fell back to the file signal.
+    let listener_active = crate::ipc_socket::is_listener_active(&project_root);
+    let (transport, publish_result) = if listener_active {
+        (
+            "editor_ipc",
+            crate::ipc_socket::send_publish_live_buffer(&project_root, &path_str),
+        )
+    } else {
+        (
+            "file_signal",
+            crate::ipc_socket::send_publish_live_buffer_file_signal(&project_root, &path_str),
+        )
+    };
+    match publish_result {
         Ok(true) => {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "editor_sync_barrier_live_buffer_publish_requested file={} reason={} patch_id={}",
+                    "editor_sync_barrier_live_buffer_publish_requested file={} reason={} transport={} patch_id={}",
                     file.display(),
                     reason,
+                    transport,
                     patch_id
                 ),
             );
@@ -681,9 +690,10 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "editor_sync_barrier_live_buffer_publish_not_acked file={} reason={} patch_id={}",
+                    "editor_sync_barrier_live_buffer_publish_not_acked file={} reason={} transport={} patch_id={}",
                     file.display(),
                     reason,
+                    transport,
                     patch_id
                 ),
             );
@@ -693,9 +703,10 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "editor_sync_barrier_live_buffer_publish_error file={} reason={} patch_id={} error={}",
+                    "editor_sync_barrier_live_buffer_publish_error file={} reason={} transport={} patch_id={} error={}",
                     file.display(),
                     reason,
+                    transport,
                     patch_id,
                     e
                 ),
@@ -959,6 +970,62 @@ mod tests {
 
         let _ = std::fs::remove_file(crate::ipc_socket::socket_path(&root));
         drop(server);
+    }
+
+    #[test]
+    fn editor_sync_barrier_timeout_falls_back_to_publish_live_buffer_file_signal_without_listener() {
+        // `#vscodepublishparity` — a VS Code (or pluginless / file-IPC) session runs
+        // NO socket listener. The editor-sync-barrier timeout flush must still reach
+        // that editor by writing `.agent-doc/patches/publish-live-buffer.signal`
+        // instead of skipping the flush with `cause=no_ipc_listener`, which silently
+        // dropped the live-buffer publish for VS Code while the sibling converge path
+        // already fell back to the file signal.
+        let (_dir, doc) = temp_doc("publish-buffer-file-signal.md");
+        let canonical = doc.canonicalize().unwrap();
+        let file_str = canonical.to_string_lossy().to_string();
+        let disk = std::fs::read_to_string(&canonical).unwrap();
+        let visible = format!("{disk}\nvisible editor buffer\n");
+
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &file_str,
+            &visible,
+            "vscode:publish-file-signal-test",
+            "vscode",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+        assert!(
+            agent_doc_debounce::editor_sync_statuses(&file_str)[0].in_flight,
+            "unsynced editor-visible content should trip the barrier before publish"
+        );
+
+        // Compute the project root exactly as settle_or_flush_editor_sync_barrier does,
+        // and assert no socket listener is active so the file-signal branch is taken.
+        let root = crate::write::resolve_ipc_project_root_pub(&canonical);
+        assert!(
+            !crate::ipc_socket::is_listener_active(&root),
+            "test must run with no socket listener so the file-signal fallback is exercised"
+        );
+
+        assert!(
+            settle_or_flush_editor_sync_barrier(&canonical, "test_publish_live_buffer_file_signal"),
+            "barrier timeout recovery should write the file signal and mark the authority buffer synced"
+        );
+
+        let signal_file = root
+            .join(".agent-doc")
+            .join("patches")
+            .join("publish-live-buffer.signal");
+        let raw = std::fs::read_to_string(&signal_file)
+            .expect("editor-sync-barrier flush must write publish-live-buffer.signal for VS Code");
+        let msg: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(msg["type"], "publish_live_buffer");
+        assert_eq!(msg["file"], file_str);
+        assert!(
+            msg.get("patch_id").is_none(),
+            "live-buffer publish is read-only and must not use save_document patch ids: {msg}"
+        );
     }
 
     #[test]

@@ -345,7 +345,7 @@ Drafted the reply as a corky draft. I could **not** read/reply directly through 
 2. Confirm **`btak.dev@gmail.com`** is the right send-from address (that's where the LSAC thread is under `u/1`).
 
 Once re-authed, say the word and I'll thread + push it to your Drafts for a final look. Want me to bump the draft `status: review` now, or leave it?
-<!-- agent:boundary:9027fe31 -->
+<!-- agent:boundary:505e6bbf -->
 <!-- /agent:exchange -->
 
 ## Queue

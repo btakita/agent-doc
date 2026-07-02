@@ -34,12 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260702-045815.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260702-060602.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #restartstderrbleed; IPC proof diagnostic (interrupted-cycle recovery)
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): next-steps to fix bugs (and "clear the review items"); wedge r...
-
+- Archived 1 response topic(s): ensure VS Code parity
+- Prior summary/context: prior compacted content: Archived 2 response topic(s): #restartstderrbleed; IPC proof diagnostic (interrupted-cycle r...
+❯ lazily-rs now supports State Charts. Would a State Chart improve state management, observability, and locatability?
 ### Re: ensure VS Code parity — publish_live_buffer editor-save (update spec + tests + install + recycle) — opus-4-8
 
 Done. Restored VS Code parity for the editor-save / live-buffer flush, updated spec + tests, installed, and recycled.
@@ -71,7 +71,7 @@ The rest of this session's work, all committed:
 
 `make check` green (6827 tests). Installed 0.34.67 (binary + cdylib) — this very finalize proves the fresh cdylib cleared the drift. **`[operator-verify]`:** install the new plugin builds (JB 0.2.206 / VS Code 0.2.39) and confirm a live IDE force-reloads the cdylib on the next `make install` broadcast (no lazy-FFI wait, no wedge).
 
-### Re: Would a lazily-rs State Chart improve state management / observability / locatability? — opus-4-8
+### Re: Would a lazily-rs State Chart improve state management / observability / locatability? — opus-4-8 (HEAD)
 
 Yes — for the **per-process local** state, which is exactly where this doc's recurring bugs live. But it is not a fix for the cross-process/cross-host bugs, and it's worth being precise about the boundary.
 
@@ -99,7 +99,7 @@ Recommendation: worth doing, scoped to local process state. Queued as `[recommen
 ## Queue
 
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - ~~:round_pushpin: do [#falsetyping-guard]~~
 - [#claimnewpane]
 - [#boundaryaccum1]

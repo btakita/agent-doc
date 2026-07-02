@@ -111,7 +111,7 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
 
-use crate::{diff_io, frontmatter_io, git, repair, resync, sessions, snapshot, sync};
+use crate::{diff_io, git, repair, resync, sessions, snapshot, sync};
 use agent_doc_document::write_normalization::editor_buffer_preserved_head_exchange;
 use agent_doc_element::element::{
     is_backlog_component, is_review_component, is_tracked_work_component,
@@ -615,6 +615,105 @@ fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
         document_agent: None,
         active_harness: None,
     })
+}
+
+/// `#stale-plugin-detect`: the expected editor-plugin version this binary ships
+/// with, baked at build time from `editors/{jetbrains/gradle.properties,
+/// vscode/package.json}` (see `build.rs`). `None` when the editor sources were
+/// absent at build time (e.g. a crates.io build) — the binary then has no
+/// expectation and emits no stale-plugin warning.
+fn expected_plugin_version(editor_kind: &str) -> Option<&'static str> {
+    match editor_kind.trim().to_ascii_lowercase().as_str() {
+        "jetbrains" | "intellij" | "idea" | "jb" => {
+            option_env!("AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION")
+        }
+        "vscode" | "vs-code" | "code" => option_env!("AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION"),
+        _ => None,
+    }
+}
+
+/// Compare two dotted numeric version strings (e.g. `0.2.206`). Returns `true`
+/// only when `running` is strictly older than `expected`. A leading `v` and any
+/// pre-release/build suffix (after `-` or `+`) are ignored; unparseable input
+/// fails open to `false` so a malformed version never manufactures a warning.
+fn plugin_version_is_older(running: &str, expected: &str) -> bool {
+    fn parse(version: &str) -> Option<Vec<u64>> {
+        let core = version.trim().trim_start_matches('v');
+        let core = core.split(['-', '+']).next().unwrap_or(core);
+        core.split('.')
+            .map(|part| part.parse::<u64>().ok())
+            .collect::<Option<Vec<_>>>()
+    }
+    let (Some(run), Some(exp)) = (parse(running), parse(expected)) else {
+        return false;
+    };
+    for index in 0..run.len().max(exp.len()) {
+        let run_component = run.get(index).copied().unwrap_or(0);
+        let exp_component = exp.get(index).copied().unwrap_or(0);
+        if run_component != exp_component {
+            return run_component < exp_component;
+        }
+    }
+    false
+}
+
+/// `#stale-plugin-detect`: detect any LIVE editor plugin reporting a version
+/// older than the plugin build this binary ships with, and warn so the operator
+/// reinstalls it. Mirrors [`stale_install_warning`] but for the editor-plugin
+/// half of the fleet: a stale plugin runs old native/IPC code against a fresh
+/// binary and is a known source of `live_prompt_drift` / `content_ours` merge
+/// regressions (a stale plugin buffer wedged this very document's finalize).
+///
+/// Detection reuses the plugin version already plumbed end-to-end into the
+/// per-editor `LiveBufferSnapshot.editor_version` sidecar via the FFI
+/// `_for_editor_v2/v3` calls, so the binary reads the running version rather than
+/// guessing from artifact mtimes.
+fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
+    let file_str = file.display().to_string();
+    let live: Vec<agent_doc_debounce::LiveBufferSnapshot> =
+        agent_doc_debounce::live_buffer_snapshots(&file_str)
+            .into_iter()
+            .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
+            .collect();
+    stale_plugin_warnings_from_snapshots(&live, expected_plugin_version)
+}
+
+/// Pure core of [`stale_plugin_warnings`]: given the live per-editor snapshots
+/// and an expected-version resolver, produce one deduplicated warning per stale
+/// (kind, version) pair. Split out so the version/dedup/message logic is unit
+/// testable without live-buffer sidecars on disk.
+fn stale_plugin_warnings_from_snapshots(
+    snapshots: &[agent_doc_debounce::LiveBufferSnapshot],
+    expected_for_kind: impl Fn(&str) -> Option<&'static str>,
+) -> Vec<PreflightWarning> {
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut warnings = Vec::new();
+    for snapshot in snapshots {
+        let (Some(kind), Some(running)) = (
+            snapshot.editor_kind.as_deref(),
+            snapshot.editor_version.as_deref(),
+        ) else {
+            continue;
+        };
+        let Some(expected) = expected_for_kind(kind) else {
+            continue;
+        };
+        if !plugin_version_is_older(running, expected) {
+            continue;
+        }
+        if !seen.insert((kind.to_string(), running.to_string())) {
+            continue;
+        }
+        warnings.push(PreflightWarning {
+            code: "stale_plugin".to_string(),
+            message: format!(
+                "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The live editor may run pre-fix IPC/native code (a known source of live_prompt_drift / content_ours merge regressions). Reinstall the {kind} plugin (JetBrains: update the IDE plugin to {expected}; VS Code: reinstall the extension) or run `agent-doc admin reload-lib` to force a cdylib reload.",
+            ),
+            document_agent: None,
+            active_harness: None,
+        });
+    }
+    warnings
 }
 
 /// Trigger an automatic `resync --fix` when session-drift has been detected
@@ -2521,6 +2620,145 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    // ---- #stale-plugin-detect -------------------------------------------------
+
+    #[test]
+    fn plugin_version_is_older_compares_numeric_components() {
+        assert!(plugin_version_is_older("0.2.205", "0.2.206"));
+        assert!(plugin_version_is_older("0.2.6", "0.2.206")); // 6 < 206, not string order
+        assert!(plugin_version_is_older("0.2", "0.2.206")); // missing patch == 0
+        assert!(plugin_version_is_older("v0.2.205", "0.2.206")); // leading v stripped
+        assert!(plugin_version_is_older("0.2.205-beta", "0.2.206")); // suffix ignored
+        assert!(!plugin_version_is_older("0.2.206", "0.2.206")); // equal is not older
+        assert!(!plugin_version_is_older("0.2.207", "0.2.206"));
+        assert!(!plugin_version_is_older("0.3.0", "0.2.206"));
+        assert!(!plugin_version_is_older("1.0.0", "0.9.9"));
+        assert!(!plugin_version_is_older("garbage", "0.2.206")); // unparseable fails open
+        assert!(!plugin_version_is_older("0.2.206", "unknown"));
+    }
+
+    #[test]
+    fn expected_plugin_version_maps_known_kinds() {
+        // Unknown editor kinds never have an expectation.
+        assert!(expected_plugin_version("emacs").is_none());
+        // Known kinds mirror the version baked by build.rs (present when built
+        // from the repo with the editors/ sources; None on a sources-absent
+        // build). Aliases resolve to the same value.
+        assert_eq!(
+            expected_plugin_version("jetbrains"),
+            option_env!("AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION")
+        );
+        assert_eq!(
+            expected_plugin_version("JetBrains"),
+            expected_plugin_version("intellij")
+        );
+        assert_eq!(
+            expected_plugin_version("vscode"),
+            option_env!("AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION")
+        );
+    }
+
+    fn snapshot_with_editor(kind: &str, version: &str) -> agent_doc_debounce::LiveBufferSnapshot {
+        agent_doc_debounce::LiveBufferSnapshot {
+            path: "/tmp/doc.md".to_string(),
+            len: 0,
+            hash: String::new(),
+            timestamp_ms: 0,
+            edit_epoch: 0,
+            last_synced_epoch: 0,
+            state_vector_b64: None,
+            editor_id: None,
+            editor_kind: Some(kind.to_string()),
+            editor_version: Some(version.to_string()),
+            capabilities: Vec::new(),
+            content: None,
+            no_unsaved_operator_edits: false,
+        }
+    }
+
+    #[test]
+    fn stale_plugin_warning_flags_older_live_plugin() {
+        let snapshots = vec![snapshot_with_editor("jetbrains", "0.2.205")];
+        let warnings = stale_plugin_warnings_from_snapshots(&snapshots, |kind| {
+            (kind == "jetbrains").then_some("0.2.206")
+        });
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, "stale_plugin");
+        assert!(warnings[0].message.contains("0.2.205"));
+        assert!(warnings[0].message.contains("0.2.206"));
+    }
+
+    #[test]
+    fn stale_plugin_warning_silent_for_current_or_unknown() {
+        let current = vec![snapshot_with_editor("jetbrains", "0.2.206")];
+        assert!(
+            stale_plugin_warnings_from_snapshots(&current, |_| Some("0.2.206")).is_empty(),
+            "a current plugin must not warn"
+        );
+        let newer = vec![snapshot_with_editor("jetbrains", "0.2.207")];
+        assert!(
+            stale_plugin_warnings_from_snapshots(&newer, |_| Some("0.2.206")).is_empty(),
+            "a newer plugin must not warn"
+        );
+        let no_expectation = vec![snapshot_with_editor("jetbrains", "0.2.100")];
+        assert!(
+            stale_plugin_warnings_from_snapshots(&no_expectation, |_| None).is_empty(),
+            "no baked expectation must not warn (fail-open)"
+        );
+    }
+
+    #[test]
+    fn stale_plugin_warning_dedups_identical_kind_version() {
+        let snapshots = vec![
+            snapshot_with_editor("vscode", "0.2.38"),
+            snapshot_with_editor("vscode", "0.2.38"),
+        ];
+        let warnings = stale_plugin_warnings_from_snapshots(&snapshots, |_| Some("0.2.39"));
+        assert_eq!(
+            warnings.len(),
+            1,
+            "identical (kind, version) collapses to one warning"
+        );
+    }
+
+    /// End-to-end: a live JetBrains plugin sidecar reporting an ancient version is
+    /// read back off disk and flagged against the build-time-baked expected
+    /// version — proving build.rs baking + live_buffer_snapshots enumeration +
+    /// liveness filter + expected_plugin_version + comparison all connect.
+    /// Skips when the editor sources were absent at build time (no expectation).
+    #[test]
+    fn stale_plugin_warning_end_to_end_from_live_sidecar() {
+        let Some(_expected) = expected_plugin_version("jetbrains") else {
+            return; // sources-absent build: nothing to compare against
+        };
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+        let doc_str = doc.display().to_string();
+        // editor_id carries the current (live) pid so the liveness filter keeps it.
+        let editor_id = format!("jetbrains-{}-e2e", std::process::id());
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            "# plan\n",
+            &editor_id,
+            "jetbrains",
+            "0.2.100", // ancient — older than any real baked expected version
+            &[],
+        )
+        .unwrap();
+
+        let warnings = stale_plugin_warnings(&doc);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "a live ancient plugin must warn: {warnings:?}"
+        );
+        assert_eq!(warnings[0].code, "stale_plugin");
+        assert!(warnings[0].message.contains("0.2.100"));
+    }
+
     #[test]
     fn preflight_output_omits_empty_claims_and_layout_issues() {
         let output = PreflightOutput::default();

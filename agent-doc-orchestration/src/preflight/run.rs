@@ -55,8 +55,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let pre_mutation_unresolved_exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (initial_frontmatter, _) =
-        frontmatter_io::parse_for_file_with_context(&content, file, &rc)?;
+    let (initial_frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+        &content,
+        file,
+        &rc.ssh_context(),
+    )?;
     let active_harness = rc.harness();
     let mut warnings = Vec::new();
     if let Some(warning) = agent_doc_model_tier::harness_mismatch_warning(
@@ -1178,6 +1181,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         eprintln!("[preflight] warning: {}", warning.message);
         warnings.push(warning);
     }
+    for warning in stale_plugin_warnings(file) {
+        eprintln!("[preflight] warning: {}", warning.message);
+        warnings.push(warning);
+    }
     let backlog_capture_required = agent_doc_prompt_contract::prompt_requests_backlog_work(
         &prompt_targets,
         &added_diff_lines,
@@ -1363,7 +1370,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                         !affectedness.turn_affected && !affectedness.classified.is_empty()
                     })));
         let current = std::fs::read_to_string(file).unwrap_or_default();
-        match frontmatter_io::parse_for_file_with_context(&current, file, &rc) {
+        match agent_doc_frontmatter_io::session::parse_for_file_with_context(
+            &current,
+            file,
+            &rc.ssh_context(),
+        ) {
             Ok((owner_fm, _)) => match owner_fm.session.as_deref() {
                 Some(session_id) => {
                     let agent_name = owner_fm.agent.as_deref().unwrap_or("claude");

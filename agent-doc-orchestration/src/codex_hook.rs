@@ -1003,7 +1003,7 @@ fn auto_queue_continuation_response(
 /// durable continuation marker (written at the last clean closeout) may still
 /// prove the document owes an `agent:queue auto` continuation. The marker is
 /// re-confirmed against the live document inside
-/// [`crate::queue_continuation::pending_marker_continuation_for_roots`], so a
+/// [`crate::queue_continuation::pending_marker_continuation_for_roots_with_actor_binding`], so a
 /// stale marker never forces a spurious block. (#codex-auto-queue-stalled-final-gate)
 fn marker_fallback_continuation_response(
     roots: &[PathBuf],
@@ -1016,9 +1016,10 @@ fn marker_fallback_continuation_response(
     // to run a foreign-owned document.
     let current_pane = std::env::var("TMUX_PANE").ok();
     let Some((file, continuation, marker)) =
-        crate::queue_continuation::pending_marker_continuation_for_roots(
+        crate::queue_continuation::pending_marker_continuation_for_roots_with_actor_binding(
             roots,
             current_pane.as_deref(),
+            crate::project_controller::authoritative_actor_binding,
         )?
     else {
         return Ok(None);

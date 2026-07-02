@@ -7,6 +7,7 @@ pub mod controller_pause;
 pub mod drain_stall;
 pub mod one_shot_sync;
 pub mod queue_consumption_proof;
+pub mod queue_continuation;
 pub mod queue_journal;
 pub mod queue_tombstone;
 pub mod write_queue;

@@ -18,12 +18,17 @@
 //! after the current closeout. The detector here is the single shared source of
 //! truth; `session-check`, the `codex-stop` hook, and the closeout paths all
 //! consult it instead of duplicating the activation reasoning.
+//!
+//! Coarse extraction note: this module intentionally moved as one queue I/O
+//! graph from `agent-doc-orchestration`. Follow-up seams are the pure queue
+//! policy regression tests (belong in `agent-doc-queue`) and the snapshot /
+//! recycle-yield host adapter around [`detect`].
 
-use agent_doc_queue::queue_continuation as queue_policy;
-use agent_doc_queue_io::continuation_marker::{
+use crate::continuation_marker::{
     ContinuationMarker, ContinuationMarkerScanAction, clear_continuation_marker,
     scan_pending_marker_continuations_for_roots, write_continuation_marker,
 };
+use agent_doc_queue::queue_continuation as queue_policy;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -57,7 +62,7 @@ pub fn detect(file: &Path) -> Result<Option<queue_policy::QueueContinuation>> {
     // [`agent_doc_queue::queue_continuation::RECYCLE_YIELD_GUIDANCE`].
     // The supervisor's OWN idle-watch drain uses `live_drainable_continuation_head`
     // (not this), so it is unaffected and resumes the drain after recycling.
-    agent_doc_queue_io::continuation_detect::detect_required_continuation_with(
+    crate::continuation_detect::detect_required_continuation_with(
         file,
         agent_doc_snapshot_io::load,
         agent_doc_supervisor_io::recycle_yield::recycle_yield_pending,
@@ -116,8 +121,16 @@ pub fn reconcile_marker(
 /// than `current_pane`. Unknown / closed / unowned ownership is NOT foreign
 /// (allowed — covers the safe-claim and same-session cases). `current_pane` of
 /// `None` (no tmux context) disables the gate and preserves prior behavior.
-fn is_foreign_owned_marker(root: &Path, doc: &Path, current_pane: &str) -> bool {
-    match crate::project_controller::authoritative_actor_binding(root, doc) {
+fn is_foreign_owned_marker<F>(
+    root: &Path,
+    doc: &Path,
+    current_pane: &str,
+    actor_binding: &F,
+) -> bool
+where
+    F: Fn(&Path, &Path) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>>,
+{
+    match actor_binding(root, doc) {
         Ok(Some(record))
             if record.state != agent_doc_sqlite::state_store::ActorState::Closed
                 && !record.pane_id.trim().is_empty() =>
@@ -133,17 +146,21 @@ fn is_foreign_owned_marker(root: &Path, doc: &Path, current_pane: &str) -> bool 
 /// Stop hook is asking; markers owned by a different live pane are skipped (the
 /// scan continues) so the hook never tells pane A to run document B while B has
 /// its own live owner (`#codex-stop-cross-doc-queue-continuation`).
-pub fn pending_marker_continuation_for_roots(
+pub fn pending_marker_continuation_for_roots_with_actor_binding<F>(
     roots: &[PathBuf],
     current_pane: Option<&str>,
-) -> Result<Option<(PathBuf, queue_policy::QueueContinuation, ContinuationMarker)>> {
+    actor_binding: F,
+) -> Result<Option<(PathBuf, queue_policy::QueueContinuation, ContinuationMarker)>>
+where
+    F: Fn(&Path, &Path) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>>,
+{
     scan_pending_marker_continuations_for_roots(roots, |root, doc, _marker| {
         // `#codex-stop-cross-doc-queue-continuation`: skip a marker owned by
         // another live actor (different pane) and keep scanning, so this
         // Codex pane is never told to run a foreign-owned document. Does NOT
         // remove the marker — it stays for that document's own owner.
         if let Some(current) = current_pane
-            && is_foreign_owned_marker(root, doc, current)
+            && is_foreign_owned_marker(root, doc, current, &actor_binding)
         {
             agent_doc_ops_log_io::log_op(
                 doc,
@@ -168,6 +185,9 @@ pub fn pending_marker_continuation_for_roots(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::continuation_marker::{
+        continuation_marker_path, load_continuation_marker, record_continuation_requested_head,
+    };
     use agent_doc_queue::queue_continuation::{
         DrainScope, deferred_backlog_ids, deferred_head_count, drainable_head_count,
         extract_head_id, head_requires_clean_session_in, head_requires_context_reset_in,
@@ -176,13 +196,34 @@ mod tests {
         live_drainable_continuation_head, open_review_item_count, queue_stale_noise_lines,
         review_phase_routed, supervisor_deferred_backlog_ids,
     };
-    use agent_doc_queue_io::continuation_marker::{
-        continuation_marker_path, load_continuation_marker, record_continuation_requested_head,
-    };
+    use agent_doc_sqlite::state_store::{ActorLastTransition, ActorRecord, ActorState};
 
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
         let queue_attrs = if has_auto { " auto go" } else { "" };
         write_doc_with_queue_attrs(dir, prompts, queue_active, queue_attrs)
+    }
+
+    fn no_actor_binding(_: &Path, _: &Path) -> Result<Option<ActorRecord>> {
+        Ok(None)
+    }
+
+    fn actor_record(doc: &Path, pane_id: &str) -> ActorRecord {
+        ActorRecord {
+            document_id: doc.to_string_lossy().into_owned(),
+            session_id: format!("session-{pane_id}"),
+            generation: 1,
+            pane_id: pane_id.to_string(),
+            window_id: "@1".to_string(),
+            harness: "test".to_string(),
+            state: ActorState::Ready,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "queue_marker_owner".to_string(),
+                timestamp: 0,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        }
     }
 
     /// `#qpausego`: set the document-scope controller queue-control state for a doc.
@@ -1083,9 +1124,13 @@ mod tests {
         reconcile_marker(&doc, "commit").expect("marker written");
 
         // The marker is found and re-confirmed against the live document.
-        let found = pending_marker_continuation_for_roots(&[root.clone()], None)
-            .unwrap()
-            .expect("durable continuation found");
+        let found = pending_marker_continuation_for_roots_with_actor_binding(
+            &[root.clone()],
+            None,
+            no_actor_binding,
+        )
+        .unwrap()
+        .expect("durable continuation found");
         assert_eq!(found.0, doc);
         assert_eq!(found.1.head_prompt, "do [#seopdp]");
 
@@ -1096,9 +1141,13 @@ mod tests {
         // Scan re-confirms against the document, finds it no longer owes
         // continuation, returns None, and prunes the stale marker.
         assert!(
-            pending_marker_continuation_for_roots(&[root.clone()], None)
-                .unwrap()
-                .is_none()
+            pending_marker_continuation_for_roots_with_actor_binding(
+                &[root.clone()],
+                None,
+                no_actor_binding,
+            )
+            .unwrap()
+            .is_none()
         );
         assert!(!path.exists(), "stale marker pruned during scan");
     }
@@ -1114,22 +1163,23 @@ mod tests {
         // Foreign doc: owned by a live actor on pane %70.
         let foreign = write_doc(&root, &["do [#foreign]"], true, true);
         reconcile_marker(&foreign, "commit").expect("foreign marker written");
-        crate::session_actor::project_binding_in(
-            &root,
-            &foreign.to_string_lossy(),
-            "foreign-session",
-            "%70",
-            "@1",
-            "test",
-            "foreign_owner",
-        )
-        .unwrap();
+        let actor_binding = |_: &Path, doc: &Path| {
+            if doc == foreign {
+                Ok(Some(actor_record(doc, "%70")))
+            } else {
+                Ok(None)
+            }
+        };
 
         // From pane %74, the foreign-owned marker must be skipped → None.
         assert!(
-            pending_marker_continuation_for_roots(&[root.clone()], Some("%74"))
-                .unwrap()
-                .is_none(),
+            pending_marker_continuation_for_roots_with_actor_binding(
+                &[root.clone()],
+                Some("%74"),
+                &actor_binding,
+            )
+            .unwrap()
+            .is_none(),
             "foreign-owned marker (pane %70) must be skipped from pane %74"
         );
         // The foreign marker must NOT be pruned — it belongs to its own owner.
@@ -1142,16 +1192,24 @@ mod tests {
         );
 
         // The foreign doc's OWN pane (%70) still drives its marker.
-        let owned = pending_marker_continuation_for_roots(&[root.clone()], Some("%70"))
-            .unwrap()
-            .expect("same-pane owner drives its own marker");
+        let owned = pending_marker_continuation_for_roots_with_actor_binding(
+            &[root.clone()],
+            Some("%70"),
+            &actor_binding,
+        )
+        .unwrap()
+        .expect("same-pane owner drives its own marker");
         assert_eq!(owned.0, foreign);
 
         // Unknown pane context (None) preserves prior behavior — returns it.
         assert!(
-            pending_marker_continuation_for_roots(&[root.clone()], None)
-                .unwrap()
-                .is_some(),
+            pending_marker_continuation_for_roots_with_actor_binding(
+                &[root.clone()],
+                None,
+                &actor_binding,
+            )
+            .unwrap()
+            .is_some(),
             "None current_pane disables the gate (prior behavior)"
         );
     }
@@ -1169,36 +1227,26 @@ mod tests {
         // Foreign doc (scanned first): owned by a live actor on pane %70.
         let foreign = write_doc(&foreign_root, &["do [#foreign]"], true, true);
         reconcile_marker(&foreign, "commit").expect("foreign marker written");
-        crate::session_actor::project_binding_in(
-            &foreign_root,
-            &foreign.to_string_lossy(),
-            "foreign-session",
-            "%70",
-            "@1",
-            "test",
-            "foreign_owner",
-        )
-        .unwrap();
 
         // Valid doc (scanned second): owned by the current pane %74.
         let valid = write_doc(&valid_root, &["do [#valid]"], true, true);
         reconcile_marker(&valid, "commit").expect("valid marker written");
-        crate::session_actor::project_binding_in(
-            &valid_root,
-            &valid.to_string_lossy(),
-            "current-session",
-            "%74",
-            "@1",
-            "test",
-            "current_owner",
-        )
-        .unwrap();
+        let actor_binding = |_: &Path, doc: &Path| {
+            if doc == foreign {
+                Ok(Some(actor_record(doc, "%70")))
+            } else if doc == valid {
+                Ok(Some(actor_record(doc, "%74")))
+            } else {
+                Ok(None)
+            }
+        };
 
         // From pane %74, the foreign root is scanned first; its %70-owned marker
         // is skipped and the scan continues to the %74-owned valid marker.
-        let found = pending_marker_continuation_for_roots(
+        let found = pending_marker_continuation_for_roots_with_actor_binding(
             &[foreign_root.clone(), valid_root.clone()],
             Some("%74"),
+            &actor_binding,
         )
         .unwrap()
         .expect("scan must continue past foreign marker to the valid one");

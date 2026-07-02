@@ -53,7 +53,7 @@ pub(crate) mod pipeline_frontmatter;
 pub mod preflight;
 pub mod project_controller;
 pub mod queue_cmd;
-pub mod queue_continuation;
+pub use agent_doc_queue_io::queue_continuation;
 pub mod realtime_model;
 pub mod repair;
 pub mod resync;

@@ -41,6 +41,20 @@ make orchestration small enough that it is an adapter rather than a God crate.
 
 ## Current Extraction Map
 
+## Coarse Extraction Ledger
+
+Use this ledger when a round intentionally moves a whole coherent graph before
+its internal seams are fully split. Coarse moves are acceptable when they delete
+orchestration ownership quickly, but each entry must name the follow-up seams so
+the next passes can split the moved graph without rediscovering the debt.
+
+| Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
+|---|---|---|---|---|
+| GC IO host | `agent-doc-orchestration/src/gc.rs` | `agent-doc-gc-io/src/lib.rs` | The orphan sidecar scanner, stale socket cleanup, typing/status/repair/codex-hook retention cleanup, and stale actor cleanup run as one project-root maintenance pass. Moving the whole graph removed orchestration ownership while preserving the injected `GcControllerEffects` boundary. | Split pure retention/path classification from filesystem deletes; keep controller actor cleanup behind effects; consider smaller modules for sidecar-family scanners once the orchestration crate no longer owns the maintenance surface. |
+| CRDT relay host IO | `agent-doc-orchestration/src/crdt_relay_host.rs` | `agent-doc-crdt-relay-io/src/lib.rs` | The live relay cutover depends on a per-document hub registry, authority gate, disk projection recovery, and editor replica delivery snapshots that share one runtime boundary. Moving it as one host graph avoided rebuilding a partial relay facade in orchestration. | Separate hub-registry lifecycle from disk projection recovery and supervisor IPC payload adapters; keep pure CRDT relay policy in `agent-doc-document-realtime` and merge primitives in `agent-doc-merge`. |
+| Lazily run-context graph | `agent-doc-orchestration/src/graph.rs` | `agent-doc-run-context-io/src/lib.rs` | `RunContext` and `ActorContext` are one lazily dependency graph over project-root/config/snapshot/frontmatter/cycle/head/session-registry slots. The graph had no hard orchestration dependency, so the entire source could move cleanly. | Split short-lived CLI `RunContext` slots from long-lived `ActorContext` invalidation slots if the graph grows; keep file/config/snapshot/session-registry loaders as focused IO dependencies, not orchestration callbacks. |
+| Queue continuation host IO | `agent-doc-orchestration/src/queue_continuation.rs` | `agent-doc-queue-io/src/queue_continuation.rs` | The detector, durable marker reconcile, marker scan, and Codex Stop-hook fallback ownership gate are one queue I/O host around existing queue policy and marker storage. Moving the host deletes the orchestration source file while preserving controller actor authority via an injected callback. | Move pure queue policy regression tests into `agent-doc-queue`; split snapshot/recycle-yield host adapters around `detect`; replace the actor-binding callback with focused controller IO once the controller RPC client is extracted. |
+
 | Responsibility | Destination | Current status |
 |---|---|---|
 | Element descriptors and local element models | `agent-doc-element-*` plus `agent-doc-element-registry` | Active. Queue item lifecycle now lives in `agent-doc-element-queue`; review-list projection/filtering and ungate-task planning now live in `agent-doc-element-review`; tracked-work ops-proof completion classification now lives in `agent-doc-element-backlog`; orchestration no longer owns those element state/projection models. |

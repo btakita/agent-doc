@@ -3510,6 +3510,12 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-queue-io/src/queue_continuation.rs")
+            .exists(),
+        "queue continuation host IO should live in the queue IO crate"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-queue/src/queue_journal.rs")
             .exists(),
         "queue journal replay policy should live in the queue crate"
@@ -3530,8 +3536,10 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         );
     }
 
-    let orchestration_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let queue_io_host =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_continuation.rs"))
             .unwrap();
     let queue_io_pause =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/controller_pause.rs"))
@@ -3561,6 +3569,14 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             "agent-doc-queue-io must own file-backed queue continuation detection: {required_snippet}"
         );
     }
+    assert!(
+        orchestration_lib.contains("pub use agent_doc_queue_io::queue_continuation;")
+            && !orchestration_lib.contains("pub mod queue_continuation;")
+            && !manifest_dir
+                .join("agent-doc-orchestration/src/queue_continuation.rs")
+                .exists(),
+        "orchestration should re-export the queue-io continuation host without owning a source facade"
+    );
     for forbidden_snippet in [
         "pub struct QueueContinuation",
         "pub fn document_queue_controller_paused(",
@@ -3586,14 +3602,16 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "const QUEUE_DIRECTIVE_VERBS",
     ] {
         assert!(
-            !orchestration_source.contains(forbidden_snippet),
+            !orchestration_lib.contains(forbidden_snippet),
             "orchestration must not re-own pure queue continuation policy: {forbidden_snippet}"
         );
     }
     assert!(
-        orchestration_source
-            .contains("agent_doc_queue_io::continuation_detect::detect_required_continuation_with"),
-        "orchestration queue_continuation should inject snapshot/recycle effects into agent-doc-queue-io"
+        queue_io_host.contains("crate::continuation_detect::detect_required_continuation_with")
+            && queue_io_host.contains("agent_doc_snapshot_io::load")
+            && queue_io_host
+                .contains("agent_doc_supervisor_io::recycle_yield::recycle_yield_pending"),
+        "queue-io continuation host should inject snapshot/recycle effects into the focused detector"
     );
     for relative in [
         "agent-doc-orchestration/src/session_check.rs",
@@ -9549,6 +9567,52 @@ fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
                 && !source.contains("agent_doc_orchestration::graph::RunContext"),
             "{relative} should use the focused run-context crate directly"
         );
+    }
+}
+
+#[test]
+fn test_coarse_orchestration_extractions_are_tracked() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tracker =
+        fs::read_to_string(manifest_dir.join("tasks/agent-doc/prd-crate-decomposition.md"))
+            .unwrap();
+    assert!(
+        tracker.contains("## Coarse Extraction Ledger"),
+        "crate decomposition PRD must track intentionally coarse extraction rounds"
+    );
+
+    for (graph, moved_from, moved_to, follow_up) in [
+        (
+            "GC IO host",
+            "agent-doc-orchestration/src/gc.rs",
+            "agent-doc-gc-io/src/lib.rs",
+            "Split pure retention/path classification from filesystem deletes",
+        ),
+        (
+            "CRDT relay host IO",
+            "agent-doc-orchestration/src/crdt_relay_host.rs",
+            "agent-doc-crdt-relay-io/src/lib.rs",
+            "Separate hub-registry lifecycle from disk projection recovery",
+        ),
+        (
+            "Lazily run-context graph",
+            "agent-doc-orchestration/src/graph.rs",
+            "agent-doc-run-context-io/src/lib.rs",
+            "Split short-lived CLI `RunContext` slots from long-lived `ActorContext`",
+        ),
+        (
+            "Queue continuation host IO",
+            "agent-doc-orchestration/src/queue_continuation.rs",
+            "agent-doc-queue-io/src/queue_continuation.rs",
+            "Move pure queue policy regression tests into `agent-doc-queue`",
+        ),
+    ] {
+        for required in [graph, moved_from, moved_to, follow_up] {
+            assert!(
+                tracker.contains(required),
+                "coarse extraction tracker is missing {required:?} for {graph}"
+            );
+        }
     }
 }
 
@@ -16495,9 +16559,8 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
         "agent-doc-queue must own queue continuation guidance policy"
     );
 
-    let orchestration_adapter =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
-            .unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     for forbidden in [
         "pub const CONTINUATION_NO_STALL_GUIDANCE",
         "pub const RECYCLE_YIELD_GUIDANCE",
@@ -16505,7 +16568,7 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
         "pub fn effective_continuation_output",
     ] {
         assert!(
-            !orchestration_adapter.contains(forbidden),
+            !orchestration_lib.contains(forbidden),
             "orchestration must not keep queue continuation guidance facades"
         );
     }
@@ -16592,8 +16655,10 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
             "queue continuation marker IO must not re-own deferred-clear payload policy: {forbidden}"
         );
     }
-    let orchestration_adapter =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let queue_io_host =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_continuation.rs"))
             .unwrap();
     for forbidden in [
         "pub struct ContinuationMarker",
@@ -16606,16 +16671,16 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
         "std::fs::remove_file(&path)",
     ] {
         assert!(
-            !orchestration_adapter.contains(forbidden),
+            !orchestration_lib.contains(forbidden),
             "queue_continuation.rs must not re-own marker scan IO or deferred-clear payload policy: {forbidden}"
         );
     }
     assert!(
-        orchestration_adapter.contains("agent_doc_queue_io::continuation_marker")
-            && orchestration_adapter.contains("scan_pending_marker_continuations_for_roots")
-            && orchestration_adapter.contains("ContinuationMarkerScanAction")
-            && !orchestration_adapter.contains("use agent_doc_queue::queue_preemption::{"),
-        "queue_continuation.rs should use focused queue-io marker storage/scanning, not queue-preemption directly"
+        queue_io_host.contains("crate::continuation_marker")
+            && queue_io_host.contains("scan_pending_marker_continuations_for_roots")
+            && queue_io_host.contains("ContinuationMarkerScanAction")
+            && !queue_io_host.contains("use agent_doc_queue::queue_preemption::{"),
+        "queue-io queue_continuation host should use focused marker storage/scanning, not queue-preemption directly"
     );
 }
 

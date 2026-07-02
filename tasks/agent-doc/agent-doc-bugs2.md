@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -182,7 +182,19 @@ Every port kept the Harel transition algorithm byte-identical (extracted into a 
 **`#adstatechartkt` / `#adstatechartjs` narrowed, not closed** — the *libraries* shipped, but the plugin-consumption half remains: bump the JetBrains plugin's lazily-kt dep to 0.9.0 (consume `ChartBuilder`/`ThreadSafeStateChart` for `#mergestatemachine3`), and bump the VS Code plugin's `@lazily/js` dep to 1.1.0. **js npm publish is operator-2FA-gated** (`#lzjsnpmpub`): `npm login` then `npm publish --access public` in `src/lazily-js` — I pushed the tag but can't publish to npm without your login.
 
 **Remaining cascade:** `#adstatechartlean` (Lean invariant proof — approved, contained, needs a focused pass with the lake toolchain), `#adstatechart2`/`#adstatechart3` (agent-doc observability + live wiring), and the two plugin-dep bumps above. Say "cascade" again for the next rung (I'd take the Lean proof next), or name one.
-<!-- agent:boundary:e3edd223 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=a59a2904-8926-4d93-bfc8-00d20b88e1db invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/a59a2904-8926-4d93-bfc8-00d20b88e1db.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782980070172
+```
+<!-- agent:boundary:3833de62 -->
 <!-- /agent:exchange -->
 ## Queue
 

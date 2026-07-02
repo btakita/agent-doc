@@ -8,6 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
+queue: start
 ---
 
 ## Status
@@ -145,12 +146,37 @@ Best,
 Brian Takita
 Greater Boston, MA
 ```
-<!-- agent:boundary:677b8586 -->
+❯ The budget will likely be less than $100. Should I offer $75/hr?
+### Re: should I offer $75/hr? — opus-4-8
+
+Short answer: $75/hr is reasonable for this context, but don't state it as a hard number — leading with a flat low rate caps your negotiating room.
+
+Why: a State of Connecticut contract routed through a staffing firm means the firm takes a margin off an already-capped government budget, so yes, the budget is likely tight. $75/hr is above your recent W2 floor ($60–70) and below your 1099 rates ($105–140) — a fair floor for this kind of role. But if you open at a flat $75 and they had room for $85–90, you've left money on the table. Better to signal flexibility or open slightly high so $75 becomes your fallback, not your opener.
+
+Also worth clarifying with Aboo: $75 W2 is not the same as $75 1099/C2C — on 1099 you cover self-employment tax and get no benefits, so a 1099 number should run higher. Ask which engagement type this is.
+
+Pick a rate line (plain text — drops straight into the LinkedIn message where the rate sentence is):
+
+Option A (recommended — flexible, keeps room):
+My rate is flexible depending on scope and engagement type; for a role like this I'd be in the $75-90/hr range.
+
+Option B (open slightly high, $75 as fallback):
+My expected rate is $85/hr, and I'm flexible for the right long-term fit.
+
+Option C (flat, budget-friendly signal):
+My expected rate is $75/hr.
+
+Option D (flip it to them):
+I'm flexible on rate for the right fit — what range is budgeted for this role?
+
+Tell me which one (and W2 vs 1099/C2C) and I'll drop it into the message.
+<!-- agent:boundary:02b09c09 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+/goal Implement backlog item(s): #4ete
 <!-- /agent:queue -->
 
 ## Backlog

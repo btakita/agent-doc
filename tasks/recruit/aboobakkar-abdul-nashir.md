@@ -116,7 +116,36 @@ Redrafted with your real details (Greater Boston / ET, AWS-honest on Azure, Pyth
 1. **Rate — I put `$140/hr (1099/C2C)`**, drawn from your recent comparable contract rates (nextera-analytics $140, andrew-curtis $110 1099; W2 roles ran lower at $60–70). Adjust for this role / engagement type (W2 vs 1099 vs C2C) as you see fit.
 2. **Azure — kept honest.** You have no production Azure (your depth is AWS), so the draft frames AWS depth + "ramp quickly on Azure" rather than claiming Azure experience. If you'd rather not surface the gap at all, drop that bullet.
 3. Phone number intentionally left implicit ("the number below") — add your preferred callback number, or use the recruiter's 515-309-9918 line.
-<!-- agent:boundary:f8cf7036 -->
+❯ Make my rate $100/hr. Format for a LinkedIn message...not markdown.
+
+### Re: rate $100/hr, LinkedIn plain-text format — opus-4-8
+
+Rate set to $100/hr and reformatted as a plain-text LinkedIn message (no markdown — no bold, bullets, or quote markers). Copy-paste ready:
+
+```
+Hi Aboo,
+
+Thanks for reaching out about the AI Engineer contract with the State of Connecticut — it's a strong match and I'm interested. I'm based in the Greater Boston area (Eastern Time), so the 100% remote setup works well.
+
+How I line up with the role:
+
+Python + modern web frameworks: production Python on FastAPI, Django, and Flask, most recently the real-time multimodal AI pipeline backend at Presence AI.
+
+AI-assisted development and model comparison/selection: my primary focus. I build agent development tooling (agent-doc, tsift) on an agent-agnostic core with pluggable LLM backends, and I run closed-loop agentic workflows where I compare and select models per task.
+
+Git and pull-request collaboration: 20+ years, PR-first throughout.
+
+Cloud: my production depth is on AWS (Lambda, ECS, EC2, CDK, Terraform). I'm comfortable with the equivalent Azure services (App Service, Storage, Key Vault) and ramp quickly.
+
+Secure handling of confidential and regulated data, including AI-specific security considerations.
+
+My expected rate is $100/hr, and I can start on short notice. I'm happy to hop on a call this week — let me know a time that works and I'll send my resume over.
+
+Best,
+Brian Takita
+Greater Boston, MA
+```
+<!-- agent:boundary:677b8586 -->
 <!-- /agent:exchange -->
 
 ## Queue

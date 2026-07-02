@@ -4,7 +4,7 @@
 //! Realizes the `specs/08b-single-process-control-plane.md` filesystem-watch
 //! authority: the editor plugin's own NIO `WatchService` is **unconditionally**
 //! demoted to read-only buffer reporting. The single controller-owned watcher
-//! (adapted by orchestration's `document_watcher`, `#pcpc4`/`#pcp4`) plus the
+//! (adapted by orchestration's watch effects, `#pcpc4`/`#pcp4`) plus the
 //! socket IPC command channel are the sole writer to the live editor buffer.
 //! This removes the
 //! second-watcher race where the plugin mutated the live buffer between an agent

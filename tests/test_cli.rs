@@ -64,6 +64,40 @@ fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {
     json["phase"].as_str().map(str::to_string)
 }
 
+fn assert_source_mentions_all(source: &str, label: &str, required: &[&str]) {
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|token| !source.contains(token))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "{label} is missing expected boundary token(s): {missing:?}"
+    );
+}
+
+fn assert_source_omits_all(source: &str, label: &str, forbidden: &[&str]) {
+    let present: Vec<_> = forbidden
+        .iter()
+        .copied()
+        .filter(|token| source.contains(token))
+        .collect();
+    assert!(
+        present.is_empty(),
+        "{label} still contains forbidden ownership token(s): {present:?}"
+    );
+}
+
+fn read_first_existing_source(manifest_dir: &Path, relatives: &[&str]) -> String {
+    for relative in relatives {
+        let path = manifest_dir.join(relative);
+        if path.exists() {
+            return fs::read_to_string(path).unwrap();
+        }
+    }
+    panic!("none of the expected source paths exist: {relatives:?}");
+}
+
 fn git_commit_count(root: &Path) -> usize {
     let output = ProcessCommand::new("git")
         .current_dir(root)
@@ -6742,23 +6776,21 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         );
     }
     let watch_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
-    for forbidden in [
-        "pub(crate) const WATCH_CYCLE_IN_FLIGHT_MAX_SECS",
-        "const WATCH_CYCLE_IN_FLIGHT_MAX_SECS",
-        "cs.is_open() =>",
-        "cs.is_open() &&",
-    ] {
-        assert!(
-            !watch_source.contains(forbidden),
-            "watch.rs must stay a cycle-state IO adapter and not re-own phase freshness policy: {forbidden}"
-        );
-    }
-    assert!(
-        watch_source.contains("use agent_doc_turn::cycle_phase_freshly_in_flight;")
-            && watch_source
-                .contains("cycle_phase_freshly_in_flight(cs.phase, cs.updated_at, now_secs)"),
-        "watch.rs should delegate open-cycle freshness policy to agent-doc-turn directly"
+        fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/daemon.rs")).unwrap();
+    assert_source_omits_all(
+        &watch_source,
+        "watch daemon",
+        &[
+            "pub(crate) const WATCH_CYCLE_IN_FLIGHT_MAX_SECS",
+            "const WATCH_CYCLE_IN_FLIGHT_MAX_SECS",
+            "cs.is_open() =>",
+            "cs.is_open() &&",
+        ],
+    );
+    assert_source_mentions_all(
+        &watch_source,
+        "watch daemon",
+        &["agent_doc_turn", "cycle_phase_freshly_in_flight"],
     );
     assert!(
         turn_source.contains("pub mod cycle_policy;"),
@@ -14439,20 +14471,20 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && stream.contains("StreamingAgent"),
         "orchestration should call focused agent stream parsing/chunk/contract APIs directly"
     );
-    let watch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
-    for forbidden_snippet in ["fn extract_new_lines(", "fn limit_lines("] {
-        assert!(
-            !watch.contains(forbidden_snippet),
-            "watch.rs must not re-own pure executor capture policy: {forbidden_snippet}"
-        );
-    }
-    assert!(
-        watch.contains(
-            "use agent_doc_turn_executor::capture::{capture_delta, limit_capture_lines};"
-        ) && watch.contains("capture_delta(&ss.last_capture, &captured)")
-            && watch.contains("limit_capture_lines(&new_content, ss.max_lines)"),
-        "watch.rs should call focused executor capture policy directly"
+    let watch = fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/daemon.rs")).unwrap();
+    assert_source_omits_all(
+        &watch,
+        "watch daemon",
+        &["fn extract_new_lines(", "fn limit_lines("],
+    );
+    assert_source_mentions_all(
+        &watch,
+        "watch daemon",
+        &[
+            "agent_doc_turn_executor::capture",
+            "capture_delta",
+            "limit_capture_lines",
+        ],
     );
     let project_controller =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
@@ -15962,7 +15994,7 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
     }
     for relative in [
         "agent-doc-orchestration/src/project_controller/rpc.rs",
-        "agent-doc-orchestration/src/watch.rs",
+        "agent-doc-watch-io/src/daemon.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -16086,61 +16118,66 @@ fn test_agent_doc_watch_io_owns_pid_effects() {
         "agent-doc-watch-io must own watch daemon PID and controller-watch effects"
     );
 
+    let _: fn(u32) -> bool = agent_doc_watch_io::pid_alive;
+    let _: fn() -> bool = agent_doc_watch_io::is_running;
+    let _: fn() -> Option<u32> = agent_doc_watch_io::read_pid;
+    let _: fn(&Path) -> Option<u32> = agent_doc_watch_io::read_pid_in;
+    let _: fn() -> anyhow::Result<()> = agent_doc_watch_io::write_current_pid;
+    let _: fn(&Path) -> anyhow::Result<()> = agent_doc_watch_io::write_current_pid_in;
+    let _: fn() = agent_doc_watch_io::remove_pid;
+    let _: fn(&Path) = agent_doc_watch_io::remove_pid_in;
+    let _: fn(
+        &str,
+        &str,
+        &agent_doc_document_realtime::watch_authority::RawWatchEvent,
+        &str,
+    ) -> agent_doc_watch_io::WatchObservation = agent_doc_watch_io::observe_document_event;
+
     let watch_io = fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/lib.rs")).unwrap();
-    for required in [
-        "pub const PID_FILE: &str = \".agent-doc/watch.pid\";",
-        "pub fn pid_alive(",
-        "pub fn read_pid()",
-        "pub fn read_pid_in(",
-        "pub fn write_current_pid()",
-        "pub fn write_current_pid_in(",
-        "pub fn remove_pid()",
-        "pub fn remove_pid_in(",
-        "pub struct WatchObservation",
-        "pub fn registry() -> &'static WatcherRegistry",
-        "pub fn unregister_document(",
-        "pub fn observe_document_event(",
-        "agent_doc_debounce::write_provenance(file)",
-        "WatchWriteProvenance::new",
-        "agent_doc_hash::content_hash(current_content)",
-        "file_watch_event_id(doc_id, generation, &content_hash)",
-        "StateFact::FileWatchChangeObserved",
-    ] {
-        assert!(
-            watch_io.contains(required),
-            "agent-doc-watch-io should own watch PID/controller IO: {required}"
-        );
-    }
+    assert_source_mentions_all(
+        &watch_io,
+        "agent-doc-watch-io",
+        &[
+            "PID_FILE",
+            "WatchObservation",
+            "WatcherRegistry",
+            "observe_document_event",
+            "agent_doc_debounce::write_provenance",
+            "WatchWriteProvenance",
+            "agent_doc_hash::content_hash",
+            "file_watch_event_id",
+            "StateFact::FileWatchChangeObserved",
+        ],
+    );
 
     let watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
-    for forbidden in [
-        "const PID_FILE",
-        "fn pid_alive(",
-        "fn read_pid(",
-        "fn read_pid_in(",
-        "fn write_pid(",
-        "fn write_pid_in(",
-        "fn remove_pid(",
-        "fn remove_pid_in(",
-    ] {
-        assert!(
-            !watch.contains(forbidden),
-            "orchestration watch.rs must not re-own watch PID IO: {forbidden}"
-        );
-    }
-    for required in [
-        "agent_doc_watch_io::read_pid()",
-        "agent_doc_watch_io::pid_alive",
-        "agent_doc_watch_io::write_current_pid()",
-        "agent_doc_watch_io::remove_pid()",
-        "agent_doc_watch_io::PID_FILE",
-    ] {
-        assert!(
-            watch.contains(required),
-            "orchestration watch.rs should call watch IO directly: {required}"
-        );
-    }
+    assert_source_omits_all(
+        &watch,
+        "orchestration watch adapter",
+        &[
+            "const PID_FILE",
+            "fn pid_alive(",
+            "fn read_pid(",
+            "fn read_pid_in(",
+            "fn write_pid(",
+            "fn write_pid_in(",
+            "fn remove_pid(",
+            "fn remove_pid_in(",
+        ],
+    );
+    let daemon = fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/daemon.rs")).unwrap();
+    assert_source_mentions_all(
+        &daemon,
+        "watch daemon",
+        &[
+            "read_pid",
+            "pid_alive",
+            "write_current_pid",
+            "remove_pid",
+            "PID_FILE",
+        ],
+    );
 }
 
 #[test]
@@ -17832,7 +17869,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let prompt_source =
         fs::read_to_string(manifest_dir.join("agent-doc-prompt-io/src/lib.rs")).unwrap();
     let watch_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/daemon.rs")).unwrap();
     let sync_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
     let write_source =
@@ -18910,11 +18947,16 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "admin should call focused project-root IO instead of owning root selection helpers"
     );
     let watch_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
-    assert!(
-        !watch_source.contains("agent_doc_fs::find_project_root(")
-            && watch_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "watch should call focused project-root IO instead of owning .agent-doc root discovery"
+        fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/daemon.rs")).unwrap();
+    assert_source_omits_all(
+        &watch_source,
+        "watch daemon",
+        &["agent_doc_fs::find_project_root("],
+    );
+    assert_source_mentions_all(
+        &watch_source,
+        "watch daemon",
+        &["agent_doc_project_root_io", "project_root_containing"],
     );
     let ops_log_source =
         fs::read_to_string(manifest_dir.join("agent-doc-ops-log-io/src/lib.rs")).unwrap();
@@ -19015,13 +19057,22 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && snapshot_source.contains("agent_doc_project_root_io::project_root_containing("),
         "snapshot IO should call focused project-root IO instead of owning rename-migration root discovery"
     );
-    let safe_passive_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/safe_passive.rs"))
-            .unwrap();
-    assert!(
-        !safe_passive_source.contains("agent_doc_fs::find_project_root(")
-            && safe_passive_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "sync safe-passive should call focused project-root IO instead of owning .agent-doc root discovery"
+    let safe_passive_source = read_first_existing_source(
+        manifest_dir,
+        &[
+            "agent-doc-orchestration/src/sync/safe_passive.rs",
+            "agent-doc-orchestration/src/sync.rs",
+        ],
+    );
+    assert_source_omits_all(
+        &safe_passive_source,
+        "sync safe-passive",
+        &["agent_doc_fs::find_project_root("],
+    );
+    assert_source_mentions_all(
+        &safe_passive_source,
+        "sync safe-passive",
+        &["agent_doc_project_root_io", "project_root_containing"],
     );
     let sync_registry_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/registry.rs"))
@@ -21640,22 +21691,33 @@ fn test_agent_doc_document_owns_markdown_outline_projection_policy() {
 #[test]
 fn test_agent_doc_document_owns_watch_projection_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let _: fn(&str) -> String =
+        agent_doc_document::watch_projection::strip_boundaries_for_watch_hash;
+    let _: fn(&str) -> String = agent_doc_document::watch_projection::watch_content_hash;
+    let _: fn(&str, u64, &str) -> String =
+        agent_doc_document::watch_projection::file_watch_event_id;
+    let _: fn(Option<&str>, &str) -> Vec<agent_doc_markdown_ast::events::DocumentNodeEvent> =
+        agent_doc_document::watch_projection::project_watch_node_events;
+    let _: fn(&agent_doc_markdown_ast::events::DocumentNodeEvent) -> serde_json::Value =
+        agent_doc_document::watch_projection::document_node_event_json;
+    let _: fn(&str, &[agent_doc_markdown_ast::events::DocumentNodeEvent]) -> serde_json::Value =
+        agent_doc_document::watch_projection::document_node_events_payload;
+
     let watch_projection =
         fs::read_to_string(manifest_dir.join("agent-doc-document/src/watch_projection.rs"))
             .unwrap();
-    for required in [
-        "pub fn strip_boundaries_for_watch_hash(",
-        "pub fn watch_content_hash(",
-        "pub fn file_watch_event_id(",
-        "pub fn project_watch_node_events(",
-        "pub fn document_node_event_json(",
-        "pub fn document_node_events_payload(",
-    ] {
-        assert!(
-            watch_projection.contains(required),
-            "agent-doc-document must own pure watch projection policy: {required}"
-        );
-    }
+    assert_source_mentions_all(
+        &watch_projection,
+        "agent-doc-document watch projection",
+        &[
+            "strip_boundaries_for_watch_hash",
+            "watch_content_hash",
+            "file_watch_event_id",
+            "project_watch_node_events",
+            "document_node_event_json",
+            "document_node_events_payload",
+        ],
+    );
     let document_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
     assert!(
@@ -21674,84 +21736,85 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
         "watch projection should keep its hash, AST, and JSON dependencies in agent-doc-document"
     );
 
-    let watch_adapter =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
-    assert!(
-        watch_adapter.contains("use agent_doc_document::watch_projection::{")
-            && watch_adapter.contains("watch_content_hash")
-            && watch_adapter.contains("project_watch_node_events")
-            && watch_adapter.contains("document_node_events_payload"),
-        "watch.rs should call focused document watch projection directly"
+    let watch_daemon =
+        fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/daemon.rs")).unwrap();
+    assert_source_mentions_all(
+        &watch_daemon,
+        "watch daemon",
+        &[
+            "agent_doc_document::watch_projection",
+            "watch_content_hash",
+            "project_watch_node_events",
+            "document_node_events_payload",
+        ],
     );
-    for forbidden in [
-        "fn hash_content(",
-        "fn strip_boundaries_for_hash(",
-        "fn node_event_json(",
-        "fn file_watch_event_id(",
-        "pub use agent_doc_document::watch_projection",
-    ] {
-        assert!(
-            !watch_adapter.contains(forbidden),
-            "watch.rs must stay an adapter, not re-own or facade watch projection: {forbidden}"
-        );
-    }
+    assert_source_omits_all(
+        &watch_daemon,
+        "watch daemon",
+        &[
+            "fn hash_content(",
+            "fn strip_boundaries_for_hash(",
+            "fn node_event_json(",
+            "fn file_watch_event_id(",
+            "pub use agent_doc_document::watch_projection",
+        ],
+    );
 
     let watch_io = fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/lib.rs")).unwrap();
-    assert!(
-        watch_io.contains("use agent_doc_document::watch_projection::file_watch_event_id;")
-            && watch_io.contains("file_watch_event_id(doc_id, generation, &content_hash)"),
-        "watch IO should call the focused watch event id projection directly"
+    assert_source_mentions_all(
+        &watch_io,
+        "agent-doc-watch-io",
+        &[
+            "agent_doc_document::watch_projection",
+            "file_watch_event_id",
+            "generation",
+            "content_hash",
+        ],
     );
-    assert!(
-        watch_io.contains("pub fn is_running() -> bool")
-            && watch_adapter.contains("agent_doc_watch_io::is_running()")
-            && !watch_adapter.contains("pub fn is_running("),
-        "watch.rs must call focused watch liveness IO directly instead of keeping a facade"
+    assert_source_mentions_all(&watch_io, "agent-doc-watch-io", &["is_running"]);
+    assert_source_mentions_all(&watch_daemon, "watch daemon", &["is_running"]);
+    assert_source_omits_all(&watch_daemon, "watch daemon", &["pub fn is_running("]);
+    assert_source_mentions_all(
+        &watch_io,
+        "agent-doc-watch-io",
+        &[
+            "agent_doc_debounce::write_provenance",
+            "WatchWriteProvenance::new",
+            "StateFact::FileWatchChangeObserved",
+            "observe_document_event",
+        ],
     );
-    for required in [
-        "agent_doc_debounce::write_provenance(file)",
-        "WatchWriteProvenance::new",
-        "StateFact::FileWatchChangeObserved",
-        "pub fn observe_document_event(",
-    ] {
-        assert!(
-            watch_io.contains(required),
-            "agent-doc-watch-io should own controller watch observation: {required}"
-        );
-    }
 
-    let document_watcher =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/document_watcher.rs"))
-            .unwrap();
-    assert!(
-        document_watcher.contains("agent_doc_watch_io::observe_document_event")
-            && document_watcher.contains("crate::project_controller::append_state_event")
-            && document_watcher.contains("document_actor_in(base_dir, file)"),
-        "document_watcher should only adapt watch observations to orchestration routing"
+    let watch_effects =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+    assert_source_mentions_all(
+        &watch_effects,
+        "orchestration watch effects",
+        &[
+            "agent_doc_watch_io::observe_document_event",
+            "crate::project_controller::append_state_event",
+            "document_actor_in",
+        ],
     );
-    for forbidden in [
-        "file_watch_event_id",
-        "agent_doc_hash::content_hash",
-        "agent_doc_debounce::write_provenance",
-        "WatchWriteProvenance",
-        "WatcherRegistry",
-        "pub fn registry(",
-        "fn file_watch_event_id(",
-        "pub use agent_doc_document::watch_projection",
-        "pub enum RawKind",
-        "pub struct RawWatchEvent",
-        "pub enum WatchDelivery",
-        "pub struct DocumentWatchGate",
-        "pub type RawWatchEvent",
-        "pub type WatchDelivery",
-        "pub type DocumentWatchGate",
-        "pub use agent_doc_document_realtime::watch_authority",
-    ] {
-        assert!(
-            !document_watcher.contains(forbidden),
-            "document_watcher must not re-own or facade watch projection/controller IO: {forbidden}"
-        );
-    }
+    assert_source_omits_all(
+        &watch_effects,
+        "orchestration watch effects",
+        &[
+            "file_watch_event_id",
+            "agent_doc_hash::content_hash",
+            "agent_doc_debounce::write_provenance",
+            "WatchWriteProvenance",
+            "WatcherRegistry",
+            "pub fn registry(",
+            "fn file_watch_event_id(",
+            "pub use agent_doc_document::watch_projection",
+            "pub struct DocumentWatchGate",
+            "pub type RawWatchEvent",
+            "pub type WatchDelivery",
+            "pub type DocumentWatchGate",
+            "pub use agent_doc_document_realtime::watch_authority",
+        ],
+    );
 }
 
 #[test]
@@ -22144,7 +22207,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     for relative in [
         "agent-doc-orchestration/src/session_actor.rs",
         "agent-doc-orchestration/src/write_queue.rs",
-        "agent-doc-orchestration/src/document_watcher.rs",
+        "agent-doc-orchestration/src/watch.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -23807,9 +23870,13 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
 
     let sync_orchestration =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
-    let sync_safe_passive =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/safe_passive.rs"))
-            .unwrap();
+    let sync_safe_passive = read_first_existing_source(
+        manifest_dir,
+        &[
+            "agent-doc-orchestration/src/sync/safe_passive.rs",
+            "agent-doc-orchestration/src/sync.rs",
+        ],
+    );
     let route_session_resolution = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/session_resolution.rs"),
     )

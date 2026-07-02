@@ -44,7 +44,6 @@ pub mod codex_hook;
 pub mod compact;
 pub mod crdt_relay_host;
 pub mod doctor;
-pub mod document_watcher;
 pub mod flow;
 pub mod focus;
 pub mod gc;

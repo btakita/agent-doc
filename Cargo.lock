@@ -107,6 +107,7 @@ dependencies = [
  "agent-doc-turn-executor-tmux",
  "agent-doc-turn-scope-io",
  "agent-doc-turn-status-io",
+ "agent-doc-watch-io",
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-doc-workflow-io",
@@ -1505,14 +1506,26 @@ dependencies = [
 name = "agent-doc-watch-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-config",
+ "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-frontmatter",
  "agent-doc-hash",
  "agent-doc-markdown-ast",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-root-io",
+ "agent-doc-session-registry-io",
  "agent-doc-state-backbone",
+ "agent-doc-supervisor-process",
+ "agent-doc-tmux-io",
+ "agent-doc-turn",
+ "agent-doc-turn-executor",
  "anyhow",
+ "notify",
  "tempfile",
+ "tmux-router",
 ]
 
 [[package]]

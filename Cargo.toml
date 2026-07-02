@@ -218,6 +218,7 @@ agent-doc-turn-executor = { path = "agent-doc-turn-executor", version = "0.34.67
 agent-doc-turn-executor-tmux = { path = "agent-doc-turn-executor-tmux", version = "0.34.67" }
 agent-doc-turn-scope-io = { path = "agent-doc-turn-scope-io", version = "0.34.67" }
 agent-doc-turn-status-io = { path = "agent-doc-turn-status-io", version = "0.34.67" }
+agent-doc-watch-io = { path = "agent-doc-watch-io", version = "0.34.67" }
 agent-doc-workflow = { path = "agent-doc-workflow", version = "0.34.67" }
 agent-doc-workflow-io = { path = "agent-doc-workflow-io", version = "0.34.67" }
 agent-doc-work-graph = { path = "agent-doc-work-graph", version = "0.34.67" }

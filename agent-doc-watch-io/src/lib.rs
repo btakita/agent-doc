@@ -12,6 +12,12 @@ use agent_doc_document_realtime::watch_authority::{
 use agent_doc_markdown_ast::events::DocumentNodeEvent;
 use agent_doc_state_backbone::{StateEvent, StateFact};
 
+pub mod daemon;
+
+pub use daemon::{
+    WatchConfig, WatchDaemonEffects, cycle_freshly_in_flight, ensure_running, start, status, stop,
+};
+
 pub const PID_FILE: &str = ".agent-doc/watch.pid";
 
 /// A controller-watch observation after write-provenance filtering and burst

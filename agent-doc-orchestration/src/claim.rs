@@ -52,7 +52,7 @@
 //!   continues if the pane is not alive.
 //! - Displays a 3-second tmux notification on the target pane.
 //! - Appends a one-line entry to `.agent-doc/claims.log` for skill-side display.
-//! - Lazy-starts the watch daemon via `watch::ensure_running` if not already running.
+//! - Lazy-starts the watch daemon via `agent_doc_watch_io::ensure_running` if not already running.
 //! - `find_alive_window_in_registry` is pure (I/O-injected predicate) for unit testability.
 //!
 //! ## Agentic Contracts
@@ -490,7 +490,7 @@ pub fn run(
     }
 
     // Lazy-start watch daemon if not running
-    match crate::watch::ensure_running() {
+    match agent_doc_watch_io::ensure_running() {
         Ok(true) => eprintln!("Watch daemon started."),
         Ok(false) => {} // already running
         Err(e) => eprintln!("warning: could not start watch daemon: {}", e),

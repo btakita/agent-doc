@@ -33,75 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260626-200326.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260702-220427.md`*
 
 Compacted content:
-- Archived 11 response topic(s): compaction recovery and queue state; IPC proof diagnostic (interrupted-cycle recovery); State machine(s) of all deal states; 8 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b...
-Blocked on agent-doc editor convergence.
-
-I loaded the local workflow, ran preflight/plan, reset sidecars with `--preserve-session`, and tried `agent-doc write --commit` twice. Both writes failed with `recovery=retry_without_disk_write`; `doctor` classifies this as operator-gated editor convergence, and `verify-op-capture` confirms there is a live editor endpoint, so I did not use `--force-disk`.
-
-No EFS code, tests, commits, pushes, or deploys were run. The document also has `queue: stop`, so the Messages-tab URL and `deploy` queue lines are inactive residue.
-
-To unblock: resolve/save the live editor buffer for [equityfundingsource.md](/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md:1), then I can retry `agent-doc write --commit`; or explicitly authorize `--force-disk`.
-❯ From the last call transcript, when did robert-waldman want to have another call?
-> **Queue prompt:** /goal Implement backlog item(s): #ccpz
-
-### Re: #ccpz — when Robert Waldman wanted the next call — opus-4-8
-
-Per the last call transcript (`src/equityfundingsource-dev/docs/calls/2026-06-30 13-20-29-compressed.transcript.md` — 88-min call with April Armas, Judith Krug, Robert Waldman), at the close of the call Robert said he'd be available **Wednesday afternoon, Central time**. He noted he has a **VA doctor's appointment Wednesday**, will be back in Texas afterward, and would try to do it "as early as I can" that afternoon before signing off with "talk to you soon."
-
-That Wednesday is **July 2, 2026** (today) — so reach out for the next call **Wednesday (7/2) afternoon Central**, ideally early-afternoon once he's back from the VA appointment.
-https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=lender modal header content is cut off due to a long email address. could we expand the modal to fit the content or make the modal full screen? The
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/professional/equityfundingsource.md source=file_ipc patch_id=665522f9-a59b-420b-a932-a84130671418 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad.json doc=equityfundingsource session=62fe1f41-886c-4f3d-b6fa-48d46106ec27 turn=cycle-1782970465057
-```
-### Re: lender-pipeline modal header cut off by long email — opus-4-8
-
-Fixed. The admin lender-pipeline **lender card dialog** (`dialog=lender`) and the **advance-lender dialog** clipped long email addresses in the header and could push the header controls (status badge, Messages, ×) out of view.
-
-Changes in `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`:
-- Header's left column now has `min-width:0` so it shrinks inside the flex row instead of forcing the row wider.
-- Email (`.page-sub`) and title now use `overflow-wrap:anywhere`, so a long address wraps inside the modal instead of being cut off.
-- Widened the card dialog from `max-w-lg` to `max-w-xl` (still `max-w-2xl` with documents open) for breathing room.
-- Regression test added in `tests/admin-investor-pipeline.test.ts` (`#modal-email-fit`).
-
-I chose responsive-fit + wrap over full-screen — it handles any email length and keeps the dialog consistent with the other pipeline dialogs. Shipped: EFS `aab1c9c` (pushed), superproject gitlink `7a746bd75`. Not deployed (the `deploy` queue item is separate and needs your go).
-
-Note: the full EFS suite has 3 pre-existing failures unrelated to this change (`#multi-upload` accreditation multi-file, `#msgrt` PortalMessages WebSocket) — identical on the clean tree; this change adds none.
-❯ Fix the test suite. #spec-test-commit-push-deploy
-
-### Re: Fix the test suite (#spec-test-commit-push-deploy) — opus-4-8
-
-Suite is green (**1376 pass, 0 fail**) and deployed. The 3 pre-existing failures were two different problems:
-
-- **portal_messages realtime — stale test.** The WebSocket subscription is already implemented (`use_admin_events_` on the portal realtime path + silent `reload_(true)` + new-message highlighting). The test asserted an outdated hardcoded `path: '...'`; updated it to match the real config-driven path (`config.realtime_endpoint ?? '/api/portal/messages/realtime/ws'`). No runtime change.
-- **accreditation multi-upload — questionnaire-only.** `accreditation.tsx` is attestations + e-signature with no evidence-upload UI or backend, so per your call it isn't a FileDropZone field: removed it from the `#multi-upload` `DROPZONE_FIELDS` list and dropped the grouped-upload assertions. (If accreditation evidence upload becomes a real requirement it's a feature build — UI + endpoint + R2 + admin review — not a test fix.)
-
-Shipped `#spec-test-commit-push-deploy`: EFS `eec3c4e` (pushed), superproject gitlink `d7e1d4d45`. **Deployed to production** — worker version `d2788b20`, live HTTP 200 at https://equityfundingsource.brian-takita.workers.dev. This deploy also shipped the earlier lender-modal email-fit fix (`aab1c9c`) that was pending.
-
-Persisted via force-disk (editor still closed).
-
-https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=lender fields should be laid out like a card. Make the dialog wider
-
-### Re: lender dialog — fields as cards + wider — opus-4-8
-
-Done. The admin lender-pipeline lender dialog (`dialog=lender`) now:
-- **Fields as cards** — the eight lender fields (Lifecycle stage, Requirements, Lender account, Funding eligibility, Days since sign-up, Funded positions, Deal commitments, Deal follow-ups) render as boxed card tiles in a gapped responsive grid instead of a plain row list. Added a `card` variant to `ModalRow`, scoped to this dialog (the accreditation questionnaire rows are unchanged).
-- **Wider dialog** — bumped to `max-w-2xl` (from `max-w-xl`), and `max-w-3xl` when the documents panel is open.
-
-Long values still wrap (`overflow-wrap:anywhere`) so nothing clips. Tests updated + green (**1377 pass, 0 fail**), build passes. Shipped: EFS `f48347f` (pushed), superproject gitlink bumped. **Not deployed** — no deploy preset on this one; say the word (or add `#…-deploy`) and I'll push it live.
-<!-- agent:boundary:768ca82f -->
+- Archived 5 response topic(s): #ccpz; IPC proof diagnostic (interrupted-cycle recovery); lender-pipeline modal header cut off by long email; 2 more
+- Prior summary/context: prior compacted content: Archived 11 response topic(s): compaction recovery and queue state; IPC proof diagnostic (in...
+<!-- agent:boundary:872d251a -->
 <!-- /agent:exchange -->
 ###
 <!--

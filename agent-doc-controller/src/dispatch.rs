@@ -1179,6 +1179,54 @@ pub fn classify_dead_harness_shell_dispatch_block(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchTargetBindFacts<'a> {
+    pub pane: &'a str,
+    pub pane_matches_file: bool,
+    pub registered_file_display: Option<&'a str>,
+    pub requested_file_display: &'a str,
+    pub registered_is_live_owner: bool,
+}
+
+pub fn classify_dispatch_target_bind(facts: DispatchTargetBindFacts<'_>) -> Option<String> {
+    if facts.pane_matches_file {
+        return None;
+    }
+    if !facts.registered_is_live_owner {
+        return None;
+    }
+    let registered_file_display = facts.registered_file_display?;
+    Some(format!(
+        "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
+        facts.pane, registered_file_display, facts.requested_file_display
+    ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchTargetMatchFacts<'a> {
+    pub pane: &'a str,
+    pub pane_matches_file: bool,
+    pub registered_file_display: Option<&'a str>,
+    pub requested_file_display: &'a str,
+}
+
+pub fn classify_dispatch_target_match(facts: DispatchTargetMatchFacts<'_>) -> Option<String> {
+    if facts.pane_matches_file {
+        return None;
+    }
+    if let Some(registered_file_display) = facts.registered_file_display {
+        Some(format!(
+            "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
+            facts.pane, registered_file_display, facts.requested_file_display
+        ))
+    } else {
+        Some(format!(
+            "route dispatch target {} is not registered for {}; refusing unbound dispatch",
+            facts.pane, facts.requested_file_display
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FreshStartAckOutcome {
     CycleAcknowledged,
     IdleNoOpKeep,
@@ -3361,6 +3409,82 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 bare_shell_command: None,
             }),
             None
+        );
+    }
+
+    #[test]
+    fn dispatch_target_bind_allows_matches_and_stale_cross_file_rows() {
+        assert_eq!(
+            classify_dispatch_target_bind(DispatchTargetBindFacts {
+                pane: "%1",
+                pane_matches_file: true,
+                registered_file_display: Some("/tmp/other.md"),
+                requested_file_display: "/tmp/current.md",
+                registered_is_live_owner: true,
+            }),
+            None,
+            "an exact pane/file match is always allowed"
+        );
+        assert_eq!(
+            classify_dispatch_target_bind(DispatchTargetBindFacts {
+                pane: "%1",
+                pane_matches_file: false,
+                registered_file_display: Some("/tmp/other.md"),
+                requested_file_display: "/tmp/current.md",
+                registered_is_live_owner: false,
+            }),
+            None,
+            "stale cross-file registry rows may be rebound"
+        );
+        assert_eq!(
+            classify_dispatch_target_bind(DispatchTargetBindFacts {
+                pane: "%1",
+                pane_matches_file: false,
+                registered_file_display: Some("/tmp/other.md"),
+                requested_file_display: "/tmp/current.md",
+                registered_is_live_owner: true,
+            }),
+            Some(
+                "route dispatch target %1 is registered for /tmp/other.md, not /tmp/current.md; refusing cross-file dispatch"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn dispatch_target_match_rejects_cross_file_and_unbound_dispatch() {
+        assert_eq!(
+            classify_dispatch_target_match(DispatchTargetMatchFacts {
+                pane: "%1",
+                pane_matches_file: true,
+                registered_file_display: None,
+                requested_file_display: "/tmp/current.md",
+            }),
+            None
+        );
+        assert_eq!(
+            classify_dispatch_target_match(DispatchTargetMatchFacts {
+                pane: "%1",
+                pane_matches_file: false,
+                registered_file_display: Some("/tmp/other.md"),
+                requested_file_display: "/tmp/current.md",
+            }),
+            Some(
+                "route dispatch target %1 is registered for /tmp/other.md, not /tmp/current.md; refusing cross-file dispatch"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            classify_dispatch_target_match(DispatchTargetMatchFacts {
+                pane: "%1",
+                pane_matches_file: false,
+                registered_file_display: None,
+                requested_file_display: "/tmp/current.md",
+            }),
+            Some(
+                "route dispatch target %1 is not registered for /tmp/current.md; refusing unbound dispatch"
+                    .to_string()
+            )
         );
     }
 

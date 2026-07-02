@@ -10845,6 +10845,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub const fn fresh_start_ack_outcome(",
         "pub struct DeadHarnessShellDispatchFacts",
         "pub fn classify_dead_harness_shell_dispatch_block(",
+        "pub struct DispatchTargetBindFacts",
+        "pub fn classify_dispatch_target_bind(",
+        "pub struct DispatchTargetMatchFacts",
+        "pub fn classify_dispatch_target_match(",
         "pub enum DirectPaneSubmitStatus",
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
@@ -11193,6 +11197,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn busy_dispatch_start_outcome(",
         "fn dispatch_start_busy_probe_timeout(",
         "fn classify_dead_harness_shell_dispatch_block(",
+        "fn classify_dispatch_target_bind(",
+        "fn classify_dispatch_target_match(",
         "fn resubmit_result_label(",
         "fn route_submit_resubmit_proof_line(",
         "fn routed_trigger_payload(",
@@ -11220,6 +11226,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("dispatch_start_busy_probe_timeout(cfg!(test))")
             && route_dispatch_source.contains("DeadHarnessShellDispatchFacts")
             && route_dispatch_source.contains("classify_dead_harness_shell_dispatch_block(")
+            && route_dispatch_source.contains("DispatchTargetBindFacts")
+            && route_dispatch_source.contains("classify_dispatch_target_bind(")
+            && route_dispatch_source.contains("DispatchTargetMatchFacts")
+            && route_dispatch_source.contains("classify_dispatch_target_match(")
             && route_dispatch_source.contains("Some(harness.binary.as_str())")
             && route_dispatch_source.contains("cfg!(test)")
             && route_dispatch_source.contains("RoutedTriggerPayloadFacts")

@@ -5,10 +5,11 @@ use super::*;
 use agent_doc_controller::dispatch::{
     AutoStartDispatchBlock, AutoStartDispatchReadyFacts, DeadHarnessShellDispatchFacts,
     DirectPaneFullResendFacts, DirectPaneNotDispatchedFacts, DispatchInjectLogFacts,
-    classify_auto_start_dispatch_ready_block, classify_dead_harness_shell_dispatch_block,
-    direct_pane_can_full_resend_not_landed, direct_pane_fast_accept_on_processing,
-    direct_pane_not_dispatched, dispatch_inject_log_line, recent_lines_contain_trigger,
-    route_trigger_visible_in_current_draft,
+    DispatchTargetBindFacts, DispatchTargetMatchFacts, classify_auto_start_dispatch_ready_block,
+    classify_dead_harness_shell_dispatch_block, classify_dispatch_target_bind,
+    classify_dispatch_target_match, direct_pane_can_full_resend_not_landed,
+    direct_pane_fast_accept_on_processing, direct_pane_not_dispatched, dispatch_inject_log_line,
+    recent_lines_contain_trigger, route_trigger_visible_in_current_draft,
 };
 use agent_doc_harness::{pane_idle_dispatch_ready, protected_prompt_draft_preview};
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
@@ -1209,26 +1210,29 @@ pub(crate) fn ensure_dispatch_target_can_bind_file(
             base_dir.display()
         )
     })?;
-    if pane_registration_matches_file(&registry, pane, file_path) {
-        return Ok(());
-    }
-
+    let pane_matches_file = pane_registration_matches_file(&registry, pane, file_path);
     let requested = canonical_dispatch_file(std::path::Path::new(file_path));
-    if let Some(entry) = registry.values().find(|entry| entry.pane == pane) {
-        let registered = canonical_registered_file(entry);
-        let registered_is_live_owner = !entry.session_id.is_empty()
-            && crate::sync::find_normal_path_owner_pane(tmux, &registered, &entry.session_id)
-                .as_deref()
-                == Some(pane);
-        if !registered_is_live_owner {
-            return Ok(());
+    let requested_display = requested.display().to_string();
+    let registered_entry = registry.values().find(|entry| entry.pane == pane);
+    let registered = registered_entry.map(canonical_registered_file);
+    let registered_display = registered.as_ref().map(|path| path.display().to_string());
+    let registered_is_live_owner = match (registered_entry, registered.as_ref()) {
+        (Some(entry), Some(registered)) => {
+            !entry.session_id.is_empty()
+                && crate::sync::find_normal_path_owner_pane(tmux, registered, &entry.session_id)
+                    .as_deref()
+                    == Some(pane)
         }
-        anyhow::bail!(
-            "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
-            pane,
-            registered.display(),
-            requested.display()
-        );
+        _ => false,
+    };
+    if let Some(refusal) = classify_dispatch_target_bind(DispatchTargetBindFacts {
+        pane,
+        pane_matches_file,
+        registered_file_display: registered_display.as_deref(),
+        requested_file_display: &requested_display,
+        registered_is_live_owner,
+    }) {
+        anyhow::bail!(refusal);
     }
 
     Ok(())
@@ -1255,25 +1259,23 @@ pub(crate) fn ensure_dispatch_target_matches_file(pane: &str, file_path: &str) -
             registry_base_dir.display()
         )
     })?;
-    if pane_registration_matches_file(&registry, pane, file_path) {
-        return Ok(());
-    }
-
+    let pane_matches_file = pane_registration_matches_file(&registry, pane, file_path);
     let requested = canonical_dispatch_file(std::path::Path::new(file_path));
-    if let Some(entry) = registry.values().find(|entry| entry.pane == pane) {
-        anyhow::bail!(
-            "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
-            pane,
-            canonical_registered_file(entry).display(),
-            requested.display()
-        );
-    }
-
-    anyhow::bail!(
-        "route dispatch target {} is not registered for {}; refusing unbound dispatch",
+    let requested_display = requested.display().to_string();
+    let registered_display = registry
+        .values()
+        .find(|entry| entry.pane == pane)
+        .map(canonical_registered_file)
+        .map(|path| path.display().to_string());
+    if let Some(refusal) = classify_dispatch_target_match(DispatchTargetMatchFacts {
         pane,
-        requested.display()
-    );
+        pane_matches_file,
+        registered_file_display: registered_display.as_deref(),
+        requested_file_display: &requested_display,
+    }) {
+        anyhow::bail!(refusal);
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_fresh_dispatch_target_after_ready_wait(

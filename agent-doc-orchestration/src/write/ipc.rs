@@ -1334,10 +1334,24 @@ pub(crate) fn materialize_missing_response_for_socket_ack_drift(
     drift_fired: bool,
     decision: &mut IpcRepairDecision,
 ) -> bool {
-    if !drift_fired
-        || decision.snap_source != IpcSnapshotSource::AckContentSidecar
-        || decision.disk_repair_reason.is_some()
-    {
+    if !drift_fired || decision.snap_source != IpcSnapshotSource::AckContentSidecar {
+        return false;
+    }
+    // #ackdriftprefixmaterialize: a prefix-normalization / dedupe repair
+    // (`PrefixDivergence`, `IpcDedupe`, `PrefixDivergenceThenIpcDedupe`) only
+    // rewrites operator-visible prefixes or removes duplicate blocks — it never
+    // restores the agent response. When such a repair leaves a drifted ACK
+    // snapshot still missing the response, this missing-response materialization
+    // is exactly the intended rescue, so those reasons must NOT gate it off. The
+    // old blanket `disk_repair_reason.is_some()` bail dead-ended a stale
+    // prefix-diverged ACK into a `retry_without_disk_write` spin until supervisor
+    // supersession. Only a repair that already replaced the snapshot with a
+    // response-bearing buffer (`LivePromptDrift`, which also sets
+    // `snap_source == ContentOurs` and is excluded above) skips the rescue.
+    if matches!(
+        decision.disk_repair_reason,
+        Some(IpcDiskRepairReason::LivePromptDrift)
+    ) {
         return false;
     }
     let response = response_materialization_probe_from_response(expected_response);
@@ -1371,10 +1385,16 @@ pub(crate) fn materialize_missing_response_for_socket_ack_drift(
         return false;
     }
 
-    let bad_state = decision.snapshot_content.clone();
+    let pre_materialize = decision.snapshot_content.clone();
     decision.snapshot_content = repaired;
     decision.disk_repair_reason = Some(IpcDiskRepairReason::LivePromptDrift);
-    decision.editor_bad_state = Some(EditorBadStateFingerprint::new(bad_state));
+    // Preserve an already-recorded editor bad state (e.g. from a prior prefix
+    // repair whose normalized content was never delivered to the editor) so
+    // redelivery still verifies against what the editor actually holds; only fall
+    // back to the pre-materialize snapshot when none was recorded.
+    if decision.editor_bad_state.is_none() {
+        decision.editor_bad_state = Some(EditorBadStateFingerprint::new(pre_materialize));
+    }
     decision.redeliver_editor = true;
     crate::ops_log::log_op(
         file,
@@ -3207,6 +3227,85 @@ mod ack_content_snapshot_tests {
             ack_content
         );
         assert!(decision.snapshot_content.contains("❯ queued prompt"));
+        assert!(
+            response_materialized_in_content(response, &decision.snapshot_content),
+            "repaired snapshot must contain the exact response body:\n{}",
+            decision.snapshot_content
+        );
+    }
+
+    #[test]
+    fn socket_ack_drift_missing_response_materializes_over_prefix_repair() {
+        // #ackdriftprefixmaterialize regression: a stale ACK sidecar that went
+        // through a prefix-divergence repair (`disk_repair_reason =
+        // Some(PrefixDivergence)`) but is still missing the agent response must
+        // NOT be blocked from the missing-response materialization rescue. Before
+        // the fix, the blanket `disk_repair_reason.is_some()` bail left the stale
+        // snapshot in place and the cycle dead-ended into a
+        // `retry_without_disk_write` spin until supervisor supersession.
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let original_bad_state = concat!(
+            "<!-- agent:exchange -->\n",
+            "queued prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        // Prefix-normalized snapshot (the `❯ ` marker restored) but still no
+        // response body — exactly what the sidecar prefix repair produces.
+        let prefix_repaired = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let response = "### Re: queued prompt - gpt-5\n\nAnswered.\n";
+        let content_ours = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "### Re: queued prompt - gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let prefix_lines = vec!["❯ queued prompt".to_string()];
+        let mut decision = IpcRepairDecision::ack_content_prefix_repair(
+            prefix_repaired.to_string(),
+            original_bad_state.to_string(),
+            &prefix_lines,
+        );
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::PrefixDivergence)
+        );
+
+        let repaired = materialize_missing_response_for_socket_ack_drift(
+            &file,
+            Some("p-prefix"),
+            Some(content_ours),
+            response,
+            true,
+            &mut decision,
+        );
+
+        assert!(
+            repaired,
+            "a prefix-diverged ACK still missing the response must materialize it from content_ours proof"
+        );
+        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::LivePromptDrift)
+        );
+        assert!(decision.redeliver_editor);
+        // The originally-recorded bad state (what the editor actually holds — the
+        // un-normalized buffer) must survive so redelivery verifies against it,
+        // not against the undelivered prefix-repaired image.
+        assert_eq!(
+            decision
+                .editor_bad_state
+                .as_ref()
+                .expect("bad state fingerprint")
+                .content(),
+            original_bad_state
+        );
         assert!(
             response_materialized_in_content(response, &decision.snapshot_content),
             "repaired snapshot must contain the exact response body:\n{}",

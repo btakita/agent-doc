@@ -9474,6 +9474,85 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
 }
 
 #[test]
+fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-run-context-io")),
+        "agent-doc-run-context-io must stay a first-class workspace crate"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/graph.rs")
+            .exists(),
+        "orchestration must not retain the Lazily run-context graph source file"
+    );
+
+    let run_context_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-run-context-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct RunContext",
+        "pub struct ActorContext",
+        "pub fn new(file_path: PathBuf) -> Self",
+        "pub fn from_project_root(project_root: PathBuf) -> Self",
+        "pub fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus",
+        "pub fn session_registry(&self) -> Arc<tmux_router::Registry>",
+        "lazily::{CellHandle, Context, SlotHandle}",
+    ] {
+        assert!(
+            run_context_source.contains(required),
+            "agent-doc-run-context-io must own the Lazily-backed run-context graph: {required}"
+        );
+    }
+    for forbidden in [
+        "agent_doc_orchestration::",
+        "crate::test_support::",
+        "pub use agent_doc_run_context_io",
+    ] {
+        assert!(
+            !run_context_source.contains(forbidden),
+            "agent-doc-run-context-io must not route through orchestration or expose a facade: {forbidden}"
+        );
+    }
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod graph;")
+            && orchestration_lib.contains("pub use agent_doc_run_context_io as graph;"),
+        "orchestration should preserve the public graph path with a direct crate re-export"
+    );
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    assert!(
+        orchestration_manifest["dependencies"]
+            .as_table()
+            .unwrap()
+            .contains_key("agent-doc-run-context-io"),
+        "orchestration should depend on the focused run-context IO crate"
+    );
+
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-run-context-io"),
+        "the CLI should call the focused run-context IO crate directly"
+    );
+    for relative in ["src/notify.rs", "src/orchestrate.rs", "src/patch.rs"] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_run_context_io::RunContext")
+                && !source.contains("agent_doc_orchestration::graph::RunContext"),
+            "{relative} should use the focused run-context crate directly"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -10756,7 +10835,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-frontmatter-io/src/session.rs",
         "agent-doc-template-io/src/lib.rs",
         "agent-doc-lint-io/src/lib.rs",
-        "agent-doc-orchestration/src/graph.rs",
+        "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-orchestration/src/claim.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/session_resolution.rs",
@@ -10906,7 +10985,7 @@ fn test_global_config_has_no_orchestration_facade() {
         "src/terminal.rs",
         "agent-doc-agent-io/src/agent/mod.rs",
         "agent-doc-agent-io/src/agent/codex.rs",
-        "agent-doc-orchestration/src/graph.rs",
+        "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-harness/src/lib.rs",
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/start.rs",
@@ -11335,7 +11414,7 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     let orchestration_graph =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/graph.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-run-context-io/src/lib.rs")).unwrap();
 
     assert!(
         frontmatter_source.contains("pub fn session_id_from_content("),
@@ -11581,7 +11660,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     }
 
     let graph_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/graph.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-run-context-io/src/lib.rs")).unwrap();
     for required_snippet in [
         "agent_doc_fs::document_state_hash(",
         "agent_doc_fs::document_state_hash_from_str(",
@@ -18501,7 +18580,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
         "agent-doc-ops-log-io/src/lib.rs",
         "agent-doc-op-capture-io/src/lib.rs",
         "agent-doc-orchestration/src/backlog_cmd.rs",
-        "agent-doc-orchestration/src/graph.rs",
+        "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-debounce/src/lib.rs",
     ] {
@@ -19002,7 +19081,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "realtime_model should call focused project-root IO instead of owning broadcast patches root discovery"
     );
     let graph_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/graph.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-run-context-io/src/lib.rs")).unwrap();
     assert!(
         !graph_source.contains("agent_doc_fs::find_project_root(")
             && graph_source.contains("agent_doc_project_root_io::project_root_containing("),
@@ -20407,7 +20486,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-orchestration/src/flow/closeout.rs",
-        "agent-doc-orchestration/src/graph.rs",
+        "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-orchestration/src/realtime_model.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-cycle-state-io/src/lib.rs",
@@ -20956,7 +21035,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     let repair_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
     let graph_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/graph.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-run-context-io/src/lib.rs")).unwrap();
     assert!(
         graph_source.contains("agent_doc_snapshot_io::snapshot_commit_status_from_contents(")
             && !graph_source.contains("normalize_transient_agent_doc_markers"),

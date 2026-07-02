@@ -610,7 +610,16 @@ mod tests {
     use super::*;
     use std::path::Path;
     use std::process::Command;
+    use std::sync::{Mutex, MutexGuard};
     use tempfile::TempDir;
+
+    static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn setup_project(dir: &Path) -> PathBuf {
         std::fs::create_dir_all(dir.join(".agent-doc/snapshots")).unwrap();
@@ -1258,7 +1267,7 @@ mod tests {
 
     #[test]
     fn phase9_harness_slot_caches_detected_harness() {
-        let _env_guard = crate::test_support::env_lock();
+        let _env_guard = env_lock();
         for key in [
             "CLAUDE_CODE_SESSION",
             "CLAUDE_CODE",
@@ -1296,7 +1305,7 @@ mod tests {
 
     #[test]
     fn phase10_global_config_slot_loads_caches_and_invalidates() {
-        let _env_guard = crate::test_support::env_lock();
+        let _env_guard = env_lock();
         let config_root = TempDir::new().unwrap();
         let config_dir = config_root.path().join("agent-doc");
         std::fs::create_dir_all(&config_dir).unwrap();

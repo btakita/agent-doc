@@ -43,8 +43,8 @@ use agent_doc_element::element;
 
 use crate::PatchMode;
 use agent_doc_frontmatter::project_config::ComponentConfig;
-use agent_doc_orchestration::graph::RunContext;
 use agent_doc_project_config_io as project_config_io;
+use agent_doc_run_context_io::RunContext;
 
 fn load_configs_with_context(
     file: &Path,

@@ -84,6 +84,7 @@ dependencies = [
  "agent-doc-repair-io",
  "agent-doc-response-replay-io",
  "agent-doc-response-toc-io",
+ "agent-doc-run-context-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
@@ -889,6 +890,7 @@ dependencies = [
  "agent-doc-repair-io",
  "agent-doc-response-replay-io",
  "agent-doc-response-toc-io",
+ "agent-doc-run-context-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
@@ -1177,6 +1179,29 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-run-context-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-config",
+ "agent-doc-cycle-state-io",
+ "agent-doc-element",
+ "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-model-tier",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-config-io",
+ "agent-doc-project-root-io",
+ "agent-doc-session-registry-io",
+ "agent-doc-snapshot-io",
+ "anyhow",
+ "lazily 0.13.1",
+ "tempfile",
+ "tmux-router",
 ]
 
 [[package]]

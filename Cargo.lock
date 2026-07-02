@@ -155,6 +155,7 @@ dependencies = [
  "agent-doc-turn-executor-tmux",
  "hex",
  "serde",
+ "serde_json",
  "sha2 0.11.0",
  "tempfile",
 ]

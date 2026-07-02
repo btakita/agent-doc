@@ -11,6 +11,9 @@ use agent_doc_controller::dispatch::{
     spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
 use agent_doc_controller::status;
+use agent_doc_controller::supervisor_replacement::{
+    SupervisorReplacementRequestFields, parse_supervisor_replacement_request,
+};
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
@@ -4101,8 +4104,13 @@ pub(crate) fn handle_supervisor_replacement(
     request: ControllerRequest,
 ) -> Result<SupervisorReplacementReceipt> {
     let file = request_file(&request)?;
-    let mode = supervisor_replacement_mode(&request)?;
-    let force = supervisor_replacement_force_flag(&request);
+    let parsed = parse_supervisor_replacement_request(SupervisorReplacementRequestFields {
+        state: request.state.as_deref(),
+        reason: request.reason.as_deref(),
+        diagnostic_payload: request.diagnostic_payload.as_deref(),
+    })?;
+    let mode = parsed.mode.as_str().to_string();
+    let force = parsed.force;
     let authorization = handle_operator_command(
         bootstrap,
         runtime,
@@ -4161,27 +4169,6 @@ pub(crate) fn handle_supervisor_replacement(
         pane_id: authorization.record.pane_id,
         generation: authorization.record.generation,
     })
-}
-
-fn supervisor_replacement_mode(request: &ControllerRequest) -> Result<String> {
-    let mode = request.state.as_deref().unwrap_or("continue").trim();
-    match mode {
-        "continue" | "fresh" => Ok(mode.to_string()),
-        other => anyhow::bail!("unsupported supervisor replacement mode `{other}`"),
-    }
-}
-
-fn supervisor_replacement_force_flag(request: &ControllerRequest) -> bool {
-    if let Some(payload) = request.diagnostic_payload.as_deref()
-        && let Ok(value) = serde_json::from_str::<serde_json::Value>(payload)
-        && let Some(force) = value.get("force").and_then(|value| value.as_bool())
-    {
-        return force;
-    }
-    request
-        .reason
-        .as_deref()
-        .is_some_and(|reason| reason.contains("force"))
 }
 
 #[cfg(any(test, feature = "test-support"))]

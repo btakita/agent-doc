@@ -442,6 +442,16 @@ pub fn short_recovery_command_from_recommendation(recommended: &str) -> Option<S
     }
 }
 
+pub fn blocked_closeout_recovery_command(decision: &CloseoutRecoveryDecision) -> Option<String> {
+    let CloseoutRecoveryDecision::Blocked { recommended, .. } = decision else {
+        return None;
+    };
+    Some(
+        short_recovery_command_from_recommendation(recommended)
+            .unwrap_or_else(|| recommended.clone()),
+    )
+}
+
 pub fn open_cycle_recovery_command(
     document: &str,
     state: Option<&OpenCycleRecoveryCommandInput>,
@@ -1132,6 +1142,26 @@ mod tests {
             short_recovery_command_from_recommendation(mixed).as_deref(),
             Some("agent-doc reset --from-current --preserve-session /path/session.md")
         );
+    }
+
+    #[test]
+    fn blocked_closeout_recovery_command_extracts_only_blocked_recommendations() {
+        let blocked = CloseoutRecoveryDecision::Blocked {
+            state: CloseoutRecoveryState::OpenCycle,
+            missing_proof: "response body".to_string(),
+            recommended: "finish the response, then `agent-doc finalize /abs/session.md`"
+                .to_string(),
+        };
+        assert_eq!(
+            blocked_closeout_recovery_command(&blocked).as_deref(),
+            Some("agent-doc finalize /abs/session.md")
+        );
+
+        let replay = CloseoutRecoveryDecision::ReplaySafe {
+            state: CloseoutRecoveryState::BoundaryOnlyDrift,
+            command: "agent-doc commit /abs/session.md".to_string(),
+        };
+        assert_eq!(blocked_closeout_recovery_command(&replay), None);
     }
 
     fn committed_cycle() -> CloseoutRecoveryCycleInput {

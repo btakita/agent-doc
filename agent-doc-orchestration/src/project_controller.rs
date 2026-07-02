@@ -1015,7 +1015,12 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
         .as_deref()
         .or(state.normalized_file_hash.as_deref())
         .or(state.capture_id.as_deref());
-    let mutations = session_actor_closeout_mutations(&state);
+    let mutations = state_store::session_actor_closeout_mutations(
+        &state.pending_done_ids,
+        &state.pending_gated_ids,
+        &state.pending_kept_open_ids,
+        &state.reaped_pending_ids,
+    );
 
     let mut conn = open_state_db(&project_root)?;
     state_store::commit_session_actor_closeout_in_db(
@@ -1033,31 +1038,6 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
         },
     )?;
     Ok(true)
-}
-
-fn session_actor_closeout_mutations(
-    state: &crate::cycle_state::CycleState,
-) -> Vec<state_store::SessionActorCloseoutMutation<'_>> {
-    let mut mutations = Vec::new();
-    append_closeout_mutations(&mut mutations, &state.pending_done_ids, "done");
-    append_closeout_mutations(&mut mutations, &state.pending_gated_ids, "gated");
-    append_closeout_mutations(&mut mutations, &state.pending_kept_open_ids, "kept_open");
-    append_closeout_mutations(&mut mutations, &state.reaped_pending_ids, "reaped");
-    mutations
-}
-
-fn append_closeout_mutations<'a>(
-    mutations: &mut Vec<state_store::SessionActorCloseoutMutation<'a>>,
-    ids: &'a [String],
-    status: &'static str,
-) {
-    for item_id in ids.iter().map(String::as_str).filter(|id| !id.is_empty()) {
-        mutations.push(state_store::SessionActorCloseoutMutation {
-            item_id,
-            mutation_kind: "backlog_completion",
-            status,
-        });
-    }
 }
 
 pub fn append_state_event(

@@ -19,6 +19,7 @@ agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.66" }
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.66" }
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.11"
 
 [dev-dependencies]

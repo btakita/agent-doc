@@ -241,8 +241,7 @@ use agent_doc_tmux_commands::input_diag::{
     format_route_pane_snapshot_log, sanitize_route_snapshot_field,
 };
 use agent_doc_turn::closeout_recovery::{
-    CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
-    short_recovery_command_from_recommendation,
+    CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, blocked_closeout_recovery_command,
 };
 use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 use tmux_router::Tmux;
@@ -2102,16 +2101,6 @@ fn classify_route_closeout_block(
     (recovery_decision, dispatch_decision)
 }
 
-fn route_closeout_blocked_recovery_command(decision: &CloseoutRecoveryDecision) -> Option<String> {
-    let CloseoutRecoveryDecision::Blocked { recommended, .. } = decision else {
-        return None;
-    };
-    Some(
-        short_recovery_command_from_recommendation(recommended)
-            .unwrap_or_else(|| recommended.clone()),
-    )
-}
-
 /// Enqueue a routed dispatch prompt into a document's `agent:queue`.
 ///
 /// `priority` marks a manual operator dispatch (JB `Run Agent Doc`) into a
@@ -2770,7 +2759,7 @@ fn route_via_authoritative_actor(
                         queued.already_present,
                         queued.superseded,
                         route_closeout_user_outcome_fields(
-                            route_closeout_blocked_recovery_command(&decision).as_deref(),
+                            blocked_closeout_recovery_command(&decision).as_deref(),
                         )
                     );
                     return Ok(dispatch_pane);
@@ -2791,7 +2780,7 @@ fn route_via_authoritative_actor(
                         file.display(),
                         head,
                         route_closeout_user_outcome_fields(
-                            route_closeout_blocked_recovery_command(&decision).as_deref(),
+                            blocked_closeout_recovery_command(&decision).as_deref(),
                         )
                     );
                     return Ok(dispatch_pane);

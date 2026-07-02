@@ -4155,6 +4155,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub enum CloseoutRecoveryDecision",
         "pub fn closeout_recovery_decision_from_state",
         "pub fn short_recovery_command_from_recommendation",
+        "pub fn blocked_closeout_recovery_command",
         "pub enum CloseoutRecoveryMutationReason",
         "pub enum MetadataDriftAuthority",
         "pub const fn capture_refresh_event",
@@ -4245,6 +4246,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "fn open_cycle_recovery_command(",
         "fn extract_recovery_command(",
         "fn short_recovery_command_from_recommendation(",
+        "fn route_closeout_blocked_recovery_command(",
         "pipe the final response (with `<!-- patch:exchange -->` blocks)",
         "rewrite the response with real `<!-- patch:exchange -->` blocks",
         "preserve the user-authored content and finish through `agent-doc finalize",
@@ -4279,10 +4281,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "orchestration closeout recovery should call focused turn policy directly"
     );
     assert!(
-        route_source.contains("short_recovery_command_from_recommendation")
+        route_source.contains("blocked_closeout_recovery_command")
             && !route_source.contains("fn extract_recovery_command(")
-            && !route_source.contains("fn short_recovery_command_from_recommendation("),
-        "route should call focused turn recovery-command projection directly, not re-own the parser"
+            && !route_source.contains("fn short_recovery_command_from_recommendation(")
+            && !route_source.contains("fn route_closeout_blocked_recovery_command("),
+        "route should call focused turn blocked-recovery projection directly, not re-own the parser"
     );
     for relative in [
         "agent-doc-orchestration/src/capture.rs",
@@ -10018,6 +10021,8 @@ fn test_project_controller_has_no_sqlite_status_facade() {
     let project_controller_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
             .unwrap();
+    let sqlite_state_store =
+        fs::read_to_string(manifest_dir.join("agent-doc-sqlite/src/state_store.rs")).unwrap();
     assert!(
         !project_controller_source.contains("pub use state_store::{"),
         "project_controller.rs must not re-export SQLite status/storage types"
@@ -10026,6 +10031,19 @@ fn test_project_controller_has_no_sqlite_status_facade() {
         project_controller_source.contains("use state_store::{"),
         "project_controller.rs should import SQLite status/storage types privately"
     );
+    assert!(
+        sqlite_state_store.contains("pub fn session_actor_closeout_mutations"),
+        "agent-doc-sqlite should own session actor closeout mutation construction"
+    );
+    for forbidden in [
+        "fn session_actor_closeout_mutations",
+        "fn append_closeout_mutations(",
+    ] {
+        assert!(
+            !project_controller_source.contains(forbidden),
+            "project_controller.rs must not re-own SQLite closeout mutation construction: {forbidden}"
+        );
+    }
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(dir).unwrap() {
@@ -10520,6 +10538,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
     let controller_status =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/status.rs")).unwrap();
+    let controller_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/lib.rs")).unwrap();
+    let supervisor_replacement_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/supervisor_replacement.rs"))
+            .unwrap();
     for required_snippet in [
         "pub fn cmdline_is_agent_doc_owner_session(",
         "pub fn cmdline_references_md_document(",
@@ -10584,6 +10607,22 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             "agent-doc-controller should own controller status/freshness projection: {required_snippet}"
         );
     }
+    assert!(
+        controller_lib.contains("pub mod supervisor_replacement;"),
+        "agent-doc-controller should expose supervisor replacement request parsing"
+    );
+    for required_snippet in [
+        "pub struct SupervisorReplacementRequestFields",
+        "pub enum SupervisorReplacementMode",
+        "pub struct ParsedSupervisorReplacementRequest",
+        "pub enum SupervisorReplacementParseError",
+        "pub fn parse_supervisor_replacement_request(",
+    ] {
+        assert!(
+            supervisor_replacement_source.contains(required_snippet),
+            "agent-doc-controller should own supervisor replacement request parsing: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "pub use agent_doc_controller::dispatch",
         "pub use agent_doc_controller::status",
@@ -10610,6 +10649,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn host_supervisor_stale_warning_message(",
         "fn args_match_same_project_controller(",
         "fn canonical_path_for_compare(",
+        "fn supervisor_replacement_mode(",
+        "fn supervisor_replacement_force_flag(",
     ] {
         assert!(
             !rpc_source.contains(forbidden_snippet),

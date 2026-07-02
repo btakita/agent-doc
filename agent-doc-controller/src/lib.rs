@@ -16,6 +16,7 @@ pub mod operator_clear;
 pub mod paths;
 pub mod recycle;
 pub mod status;
+pub mod supervisor_replacement;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ActorRecord {

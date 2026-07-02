@@ -275,6 +275,31 @@ pub struct SessionActorCloseoutMutation<'a> {
     pub status: &'a str,
 }
 
+pub fn session_actor_closeout_mutations<'a>(
+    pending_done_ids: &'a [String],
+    pending_gated_ids: &'a [String],
+    pending_kept_open_ids: &'a [String],
+    reaped_pending_ids: &'a [String],
+) -> Vec<SessionActorCloseoutMutation<'a>> {
+    let mutation_groups: [(&'a [String], &'static str); 4] = [
+        (pending_done_ids, "done"),
+        (pending_gated_ids, "gated"),
+        (pending_kept_open_ids, "kept_open"),
+        (reaped_pending_ids, "reaped"),
+    ];
+    let mut mutations = Vec::new();
+    for (ids, status) in mutation_groups {
+        for item_id in ids.iter().map(String::as_str).filter(|id| !id.is_empty()) {
+            mutations.push(SessionActorCloseoutMutation {
+                item_id,
+                mutation_kind: "backlog_completion",
+                status,
+            });
+        }
+    }
+    mutations
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionActorCloseoutCommit<'a> {
     pub document_id: &'a str,
@@ -2055,6 +2080,52 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_actor_closeout_mutations_filter_empty_ids_and_preserve_status_order() {
+        let pending_done_ids = vec!["done-1".to_string(), String::new(), "done-2".to_string()];
+        let pending_gated_ids = vec![String::new(), "gated-1".to_string()];
+        let pending_kept_open_ids = vec!["kept-1".to_string(), String::new()];
+        let reaped_pending_ids = vec![String::new(), "reaped-1".to_string()];
+
+        let mutations = session_actor_closeout_mutations(
+            &pending_done_ids,
+            &pending_gated_ids,
+            &pending_kept_open_ids,
+            &reaped_pending_ids,
+        );
+
+        assert_eq!(
+            mutations,
+            vec![
+                SessionActorCloseoutMutation {
+                    item_id: "done-1",
+                    mutation_kind: "backlog_completion",
+                    status: "done",
+                },
+                SessionActorCloseoutMutation {
+                    item_id: "done-2",
+                    mutation_kind: "backlog_completion",
+                    status: "done",
+                },
+                SessionActorCloseoutMutation {
+                    item_id: "gated-1",
+                    mutation_kind: "backlog_completion",
+                    status: "gated",
+                },
+                SessionActorCloseoutMutation {
+                    item_id: "kept-1",
+                    mutation_kind: "backlog_completion",
+                    status: "kept_open",
+                },
+                SessionActorCloseoutMutation {
+                    item_id: "reaped-1",
+                    mutation_kind: "backlog_completion",
+                    status: "reaped",
+                },
+            ]
+        );
+    }
 
     #[test]
     fn ensure_column_tolerates_duplicate_column_after_race() -> Result<()> {

@@ -269,6 +269,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-crdt-relay-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-debounce",
+ "agent-doc-document-realtime",
+ "agent-doc-fs",
+ "agent-doc-ipc-io",
+ "agent-doc-merge",
+ "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
+ "agent-doc-project-root-io",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "agent-doc-cycle-state-io"
 version = "0.34.67"
 dependencies = [
@@ -814,6 +832,7 @@ dependencies = [
  "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-controller-io",
+ "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-diff",

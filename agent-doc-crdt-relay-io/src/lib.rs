@@ -1,7 +1,7 @@
 //! Live wiring of the CRDT relay/commit-barrier into the finalize + disk paths
 //! (`#crdtauth4` cutover).
 //!
-//! The state-vector sync primitive ([`agent_doc_merge::crdt_sync`]), the authority
+//! The state-vector sync primitive (`agent_doc_merge::crdt_sync`), the authority
 //! state machine ([`agent_doc_document_realtime::crdt_authority`]), and the relay
 //! hub ([`agent_doc_document_realtime::crdt_relay`]) were built and tested as
 //! standalone modules. This
@@ -582,7 +582,7 @@ pub fn record_committed_baseline_for_file(file: &Path) {
 /// Under [`CrdtAuthority::GitAuthoritative`] there is no live in-memory authority
 /// to reconcile against — disk demotion does not apply, and the existing
 /// baseline-wins load path
-/// ([`agent_doc_snapshot_io::crdt_merge_base_state_with`], which already
+/// (`agent_doc_snapshot_io::crdt_merge_base_state_with`, which already
 /// discards a stale `.yrs` whose markdown projection does not match the cycle
 /// baseline) is left to run unchanged. Returns `None` (no live reconcile
 /// performed).
@@ -831,11 +831,23 @@ mod tests {
         (dir, path)
     }
 
+    fn seed_live_plugin_owner_lease(file: &str) {
+        let pid = std::process::id();
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(
+                file,
+                &format!("test-editor-{pid}"),
+                pid
+            ),
+            "test setup should acquire a live plugin-owner lease"
+        );
+    }
+
     #[test]
     fn register_replica_seeds_fresh_hub_from_current_document_text() {
         let (_dir, doc) = temp_doc("seed-register.md");
         let file_str = doc.display().to_string();
-        crate::test_support::seed_live_plugin_owner_lease(&file_str);
+        seed_live_plugin_owner_lease(&file_str);
         let on_disk = std::fs::read_to_string(&doc).unwrap();
 
         let (client_id, bootstrap) = register_replica_for_file(&doc, "intellij:seed")

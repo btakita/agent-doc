@@ -1,0 +1,26 @@
+[package]
+name = "agent-doc-crdt-relay-io"
+version = "0.34.67"
+edition = "2024"
+description = "CRDT relay host IO boundary for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_crdt_relay_io"
+
+[dependencies]
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
+agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+anyhow = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.67" }
+serde_json = "1"
+tempfile = "3"

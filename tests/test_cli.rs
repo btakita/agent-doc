@@ -22418,6 +22418,38 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .exists(),
         "orchestration must not retain a CRDT relay shim module"
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-crdt-relay-io/src/lib.rs")
+            .exists(),
+        "agent-doc-crdt-relay-io must own the CRDT relay host IO boundary"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/crdt_relay_host.rs")
+            .exists(),
+        "orchestration must not retain a CRDT relay host source-file facade"
+    );
+    let workspace_manifest_source = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace_manifest: toml::Value = toml::from_str(&workspace_manifest_source).unwrap();
+    let workspace_members = workspace_manifest["workspace"]["members"]
+        .as_array()
+        .unwrap();
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-crdt-relay-io")),
+        "workspace must include agent-doc-crdt-relay-io"
+    );
+    let orchestration_manifest_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest: toml::Value =
+        toml::from_str(&orchestration_manifest_source).unwrap();
+    let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-crdt-relay-io"),
+        "orchestration should depend on the focused CRDT relay host IO crate"
+    );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     for forbidden_snippet in [
@@ -22438,9 +22470,16 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         !orchestration_lib.contains("pub mod crdt_relay;"),
         "orchestration must not export a CRDT relay facade"
     );
+    assert!(
+        !orchestration_lib.contains("pub mod crdt_relay_host;"),
+        "orchestration must not export a CRDT relay host source-file facade"
+    );
+    assert!(
+        orchestration_lib.contains("pub use agent_doc_crdt_relay_io as crdt_relay_host;"),
+        "orchestration should preserve the public CRDT relay host path with a direct crate re-export"
+    );
     let crdt_relay_host =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/crdt_relay_host.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-crdt-relay-io/src/lib.rs")).unwrap();
     assert!(
         crdt_relay_host.contains("use agent_doc_document_realtime::crdt_relay::{"),
         "crdt_relay_host should call the focused realtime relay directly"
@@ -22449,16 +22488,14 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "use crate::crdt_relay::",
         "crate::crdt_relay::",
         "agent_doc_orchestration::crdt_relay::",
+        "agent_doc_orchestration::crdt_relay_host::",
     ] {
         assert!(
             !crdt_relay_host.contains(forbidden_snippet),
             "crdt_relay_host must not route through an orchestration relay facade: {forbidden_snippet}"
         );
     }
-    for relative in [
-        "agent-doc-orchestration/src/crdt_relay_host.rs",
-        "src/sim_world.rs",
-    ] {
+    for relative in ["agent-doc-crdt-relay-io/src/lib.rs", "src/sim_world.rs"] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains("agent_doc_document_realtime::crdt_authority::CrdtAuthority"),
@@ -22471,7 +22508,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         );
     }
     for relative in [
-        "agent-doc-orchestration/src/crdt_relay_host.rs",
+        "agent-doc-crdt-relay-io/src/lib.rs",
         "agent-doc-orchestration/src/flow/closeout.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",

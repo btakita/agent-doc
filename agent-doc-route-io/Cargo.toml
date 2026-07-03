@@ -11,12 +11,14 @@ name = "agent_doc_route_io"
 
 [dependencies]
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
 agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.34.67" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
 agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
@@ -27,6 +29,7 @@ agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34
 agent-doc-sync = { path = "../agent-doc-sync", version = "0.34.67" }
 agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.34.67" }
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.67" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.67" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.67" }
 anyhow = "1"

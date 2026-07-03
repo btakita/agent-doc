@@ -13444,16 +13444,17 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
             );
         }
     }
-    let route_dispatch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
+    let route_direct_pane_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
             .unwrap();
     let start_detection =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
             .unwrap();
     assert!(
-        route_dispatch.contains("route_trigger_visible_in_current_draft(&content, &trigger")
+        route_direct_pane_dispatch
+            .contains("route_trigger_visible_in_current_draft(&content, &trigger")
             && start_detection.contains("dispatch_payload_pending_in_current_input("),
-        "route/start should call focused controller dispatch visibility policy directly"
+        "route direct-pane IO and start detection should call focused controller dispatch visibility policy directly"
     );
 }
 
@@ -13954,6 +13955,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
             .unwrap();
+    let route_direct_pane_dispatch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
+            .unwrap();
     let route_dispatch_only_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch_only.rs"))
             .unwrap();
@@ -14122,6 +14126,73 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_only_source.contains("dispatch_only_dispatch_start_proof_required")
             && route_dispatch_only_source.contains("require_dispatch_only_dispatch_start_proof("),
         "route/dispatch_only.rs should call focused dispatch-only route IO directly"
+    );
+    for required_snippet in [
+        "pub struct CommandDispatchResult",
+        "pub struct DirectPaneAcceptance",
+        "pub struct RouteSubmitObservationLogFacts",
+        "pub const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL",
+        "pub fn editor_route_attempt_id(",
+        "pub fn preserve_route_pane_snapshot(",
+        "pub fn print_route_pane_snapshot_hint(",
+        "pub fn log_route_submit_observation(",
+        "pub fn log_route_latency(",
+        "pub fn log_dispatch_inject(",
+        "pub fn poll_direct_pane_acceptance(",
+        "pub fn send_direct_pane_enter_resubmit(",
+        "pub fn send_direct_pane_enter_resubmit_until_stable(",
+        "pub fn dead_harness_shell_dispatch_block(",
+        "pub fn send_command_unchecked(",
+        "pub fn send_command_once_unchecked(",
+        "pub fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(",
+        "DirectPaneAcceptancePollState::default()",
+        "direct_pane_acceptance_poll_status(",
+        ".saw_trigger_visible()",
+        "DirectPaneEnterResubmitAttemptFacts",
+        "direct_pane_can_continue_enter_resubmit(",
+        "DirectPaneExistingDraftSubmitFacts",
+        "direct_pane_can_enter_existing_draft(",
+        "DirectPaneResubmitProofFacts",
+        "direct_pane_resubmit_proof_line(",
+        "DeadHarnessShellDispatchFacts",
+        "classify_dead_harness_shell_dispatch_block(",
+        "RoutedTriggerPayloadFacts",
+        "routed_trigger_payload_rejection(",
+        "direct_pane_can_full_resend_not_landed(",
+        "agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(",
+        "agent_doc_tmux_io::send_submitted_text_for_harness_logged(",
+        "agent_doc_supervisor_io::recycle_inflight::wait_for_recycle_settle(",
+    ] {
+        assert!(
+            route_direct_pane_dispatch_source.contains(required_snippet),
+            "agent-doc-route-io direct_pane_dispatch should own direct-pane dispatch IO: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "pub(crate) fn poll_direct_pane_acceptance(",
+        "fn send_direct_pane_enter_resubmit(",
+        "fn send_direct_pane_enter_resubmit_until_stable(",
+        "pub(crate) fn dead_harness_shell_dispatch_block(",
+        "pub(crate) fn send_command_unchecked(",
+        "pub(crate) fn send_command_once_unchecked(",
+        "fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(",
+        "DirectPaneAcceptancePollState::default()",
+        "route_redispatch_not_landed file=",
+        "direct_pane_protected_prompt_input",
+    ] {
+        assert!(
+            !route_dispatch_source.contains(forbidden_snippet),
+            "route/dispatch.rs must not re-own direct-pane dispatch IO after it moves to agent-doc-route-io: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_dispatch_source.contains("agent_doc_route_io::direct_pane_dispatch::{")
+            && route_dispatch_source.contains("send_command_unchecked")
+            && route_dispatch_source
+                .contains("try_late_direct_pane_enter_resubmit_after_unproven_dispatch(")
+            && route_dispatch_source.contains("log_route_submit_observation(")
+            && route_dispatch_source.contains("log_route_latency("),
+        "route/dispatch.rs should call focused direct-pane route IO directly"
     );
     for required_snippet in [
         "pub enum DispatchActorState",
@@ -14409,7 +14480,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
-            && route_source.contains("DirectPaneSubmitStatus as CommandDispatchStatus")
             && route_source.contains("RetryBudget")
             && route_source.contains("authoritative_actor_ready_retry_budget")
             && route_source.contains("CloseoutBlockDispatchDecision")
@@ -14434,14 +14504,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("should_require_routed_cycle_ack")
             && route_source.contains("MissingCycleAckFacts")
             && route_source.contains("should_optimistically_accept_missing_cycle_ack")
-            && route_source.contains("RouteSubmitObservation")
-            && route_source.contains("ControllerRouteSubmitObservationFacts")
-            && route_source.contains("route_submit_observation_message(")
-            && route_source.contains("route_submit_issue_message(")
-            && route_source.contains("RouteLatencyFacts")
-            && route_source.contains("RouteLatencyStatus")
-            && route_source.contains("route_latency_message(")
-            && route_source.contains("route_latency_status(")
             && route_source.contains("RouteStartupMissDiagnosticFacts")
             && route_source.contains("route_startup_miss_diagnostic_message(")
             && route_source.contains("RouteBusyDiagnosticFacts")
@@ -14491,23 +14553,27 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
-        route_dispatch_source.contains("DirectPaneAcceptancePollState::default()")
-            && route_dispatch_source.contains("direct_pane_acceptance_poll_status(")
-            && route_dispatch_source.contains("direct_pane_submit_outcome")
-            && route_dispatch_source.contains(".saw_trigger_visible()")
-            && route_dispatch_source.contains("DirectPaneEnterResubmitAttemptFacts")
-            && route_dispatch_source.contains("direct_pane_can_continue_enter_resubmit(")
-            && route_dispatch_source.contains("DirectPaneExistingDraftSubmitFacts")
-            && route_dispatch_source.contains("direct_pane_can_enter_existing_draft(")
+        route_direct_pane_dispatch_source.contains("DirectPaneAcceptancePollState::default()")
+            && route_direct_pane_dispatch_source.contains("direct_pane_acceptance_poll_status(")
+            && route_direct_pane_dispatch_source.contains("direct_pane_submit_outcome")
+            && route_direct_pane_dispatch_source.contains(".saw_trigger_visible()")
+            && route_direct_pane_dispatch_source.contains("DirectPaneEnterResubmitAttemptFacts")
+            && route_direct_pane_dispatch_source
+                .contains("direct_pane_can_continue_enter_resubmit(")
+            && route_direct_pane_dispatch_source.contains("DirectPaneExistingDraftSubmitFacts")
+            && route_direct_pane_dispatch_source.contains("direct_pane_can_enter_existing_draft(")
+            && route_direct_pane_dispatch_source.contains("DirectPaneResubmitProofFacts")
+            && route_direct_pane_dispatch_source.contains("direct_pane_resubmit_proof_line(")
+            && route_direct_pane_dispatch_source.contains("DeadHarnessShellDispatchFacts")
+            && route_direct_pane_dispatch_source
+                .contains("classify_dead_harness_shell_dispatch_block(")
+            && route_direct_pane_dispatch_source.contains("RoutedTriggerPayloadFacts")
+            && route_direct_pane_dispatch_source.contains("routed_trigger_payload_rejection(")
             && route_dispatch_source.contains("DirectPaneDispatchStartProofFacts")
             && route_dispatch_source.contains("direct_pane_should_await_dispatch_start_proof(")
-            && route_dispatch_source.contains("DirectPaneResubmitProofFacts")
-            && route_dispatch_source.contains("direct_pane_resubmit_proof_line(")
             && route_dispatch_source.contains("routed_dispatch_start_timeout_for_binary(")
             && route_dispatch_source.contains("busy_dispatch_start_outcome(true, probe_proof)")
             && route_dispatch_source.contains("dispatch_start_busy_probe_timeout(cfg!(test))")
-            && route_dispatch_source.contains("DeadHarnessShellDispatchFacts")
-            && route_dispatch_source.contains("classify_dead_harness_shell_dispatch_block(")
             && route_dispatch_recovery_source.contains("FreshDispatchTargetAfterReadyWaitFacts")
             && route_dispatch_recovery_source.contains("FreshDispatchTargetAfterReadyWaitDecision")
             && route_dispatch_recovery_source
@@ -14516,7 +14582,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("cfg!(test)")
             && route_dispatch_source.contains("RoutedTriggerPayloadFacts")
             && route_dispatch_source.contains("routed_trigger_payload_rejection("),
-        "route dispatch/recovery adapters should adapt tmux and registry facts into focused controller direct-pane policy"
+        "route direct-pane IO should live in agent-doc-route-io while route dispatch keeps proof/supervisor adapters"
     );
     for forbidden_snippet in [
         "fn route_dispatch_only_sent_log_message(",
@@ -16685,13 +16751,13 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && start_run.contains("start_session_retryable_during_recycle"),
         "start/run should call focused supervisor start-session recycle retry policy directly"
     );
-    let route_dispatch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
+    let route_direct_pane_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
             .unwrap();
     assert!(
-        route_dispatch.contains("agent_doc_supervisor::")
-            && route_dispatch.contains("recycle_interrupted_resubmit_should_wait"),
-        "route dispatch should call focused supervisor recycle-resubmit policy directly"
+        route_direct_pane_dispatch.contains("agent_doc_supervisor::")
+            && route_direct_pane_dispatch.contains("recycle_interrupted_resubmit_should_wait"),
+        "direct-pane route IO should call focused supervisor recycle-resubmit policy directly"
     );
     let idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
@@ -19507,6 +19573,9 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     let route_dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
             .unwrap();
+    let route_direct_pane_dispatch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
+            .unwrap();
     let start_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
     let idle_watch_source =
@@ -19535,9 +19604,9 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
         !route_dispatch_source.contains("fn routed_trigger_submit_diagnostic(")
             && !route_dispatch_source.contains("fn routed_trigger_payload(")
             && !route_dispatch_source.contains("fn validate_routed_trigger_payload(")
-            && route_dispatch_source.contains("tmux_submit_transform_for_harness(")
-            && route_dispatch_source.contains("tmux_submit_key_for_harness("),
-        "route dispatch should call focused tmux submit diagnostics directly, without a local wrapper"
+            && route_direct_pane_dispatch_source.contains("tmux_submit_transform_for_harness(")
+            && route_direct_pane_dispatch_source.contains("tmux_submit_key_for_harness("),
+        "direct-pane route IO should call focused tmux submit diagnostics directly, without a local wrapper"
     );
     let supervisor_ipc_protocol_source =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/ipc_protocol.rs")).unwrap();
@@ -20638,6 +20707,9 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
 #[test]
 fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let route_direct_pane_dispatch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
+            .unwrap();
     let tmux_commands_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-tmux-commands/Cargo.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&tmux_commands_manifest).unwrap();
@@ -20832,11 +20904,11 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         );
     }
     assert!(
-        route_source
+        route_direct_pane_dispatch_source
             .contains("agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(")
-            && route_source
+            && route_direct_pane_dispatch_source
                 .contains("agent_doc_controller_io::route_snapshot::route_pane_snapshot_hint("),
-        "route.rs should preserve snapshots through the focused route snapshot IO adapter"
+        "direct-pane route IO should preserve snapshots through the focused route snapshot IO adapter"
     );
 
     for forbidden in [

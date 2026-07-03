@@ -163,17 +163,14 @@ use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixOutcome,
     CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts,
-    DegradedAuthoritativeActorDirectSubmit, DegradedAuthoritativeActorFacts,
-    DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
+    DegradedAuthoritativeActorDirectSubmit, DegradedAuthoritativeActorFacts, DispatchActorState,
     DispatchDrainRetryDecision, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyBusyRefusalFacts,
     DispatchOnlyReopenDelivery, DispatchOnlyStartingPaneActorReadyFacts,
     DispatchOnlyStartingPaneNotReadyMessageFacts, DispatchRuntimeHealth,
     DuplicatePanePolicyErrorFacts, MissingCycleAckFacts, PromptReadyBarrierDecision, ReopenMode,
     RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
-    RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteLatencyFacts,
-    RouteLatencyStatus, RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
-    RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
-    RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
+    RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts,
+    RoutedCycleAckFacts, RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
     STARTING_ACTOR_TIMEOUT_REASON, StartingActorLogFacts, StartingTimeoutActorFacts,
     StartupMissRouteFacts, actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
     actor_recovery_hint, authoritative_actor_ready_retry_budget,
@@ -191,9 +188,8 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
     failclosed_wait_context, fresh_route_start_ack_timeout, prompt_ready_barrier_failed_event,
     route_busy_diagnostic_message, route_busy_queued_diagnostic_message,
-    route_closeout_user_outcome_fields, route_dispatch_bug_report_item, route_latency_message,
-    route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
-    route_submit_observation_message, routed_cycle_ack_timeout,
+    route_closeout_user_outcome_fields, route_dispatch_bug_report_item,
+    route_startup_miss_diagnostic_message, routed_cycle_ack_timeout,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
     starting_actor_not_ready_log_line, starting_actor_ready_log_line,
     starting_actor_terminal_log_line, starting_actor_timeout_coalesced_log_line,
@@ -206,7 +202,6 @@ use agent_doc_controller::dispatch::{
     BusyPaneAutoFixFacts,
     busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
 };
-use agent_doc_controller_io::route_snapshot::RoutePaneSnapshot;
 use agent_doc_controller_io::starting_actor_timeout::{
     StartingActorTimeoutLogDecision, clear_starting_actor_timeout_record,
     record_starting_actor_timeout, starting_actor_timeout_record_identity_matches,
@@ -219,6 +214,7 @@ pub(crate) use agent_doc_route_io::busy_pane::{
     attempt_busy_existing_pane_auto_fix, attempt_busy_existing_pane_interrupt_recovery,
     ensure_existing_pane_ready_for_dispatch,
 };
+use agent_doc_route_io::direct_pane_dispatch::{editor_route_attempt_id, log_route_latency};
 pub(crate) use agent_doc_route_io::dispatch_recovery::{
     resolve_fresh_dispatch_target_after_ready_wait, wait_for_starting_pane_recovery_target,
 };
@@ -342,13 +338,6 @@ fn wait_for_ready_override() -> Option<Duration> {
     WAIT_FOR_READY_OVERRIDE.with(|cell| cell.get())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CommandDispatchResult {
-    status: CommandDispatchStatus,
-    elapsed: Duration,
-    diagnostic_path: Option<PathBuf>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteMode {
     Managed,
@@ -406,17 +395,6 @@ struct RouteQueueEnqueueOutcome {
     activated: bool,
 }
 
-/// Poll cadence for the direct-pane submit-acceptance check in
-/// `send_command_unchecked`. `#run-agent-doc-latency`: tightened from 300ms so a
-/// pane that consumes the routed trigger quickly is confirmed accepted within one
-/// short poll instead of a 300ms floor. The loop captures before sleeping, so a
-/// near-instant consume returns on the first capture.
-const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
-
-fn editor_route_attempt_id() -> Option<String> {
-    agent_doc_controller_io::route_snapshot::editor_route_attempt_id()
-}
-
 fn route_current_actor_generation(file: &Path) -> Option<u64> {
     let canonical = file.canonicalize().ok()?;
     let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
@@ -430,63 +408,6 @@ fn route_ops_log_path(file: &Path) -> Option<PathBuf> {
     let canonical = file.canonicalize().ok()?;
     let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
     Some(root.join(".agent-doc/logs/ops.log"))
-}
-
-fn preserve_route_pane_snapshot(
-    file: &Path,
-    pane: &str,
-    harness: &HarnessConfig,
-    phase: &str,
-    content: &str,
-) -> RoutePaneSnapshot {
-    let outcome = agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(
-        file,
-        pane,
-        &harness.binary,
-        phase,
-        content,
-        agent_doc_ops_log_io::log_op,
-    );
-    if let Some(err) = outcome.warning.as_deref() {
-        eprintln!(
-            "[route] warning: failed to preserve pane snapshot for {} phase {}: {}",
-            file.display(),
-            phase,
-            err
-        );
-    }
-    outcome.snapshot
-}
-
-fn print_route_pane_snapshot_hint(
-    file: &Path,
-    pane: &str,
-    harness: &HarnessConfig,
-    phase: &str,
-    snapshot: &RoutePaneSnapshot,
-) {
-    let message = agent_doc_controller_io::route_snapshot::route_pane_snapshot_hint(
-        file,
-        pane,
-        &harness.binary,
-        phase,
-        snapshot,
-    );
-    eprintln!("{message}");
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RouteSubmitObservationLogFacts<'a> {
-    file: &'a Path,
-    pane: &'a str,
-    harness: &'a HarnessConfig,
-    phase: &'a str,
-    observation: RouteSubmitObservation,
-    trigger_visible: Option<bool>,
-    elapsed: Duration,
-    capture_len: Option<usize>,
-    capture_hash: Option<&'a str>,
-    proof: Option<RoutedDispatchStartProof>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -608,66 +529,6 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
                 ),
             );
         }
-    }
-}
-
-fn log_route_submit_observation(facts: RouteSubmitObservationLogFacts<'_>) {
-    let file_display = facts.file.display().to_string();
-    let editor_attempt_id = editor_route_attempt_id();
-    let controller_facts = ControllerRouteSubmitObservationFacts {
-        file_display: &file_display,
-        pane: facts.pane,
-        harness_binary: &facts.harness.binary,
-        phase: facts.phase,
-        observation: facts.observation,
-        trigger_visible: facts.trigger_visible,
-        elapsed_ms: facts.elapsed.as_millis(),
-        capture_len: facts.capture_len,
-        capture_hash: facts.capture_hash,
-        proof: facts.proof,
-        editor_attempt_id: editor_attempt_id.as_deref(),
-    };
-    agent_doc_ops_log_io::log_op(
-        facts.file,
-        &route_submit_observation_message(controller_facts),
-    );
-    if let Some(issue) = route_submit_issue_message(controller_facts) {
-        agent_doc_ops_log_io::log_op(facts.file, &issue);
-    }
-}
-
-fn log_route_latency(
-    file: &Path,
-    phase: &str,
-    elapsed: Duration,
-    budget: Duration,
-    pane: &str,
-    harness: &HarnessConfig,
-    outcome: &str,
-) {
-    let editor_attempt_id = editor_route_attempt_id();
-    let elapsed_ms = elapsed.as_millis();
-    let budget_ms = budget.as_millis();
-    let message = route_latency_message(RouteLatencyFacts {
-        phase,
-        elapsed_ms,
-        budget_ms,
-        pane,
-        harness_binary: &harness.binary,
-        outcome,
-        editor_attempt_id: editor_attempt_id.as_deref(),
-    });
-    agent_doc_ops_log_io::log_op(file, &message);
-    if route_latency_status(elapsed_ms, budget_ms) == RouteLatencyStatus::OverBudget {
-        eprintln!(
-            "[route] latency budget exceeded: phase {} took {}ms (budget {}ms, pane={}, harness={}, outcome={})",
-            phase,
-            elapsed.as_millis(),
-            budget.as_millis(),
-            pane,
-            harness.binary,
-            outcome
-        );
     }
 }
 
@@ -3839,7 +3700,11 @@ pub(crate) fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTa
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use agent_doc_controller::dispatch::{
+        PromptReadyBarrierFacts, RouteLatencyFacts, classify_prompt_ready_barrier,
+        route_latency_message,
+    };
+    use agent_doc_route_io::direct_pane_dispatch::CommandDispatchStatus;
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     use agent_doc_supervisor_io::ipc::SupervisorIpc;
     use agent_doc_turn::closeout_recovery::CloseoutRecoveryState;
@@ -5520,43 +5385,6 @@ mod tests {
             "{message}"
         );
         assert!(!message.contains("timed_out"), "{message}");
-    }
-    #[test]
-    fn route_pane_snapshot_preserves_redacted_terminal_capture() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let file = tmp.path().join("session.md");
-        std::fs::write(&file, "session").unwrap();
-        let content = "\
-› agent-doc tasks/agent-doc/agent-doc-bugs2.md
-OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
-";
-
-        let snapshot = preserve_route_pane_snapshot(
-            &file,
-            "%7",
-            &HarnessConfig::codex(),
-            "direct_pane_acceptance",
-            content,
-        );
-
-        let path = snapshot.path.expect("snapshot path should be preserved");
-        assert!(path.starts_with(tmp.path().join(".agent-doc/logs/route-submit")));
-        let saved = std::fs::read_to_string(&path).unwrap();
-        assert!(
-            saved.contains("OPENAI_API_KEY=[REDACTED]"),
-            "snapshot should redact named API keys: {saved}"
-        );
-        assert!(
-            !saved.contains("sk-proj-aaaaaaaa"),
-            "raw token must not be preserved in snapshot: {saved}"
-        );
-
-        let ops = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops.contains("route_pane_snapshot"), "{ops}");
-        assert!(ops.contains("phase=direct_pane_acceptance"), "{ops}");
-        assert!(ops.contains("capture_hash="), "{ops}");
-        assert!(ops.contains("snapshot_path="), "{ops}");
     }
     #[test]
     fn route_dispatch_bug_report_dedupes_same_document_stage() {

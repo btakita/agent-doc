@@ -616,6 +616,7 @@ mod tests {
     use super::*;
     use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use agent_doc_route_io::direct_pane_dispatch::CommandDispatchStatus;
     use agent_doc_route_io::startup_sync::sync_after_claim;
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     use agent_doc_supervisor_io::ipc::SupervisorIpc;
@@ -811,8 +812,9 @@ mod tests {
         let harness = HarnessConfig::claude();
 
         // Bare shell, no harness running → dispatch must be blocked.
-        let blocked =
-            super::super::dispatch::dead_harness_shell_dispatch_block(&iso, &pane, &harness);
+        let blocked = agent_doc_route_io::direct_pane_dispatch::dead_harness_shell_dispatch_block(
+            &iso, &pane, &harness,
+        );
         assert!(
             blocked.is_some(),
             "expected dead-harness shell block on a bare shell pane, got None"
@@ -820,7 +822,7 @@ mod tests {
 
         // The actual send path must fail closed (not type the trigger into the shell).
         let doc = cwd.join("dead-shell.md");
-        let err = super::super::dispatch::send_command_unchecked(
+        let err = agent_doc_route_io::direct_pane_dispatch::send_command_unchecked(
             &iso,
             &pane,
             &doc.to_string_lossy(),
@@ -836,8 +838,9 @@ mod tests {
         // Once a harness dispatch-ready prompt is visible, dispatch is allowed.
         send_keys_with_retry(&iso, &pane, &mock_agent_script(500));
         wait_for_pane_contains(&iso, &pane, "❯", std::time::Duration::from_secs(5));
-        let allowed =
-            super::super::dispatch::dead_harness_shell_dispatch_block(&iso, &pane, &harness);
+        let allowed = agent_doc_route_io::direct_pane_dispatch::dead_harness_shell_dispatch_block(
+            &iso, &pane, &harness,
+        );
         assert!(
             allowed.is_none(),
             "harness dispatch-ready prompt visible should not be blocked, got {allowed:?}"

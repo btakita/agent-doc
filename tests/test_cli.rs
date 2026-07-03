@@ -12410,6 +12410,8 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     let route_startup_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
             .unwrap();
+    let route_startup_locks =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_locks.rs")).unwrap();
     for forbidden_snippet in [
         "fn starting_dir_for(",
         "fn session_start_lock_name(",
@@ -12427,10 +12429,40 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         "agent_doc_fs::startup_session_lock_path_for(file, session_name)",
     ] {
         assert!(
-            route_startup_source.contains(required_snippet),
-            "route/startup.rs should call focused startup lock path helpers directly: {required_snippet}"
+            route_startup_locks.contains(required_snippet),
+            "agent-doc-route-io startup locks should call focused startup lock path helpers directly: {required_snippet}"
         );
     }
+    assert!(
+        route_startup_source.contains("agent_doc_route_io::startup_locks::{"),
+        "route/startup.rs should import focused startup-lock acquisition instead of owning it"
+    );
+
+    let route_startup_debounce =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_debounce.rs"))
+            .unwrap();
+    assert!(
+        route_startup_debounce.contains("agent_doc_debounce::typing_indicator_status")
+            && route_startup_debounce.contains("std::fs::metadata(file)"),
+        "agent-doc-route-io startup debounce should own route idle wait over typing sidecars and mtime"
+    );
+    assert!(
+        !route_startup_source.contains("pub(crate) fn await_idle")
+            && !route_startup_source.contains("fn await_idle_with_max_wait"),
+        "route/startup.rs must not keep the route idle debounce graph"
+    );
+
+    let route_startup_harness =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_harness.rs")).unwrap();
+    assert!(
+        route_startup_harness.contains("RunContext::new")
+            && route_startup_harness.contains("HarnessConfig::from_context"),
+        "agent-doc-route-io startup harness resolution should own frontmatter/global config adaptation"
+    );
+    assert!(
+        !route_startup_source.contains("fn resolve_harness_for_file("),
+        "route/startup.rs must not keep the route startup harness-resolution helper"
+    );
 
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();

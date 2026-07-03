@@ -8,6 +8,10 @@ use agent_doc_route_io::session_resolution::{
     ensure_auto_start_target_session, evict_previous_stash_pane, find_registered_pane_in_session,
     resolve_target_session,
 };
+use agent_doc_route_io::startup_harness::resolve_harness_for_file;
+use agent_doc_route_io::startup_locks::{
+    StartupLockAcquire, StartupLockMode, acquire_startup_locks,
+};
 
 /// `#jbtsiftnosub`: bounded re-verify window for the auto-start cold-start gate.
 /// After `wait_for_agent_ready` reports ready, the pane should already show a
@@ -152,94 +156,6 @@ pub(crate) fn auto_start_ext_with_lock_mode(
         false,
         startup_lock_mode,
     )
-}
-
-pub(crate) struct StartupLocks {
-    _doc: File,
-    _session: File,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StartupLockMode {
-    Blocking,
-    Try,
-}
-
-pub(crate) enum StartupLockAcquire {
-    Acquired(Option<StartupLocks>),
-    Busy,
-}
-
-pub(crate) fn open_start_lock(path: &Path) -> Result<File> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(path)
-        .with_context(|| format!("failed to open startup lock {}", path.display()))
-}
-
-pub(crate) fn lock_startup_file(
-    lock: &File,
-    lock_path: &Path,
-    mode: StartupLockMode,
-) -> Result<bool> {
-    match mode {
-        StartupLockMode::Blocking => {
-            lock.lock_exclusive().with_context(|| {
-                format!("failed to acquire startup lock {}", lock_path.display())
-            })?;
-            Ok(true)
-        }
-        StartupLockMode::Try => match lock.try_lock_exclusive() {
-            Ok(()) => Ok(true),
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(false),
-            Err(err) => Err(err)
-                .with_context(|| format!("failed to acquire startup lock {}", lock_path.display())),
-        },
-    }
-}
-
-pub(crate) fn acquire_startup_locks(
-    file: &Path,
-    session_name: &str,
-    mode: StartupLockMode,
-) -> Result<StartupLockAcquire> {
-    let Some(doc_lock_path) = agent_doc_fs::startup_document_lock_path_for(file) else {
-        return Ok(StartupLockAcquire::Acquired(None));
-    };
-    let Some(session_lock_path) = agent_doc_fs::startup_session_lock_path_for(file, session_name)
-    else {
-        return Ok(StartupLockAcquire::Acquired(None));
-    };
-
-    let doc_lock = open_start_lock(&doc_lock_path)?;
-    if !lock_startup_file(&doc_lock, &doc_lock_path, mode)? {
-        return Ok(StartupLockAcquire::Busy);
-    }
-
-    let session_lock = open_start_lock(&session_lock_path)?;
-    if !lock_startup_file(&session_lock, &session_lock_path, mode)? {
-        return Ok(StartupLockAcquire::Busy);
-    }
-
-    Ok(StartupLockAcquire::Acquired(Some(StartupLocks {
-        _doc: doc_lock,
-        _session: session_lock,
-    })))
-}
-
-/// Resolve HarnessConfig from a file's frontmatter + global config.
-pub(crate) fn resolve_harness_for_file(file: &Path) -> HarnessConfig {
-    let content = std::fs::read_to_string(file).unwrap_or_default();
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
-    rc.set_doc_content(content);
-    let fm = rc.frontmatter();
-    let global_config = rc.global_config();
-    HarnessConfig::from_context(&fm, &global_config)
 }
 
 /// Auto-start a new agent session in a specific tmux session.
@@ -908,87 +824,6 @@ pub(crate) fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) 
     }
 }
 
-/// Wait for the file's mtime and editor typing indicator to settle.
-///
-/// Polls every 100ms, up to 10× the debounce duration as a safety cap. Route
-/// must fail closed instead of proceeding through a visible document mutation
-/// while the editor-side typing indicator is still active.
-pub(crate) fn await_idle(file: &Path, debounce: Duration) -> Result<()> {
-    await_idle_with_max_wait(file, debounce, debounce * 10)
-}
-
-pub(crate) fn await_idle_with_max_wait(
-    file: &Path,
-    debounce: Duration,
-    max_wait: Duration,
-) -> Result<()> {
-    use agent_doc_debounce::TypingIndicatorStatus;
-    use std::time::Instant;
-
-    let poll_interval = Duration::from_millis(100);
-    let start = Instant::now();
-    let debounce_ms = debounce.as_millis().min(u64::MAX as u128) as u64;
-    let file_str = file.to_string_lossy();
-
-    loop {
-        let indicator = agent_doc_debounce::typing_indicator_status(&file_str, debounce_ms);
-
-        // `#jb-run-agent-doc-double-debounce`: when an editor owns the typing
-        // lifecycle and its indicator reports idle, the editor already debounced
-        // in-process before saving and routing. The editor's pre-route save
-        // (`saveAllDocuments()`) freshly bumps the file mtime, so re-imposing the
-        // mtime settle here double-counts the editor's own write as if it were
-        // user typing — a redundant ~debounce-long wait the operator perceives as
-        // "Run Agent Doc takes several seconds". The idle indicator is the
-        // authoritative cross-process typing signal, so trust it and dispatch
-        // immediately. CLI / direct-disk edits leave no indicator (`Absent`) and
-        // keep the mtime debounce below as the fail-closed typing guard.
-        match indicator {
-            TypingIndicatorStatus::Idle => {
-                eprintln!(
-                    "[route] debounce OK — editor typing indicator idle (skipping redundant mtime settle for editor pre-route save)"
-                );
-                return Ok(());
-            }
-            TypingIndicatorStatus::Active => {
-                // Editor reports active typing — keep waiting regardless of mtime.
-            }
-            TypingIndicatorStatus::Absent => {
-                // No editor indicator (CLI / direct-disk caller): fall back to the
-                // filesystem mtime settle as the only available quiescence proof.
-                let mtime = std::fs::metadata(file)
-                    .and_then(|m| m.modified())
-                    .with_context(|| format!("failed to stat {}", file.display()))?;
-                let elapsed_since_edit = mtime.elapsed().unwrap_or(Duration::ZERO);
-                if elapsed_since_edit >= debounce {
-                    eprintln!(
-                        "[route] debounce OK — file idle for {:.1}s and no editor typing indicator",
-                        elapsed_since_edit.as_secs_f64(),
-                    );
-                    return Ok(());
-                }
-            }
-        }
-
-        if start.elapsed() >= max_wait {
-            let elapsed_since_edit = std::fs::metadata(file)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|m| m.elapsed().ok())
-                .unwrap_or(Duration::ZERO);
-            anyhow::bail!(
-                "route deferred for {}: document did not settle within {}ms (mtime_idle_ms={}, typing_active={}); retry after typing stops",
-                file.display(),
-                max_wait.as_millis(),
-                elapsed_since_edit.as_millis(),
-                indicator == TypingIndicatorStatus::Active
-            );
-        }
-
-        std::thread::sleep(poll_interval);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -1033,103 +868,6 @@ mod tests {
         assert!(!is_codex_shell_search_blocker(
             codex.dispatch_blocker_reason(active_turn).as_deref()
         ));
-    }
-    #[test]
-    fn try_startup_lock_reports_busy_without_waiting() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let doc = tmp.path().join("session.md");
-        std::fs::write(&doc, "---\nagent_doc_session: startup-lock-test\n---\n").unwrap();
-
-        let starting_dir =
-            agent_doc_fs::startup_starting_dir_for(&doc).expect("project root should resolve");
-        std::fs::create_dir_all(&starting_dir).unwrap();
-        let lock_path = agent_doc_fs::startup_document_lock_path_for(&doc)
-            .expect("document startup lock path should resolve");
-        let held_doc_lock = open_start_lock(&lock_path).unwrap();
-        fs2::FileExt::lock_exclusive(&held_doc_lock).unwrap();
-
-        let start = std::time::Instant::now();
-        let acquired =
-            acquire_startup_locks(&doc, "startup-lock-test-session", StartupLockMode::Try).unwrap();
-        let elapsed = start.elapsed();
-
-        fs2::FileExt::unlock(&held_doc_lock).unwrap();
-        assert!(
-            matches!(acquired, StartupLockAcquire::Busy),
-            "try-mode startup locks should report a busy lock instead of waiting"
-        );
-        assert!(
-            elapsed < std::time::Duration::from_millis(100),
-            "try-mode startup lock acquisition should be bounded, elapsed={elapsed:?}"
-        );
-    }
-    #[test]
-    fn route_debounce_fails_closed_while_typing_indicator_is_active() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
-        std::fs::write(&doc, "prompt in progress\n").unwrap();
-
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::document_changed(&doc_str);
-
-        let err =
-            await_idle_with_max_wait(&doc, Duration::from_millis(500), Duration::from_millis(25))
-                .expect_err("route must not proceed while the editor typing indicator is active");
-
-        assert!(
-            err.to_string().contains("typing_active=true"),
-            "route debounce error should prove the active typing reason: {err}"
-        );
-    }
-    #[test]
-    fn route_debounce_allows_dispatch_after_typing_indicator_expires() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
-        std::fs::write(&doc, "settled prompt\n").unwrap();
-
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::document_changed(&doc_str);
-
-        await_idle_with_max_wait(&doc, Duration::from_millis(10), Duration::from_millis(1000))
-            .expect("route should proceed after mtime and typing indicator are both idle");
-    }
-    #[test]
-    fn route_dispatches_immediately_when_idle_typing_indicator_present_despite_fresh_mtime() {
-        // `#jb-run-agent-doc-double-debounce`: the editor already awaited typing
-        // idle in-process, then `saveAllDocuments()` bumped the file mtime right
-        // before spawning route. Route must not re-impose the full mtime debounce on
-        // the editor's own pre-route save when the cross-process typing indicator is
-        // idle — that redundant wait is the "several seconds to dispatch" latency.
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
-        std::fs::write(&doc, "settled prompt\n").unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-
-        // Editor tracked typing, then went idle (indicator present but stale).
-        agent_doc_debounce::document_changed(&doc_str);
-        std::thread::sleep(Duration::from_millis(80)); // exceed the 50ms debounce window
-
-        assert_eq!(
-            agent_doc_debounce::typing_indicator_status(&doc_str, 50),
-            agent_doc_debounce::TypingIndicatorStatus::Idle,
-            "indicator should report idle after the debounce window elapses"
-        );
-
-        // Editor's pre-route save bumps mtime to "now" (simulates saveAllDocuments()).
-        std::fs::write(&doc, "settled prompt\n").unwrap();
-
-        let start = std::time::Instant::now();
-        await_idle_with_max_wait(&doc, Duration::from_millis(50), Duration::from_millis(2000))
-            .expect("an idle editor typing indicator must authorize immediate dispatch");
-        assert!(
-            start.elapsed() < Duration::from_millis(50),
-            "route must not re-impose the mtime debounce when the editor indicator is idle (elapsed {:?})",
-            start.elapsed()
-        );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

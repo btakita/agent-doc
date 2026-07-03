@@ -1361,13 +1361,17 @@ name = "agent-doc-route-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-controller",
+ "agent-doc-debounce",
+ "agent-doc-fs",
  "agent-doc-harness",
  "agent-doc-project-config-io",
+ "agent-doc-run-context-io",
  "agent-doc-session-registry-io",
  "agent-doc-sync",
  "agent-doc-sync-io",
  "agent-doc-tmux-io",
  "anyhow",
+ "fs2",
  "tempfile",
  "tmux-router",
 ]

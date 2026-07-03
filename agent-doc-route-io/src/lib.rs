@@ -1,6 +1,10 @@
-//! Route target session and pane resolution I/O.
+//! Route target session, pane resolution, and startup I/O.
 //!
-//! This crate owns tmux/session-registry route resolution effects. It does not
-//! own command dispatch, document mutation, queue policy, or supervisor startup.
+//! This crate owns route tmux/session-registry resolution effects plus focused
+//! route startup helpers. It does not own command dispatch, document mutation,
+//! queue policy, or supervisor process startup.
 
 pub mod session_resolution;
+pub mod startup_debounce;
+pub mod startup_harness;
+pub mod startup_locks;

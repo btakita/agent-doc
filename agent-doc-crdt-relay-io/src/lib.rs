@@ -52,11 +52,15 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
 use agent_doc_document_realtime::crdt_relay::{
-    AwarenessState, PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot, mint_client_id,
+    AwarenessState, DiskChangeOutcome, PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot,
+    mint_client_id,
+};
+use agent_doc_document_realtime::watch_authority::{
+    WatchAction, WatchDelivery, decide_watch_action,
 };
 use agent_doc_plugin_owner::crdt_authority::authority_for_file;
 
@@ -305,6 +309,40 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
         updates,
         delivery,
     }))
+}
+
+/// D2 delivery: if the editor `identity` was flagged for a **replace-capable
+/// re-bootstrap** (an out-of-band deletion the additive CRDT delta cannot
+/// express), return the corrected canonical text the editor must REPLACE its
+/// buffer with, and clear the flag. `Ok(None)` when nothing is pending or the doc
+/// is not editor-attached. The editor applies the returned text by *replacing* its
+/// buffer, never CRDT-merging — that is the whole point of D2.
+pub fn pull_rebootstrap_for_file(file: &Path, identity: &str) -> Result<Option<String>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let client_id = mint_client_id(identity);
+    let text = with_hub_seeded_from_file(file, |hub| {
+        if hub.pending_rebootstrap_members().contains(&client_id) {
+            let text = hub.rebootstrap_text();
+            hub.clear_rebootstrap(client_id);
+            Some(text)
+        } else {
+            None
+        }
+    })?;
+    if text.is_some() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_rebootstrap_pull file={} authority=multi_replica identity={} action=replace_buffer",
+                file.display(),
+                identity,
+            ),
+        );
+    }
+    Ok(text)
 }
 
 /// ACK one pulled update after the editor applied it to the local document
@@ -606,6 +644,126 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
         ),
     );
     Ok(Some(changed))
+}
+
+/// Route a settled out-of-band disk change into the live canonical replica — the
+/// in-process host seam the controller watcher calls when it observes a
+/// `FileWatchChangeObserved` for a document (`plan-crdt-scramble-and-disk-propagation.md`
+/// Phase C1). Mirrors [`reconcile_disk_projection_for_file`]: authority-gated,
+/// fail-open sync barrier, then the hub method.
+///
+/// Under [`CrdtAuthority::GitAuthoritative`] (no live editor) there is no live
+/// canonical replica to reconcile against — disk is already authoritative and the
+/// headless load path owns it — so this returns `Ok(None)`. Under
+/// [`CrdtAuthority::MultiReplica`] the disk text is routed through
+/// [`RelayHub::apply_disk_change`], returning `Ok(Some(outcome))`.
+///
+/// The editor-side propagation of a `RebuiltFromDisk` correction still needs the
+/// replace-capable delivery (Phase D2) — this seam integrates the change into the
+/// canonical replica and reports the outcome; it does not yet push a deletion into
+/// the live editor buffer.
+pub fn apply_disk_change_for_file(file: &Path, on_disk: &str) -> Result<Option<DiskChangeOutcome>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        // Headless: no live canonical replica; the baseline-wins load path owns
+        // stale disk. Nothing to reconcile here.
+        return Ok(None);
+    }
+    // Bounded, fail-open: never block a reconcile forever on an editor that will
+    // not settle (the no_ack wedge). Same primitive the projection reconcile uses.
+    let _ = settle_or_flush_editor_sync_barrier(file, "disk_change_reconcile");
+    let outcome = with_hub_seeded_from_file(file, |hub| hub.apply_disk_change(on_disk))??;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_disk_change_reconcile file={} authority=multi_replica outcome={outcome:?}",
+            file.display(),
+        ),
+    );
+    Ok(Some(outcome))
+}
+
+/// Producer (C1b, controller watch daemon side): drop a disk-change-reconcile
+/// marker for `file` so the owning supervisor's idle loop reconciles the change
+/// into the canonical replica at its next idle boundary. This is the robust
+/// cross-process signal (a file marker polled by the supervisor, mirroring
+/// `recycle_request`) — it needs no live socket or session resolution and
+/// survives degraded IPC. The marker is a signal only; the consumer re-reads the
+/// current disk text so a change that lands after this call is still picked up.
+pub fn request_disk_change_reconcile(file: &Path) -> Result<()> {
+    let path = agent_doc_fs::disk_change_request_path_for(file)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!("failed to create disk-change-request dir {}", parent.display())
+        })?;
+    }
+    let requested_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let body = format!("{{\"requested_at_secs\":{requested_at}}}");
+    std::fs::write(&path, body)
+        .with_context(|| format!("failed to write disk-change-request {}", path.display()))?;
+    Ok(())
+}
+
+/// Whether a disk-change-reconcile marker is pending for `file`.
+pub fn disk_change_request_pending(file: &Path) -> bool {
+    agent_doc_fs::disk_change_request_path_for(file)
+        .map(|p| p.exists())
+        .unwrap_or(false)
+}
+
+/// Consumer (C1b, supervisor idle-loop side): if a disk-change-reconcile marker
+/// is pending for `file`, re-read the current disk text, route it into the
+/// canonical replica via [`apply_disk_change_for_file`], clear the marker, and
+/// return the outcome. Returns `Ok(None)` when no marker is pending. The marker is
+/// always cleared once observed (even on a headless / no-op reconcile) so the
+/// signal is consumed exactly once.
+pub fn consume_disk_change_reconcile(file: &Path) -> Result<Option<DiskChangeOutcome>> {
+    let marker = agent_doc_fs::disk_change_request_path_for(file)?;
+    if !marker.exists() {
+        return Ok(None);
+    }
+    let on_disk = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read disk text for reconcile {}", file.display()))?;
+    let outcome = apply_disk_change_for_file(file, &on_disk)?;
+    // Clear the marker whether or not a live hub reconciled — the signal is spent.
+    if let Err(e) = std::fs::remove_file(&marker)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!(
+            "[crdt] warning: failed to clear disk-change-request {}: {e}",
+            marker.display()
+        );
+    }
+    Ok(outcome)
+}
+
+/// Daemon-facing gate (C1b producer entry): given a settled watch `delivery` for
+/// `file`, decide via [`decide_watch_action`] whether the change should be routed
+/// to the canonical replica and, if so, drop the reconcile marker. Returns the
+/// chosen [`WatchAction`]. Editor-attached changes (`ReconcileIntoCanonical` /
+/// `DeferForEditSettle`) drop a marker; headless changes (`ApplyAsDiskAuthority`,
+/// the disk-authority load path owns them) and non-changes drop none. This keeps
+/// headless documents — the common case — from accumulating markers no supervisor
+/// would consume.
+pub fn route_disk_change_signal(
+    file: &Path,
+    delivery: &WatchDelivery,
+) -> Result<WatchAction> {
+    let authority = authority_for_file(&file.display().to_string());
+    // The supervisor's own reconcile barrier handles an in-flight editor edit, so
+    // the daemon does not need the live edit epoch here — pass `false` and let the
+    // consumer's bounded fail-open barrier settle it.
+    let action = decide_watch_action(delivery, authority, false);
+    if matches!(
+        action,
+        WatchAction::ReconcileIntoCanonical | WatchAction::DeferForEditSettle
+    ) {
+        request_disk_change_reconcile(file)?;
+    }
+    Ok(action)
 }
 
 fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
@@ -1273,5 +1431,114 @@ mod tests {
         }
         let changed = with_hub(file, |hub| hub.reconcile_disk_projection(projection))??;
         Ok(Some(changed))
+    }
+
+    /// Test-only authority-explicit variant of [`apply_disk_change_for_file`]
+    /// (skips the live sync barrier + lease resolution), so the C1 host seam is
+    /// deterministically exercisable.
+    fn apply_disk_change_for_file_with_authority(
+        file: &Path,
+        on_disk: &str,
+        authority: CrdtAuthority,
+    ) -> Result<Option<DiskChangeOutcome>> {
+        if !authority.editor_attached() {
+            return Ok(None);
+        }
+        let outcome = with_hub_seeded_from_file(file, |hub| hub.apply_disk_change(on_disk))??;
+        Ok(Some(outcome))
+    }
+
+    #[test]
+    fn pull_rebootstrap_is_none_when_headless() {
+        // No live editor → no hub → nothing to re-bootstrap.
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("headless-rebootstrap.md");
+        std::fs::write(&file, "# doc\n").unwrap();
+        assert_eq!(pull_rebootstrap_for_file(&file, "editor:x").unwrap(), None);
+    }
+
+    #[test]
+    fn apply_disk_change_host_is_none_when_headless() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("headless.md");
+        std::fs::write(&file, "# doc\n\nbody\n").unwrap();
+        // GitAuthoritative (no live editor) → no live canonical to reconcile.
+        assert_eq!(
+            apply_disk_change_for_file_with_authority(
+                &file,
+                "# doc\n\nchanged\n",
+                CrdtAuthority::GitAuthoritative,
+            )
+            .unwrap(),
+            None,
+        );
+    }
+
+    #[test]
+    fn apply_disk_change_host_reconciles_noop_when_editor_already_has_it() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("attached.md");
+        // Seed the hub from this exact text; an identical disk change is a no-op.
+        std::fs::write(&file, "# doc\n\nbody\n").unwrap();
+        let outcome = apply_disk_change_for_file_with_authority(
+            &file,
+            "# doc\n\nbody\n",
+            CrdtAuthority::MultiReplica,
+        )
+        .unwrap();
+        assert_eq!(outcome, Some(DiskChangeOutcome::AlreadyReconciled));
+    }
+
+    // ---- disk-change-reconcile marker (C1b cross-process signal) ----
+
+    #[test]
+    fn request_disk_change_writes_a_pending_marker() {
+        let (_dir, file) = temp_doc("marker.md");
+        assert!(!disk_change_request_pending(&file));
+        request_disk_change_reconcile(&file).unwrap();
+        assert!(disk_change_request_pending(&file));
+        // The marker path resolves under the project's .agent-doc dir.
+        let marker = agent_doc_fs::disk_change_request_path_for(&file).unwrap();
+        assert!(marker.exists());
+    }
+
+    #[test]
+    fn route_signal_drops_no_marker_for_headless_change() {
+        // No live editor → decide_watch_action yields ApplyAsDiskAuthority, which
+        // the disk-authority load path owns — no marker for a supervisor to consume.
+        let (_dir, file) = temp_doc("route-headless.md");
+        let action = route_disk_change_signal(&file, &WatchDelivery::Change { generation: 1 })
+            .unwrap();
+        assert_eq!(action, WatchAction::ApplyAsDiskAuthority);
+        assert!(!disk_change_request_pending(&file));
+    }
+
+    #[test]
+    fn route_signal_drops_no_marker_for_non_change_delivery() {
+        let (_dir, file) = temp_doc("route-echo.md");
+        let action = route_disk_change_signal(&file, &WatchDelivery::SelfWriteEcho).unwrap();
+        assert_eq!(action, WatchAction::None);
+        assert!(!disk_change_request_pending(&file));
+    }
+
+    #[test]
+    fn consume_without_a_marker_is_a_noop() {
+        let (_dir, file) = temp_doc("nomarker.md");
+        assert_eq!(consume_disk_change_reconcile(&file).unwrap(), None);
+    }
+
+    #[test]
+    fn consume_clears_the_marker_even_on_a_headless_no_op() {
+        // No live editor → apply_disk_change_for_file is a headless no-op (None),
+        // but the marker signal must still be consumed exactly once.
+        let (_dir, file) = temp_doc("headless-consume.md");
+        request_disk_change_reconcile(&file).unwrap();
+        assert!(disk_change_request_pending(&file));
+
+        let outcome = consume_disk_change_reconcile(&file).unwrap();
+        // Headless: no hub allocated, so the reconcile itself is None...
+        assert_eq!(outcome, None);
+        // ...but the marker is cleared so the idle loop does not spin on it.
+        assert!(!disk_change_request_pending(&file));
     }
 }

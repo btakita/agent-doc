@@ -351,6 +351,7 @@ let _free_state: any = null;
 let _free_string: any = null;
 let _version: any = null;
 let _state_projection: any = null;
+let _turn_projection: any = null;
 let _state_subscribe: any = null;
 let _record_state_event: any = null;
 let _reconnect_buffer_decision: any = null;
@@ -513,6 +514,15 @@ function bindFunctions(): void {
         console.log(`[agent-doc/native] state projection ABI unavailable: ${e.message}`);
         _state_projection = null;
         _record_state_event = null;
+    }
+    try {
+        // CPC→plugin turn-state projection (Shared-Foundation parity with the JB
+        // plugin). Optional so an older cdylib without the symbol does not break
+        // the rest of the bindings.
+        _turn_projection = lib.func('agent_doc_turn_projection', 'char*', ['str']);
+    } catch (e: any) {
+        console.log(`[agent-doc/native] turn projection ABI unavailable: ${e.message}`);
+        _turn_projection = null;
     }
     try {
         // #r5at lazily-js reactive mirror: warm subscribe (snapshot/delta) over
@@ -901,6 +911,32 @@ export function stateProjection(documentHashValue: string, projectRoot?: string)
 
 export function stateProjectionForFile(filePath: string, projectRoot?: string): any | null {
     return stateProjection(documentHash(filePath), projectRoot);
+}
+/**
+ * CPC→plugin turn-state projection for a document path:
+ * `{state, turn_in_flight, transition_authority}`. Observe it to render
+ * turn-in-flight UI and to decide whether a forwarded operator prompt starts a
+ * fresh turn or would collide with an in-flight response (the double-append
+ * guard). Returns null when the ABI is unavailable or on error — callers treat
+ * null as "idle / unknown". Parity with the JB `agent_doc_turn_projection`.
+ */
+export function turnProjectionForFile(filePath: string, projectRoot?: string): any | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_turn_projection) return null;
+    let ptr: any = null;
+    try {
+        ptr = _turn_projection(filePath);
+        if (!ptr) return null;
+        const raw = koffi.decode(ptr, 'char', -1);
+        if (!raw || raw === 'null') return null;
+        return JSON.parse(raw);
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] turn_projection error: ${e.message}`);
+        return null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
 }
 
 // #r5at lazily-js reactive mirror — the VS Code counterpart of the JB plugin's

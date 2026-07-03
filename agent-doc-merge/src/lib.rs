@@ -201,10 +201,98 @@ pub fn resolve_append_conflicts(merged: &str) -> (String, bool) {
     (result, has_remaining)
 }
 
+/// Document-model classification of a merge result (operator directives 2026-07-03:
+/// "the document model should account for all 5 merge_3way cases"; "corrupted
+/// document should have a special designation"; "bad markers / frontmatter could
+/// be repairable"). The merge reports WHAT it produced structurally, so callers
+/// react deliberately instead of silently committing a scrambled or corrupt doc.
+///
+/// The `Corrupted` variant carries a `repairable` hint derived from the corruption
+/// class: duplicate-singleton / orphaned-marker corruption is usually fixable by a
+/// structural-normalize pass, whereas a hard parse error is not. The actual repair
+/// (`normalize_template_structure` for markers, frontmatter repair) lives at the
+/// orchestration layer that owns those passes — this crate only classifies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeClassification {
+    /// A structurally-sound merged document.
+    Clean { text: String, state: Vec<u8> },
+    /// The merged document has bad element markers or frontmatter. `reason` is the
+    /// [`agent_doc_element::element::structural_corruption_reason`] tag; `repairable`
+    /// hints whether a structural-normalize pass is likely to recover it (the
+    /// caller performs the repair and re-classifies).
+    Corrupted {
+        text: String,
+        state: Vec<u8>,
+        reason: String,
+        repairable: bool,
+    },
+}
+
+/// Whether a [`structural_corruption_reason`](agent_doc_element::element::structural_corruption_reason)
+/// tag names a corruption a structural-normalize pass is likely to repair
+/// (duplicate singleton blocks, orphaned/unbalanced markers) vs. a hard parse
+/// failure or malformed attribute that needs operator/agent intervention.
+pub fn corruption_is_repairable(reason: &str) -> bool {
+    reason.starts_with("duplicate_singleton_component")
+        || reason.starts_with("orphan")
+        || reason.starts_with("unbalanced")
+}
+
+/// Classify a CRDT merge (`merge_contents_crdt`) as [`MergeClassification::Clean`]
+/// or [`MergeClassification::Corrupted`] via the shared element structural
+/// validator — the document-model outcome callers consult before adopting merged
+/// text. A corrupt result must never be committed as-is; the caller repairs
+/// (when `repairable`) or fails closed.
+pub fn merge_contents_crdt_classified(
+    base_state: Option<&[u8]>,
+    ours: &str,
+    theirs: &str,
+) -> anyhow::Result<MergeClassification> {
+    let (text, state) = merge_contents_crdt(base_state, ours, theirs)?;
+    match agent_doc_element::element::structural_corruption_reason(&text) {
+        Some(reason) => {
+            let repairable = corruption_is_repairable(&reason);
+            Ok(MergeClassification::Corrupted {
+                text,
+                state,
+                reason,
+                repairable,
+            })
+        }
+        None => Ok(MergeClassification::Clean { text, state }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::semantic_merge::AckReason;
+
+    #[test]
+    fn classified_sound_merge_is_clean() {
+        let base = "<!-- agent:exchange -->\nQ.\n<!-- /agent:exchange -->\n";
+        let bs = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        let ours = "<!-- agent:exchange -->\nQ.\n\n### Re: Q\n\nA.\n<!-- /agent:exchange -->\n";
+        let out = merge_contents_crdt_classified(Some(&bs), ours, base).unwrap();
+        assert!(matches!(out, MergeClassification::Clean { .. }), "{out:?}");
+    }
+
+    #[test]
+    fn classified_designates_repairable_marker_corruption() {
+        // A document that already carries a DUPLICATE singleton exchange block
+        // (ours == theirs so the merge is identity) is designated Corrupted, and the
+        // marker corruption class is flagged repairable (a normalize pass recovers).
+        let corrupt = "<!-- agent:exchange -->\nA\n<!-- /agent:exchange -->\n\
+<!-- agent:exchange -->\nB\n<!-- /agent:exchange -->\n";
+        match merge_contents_crdt_classified(None, corrupt, corrupt).unwrap() {
+            MergeClassification::Corrupted {
+                reason, repairable, ..
+            } => {
+                assert!(repairable, "marker corruption should be repairable: {reason}");
+            }
+            other => panic!("expected Corrupted, got {other:?}"),
+        }
+    }
 
     const BASE: &str = r#"<!-- agent:queue -->
 - [ ] [#task] old text

@@ -24,6 +24,7 @@
 //! `plugin_watch_readonly` `ops.log` marker. The plugin's socket IPC apply path
 //! (the controller's writer arm into the editor) stays active.
 
+use crate::crdt_authority::CrdtAuthority;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -208,6 +209,80 @@ pub fn plugin_watch_is_readonly() -> bool {
     true
 }
 
+/// What the controller-owned watcher should *do* with a settled change, once the
+/// per-document gate ([`DocumentWatchGate::observe`]) has classified the raw
+/// event. This is the missing consumer decision for a `FileWatchChangeObserved`
+/// event: the gate answers "is this a real change vs. our own echo?", and this
+/// answers "given the authority mode and whether an operator edit is in flight,
+/// where does that change go?".
+///
+/// The action is *only* the routing decision; the IPC hop into the canonical
+/// [`crate::crdt_relay`] replica and the fan-out to editor buffers are the
+/// caller's job (`plan-crdt-scramble-and-disk-propagation.md` Phases C/D).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchAction {
+    /// Nothing to do — the delivery was not a fresh content-bearing change
+    /// (ignored, coalesced burst, or a suppressed self-write echo).
+    None,
+    /// A live editor holds an unsynced operator edit (`edit_epoch >
+    /// last_synced_epoch`). Defer the reconcile for a **bounded** settle budget
+    /// so the watcher never reads a half-applied buffer. This is *not* a held
+    /// lock: on settle → re-decide (which yields [`Self::ReconcileIntoCanonical`]);
+    /// on timeout → **fail open** and reconcile anyway (state-vector merge
+    /// preserves the operator's text — never discard, never block forever).
+    DeferForEditSettle,
+    /// EditorAttached ([`CrdtAuthority::MultiReplica`]) with no operator edit in
+    /// flight: integrate the disk change into the canonical replica via
+    /// state-vector merge, then enqueue delivery to every live editor. Idempotent
+    /// — a change the canonical already holds is a structural no-op (the
+    /// "editor buffer already has it" reconcile case).
+    ReconcileIntoCanonical,
+    /// Detached ([`CrdtAuthority::GitAuthoritative`]) — no live editor. Disk is
+    /// authoritative and the CRDT is ephemeral, so the change is applied as the
+    /// new baseline directly; there is no editor buffer to reconcile against.
+    ApplyAsDiskAuthority,
+}
+
+/// Decide what the controller watcher should do with a gate delivery.
+///
+/// Pure and total over the inputs: no filesystem, IPC, or clock. The bounded
+/// defer + fail-open semantics of [`WatchAction::DeferForEditSettle`] are the
+/// caller's to honor (see the variant docs) — this function only chooses the
+/// action.
+///
+/// Design (matches the watcher-scoping guidance for goal 4): the watcher stays
+/// **on** whether or not an editor is attached; what a live editor changes is the
+/// *destination* of the change (reconcile into canonical vs. apply as disk
+/// authority), not whether the change is observed. Self-write echoes are already
+/// dropped upstream by the gate, so `decide` never re-applies agent-doc's own
+/// write.
+pub fn decide_watch_action(
+    delivery: &WatchDelivery,
+    authority: CrdtAuthority,
+    editor_edit_in_flight: bool,
+) -> WatchAction {
+    match delivery {
+        // Not a fresh change — the gate already coalesced bursts and suppressed
+        // self-write echoes.
+        WatchDelivery::Ignored | WatchDelivery::Coalesced | WatchDelivery::SelfWriteEcho => {
+            WatchAction::None
+        }
+        WatchDelivery::Change { .. } => match authority {
+            // No live editor: disk is the authority, nothing to reconcile against.
+            CrdtAuthority::GitAuthoritative => WatchAction::ApplyAsDiskAuthority,
+            // Live editor: reconcile into the canonical replica, but defer while
+            // the operator's own edit is still settling (bounded, fail-open).
+            CrdtAuthority::MultiReplica => {
+                if editor_edit_in_flight {
+                    WatchAction::DeferForEditSettle
+                } else {
+                    WatchAction::ReconcileIntoCanonical
+                }
+            }
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +398,84 @@ mod tests {
         let (b, _) = reg.register("doc-B", "/tmp/b.md");
         assert!(!Arc::ptr_eq(&a, &b));
         assert_eq!(reg.len(), 2);
+    }
+
+    // ---- decide_watch_action: the FileWatchChangeObserved consumer decision ----
+
+    fn a_change() -> WatchDelivery {
+        WatchDelivery::Change { generation: 1 }
+    }
+
+    #[test]
+    fn non_change_deliveries_are_no_action_regardless_of_mode() {
+        for delivery in [
+            WatchDelivery::Ignored,
+            WatchDelivery::Coalesced,
+            WatchDelivery::SelfWriteEcho,
+        ] {
+            for authority in [CrdtAuthority::GitAuthoritative, CrdtAuthority::MultiReplica] {
+                for in_flight in [false, true] {
+                    assert_eq!(
+                        decide_watch_action(&delivery, authority, in_flight),
+                        WatchAction::None,
+                        "delivery={delivery:?} authority={authority:?} in_flight={in_flight}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn detached_change_applies_disk_as_authority() {
+        // No live editor: disk is authoritative, nothing to reconcile against.
+        // Edit-in-flight is meaningless here (no editor) and must not change it.
+        assert_eq!(
+            decide_watch_action(&a_change(), CrdtAuthority::GitAuthoritative, false),
+            WatchAction::ApplyAsDiskAuthority
+        );
+        assert_eq!(
+            decide_watch_action(&a_change(), CrdtAuthority::GitAuthoritative, true),
+            WatchAction::ApplyAsDiskAuthority
+        );
+    }
+
+    #[test]
+    fn editor_attached_change_reconciles_into_canonical_when_settled() {
+        assert_eq!(
+            decide_watch_action(&a_change(), CrdtAuthority::MultiReplica, false),
+            WatchAction::ReconcileIntoCanonical
+        );
+    }
+
+    #[test]
+    fn editor_attached_change_defers_while_operator_edit_in_flight() {
+        // The bounded, fail-open defer — never a held lock (the no_ack trap).
+        assert_eq!(
+            decide_watch_action(&a_change(), CrdtAuthority::MultiReplica, true),
+            WatchAction::DeferForEditSettle
+        );
+    }
+
+    #[test]
+    fn defer_falls_open_to_reconcile_when_the_edit_settles() {
+        // Models the caller's fail-open path: an in-flight edit yields Defer; once
+        // the edit settles (or the bounded budget expires and the caller clears
+        // the in-flight flag), re-deciding yields a reconcile, never a wedge.
+        let settling = decide_watch_action(&a_change(), CrdtAuthority::MultiReplica, true);
+        assert_eq!(settling, WatchAction::DeferForEditSettle);
+        let settled = decide_watch_action(&a_change(), CrdtAuthority::MultiReplica, false);
+        assert_eq!(settled, WatchAction::ReconcileIntoCanonical);
+    }
+
+    #[test]
+    fn watcher_stays_on_with_a_live_editor_it_only_changes_destination() {
+        // Goal-4 invariant: a live editor never turns the watcher into a no-op;
+        // it only routes a real disk change to canonical instead of to disk.
+        let change = a_change();
+        assert_ne!(
+            decide_watch_action(&change, CrdtAuthority::MultiReplica, false),
+            WatchAction::None,
+            "an attached editor must not silence out-of-band disk changes"
+        );
     }
 }

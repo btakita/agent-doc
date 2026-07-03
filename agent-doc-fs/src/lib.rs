@@ -11,6 +11,7 @@ const TURN_SCOPE_DIR: &str = ".agent-doc/turn-scope";
 const CRDT_DIR: &str = ".agent-doc/crdt";
 const PRE_RESPONSE_DIR: &str = ".agent-doc/pre-response";
 const CYCLE_STATE_DIR: &str = ".agent-doc/state/cycles";
+const DISK_CHANGE_REQUEST_DIR: &str = ".agent-doc/disk-change-requests";
 const RECOVERY_DIR: &str = ".agent-doc/recovery";
 const STARTING_DIR: &str = ".agent-doc/starting";
 const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
@@ -79,6 +80,15 @@ pub fn pending_response_path_for(doc: &Path) -> Result<PathBuf> {
 /// Compute `<project_root>/.agent-doc/turn-scope/<hash>.json` for a document.
 pub fn turn_scope_path_for(doc: &Path) -> Result<PathBuf> {
     hashed_state_path(doc, TURN_SCOPE_DIR, "json")
+}
+
+/// Compute `<project_root>/.agent-doc/disk-change-requests/<hash>.json` for a
+/// document. The controller watch daemon drops this marker when the file changed
+/// on disk out of band; the owning supervisor's idle loop reads it, reconciles the
+/// change into the canonical replica, and clears it (the marker + idle-poll
+/// cross-process signal, mirroring recycle-request).
+pub fn disk_change_request_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path(doc, DISK_CHANGE_REQUEST_DIR, "json")
 }
 
 /// Compute `<project_root>/.agent-doc/state/cycles/<hash>.json` for a document.

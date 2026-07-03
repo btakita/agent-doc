@@ -540,10 +540,8 @@ pub fn count_session_loss_events_within(
             }
             let event = event_from_log_line(line);
             let timestamp = timestamp_from_log_line(line)?;
-            (timestamp >= cutoff
-                && timestamp <= now_epoch_secs
-                && is_session_loss_event(event))
-            .then_some(())
+            (timestamp >= cutoff && timestamp <= now_epoch_secs && is_session_loss_event(event))
+                .then_some(())
         })
         .count()
 }

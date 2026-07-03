@@ -145,6 +145,47 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `focus gained on a different markdown split triggers reconcile`() {
+        // #panefocussplit: moving focus to the other split editor (a different
+        // md path than the last focus reconcile) must drive a focus reconcile so
+        // the tmux active pane follows the editor selection.
+        assertEquals(
+            true,
+            EditorTabSyncListener.AutomaticCommandPlanner.shouldReconcileFocusedFile(
+                focusedFilePath = "/repo/tasks/professional/equityfundingsource.md",
+                isMarkdown = true,
+                lastFocusRequestedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+        )
+    }
+
+    @Test
+    fun `repeated focus gained on the same file does not reconcile`() {
+        // Focus events fire repeatedly for the same editor; consecutive events on
+        // one file must not re-run the focus reconcile.
+        assertEquals(
+            false,
+            EditorTabSyncListener.AutomaticCommandPlanner.shouldReconcileFocusedFile(
+                focusedFilePath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                isMarkdown = true,
+                lastFocusRequestedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+        )
+    }
+
+    @Test
+    fun `focus gained on a non markdown editor does not reconcile`() {
+        assertEquals(
+            false,
+            EditorTabSyncListener.AutomaticCommandPlanner.shouldReconcileFocusedFile(
+                focusedFilePath = "/repo/src/main.rs",
+                isMarkdown = false,
+                lastFocusRequestedFile = null,
+            ),
+        )
+    }
+
+    @Test
     fun `visible set changes still dispatch sync`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",

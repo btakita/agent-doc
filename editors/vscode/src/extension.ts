@@ -20,6 +20,7 @@ import {
     buildSessionStatusPresentation,
     buildSessionSuccessHint,
     buildStartingSessionRestartBlockedMessage,
+    buildTurnStatePresentation,
     parseBusySessionRestartRefusal,
     parseBusySessionClearRefusal,
     parseStartingSessionRestartRefusal,
@@ -360,6 +361,29 @@ function showHint(message: string): void {
 
 function showError(message: string): void {
     vscode.window.showErrorMessage(`Agent Doc: ${message}`);
+}
+
+// CPC→plugin turn-state coordination (goal 1): reflect the CPC's authoritative
+// turn phase in a status-bar indicator by calling the native
+// `agent_doc_turn_projection` FFI. Parity with the JetBrains frontend.
+const turnStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+
+function refreshTurnStatus(): void {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !editor.document.fileName.endsWith('.md')) {
+        turnStatusBarItem.hide();
+        return;
+    }
+    const projection = native.turnProjectionForFile(editor.document.fileName) as
+        | import('./sessionUi').TurnProjection
+        | null;
+    const presentation = buildTurnStatePresentation(projection);
+    if (presentation.label) {
+        turnStatusBarItem.text = presentation.label;
+        turnStatusBarItem.show();
+    } else {
+        turnStatusBarItem.hide();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3010,6 +3034,17 @@ let syntaxDecorationController: SyntaxDecorationController | undefined;
 // ---------------------------------------------------------------------------
 
 export function activate(context: vscode.ExtensionContext): void {
+    // Goal 1: coordinate the CPC turn state into the status bar. Refresh on active
+    // editor change + a light interval so the plugin reflects the CPC's
+    // authoritative turn phase (agent_doc_turn_projection). Parity with JetBrains.
+    context.subscriptions.push(
+        turnStatusBarItem,
+        vscode.window.onDidChangeActiveTextEditor(() => refreshTurnStatus()),
+    );
+    const turnStatusInterval = setInterval(refreshTurnStatus, 1500);
+    context.subscriptions.push({ dispose: () => clearInterval(turnStatusInterval) });
+    refreshTurnStatus();
+
     // Feature 1: Run (Submit)
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.submit', submitAction)

@@ -205,9 +205,34 @@ object TypingTracker : DocumentListener {
         }
     }
 
+    /**
+     * Acquire / refresh the plugin-owner lease for this editor with our LIVE pid.
+     * The JetBrains plugin previously never called the acquire FFI (only VS Code
+     * did, on patch handling), so it never registered a live lease — after an IDE
+     * restart the stale lease kept a dead pid and the document read as headless
+     * (not editor-attached), so the realtime/CRDT paths never engaged. Called on
+     * document open + on each debounced buffer report so a restart re-establishes a
+     * fresh lease. Best-effort: an older cdylib without the symbol is a no-op.
+     */
+    private fun refreshPluginOwner(lib: AgentDocLib, filePath: String) {
+        try {
+            lib.agent_doc_plugin_owner_try_acquire(
+                filePath,
+                EditorIdentity.id,
+                ProcessHandle.current().pid(),
+            )
+        } catch (_: UnsatisfiedLinkError) {
+        } catch (_: NoSuchMethodError) {
+        }
+    }
+
     fun scheduleOpenDocumentReport(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         val lib = AgentDocLib.get() ?: return
+        // Re-establish the plugin-owner lease with our live pid when a markdown
+        // document is (re)opened — the root-cause fix for stale leases after an IDE
+        // restart.
+        refreshPluginOwner(lib, file.path)
         val document = FileDocumentManager.getInstance().getDocument(file) ?: return
         scheduleFullContentReport(lib, file.path, document)
     }
@@ -219,6 +244,11 @@ object TypingTracker : DocumentListener {
         // from the conservative-but-current provenance.
         unsyncedLocalEditPaths.remove(file.path)
         val lib = AgentDocLib.get() ?: return
+        try {
+            lib.agent_doc_plugin_owner_release(file.path, EditorIdentity.id)
+        } catch (_: UnsatisfiedLinkError) {
+        } catch (_: NoSuchMethodError) {
+        }
         try {
             lib.agent_doc_document_closed_for_editor(file.path, EditorIdentity.id)
         } catch (_: UnsatisfiedLinkError) {
@@ -280,6 +310,18 @@ object TypingTracker : DocumentListener {
         requireAuthority: Boolean,
     ): Boolean {
         return try {
+            // Heartbeat the plugin-owner lease with our live pid on each debounced
+            // buffer report so the document stays editor-attached while open.
+            refreshPluginOwner(lib, filePath)
+            // Goal-1 coordination probe: log the CPC turn phase this document
+            // projects (via the agent_doc_turn_projection FFI → TurnStateBridge), so
+            // the CPC→plugin turn-state pipeline is verifiable in idea.log
+            // independent of the status-bar widget rendering. Only when in flight,
+            // to avoid steady-state spam.
+            val turnLabel = TurnStateBridge.presentationForFile(filePath).label
+            if (turnLabel.isNotEmpty()) {
+                LOG.info("[turn-state] $filePath → $turnLabel (CPC turn phase projected to plugin)")
+            }
             val text = com.intellij.openapi.application.ApplicationManager.getApplication()
                 .runReadAction<String> { document.text }
             // #falsetyping-guard: derive replica-churn provenance. A document that

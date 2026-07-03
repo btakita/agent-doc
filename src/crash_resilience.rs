@@ -147,7 +147,13 @@ mod tests {
         std::env::set_current_dir(prev).unwrap();
         assert_eq!(
             got,
-            Some(tmp.path().canonicalize().unwrap().join(".agent-doc").join("logs"))
+            Some(
+                tmp.path()
+                    .canonicalize()
+                    .unwrap()
+                    .join(".agent-doc")
+                    .join("logs")
+            )
         );
     }
 

@@ -30,6 +30,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
     @Volatile
     private var lastFocusedFile: String? = null
 
+    // #panefocussplit: the last file path we drove a focus reconcile for from an
+    // editor focus-gained event. Focus events fire repeatedly for the same
+    // editor, so this dedups consecutive focus-gained events on one file while
+    // still reacting to every switch between different split editors.
+    @Volatile
+    private var lastFocusRequestedFile: String? = null
+
     private val latestSnapshot = java.util.concurrent.atomic.AtomicReference<AutomaticStateSnapshot?>(null)
 
     companion object {
@@ -143,6 +150,19 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
             return AutomaticCommandPlan(AutomaticCommandKind.Sync, visibleSignature)
         }
+
+        /**
+         * #panefocussplit: decide whether an editor focus-gained event should
+         * trigger a tmux focus reconcile. Focus events fire repeatedly for the
+         * same editor, so only act on markdown files whose path differs from the
+         * last focus reconcile already requested. A switch to a different split
+         * editor always changes the path and therefore always reconciles.
+         */
+        fun shouldReconcileFocusedFile(
+            focusedFilePath: String,
+            isMarkdown: Boolean,
+            lastFocusRequestedFile: String?,
+        ): Boolean = isMarkdown && focusedFilePath != lastFocusRequestedFile
 
         fun shouldReplayAfterRun(startedGeneration: Long, latestGeneration: Long): Boolean =
             latestGeneration > startedGeneration
@@ -466,6 +486,35 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
         val snapshot = captureSnapshot(event.manager.project, file) ?: return
         requestAutomaticSync(event.manager.project, snapshot, immediateFocus = true)
+    }
+
+    /**
+     * The operator moved editor focus to [file] — e.g. clicked into the other
+     * split editor window showing an already-open agent-doc document.
+     *
+     * #panefocussplit: [FileEditorManagerListener.selectionChanged] does NOT
+     * fire for focus movement between two existing split editors (only for tab /
+     * visible-file-set changes), so without this entry point split navigation
+     * never moves the tmux active pane. Reuses the same debounced, generation-
+     * guarded reconcile as [selectionChanged]; [EditorFocusSyncListener] wires
+     * the per-editor focus events that call this.
+     */
+    fun onEditorFocusGained(project: com.intellij.openapi.project.Project, file: VirtualFile) {
+        if (!AutomaticCommandPlanner.shouldReconcileFocusedFile(
+                focusedFilePath = file.path,
+                isMarkdown = file.name.endsWith(".md"),
+                lastFocusRequestedFile = lastFocusRequestedFile,
+            )
+        ) {
+            return
+        }
+        val manager = FileEditorManager.getInstance(project)
+        val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
+        if (visibleMdFiles.isEmpty()) return
+        lastFocusRequestedFile = file.path
+        log("focusGained: file=${file.name} mdFiles=$visibleMdFiles")
+        val snapshot = captureSnapshot(project, file) ?: return
+        requestAutomaticSync(project, snapshot, immediateFocus = true)
     }
 
     /**

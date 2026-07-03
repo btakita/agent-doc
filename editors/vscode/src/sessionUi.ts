@@ -47,6 +47,43 @@ const BUSY_CLEAR_SOURCE_REGEX = /source=([^,)]+)/s;
 const BUSY_CLEAR_COMMAND_REGEX = /current_command=([^,)]+)/s;
 const PROTECTED_CLEAR_REASON_REGEX = /reason=([^,)]+)/s;
 
+/** The CPC→plugin turn-state projection, as returned by the native
+ * `agent_doc_turn_projection` FFI export (`turnProjectionForFile`). */
+export interface TurnProjection {
+    state: 'idle' | 'awaiting_response' | 'persisting';
+    turn_in_flight: boolean;
+    transition_authority: string;
+}
+
+export interface TurnStatePresentation {
+    /** Short status label reflecting the CPC turn phase ('' when idle). */
+    label: string;
+    /** True when a forwarded operator prompt would collide with an in-flight
+     * response (the `live_prompt_drift` double-append guard): the plugin queues it
+     * for the next turn instead of feeding it into the current exchange. */
+    guardPromptForwarding: boolean;
+}
+
+/**
+ * Consume the CPC's authoritative turn-state projection into a plugin-facing
+ * status label + the double-append forwarding guard. This is how the plugin
+ * COORDINATES with the CPC turn phase (Shared-Foundation: the CPC owns the phase,
+ * the plugin observes this projection). Parity with the JetBrains frontend
+ * (`specs/14-realtime-workflow.md` § Editor Parity Requirement).
+ */
+export function buildTurnStatePresentation(
+    projection: TurnProjection | null,
+): TurnStatePresentation {
+    if (!projection || projection.state === 'idle' || !projection.turn_in_flight) {
+        return { label: '', guardPromptForwarding: false };
+    }
+    const label =
+        projection.state === 'awaiting_response'
+            ? '⟳ agent-doc: awaiting response'
+            : '⟳ agent-doc: persisting';
+    return { label, guardPromptForwarding: true };
+}
+
 export function buildSessionCommandArgs(
     command: SessionCommandName,
     relativePath: string,

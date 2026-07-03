@@ -1366,6 +1366,26 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                     }
                 }
+                // C1b consumer (`plan-crdt-scramble-and-disk-propagation.md`): if the
+                // controller watch daemon dropped a disk-change-reconcile marker for
+                // this document, reconcile the out-of-band disk change into the
+                // canonical replica now (this supervisor owns the hub) and clear the
+                // marker. Best-effort — a reconcile hiccup must not block the idle
+                // recycle path below.
+                match crate::crdt_relay_host::consume_disk_change_reconcile(&path) {
+                    Ok(Some(outcome)) => agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "crdt_disk_change_consumed file={} outcome={outcome:?}",
+                            path.display()
+                        ),
+                    ),
+                    Ok(None) => {}
+                    Err(err) => eprintln!(
+                        "[agent-doc] disk-change reconcile consume failed for {}: {err}",
+                        path.display()
+                    ),
+                }
                 let current_recycle_identity = agent_doc_controller_io::project_controller::current_binary_identity().ok();
                 let supervisor_stale = agent_doc_controller::status::process_binary_is_stale(
                     recycle_launch_identity.as_ref(),

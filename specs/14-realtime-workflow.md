@@ -211,6 +211,67 @@ If a writer exposes a partially written file, the realtime loop waits for a
 stable read/epoch or fails closed. It must not merge against stale buffered
 content merely because a save notification fired.
 
+## Disk Change Propagation To Live Editors
+
+When the document file changes on disk out of band — a `git` operation
+(`checkout`/`reset`/rebase), an external editor, or another process — the change
+must reach the canonical CPC replica and, from there, the live editor buffers.
+The controller watch daemon and the owning supervisor run in separate processes;
+the canonical `RelayHub` lives in the supervisor. Propagation crosses that
+boundary through a **file marker polled by the supervisor idle loop** (the same
+robust cross-process signal as recycle-request), never a socket the change
+depends on.
+
+Path (`plan-crdt-scramble-and-disk-propagation.md`, Phase C/D):
+
+1. **Detect + gate (daemon).** On a settled watch `Change`, the daemon runs
+   `decide_watch_action(delivery, authority, edit_in_flight)`. Editor-attached
+   documents (`ReconcileIntoCanonical` / `DeferForEditSettle`) drop a marker at
+   `.agent-doc/disk-change-requests/<hash>.json`; headless
+   (`ApplyAsDiskAuthority`, owned by the disk-authority load path) and non-change
+   deliveries drop none. Self-write echoes are suppressed upstream by the watch
+   gate, so the daemon never re-signals agent-doc's own write.
+2. **Reconcile (supervisor idle loop).** The idle loop reads the current disk
+   text and routes it through `RelayHub::apply_disk_change`, yielding a
+   `DiskChangeOutcome`:
+   - `AlreadyReconciled` — the canonical already holds the change (the editor
+     authored it, or a peer already pulled it): a no-op. This is the
+     **"editor buffer already has the changes → reconcile"** case, and it is
+     idempotent.
+   - `RebuiltFromDisk { live_members }` — an out-of-band **deletion** the additive
+     CRDT delta cannot express. The canonical is rebuilt from disk and hub-side
+     mirrors reseeded; `live_members` live editors still need a replace-capable
+     re-bootstrap (below). The count is reported, never silently dropped.
+   - `BaselineDeferred` — no commit baseline yet; the disk text is adopted as the
+     baseline and the change defers to the normal editor-delta / commit path.
+   The marker is cleared once observed (even on a headless no-op) so the idle loop
+   never spins on it. The reconcile runs behind the bounded, fail-open editor sync
+   barrier — never a held lock.
+3. **Deliver to editors.** Additive changes reach live editors through the
+   existing `ReplicaPull` delta channel. A `RebuiltFromDisk` deletion requires a
+   **replace-capable bootstrap delivery**: the editor applies it by *replacing*
+   its buffer, not CRDT-merging (an additive merge cannot drop the stale text).
+
+### Turn-State Projection To The Plugin
+
+The CPC owns the authoritative turn phase (`CyclePhase`). The plugin observes a
+coarse projection — `TurnProjection` (Idle / AwaitingResponse / Persisting) plus
+`turn_in_flight` and a `would_collide_with_in_flight_response()` guard so a
+forwarded operator prompt queues for the next turn instead of double-appending
+into an in-flight response. The plugin never drives a turn-state transition; the
+CPC is authoritative for every transition (`transition_authority`).
+
+### Editor Parity Requirement
+
+All editor-facing behavior in this section — `ReplicaPull` application, the
+replace-capable re-bootstrap delivery, and `TurnProjection` consumption — is part
+of the Shared Foundation contract and **must have parity across the JetBrains and
+VS Code plugins**. The reconcile, decision, marker, and projection logic lives in
+the shared Rust/FFI layer; each plugin is a thin consumer of the same FFI
+surface. A change to the editor delivery or turn-state projection is not complete
+until both the IntelliJ and VS Code frontends consume it identically. Divergence
+between the two frontends on any of these paths is a forbidden shape.
+
 ## Realtime States
 
 These states describe document authority, not the agent turn/cycle. Agent cycle

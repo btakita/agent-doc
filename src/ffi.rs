@@ -853,6 +853,48 @@ pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut 
         .into_raw()
 }
 
+/// Get the CPC→plugin turn-state projection for a document, as JSON.
+///
+/// Returns a NUL-terminated JSON string of `TurnProjection`:
+/// `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"cpc"}`.
+/// The CPC owns the authoritative turn phase; the plugin observes this projection
+/// to render turn-in-flight UI and to decide whether a forwarded operator prompt
+/// starts a fresh turn (`turn_in_flight == false`) or would collide with an
+/// in-flight response (the `live_prompt_drift` double-append guard). Defaults to
+/// the idle projection when no cycle state exists or on any error. Both the
+/// JetBrains and VS Code frontends consume this same export (Shared Foundation
+/// parity — `specs/14-realtime-workflow.md` § Editor Parity Requirement).
+///
+/// Caller must free with `agent_doc_free_string`.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> *mut c_char {
+    fn idle_json() -> String {
+        let proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(
+            agent_doc_turn::CyclePhase::Committed,
+        );
+        serde_json::to_string(&proj).unwrap_or_else(|_| r#"{"state":"idle"}"#.to_string())
+    }
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return CString::new(idle_json()).unwrap().into_raw(),
+    };
+    // No cycle state (or an unreadable one) means no turn is in flight → idle.
+    let phase = agent_doc_cycle_state_io::load(std::path::Path::new(path))
+        .ok()
+        .flatten()
+        .map(|state| state.phase)
+        .unwrap_or(agent_doc_turn::CyclePhase::Committed);
+    let proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(phase);
+    let json = serde_json::to_string(&proj).unwrap_or_else(|_| idle_json());
+    CString::new(json)
+        .unwrap_or_else(|_| CString::new(idle_json()).unwrap())
+        .into_raw()
+}
+
 /// Check if any operation is in progress for a file (file-based).
 ///
 /// Returns `true` if status is NOT "idle". Plugins should skip route
@@ -2677,6 +2719,20 @@ mod tests {
             "null", missing,
             "unknown document_hash should project to null"
         );
+    }
+
+    #[test]
+    fn turn_projection_ffi_defaults_to_idle_for_unknown_document() {
+        // No cycle state for this path → idle projection, valid JSON, not in flight.
+        let path = CString::new("/nonexistent/agent-doc/turnproj.md").unwrap();
+        let ptr = unsafe { agent_doc_turn_projection(path.as_ptr()) };
+        let json = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
+        drop(unsafe { CString::from_raw(ptr) });
+
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid projection JSON");
+        assert_eq!(value["state"], "idle");
+        assert_eq!(value["turn_in_flight"], false);
+        assert_eq!(value["transition_authority"], "cpc");
     }
 
     #[test]

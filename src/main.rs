@@ -863,6 +863,17 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
                 },
             )??;
         }
+        // C1b (`plan-crdt-scramble-and-disk-propagation.md`): for an editor-attached
+        // document, drop a disk-change-reconcile marker so the owning supervisor's
+        // idle loop reconciles this out-of-band disk change into the canonical
+        // replica. Best-effort + authority-gated inside the helper (headless docs
+        // get no marker); a failure here must never wedge the watch loop.
+        if let Err(e) = agent_doc_orchestration::crdt_relay_host::route_disk_change_signal(
+            Path::new(file),
+            &observation.delivery,
+        ) {
+            eprintln!("[watch] disk-change reconcile signal failed for {file}: {e}");
+        }
         Ok(observation.delivery)
     }
 

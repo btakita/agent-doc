@@ -9,6 +9,8 @@ import {
     buildSessionStatusPresentation,
     buildSessionSuccessHint,
     buildStartingSessionRestartBlockedMessage,
+    buildTurnStatePresentation,
+    TurnProjection,
     parseBusySessionRestartRefusal,
     parseBusySessionClearRefusal,
     parseStartingSessionRestartRefusal,
@@ -214,5 +216,43 @@ describe('sessionUi', () => {
                 toast: `route failed: ${output}`,
             },
         );
+    });
+});
+
+describe('buildTurnStatePresentation (CPC turn-state coordination)', () => {
+    it('is empty + ungated when idle or no projection', () => {
+        assert.deepStrictEqual(buildTurnStatePresentation(null), {
+            label: '',
+            guardPromptForwarding: false,
+        });
+        const idle: TurnProjection = {
+            state: 'idle',
+            turn_in_flight: false,
+            transition_authority: 'cpc',
+        };
+        assert.deepStrictEqual(buildTurnStatePresentation(idle), {
+            label: '',
+            guardPromptForwarding: false,
+        });
+    });
+
+    it('labels + gates prompt forwarding while a turn is in flight', () => {
+        const awaiting: TurnProjection = {
+            state: 'awaiting_response',
+            turn_in_flight: true,
+            transition_authority: 'cpc',
+        };
+        const a = buildTurnStatePresentation(awaiting);
+        assert.ok(a.label.includes('awaiting response'));
+        assert.strictEqual(a.guardPromptForwarding, true);
+
+        const persisting: TurnProjection = {
+            state: 'persisting',
+            turn_in_flight: true,
+            transition_authority: 'cpc',
+        };
+        const p = buildTurnStatePresentation(persisting);
+        assert.ok(p.label.includes('persisting'));
+        assert.strictEqual(p.guardPromptForwarding, true);
     });
 });

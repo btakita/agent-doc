@@ -317,6 +317,40 @@ fn current_epoch_secs() -> u64 {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Basic-repair a document's malformed frontmatter ON DISK before startup so a
+/// recoverable formatting slip (tab indentation / a stray `---` fence) does not
+/// prevent the supervisor from opening (operator bug 2026-07-03: "if the
+/// frontmatter is not well formatted, the supervisor does not open. Basic repairs
+/// can be done or a user facing message can appear."). Conservative + idempotent:
+/// rewrites only when the current frontmatter fails to parse AND a
+/// semantics-preserving repair parses cleanly. An unrepairable block is left
+/// as-is so the normal parse surfaces the clear user-facing message downstream.
+/// Returns whether a repair was written.
+pub fn repair_document_frontmatter_on_disk(file: &Path) -> Result<bool> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return Ok(false),
+    };
+    if frontmatter::parse(&content).is_ok() {
+        return Ok(false);
+    }
+    let Some((bad, good)) = frontmatter::raw_frontmatter_yaml(&content)
+        .map(str::to_string)
+        .and_then(|bad| frontmatter::repair_frontmatter_yaml(&bad).map(|good| (bad, good)))
+    else {
+        return Ok(false);
+    };
+    let repaired = content.replacen(&bad, &good, 1);
+    std::fs::write(file, &repaired)
+        .with_context(|| format!("failed to persist repaired frontmatter {}", file.display()))?;
+    eprintln!(
+        "[agent-doc] repaired malformed frontmatter in {} (tabs/stray fence) before startup",
+        file.display()
+    );
+    Ok(true)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     file: &Path,
     branch: bool,
@@ -349,6 +383,12 @@ pub fn run_with_context(
     } else {
         RunStderrRedirect::inactive()
     };
+    // Repair malformed frontmatter on disk before ANY parse in the run pipeline
+    // (diff / session-ensure / config resolution), so a recoverable slip opens
+    // cleanly instead of failing the whole run. Skipped for dry-run (no writes).
+    if !dry_run {
+        let _ = repair_document_frontmatter_on_disk(file);
+    }
     // #jb-tsift-pane-sync diagnostic: log if this run is executing inside a tmux
     // pane that owns a *different* document (cross-document contamination vector
     // — e.g. a tsift.md-owned pane running agent-doc-bugs2.md's cycle). The

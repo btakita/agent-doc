@@ -605,9 +605,27 @@ pub fn merge_by_component(
         return merge(base_state, ours_text, theirs_text);
     }
 
-    // Structural divergence: the set/order of components differs. A per-node
-    // pairing is unsound, so fall back to the whole-doc merge (logged).
+    // Structural divergence: the set/order of components differs. Model it as
+    // component add/remove ops relative to base (#crdt-component-splice case 1):
+    // when one side's component set is a clean superset (a component added, none
+    // removed or reordered), align by name and merge per-component so the framing
+    // stays valid — instead of the whole-doc merge, which cross-splices. Genuine
+    // divergence (reorder / both-added-different) still falls back to whole-doc.
     if ours_names != theirs_names {
+        let base_text_for_sets = match base_state {
+            Some(bytes) => CrdtDoc::decode_state(bytes)
+                .map(|d| d.to_text())
+                .unwrap_or_default(),
+            None => String::new(),
+        };
+        if let Some(merged) =
+            merge_divergent_component_sets(&base_text_for_sets, &ours_nodes, &theirs_nodes)
+        {
+            // Structural safety net: only emit if the result round-trips cleanly.
+            if segment_into_nodes(&merged).is_ok() {
+                return Ok(merged);
+            }
+        }
         eprintln!(
             "[crdt] merge_by_component: structural divergence (ours components {ours_names:?} != theirs {theirs_names:?}); falling back to whole-doc merge"
         );
@@ -695,6 +713,101 @@ pub fn merge_by_component(
 /// This is the shared per-node reconciliation loop behind both
 /// [`merge_by_component`] (base resolved from a decoded whole-doc state) and
 /// [`MultiNodeState::merge`] (base resolved from per-node persisted states).
+/// Whether `sub` is a subsequence of `sup` (every name in `sub` appears in `sup`
+/// in the same relative order). Used to decide a divergent component set is a
+/// clean superset (a component ADDED on one side, none removed or reordered).
+fn is_name_subsequence(sub: &[&str], sup: &[&str]) -> bool {
+    let mut it = sup.iter();
+    sub.iter().all(|name| it.any(|s| s == name))
+}
+
+/// Merge two documents whose top-level component SETS differ (structural
+/// divergence — operator directive: "structural divergence should send change ops
+/// to the document model"). Modeled as component add/remove *ops* relative to
+/// base: a component present on only one side is a keep (an add), a component on
+/// both sides is merged per-component (framing-safe). Applied only when one side's
+/// component-name sequence is a **superset** of the other's (a component added,
+/// none removed or reordered) and names are unique — the realistic case. Returns
+/// `None` on genuine divergence (reorder / both-added-different) so the caller
+/// keeps the whole-doc fallback. Reassembles from the superset side's node stream,
+/// so component framing is valid by construction (no cross-splice).
+fn merge_divergent_component_sets(
+    base_text: &str,
+    ours_nodes: &[Node],
+    theirs_nodes: &[Node],
+) -> Option<String> {
+    let names = |nodes: &[Node]| -> Vec<String> {
+        nodes
+            .iter()
+            .filter_map(|n| n.component_name().map(str::to_string))
+            .collect()
+    };
+    let ours_names = names(ours_nodes);
+    let theirs_names = names(theirs_nodes);
+    let unique = |v: &[String]| {
+        let mut s = v.to_vec();
+        s.sort();
+        s.dedup();
+        s.len() == v.len()
+    };
+    if !unique(&ours_names) || !unique(&theirs_names) {
+        return None; // repeated top-level names make name-keyed alignment ambiguous
+    }
+    let ours_ref: Vec<&str> = ours_names.iter().map(String::as_str).collect();
+    let theirs_ref: Vec<&str> = theirs_names.iter().map(String::as_str).collect();
+
+    // The superset side is the one whose name sequence contains the other's.
+    let sup_nodes = if is_name_subsequence(&ours_ref, &theirs_ref) {
+        theirs_nodes
+    } else if is_name_subsequence(&theirs_ref, &ours_ref) {
+        ours_nodes
+    } else {
+        return None; // genuine divergence (reorder / both added different) → whole-doc
+    };
+
+    let comp_text_by_name = |nodes: &[Node]| -> std::collections::HashMap<String, String> {
+        nodes
+            .iter()
+            .filter_map(|n| match n {
+                Node::Component { name, text } => Some((name.clone(), text.clone())),
+                Node::Interstitial(_) => None,
+            })
+            .collect()
+    };
+    let ours_map = comp_text_by_name(ours_nodes);
+    let theirs_map = comp_text_by_name(theirs_nodes);
+    let base_map = segment_into_nodes(base_text)
+        .map(|n| comp_text_by_name(&n))
+        .unwrap_or_default();
+
+    let mut out = String::new();
+    for node in sup_nodes {
+        match node {
+            Node::Interstitial(t) => out.push_str(t),
+            Node::Component { name, text } => {
+                let merged = match (ours_map.get(name), theirs_map.get(name)) {
+                    // Present on both sides → merge per-component (framing-safe).
+                    (Some(o), Some(t)) => {
+                        merge_one_component(name, base_map.get(name).map(String::as_str), o, t)
+                            .ok()?
+                    }
+                    // Present on only one side — an ADD (not in base) or the other
+                    // side's DELETE (in base). Either way, KEEP the component with
+                    // its valid framing: this is conservative (never drops operator
+                    // content — the #queue-clear-unrun-items / append-only-exchange
+                    // data-loss class) and framing-safe (no cross-splice), which is
+                    // strictly better than the whole-doc scrambler. Honoring a
+                    // legitimate operator component-delete is a deliberate semantic
+                    // deferred to the op-based per-cell model (crdt_sync migration).
+                    _ => text.clone(),
+                };
+                out.push_str(&merged);
+            }
+        }
+    }
+    Some(out)
+}
+
 fn merge_aligned_nodes<F>(
     ours_nodes: &[Node],
     theirs_nodes: &[Node],
@@ -715,23 +828,14 @@ where
         let ours_slice = ours_node.text();
         let theirs_slice = theirs_node.text();
 
-        let merged_text = if ours_slice == theirs_slice {
-            ours_slice.to_string()
-        } else if let Some(component_name) = name
-            && let Some(merged) = reconcile_component(
-                component_name,
-                node_base.as_deref(),
-                ours_slice,
-                theirs_slice,
-            )
-        {
-            // Phase 3 (#qnodemerge3): recursive keyed reconciliation drilled
-            // *inside* the component, so two edits to different child nodes (queue
-            // items, `### Re:` blocks) reconcile in separate sub-trees and never
-            // contend. Falls back to the flat whole-component `merge` below when
-            // the component has no keyed child structure or keys are ambiguous.
-            merged
+        let merged_text = if let Some(component_name) = name {
+            // Phase 3 (#qnodemerge3) + framing-safe fallback (#crdt-component-splice):
+            // keyed per-child reconciliation when splittable, else a body-only merge
+            // that reframes with valid markers — never a text merge of the framed
+            // slice (which could duplicate/drop the component markers).
+            merge_one_component(component_name, node_base.as_deref(), ours_slice, theirs_slice)?
         } else {
+            // Interstitial (no component framing to protect): flat leaf merge.
             let node_base_state = node_base
                 .as_deref()
                 .map(|t| CrdtDoc::from_text(t).encode_state());
@@ -966,6 +1070,48 @@ fn reconcile_component(
         theirs_close,
     );
     Some(format!("{merged_open}{merged_body}{merged_close}"))
+}
+
+/// Merge one aligned component (`ours`/`theirs` are the full framed slices).
+/// The framing-safe per-component ladder (`#crdt-component-splice`): identical →
+/// as-is; keyed per-child reconciliation ([`reconcile_component`]) when
+/// splittable; otherwise leaf-merge ONLY the body between the markers and reframe
+/// with operator-authoritative markers so the component framing is valid by
+/// construction (never a duplicated/dropped `<!-- /agent:NAME -->`); flat
+/// whole-slice merge only when the framing does not parse.
+fn merge_one_component(
+    name: &str,
+    base_text: Option<&str>,
+    ours_text: &str,
+    theirs_text: &str,
+) -> Result<String> {
+    if ours_text == theirs_text {
+        return Ok(ours_text.to_string());
+    }
+    if let Some(merged) = reconcile_component(name, base_text, ours_text, theirs_text) {
+        return Ok(merged);
+    }
+    if let (Some((ours_open, ours_body, ours_close)), Some((theirs_open, theirs_body, theirs_close))) =
+        (component_framing(ours_text), component_framing(theirs_text))
+    {
+        let base_framing = base_text.and_then(component_framing);
+        let base_body = base_framing.map(|(_, b, _)| b);
+        let base_body_state = base_body.map(|b| CrdtDoc::from_text(b).encode_state());
+        let merged_body = merge(base_body_state.as_deref(), ours_body, theirs_body)?;
+        let open = reconcile_marker_operator_authoritative(
+            base_framing.map(|(o, _, _)| o),
+            ours_open,
+            theirs_open,
+        );
+        let close = reconcile_marker_operator_authoritative(
+            base_framing.map(|(_, _, c)| c),
+            ours_close,
+            theirs_close,
+        );
+        return Ok(format!("{open}{merged_body}{close}"));
+    }
+    let base_state = base_text.map(|t| CrdtDoc::from_text(t).encode_state());
+    merge(base_state.as_deref(), ours_text, theirs_text)
 }
 
 /// Reconcile one component marker line operator-authoritatively (`#qmarkerauth`).
@@ -3126,22 +3272,31 @@ Second answer line three.
     }
 
     #[test]
-    fn merge_by_component_falls_back_on_structural_divergence() {
-        // theirs removes the queue component entirely → structural divergence →
-        // whole-doc fallback (no panic, content preserved deterministically).
+    fn structural_divergence_delete_is_framing_safe_and_conservative() {
+        // theirs removes the queue component entirely → structural divergence.
+        // The document model now handles this as a component-remove op relative to
+        // base: rather than the whole-doc cross-splicer, it reassembles framing-safe
+        // and CONSERVATIVELY keeps the queue (never drops operator content — the
+        // #queue-clear-unrun-items data-loss class). Honoring the delete is the
+        // deferred crdt_sync semantic.
         let base = doc_with_exchange_queue("Q.", "- do [#a1]");
         let base_state = CrdtDoc::from_text(&base).encode_state();
         let ours = doc_with_exchange_queue("Q.\n\n### Re: q\n\nResponse.", "- do [#a1]");
         // theirs: no queue component at all.
         let theirs = "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange -->\nQ.\n<!-- /agent:exchange -->\n".to_string();
 
-        // Must not panic and must equal the whole-doc merge fallback.
-        let by_component = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
-        let whole_doc = merge(Some(&base_state), &ours, &theirs).unwrap();
-        assert_eq!(
-            by_component, whole_doc,
-            "structural divergence must use whole-doc fallback"
-        );
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+
+        // Valid framing (no cross-splice): one open/close per component.
+        assert_eq!(merged.matches("<!-- agent:exchange -->").count(), 1, "{merged}");
+        assert_eq!(merged.matches("<!-- /agent:exchange -->").count(), 1, "{merged}");
+        assert_eq!(merged.matches("<!-- agent:queue -->").count(), 1, "{merged}");
+        assert_eq!(merged.matches("<!-- /agent:queue -->").count(), 1, "{merged}");
+        // Agent's exchange edit survives; the operator queue item is NOT dropped.
+        assert!(merged.contains("Response."), "agent edit lost:\n{merged}");
+        assert!(merged.contains("[#a1]"), "operator queue item dropped:\n{merged}");
+        // The result must re-segment cleanly (never emit malformed framing).
+        assert!(segment_into_nodes(&merged).is_ok(), "malformed framing:\n{merged}");
     }
 
     // ---- #qnodemerge2: per-node CRDT state persistence --------------------

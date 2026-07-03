@@ -36,7 +36,7 @@
 //! [`RelayHub::recover_from_projection`], [`RelayHub::reconcile_disk_projection`],
 //! and [`DISK_IS_RECOVERY_PROJECTION_ONLY`].
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -101,6 +101,38 @@ pub struct ReplicaDeliverySnapshot {
     pub last_ack_generation: u64,
 }
 
+/// Outcome of routing an out-of-band disk change into the hub
+/// ([`RelayHub::apply_disk_change`]). This is the CPC-replica side of the
+/// file-watch propagation path (`plan-crdt-scramble-and-disk-propagation.md`
+/// Phases C/D): the watcher hands the settled disk text to the hub, and the hub
+/// decides how it relates to the live canonical replica.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskChangeOutcome {
+    /// The canonical replica already reflects the disk text — a live editor that
+    /// authored the change (or a peer that already pulled it) means reconcile is
+    /// a **no-op**. This is the "editor buffer already has the changes" case
+    /// (goal 5): nothing to propagate.
+    AlreadyReconciled,
+    /// The disk was corrected **out of band** (a `git checkout HEAD` /
+    /// `reset --from-current` / external edit the hub did not author) in a way the
+    /// additive CRDT delta cannot express — typically a content-removing
+    /// correction. The canonical replica was rebuilt from disk and hub-side member
+    /// mirrors reseeded, but the `live_members` live editor buffers still hold the
+    /// stale text. Propagating a *deletion* to them needs a replace-capable
+    /// delivery (Phase D2 — a bootstrap/replace message the editor applies by
+    /// replacing its buffer, not CRDT-merging). Until D2 lands, the caller must
+    /// re-bootstrap those editors; this variant makes that requirement explicit
+    /// rather than silently leaving them stale.
+    RebuiltFromDisk { live_members: usize },
+    /// No commit baseline had been recorded yet (a hub allocated mid-session
+    /// before its first finalize), so the disk text was adopted as the baseline
+    /// without touching the canonical replica — a later out-of-band correction is
+    /// now detectable. The canonical still differs from disk; the change is
+    /// deferred to the normal editor-delta / commit-barrier path rather than being
+    /// forced through here.
+    BaselineDeferred,
+}
+
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
 pub struct RelayHub {
     /// The supervisor's canonical replica (the hub / git-checkpoint authority).
@@ -115,6 +147,13 @@ pub struct RelayHub {
     /// hub did not author) so the stale canonical can be rebuilt from the
     /// correction instead of re-committing the discarded content forever.
     last_committed_text: Option<String>,
+    /// Live editors that need a **replace-capable re-bootstrap** (D2): after an
+    /// out-of-band deletion rebuilds the canonical, an additive CRDT delta cannot
+    /// express the removal, so each live editor must replace its buffer with the
+    /// corrected canonical text. Populated by [`Self::apply_disk_change`] on a
+    /// `RebuiltFromDisk`; drained by the caller which delivers the replace and
+    /// calls [`Self::clear_rebootstrap`].
+    pending_rebootstrap: HashSet<u64>,
 }
 
 impl RelayHub {
@@ -127,6 +166,7 @@ impl RelayHub {
             members: HashMap::new(),
             awareness: AwarenessChannel::new(),
             last_committed_text: None,
+            pending_rebootstrap: HashSet::new(),
         }
     }
 
@@ -159,6 +199,7 @@ impl RelayHub {
             members: HashMap::new(),
             awareness: AwarenessChannel::new(),
             last_committed_text,
+            pending_rebootstrap: HashSet::new(),
         })
     }
 
@@ -648,6 +689,69 @@ impl RelayHub {
         }
         self.last_committed_text = Some(on_disk.to_string());
         Ok(true)
+    }
+
+    /// Route a settled out-of-band disk change into the hub — the CPC-replica
+    /// entry point the controller watcher calls when the document file changed on
+    /// disk (a `git` operation, an external editor, another process). Composes the
+    /// existing in-memory-wins reconcile primitives and reports how the change
+    /// relates to the live canonical replica so the caller knows what still needs
+    /// to reach the editor buffers.
+    ///
+    /// - Canonical already reflects the disk text → [`DiskChangeOutcome::AlreadyReconciled`]
+    ///   (goal 5: the editor already has it, reconcile is a no-op).
+    /// - Out-of-band correction the additive delta cannot express → the canonical
+    ///   is rebuilt from disk and [`DiskChangeOutcome::RebuiltFromDisk`] reports how
+    ///   many live editors still need a replace-capable re-bootstrap (Phase D2).
+    /// - No commit baseline yet → [`DiskChangeOutcome::BaselineDeferred`].
+    ///
+    /// Idempotent: applying the same disk text twice yields `AlreadyReconciled` the
+    /// second time (the first rebuild made canonical agree with disk).
+    pub fn apply_disk_change(&mut self, on_disk: &str) -> Result<DiskChangeOutcome> {
+        if self.canonical_text() == on_disk {
+            return Ok(DiskChangeOutcome::AlreadyReconciled);
+        }
+        let rebuilt = self.reconcile_canonical_against_baseline(on_disk)?;
+        if rebuilt {
+            // D2: an additive delta cannot express the out-of-band removal, so flag
+            // every live editor for a replace-capable re-bootstrap of its buffer.
+            let live: Vec<u64> = self
+                .members
+                .iter()
+                .filter(|(_, m)| m.live)
+                .map(|(id, _)| *id)
+                .collect();
+            self.pending_rebootstrap.extend(live);
+            Ok(DiskChangeOutcome::RebuiltFromDisk {
+                live_members: self.live_count(),
+            })
+        } else if self.canonical_text() == on_disk {
+            Ok(DiskChangeOutcome::AlreadyReconciled)
+        } else {
+            Ok(DiskChangeOutcome::BaselineDeferred)
+        }
+    }
+
+    /// Live editors that need a replace-capable re-bootstrap after an out-of-band
+    /// deletion (D2). Sorted for deterministic delivery order.
+    pub fn pending_rebootstrap_members(&self) -> Vec<u64> {
+        let mut ids: Vec<u64> = self.pending_rebootstrap.iter().copied().collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// The corrected canonical text an editor flagged by
+    /// [`Self::pending_rebootstrap_members`] must REPLACE its buffer with (not
+    /// CRDT-merge — the whole point of D2 is that the deletion is not expressible
+    /// as an additive delta).
+    pub fn rebootstrap_text(&self) -> String {
+        self.canonical.text()
+    }
+
+    /// Clear the re-bootstrap flag for `client_id` once its editor has applied the
+    /// replace. Returns whether a flag was pending.
+    pub fn clear_rebootstrap(&mut self, client_id: u64) -> bool {
+        self.pending_rebootstrap.remove(&client_id)
     }
 
     /// The text this hub last recorded as committed to disk (test introspection).
@@ -1190,5 +1294,97 @@ mod tests {
             "canonical already agrees with disk → no rebuild"
         );
         assert_eq!(hub.last_committed_text_for_test(), Some("v2 body"));
+    }
+
+    // ---- apply_disk_change: the file-watch → CPC-replica entry point ----
+
+    #[test]
+    fn apply_disk_change_is_a_noop_when_canonical_already_has_it() {
+        // Goal 5: the editor authored the change (or a peer already pulled it), so
+        // the canonical already reflects the disk text → reconcile is a no-op.
+        let mut hub = RelayHub::from_text(1, "# plan\n\nbody\n");
+        assert_eq!(
+            hub.apply_disk_change("# plan\n\nbody\n").unwrap(),
+            DiskChangeOutcome::AlreadyReconciled
+        );
+        assert_eq!(hub.canonical_text(), "# plan\n\nbody\n");
+    }
+
+    #[test]
+    fn apply_disk_change_rebuilds_and_reports_editors_to_rebootstrap() {
+        let mut hub = RelayHub::new(1);
+        let editor = mint_client_id("intellij:disk-change-test");
+        hub.register(editor).unwrap();
+        hub.apply_local(editor, 0, 0, "GOOD\nCORRUPT-RESPONSE\n")
+            .unwrap();
+        hub.record_committed_baseline("GOOD\nCORRUPT-RESPONSE\n");
+
+        // Operator corrects the file out of band (drops the corrupt block).
+        let outcome = hub.apply_disk_change("GOOD\n").unwrap();
+        assert_eq!(
+            outcome,
+            DiskChangeOutcome::RebuiltFromDisk { live_members: 1 },
+            "an out-of-band deletion rebuilds canonical and flags the live editor"
+        );
+        assert_eq!(hub.canonical_text(), "GOOD\n", "disk wins on rebuild");
+        // The hub-side mirror is corrected; the live editor buffer still needs a
+        // replace-capable re-bootstrap (Phase D2) — reported, not silently dropped.
+        assert_eq!(hub.member_text(editor).as_deref(), Some("GOOD\n"));
+    }
+
+    #[test]
+    fn rebuilt_from_disk_flags_live_editors_for_replace_rebootstrap() {
+        // D2: an out-of-band deletion rebuilds canonical; each live editor must be
+        // flagged for a replace-capable re-bootstrap with the corrected text.
+        let mut hub = RelayHub::new(1);
+        let editor = mint_client_id("intellij:d2-test");
+        hub.register(editor).unwrap();
+        hub.apply_local(editor, 0, 0, "GOOD\nCORRUPT\n").unwrap();
+        hub.record_committed_baseline("GOOD\nCORRUPT\n");
+        assert!(hub.pending_rebootstrap_members().is_empty());
+
+        // Operator deletes the corrupt block out of band.
+        let outcome = hub.apply_disk_change("GOOD\n").unwrap();
+        assert!(matches!(outcome, DiskChangeOutcome::RebuiltFromDisk { .. }));
+
+        // The live editor is flagged, and the replace text is the corrected canonical.
+        assert_eq!(hub.pending_rebootstrap_members(), vec![editor]);
+        assert_eq!(hub.rebootstrap_text(), "GOOD\n");
+
+        // Once the editor applies the replace, the flag clears (idempotent).
+        assert!(hub.clear_rebootstrap(editor));
+        assert!(hub.pending_rebootstrap_members().is_empty());
+        assert!(!hub.clear_rebootstrap(editor));
+    }
+
+    #[test]
+    fn apply_disk_change_is_idempotent_after_a_rebuild() {
+        let mut hub = RelayHub::from_text(1, "GOOD\nCORRUPT\n");
+        assert!(matches!(
+            hub.apply_disk_change("GOOD\n").unwrap(),
+            DiskChangeOutcome::RebuiltFromDisk { .. }
+        ));
+        // Re-delivering the same disk text is now a no-op — canonical agrees.
+        assert_eq!(
+            hub.apply_disk_change("GOOD\n").unwrap(),
+            DiskChangeOutcome::AlreadyReconciled
+        );
+    }
+
+    #[test]
+    fn apply_disk_change_defers_when_no_commit_baseline_recorded() {
+        // A hub allocated mid-session before its first finalize has no baseline;
+        // the disk text is adopted as the baseline and the change is deferred to
+        // the normal editor-delta / commit-barrier path (canonical untouched).
+        let mut hub = RelayHub::new(1);
+        assert_eq!(
+            hub.apply_disk_change("brand new disk text\n").unwrap(),
+            DiskChangeOutcome::BaselineDeferred
+        );
+        assert_eq!(
+            hub.last_committed_text_for_test(),
+            Some("brand new disk text\n"),
+            "the disk text becomes the baseline so a later correction is detectable"
+        );
     }
 }

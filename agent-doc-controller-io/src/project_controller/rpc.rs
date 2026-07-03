@@ -2290,20 +2290,21 @@ fn controller_supervisor_watchdog_tick(
             continue;
         }
         // Restart budget from the shared session-loss ledger.
-        let prior_restarts = match agent_doc_supervisor_io::startup_miss::count_recent_session_loss_events(
-            &file,
-            &record.session_id,
-            window_secs,
-        ) {
-            Ok(count) => count,
-            Err(err) => {
-                eprintln!(
-                    "[controller] supervisor watchdog: failed to read restart budget for {}: {err}",
-                    file.display()
-                );
-                continue;
-            }
-        };
+        let prior_restarts =
+            match agent_doc_supervisor_io::startup_miss::count_recent_session_loss_events(
+                &file,
+                &record.session_id,
+                window_secs,
+            ) {
+                Ok(count) => count,
+                Err(err) => {
+                    eprintln!(
+                        "[controller] supervisor watchdog: failed to read restart budget for {}: {err}",
+                        file.display()
+                    );
+                    continue;
+                }
+            };
         match agent_doc_supervisor::crash_policy::watchdog_restart_decision(
             prior_restarts,
             agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_CAP,

@@ -36,10 +36,15 @@ class PluginLifecycleListener : ProjectManagerListener {
         // Detect editor layout changes (tab drags, new splits) and sync tmux
         LayoutChangeDetector.getInstance(project)
         // Register EditorTabSyncListener via code (not XML) so it survives hot-reload
+        val editorTabSync = EditorTabSyncListener()
         project.messageBus.connect().subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
-            EditorTabSyncListener()
+            editorTabSync
         )
+        // Drive tmux pane focus on split-editor focus changes (#panefocussplit):
+        // selectionChanged does not fire for focus movement between existing
+        // splits, so this reuses editorTabSync's reconcile from focus events.
+        EditorFocusSyncListener.install(project, editorTabSync)
         project.messageBus.connect().subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             object : FileEditorManagerListener {
@@ -110,5 +115,6 @@ class PluginLifecycleListener : ProjectManagerListener {
         PatchWatcher.disposeProject(project)
         LayoutChangeDetector.disposeProject(project)
         VisualHighlighterManager.disposeProject(project)
+        EditorFocusSyncListener.disposeProject(project)
     }
 }

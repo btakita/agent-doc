@@ -960,6 +960,102 @@ pub fn session_id_from_content(content: &str) -> Option<String> {
     fm.session
 }
 
+/// Attempt basic, semantics-preserving repairs of malformed frontmatter YAML so a
+/// recoverable formatting slip does not block startup (operator bug 2026-07-03:
+/// "if the frontmatter is not well formatted, the supervisor does not open").
+///
+/// Conservative by design — only fixes that cannot change the intended values:
+/// - leading TAB indentation → two spaces (YAML forbids tabs for indentation, and
+///   a tab there is almost always an accidental editor insert),
+/// - a stray duplicate closing `---` fence line inside the block (a merge/edit
+///   artifact) is dropped.
+///
+/// Returns `Some(repaired_yaml)` only when the repaired text actually parses AND
+/// differs from the input; `None` when nothing safe recovered it (the caller then
+/// surfaces a user-facing message via [`contextualize_parse_error`]).
+pub fn repair_frontmatter_yaml(yaml: &str) -> Option<String> {
+    if serde_yaml::from_str::<Frontmatter>(yaml).is_ok() {
+        return None; // already valid — nothing to repair
+    }
+    let mut repaired = String::with_capacity(yaml.len());
+    for line in yaml.lines() {
+        // Convert leading tabs to two spaces each (indentation only).
+        let leading_tabs = line.chars().take_while(|c| *c == '\t').count();
+        if leading_tabs > 0 {
+            for _ in 0..leading_tabs {
+                repaired.push_str("  ");
+            }
+            repaired.push_str(&line[leading_tabs..]);
+        } else if line.trim() == "---" {
+            // A stray fence line inside the YAML block — drop it.
+            continue;
+        } else {
+            repaired.push_str(line);
+        }
+        repaired.push('\n');
+    }
+    if repaired != yaml && serde_yaml::from_str::<Frontmatter>(&repaired).is_ok() {
+        Some(repaired)
+    } else {
+        None
+    }
+}
+
+/// Outcome of a startup-tolerant frontmatter parse: the supervisor must never
+/// silently fail to open on malformed frontmatter — it either basic-repairs the
+/// YAML or surfaces a clear, user-facing message.
+#[derive(Debug)]
+pub enum StartupFrontmatter {
+    /// Parsed cleanly (or no frontmatter block present).
+    Ok(Frontmatter),
+    /// Parsed after a basic repair; `note` explains what was fixed so the caller
+    /// can persist the repaired document and/or inform the operator.
+    Repaired {
+        frontmatter: Frontmatter,
+        repaired_yaml: String,
+        note: String,
+    },
+    /// Not repairable — carries the user-facing message to surface to the operator
+    /// (via pane/editor) instead of a silent no-open.
+    Unrepairable { message: String },
+}
+
+/// Parse frontmatter tolerantly for startup: clean parse → `Ok`; a
+/// basic-repairable formatting slip → `Repaired`; otherwise → `Unrepairable` with
+/// the user-facing [`contextualize_parse_error`] message.
+pub fn parse_for_startup(file_display: &str, content: &str) -> StartupFrontmatter {
+    match parse(content) {
+        Ok((fm, _)) => StartupFrontmatter::Ok(fm),
+        Err(err) => {
+            let Some(yaml) = raw_frontmatter_yaml(content) else {
+                // No parseable block boundary at all — surface the message.
+                return StartupFrontmatter::Unrepairable {
+                    message: contextualize_parse_error(file_display, err).to_string(),
+                };
+            };
+            match repair_frontmatter_yaml(yaml) {
+                Some(repaired_yaml) => match serde_yaml::from_str::<Frontmatter>(&repaired_yaml) {
+                    Ok(mut fm) => {
+                        normalize_queue_control(&mut fm);
+                        StartupFrontmatter::Repaired {
+                            frontmatter: fm,
+                            repaired_yaml,
+                            note: "repaired malformed frontmatter (tabs/stray fence) before startup"
+                                .to_string(),
+                        }
+                    }
+                    Err(err2) => StartupFrontmatter::Unrepairable {
+                        message: contextualize_parse_error(file_display, err2.into()).to_string(),
+                    },
+                },
+                None => StartupFrontmatter::Unrepairable {
+                    message: contextualize_parse_error(file_display, err).to_string(),
+                },
+            }
+        }
+    }
+}
+
 /// Wrap a frontmatter parse failure with the target document display string
 /// and a repair hint.
 pub fn contextualize_parse_error(file_display: &str, err: anyhow::Error) -> anyhow::Error {
@@ -1782,6 +1878,45 @@ fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- startup-tolerant frontmatter parse (malformed fm must not block open) ----
+
+    #[test]
+    fn parse_for_startup_clean_frontmatter_is_ok() {
+        let content = "---\nagent_doc_format: template\n---\n\nbody\n";
+        assert!(matches!(
+            parse_for_startup("plan.md", content),
+            StartupFrontmatter::Ok(_)
+        ));
+    }
+
+    #[test]
+    fn parse_for_startup_repairs_tab_indentation() {
+        // A tab-indented nested key is invalid YAML (tabs forbidden for indent) —
+        // the supervisor must repair rather than fail to open.
+        let content = "---\nagent_doc_stream:\n\tinterval: 200\n---\n\nbody\n";
+        assert!(parse(content).is_err(), "precondition: tabs break the parse");
+        match parse_for_startup("plan.md", content) {
+            StartupFrontmatter::Repaired { repaired_yaml, .. } => {
+                assert!(!repaired_yaml.contains('\t'));
+            }
+            other => panic!("expected Repaired, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_startup_unrepairable_surfaces_user_message() {
+        // Genuinely broken YAML (unterminated flow mapping) → a user-facing message,
+        // not a silent no-open.
+        let content = "---\nagent: {unterminated\n---\n\nbody\n";
+        match parse_for_startup("plan.md", content) {
+            StartupFrontmatter::Unrepairable { message } => {
+                assert!(message.contains("plan.md"));
+                assert!(message.contains("frontmatter"));
+            }
+            other => panic!("expected Unrepairable, got {other:?}"),
+        }
+    }
 
     // ---- #fmreset: field-level frontmatter 3-way merge ----
 

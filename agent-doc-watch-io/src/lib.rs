@@ -111,13 +111,35 @@ pub fn pid_alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
 }
 
+/// Whether `pid` is a live agent-doc **watch daemon** — verified by process
+/// identity, not mere liveness.
+///
+/// A bare `/proc/{pid}` existence check is fooled by a REUSED pid: when a watch
+/// daemon dies and the OS later reassigns its pid to an unrelated process (e.g. a
+/// kernel thread such as `[rcu_...]`, whose `/proc/{pid}/cmdline` is empty), the
+/// stale `watch.pid` still "looks alive", so `ensure_running` believes a daemon is
+/// running and refuses to start a real one — and `--status` reports a phantom
+/// daemon. Verify the cmdline is actually `agent-doc … watch`, mirroring the
+/// supervisor's `supervisor_pid_matches_doc` and the plugin-owner lease
+/// pid-identity guard.
+pub fn pid_is_agent_doc_watch(pid: u32) -> bool {
+    let Ok(cmdline) = std::fs::read_to_string(format!("/proc/{pid}/cmdline")) else {
+        return false;
+    };
+    // `cmdline` is NUL-separated argv; a kernel thread yields an empty string.
+    let args = cmdline.replace('\0', " ");
+    args.contains("agent-doc") && args.contains("watch")
+}
+
 pub fn read_pid() -> Option<u32> {
     read_pid_in(&std::env::current_dir().ok()?)
 }
 
 /// Check whether the watch daemon recorded in the current directory is alive.
+/// Identity-verified (`pid_is_agent_doc_watch`) so a stale pid reused by an
+/// unrelated process does not read as a live daemon.
 pub fn is_running() -> bool {
-    read_pid().is_some_and(pid_alive)
+    read_pid().is_some_and(pid_is_agent_doc_watch)
 }
 
 pub fn read_pid_in(base_dir: &Path) -> Option<u32> {
@@ -150,6 +172,20 @@ pub fn remove_pid_in(base_dir: &Path) {
 mod tests {
     use super::*;
     use agent_doc_document_realtime::watch_authority::RawWatchEvent;
+
+    #[test]
+    fn watch_liveness_verifies_identity_not_mere_pid_existence() {
+        // The stale-pid bug: a pid reused by an unrelated live process (e.g. a
+        // kernel thread with an empty cmdline) must NOT read as a live watch
+        // daemon. pid 1 (init/systemd) is always alive but is not `agent-doc
+        // watch`; a bare liveness check would wrongly call it running.
+        assert!(
+            !pid_is_agent_doc_watch(1),
+            "pid 1 is live but is not an agent-doc watch daemon"
+        );
+        // A pid with no /proc entry (nonexistent) is not a daemon either.
+        assert!(!pid_is_agent_doc_watch(u32::MAX - 1));
+    }
 
     #[test]
     fn pid_file_roundtrip() {

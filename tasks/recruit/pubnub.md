@@ -128,7 +128,19 @@ I've filed this as **`#pubnubpoc` [recommended]** in the backlog with those exac
 1. **In the call:** mention it in ~2 sentences as your "why PubNub," framed as designing/planning. It strengthens fit signal at zero risk.
 2. **Don't build first.** A recruiter screen doesn't reward a prototype, and you'd be investing before confirming the role/timeline.
 3. **After you advance (technical round):** build the tight `#pubnubpoc` connector — that's where working code pays off.
-<!-- agent:boundary:1229b043 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/recruit/pubnub.md source=socket_already_applied patch_id=8fed8071-f3ea-4dbc-9010-e92f718c999c invariant=disk_missing_response_probe recovery=content_ours_snapshot_visible_response_repair response_sha256=1c1130553aaba38ff7d8dccb8d2c621ac22c62db86d161d1abff41e88760c4f5 current_len=3771 current_hash=5d8f2bd05a7f95c9ec50ac9d6775d9c3dedb98a5f761eda663ce8b6b78fbfafa repaired_len=10765 repaired_hash=0bbd69d8b0fd630f1c909b0f66b7f2b66d532ee2310b0e472b2a31feb24f072d doc=pubnub session=4272fa95-d314-4843-bd18-e21c8c99823a turn=cycle-1783037818790
+```
+<!-- agent:boundary:109a444a -->
 <!-- /agent:exchange -->
 
 ## Queue

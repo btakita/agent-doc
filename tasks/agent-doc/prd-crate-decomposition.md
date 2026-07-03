@@ -94,7 +94,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `d6387afa` | Sync and resync runtime IO graph |
 | `c65b9260` | Compact command archive/write IO graph |
 | `af54bb9f` | Document realtime authority IO graph |
-| `pending-current-round` | Claim command binding IO graph |
+| `e756b12c` | Claim command binding IO graph |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

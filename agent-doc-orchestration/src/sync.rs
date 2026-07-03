@@ -1591,122 +1591,20 @@ fn check_build_stamp() {
 // `#panefocussteal`: a passive sync (the JetBrains 5s layout poll or a
 // tab-select) reconciles tmux layout but must **never** select a pane. Moving
 // tmux focus is a separate, explicit action — the `agent-doc focus <file>`
-// command — which the plugin invokes only on a deliberate editor doc switch.
+// command — which the plugin invokes only on a deliberate editor doc switch
+// (`EditorTabSyncListener.plan()` → `AutomaticCommandKind.Focus`).
 //
-// An earlier attempt captured the operator's active pane and restored it after
-// the sync, but that cannot tell "stay put" (a background poll) from "follow the
-// switch" (a deliberate navigation): it either yanked the operator back off the
-// pane they just moved to, or — under back-to-back syncs — captured the already
-// stolen pane as the baseline and restored *that*.
-//
-// The correct signal is "did the focused document change since the last sync?".
-// The plugin re-sends the same `--focus` on every background poll, so an
-// unchanged focus means "poll, do nothing" and a changed focus means "the
-// operator switched documents, follow it." `maybe_follow_focus_change` persists
-// the last focused document per project and selects the pane only on a change.
-
-/// Whether the focused document differs from the one persisted at `state_path`.
-/// A missing/unreadable state file counts as changed (first sync follows focus).
-fn focus_document_changed(state_path: &Path, canonical_focus: &str) -> bool {
-    std::fs::read_to_string(state_path)
-        .ok()
-        .is_none_or(|prev| prev.trim() != canonical_focus)
-}
-
-/// `#panefocussteal`: select the focused document's live pane, but only when the
-/// operator changed which document is focused since the previous sync.
-///
-/// The prior focused path is persisted at `.agent-doc/state/last-sync-focus` in
-/// the focused document's project. A background poll re-sends the same `--focus`,
-/// so it compares equal and moves nothing (no forward steal); after a switch the
-/// new focus is persisted, so subsequent polls also compare equal and never
-/// re-assert it (no reverse steal). Only a genuine change selects the pane.
-fn maybe_follow_focus_change(tmux: &Tmux, focus: Option<&str>) {
-    let Some(focus_file) = focus.map(str::trim).filter(|file| !file.is_empty()) else {
-        return;
-    };
-    let focus_path = PathBuf::from(focus_file);
-    let canonical = focus_path
-        .canonicalize()
-        .unwrap_or_else(|_| focus_path.clone());
-    let Some(base_dir) = agent_doc_project_root_io::project_root_containing(&canonical) else {
-        return;
-    };
-    let state_path = base_dir
-        .join(".agent-doc")
-        .join("state")
-        .join("last-sync-focus");
-    let canonical_str = canonical.to_string_lossy();
-    if !focus_document_changed(&state_path, canonical_str.as_ref()) {
-        // Background poll re-sending the same focused document — never move the
-        // operator's tmux focus.
-        return;
-    }
-    // Persist the new focus first, so a failed pane resolution does not re-trigger
-    // a select attempt on every subsequent poll.
-    if let Some(parent) = state_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Err(err) = std::fs::write(&state_path, canonical_str.as_bytes()) {
-        eprintln!("[sync] warning: failed to persist last-sync-focus: {err}");
-    }
-
-    let Some(session_id) = agent_doc_frontmatter_io::session::read_session_id(&focus_path) else {
-        return;
-    };
-    let Some(pane) =
-        crate::focus::local_actor_projection_pane_for_document(&focus_path, &session_id, tmux)
-    else {
-        return;
-    };
-    if !tmux.pane_alive(&pane) {
-        return;
-    }
-    // Surface the pane out of stash before selecting so the switch never shows an
-    // intermediate stash frame.
-    if let Err(err) = promote_pane_to_agent_doc_window(tmux, &pane) {
-        eprintln!("[sync] focus-follow stash promote failed for {pane}: {err}");
-    }
-    if tmux.select_pane(&pane).is_ok() {
-        sync_log(&format!(
-            "safe_passive_focus_followed_change file={} pane={} (#panefocussteal)",
-            focus_path.display(),
-            pane
-        ));
-    }
-}
-
-#[cfg(test)]
-mod focus_follow_tests {
-    use super::focus_document_changed;
-
-    #[test]
-    fn missing_state_counts_as_changed() {
-        // First sync (no persisted focus) follows the focus.
-        let dir = tempfile::tempdir().unwrap();
-        let state = dir.path().join("last-sync-focus");
-        assert!(focus_document_changed(&state, "/repo/tasks/a.md"));
-    }
-
-    #[test]
-    fn same_focus_is_unchanged_so_a_poll_never_moves_focus() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = dir.path().join("last-sync-focus");
-        std::fs::write(&state, "/repo/tasks/a.md").unwrap();
-        assert!(!focus_document_changed(&state, "/repo/tasks/a.md"));
-        // Trailing whitespace in the persisted value must not defeat the match.
-        std::fs::write(&state, "/repo/tasks/a.md\n").unwrap();
-        assert!(!focus_document_changed(&state, "/repo/tasks/a.md"));
-    }
-
-    #[test]
-    fn different_focus_is_changed_so_a_deliberate_switch_follows() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = dir.path().join("last-sync-focus");
-        std::fs::write(&state, "/repo/tasks/a.md").unwrap();
-        assert!(focus_document_changed(&state, "/repo/tasks/b.md"));
-    }
-}
+// An earlier attempt (`maybe_follow_focus_change`) tried to follow focus from
+// inside `sync` by persisting the last focused document per project at
+// `.agent-doc/state/last-sync-focus` and selecting the pane whenever the
+// incoming `--focus` differed. That is unsound with more than one open document:
+// each editor window emits `sync --focus <its-own-doc>`, and documents under a
+// shared superproject root map to the **same** state file. A `--focus` for the
+// non-globally-focused document therefore always compares "changed" and steals
+// the tmux pane to itself. `sync` cannot tell "the operator switched the global
+// focus" from "another window's poller reconciled its own layout" — only the
+// editor knows, and it already signals a deliberate switch via `agent-doc
+// focus`. So `sync` stays focus-neutral and owns layout only.
 
 fn run_with_options_internal(
     col_args: &[String],
@@ -1957,16 +1855,13 @@ fn run_with_options_internal(
         SYNC_WINDOW_RESOLUTION_BUDGET,
         auto_start_mode,
     );
-    // `#panefocussteal`: follow a *deliberate* focus change only. The old
-    // unconditional post-lock select re-focused the document pane on every 5s
-    // poll, stealing the operator's tmux focus. Instead, select the focused
-    // document's pane only when the focused document actually changed since the
-    // last sync (persisted per project). A background poll re-sends the same
-    // `--focus`, so it compares equal and moves nothing — no forward steal and no
-    // reverse steal (an unchanged poll never re-asserts focus after a switch).
-    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        maybe_follow_focus_change(tmux, focus);
-    }
+    // `#panefocussteal`: passive sync is focus-neutral — it never selects a pane.
+    // Deliberate focus movement is the `agent-doc focus <file>` command, which the
+    // plugin invokes on a real editor doc switch. Following focus from here is
+    // unsound with multiple open documents (see the module comment above
+    // `run_with_options_internal`): every window emits `sync --focus <own-doc>`
+    // against a shared per-project `last-sync-focus`, so a non-focused document's
+    // poll would steal the tmux pane.
     let focus_only_mode = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
         agent_doc_tmux::TmuxFocusOnlyExpansionMode::SafePassive
     } else {

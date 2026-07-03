@@ -489,7 +489,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "serde",
  "sha2 0.11.0",
  "similar",
@@ -612,7 +612,7 @@ name = "agent-doc-element-queue"
 version = "0.34.67"
 dependencies = [
  "agent-doc-element",
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "serde",
 ]
 
@@ -947,7 +947,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-markdown-ast",
  "anyhow",
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "serde",
  "serde_json",
  "similar",
@@ -1124,7 +1124,7 @@ dependencies = [
  "indexmap",
  "instruction-files",
  "interprocess",
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "libc",
  "notify",
  "portable-pty",
@@ -1279,7 +1279,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-hash",
  "agent-doc-session-accretion",
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "serde",
  "serde_json",
 ]
@@ -1499,7 +1499,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "anyhow",
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "tempfile",
  "tmux-router",
 ]
@@ -1663,7 +1663,7 @@ name = "agent-doc-state-backbone"
 version = "0.34.67"
 dependencies = [
  "agent-doc-turn",
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "serde",
  "serde_json",
 ]
@@ -1752,7 +1752,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-tmux-commands",
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "serde",
  "serde_json",
 ]
@@ -1917,7 +1917,7 @@ dependencies = [
 name = "agent-doc-tmux"
 version = "0.34.67"
 dependencies = [
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "serde",
  "tempfile",
 ]
@@ -1959,7 +1959,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-template",
- "lazily 0.20.0",
+ "lazily 0.21.1",
  "proptest",
  "regex",
  "serde",
@@ -3324,7 +3324,7 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.20.0"
+version = "0.21.1"
 dependencies = [
  "arc-swap",
  "parking_lot",

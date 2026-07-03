@@ -23,7 +23,7 @@ agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
 anyhow = "1"
-lazily = "0.20"
+lazily = "0.21"
 tmux-router = { path = "../../tmux-router", version = "0.3.11" }
 
 [dev-dependencies]

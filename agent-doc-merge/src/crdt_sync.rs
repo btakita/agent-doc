@@ -25,7 +25,7 @@
 //! since the authority layer lives there.
 
 use anyhow::{Context, Result};
-use lazily::{TextCrdt, TextOp, VersionVector};
+use lazily::{TextCrdt, TextOp, TextVersionVector};
 use std::cell::RefCell;
 
 /// Convert a byte offset into a char index against `text`. Editor/diff offsets are
@@ -106,7 +106,7 @@ impl ReplicaState {
     /// (`delta_since(their_vv)`) — a delta, never a whole-document snapshot. This is
     /// the sync reply a replica sends a peer that announced `their_sv`.
     pub fn diff(&self, their_sv: &[u8]) -> Result<Vec<u8>> {
-        let their_vv: VersionVector =
+        let their_vv: TextVersionVector =
             serde_json::from_slice(their_sv).context("decode version vector")?;
         let delta = self.text.borrow().delta_since(&their_vv);
         serde_json::to_vec(&delta).context("encode delta")
@@ -125,7 +125,7 @@ impl ReplicaState {
     /// snapshot a peer needs on first contact. It is `delta_since(∅)`: every op the
     /// replica holds, as a `TextOp` list.
     pub fn encode_state(&self) -> Vec<u8> {
-        let snapshot = self.text.borrow().delta_since(&VersionVector::new());
+        let snapshot = self.text.borrow().delta_since(&TextVersionVector::new());
         serde_json::to_vec(&snapshot).unwrap_or_default()
     }
 }

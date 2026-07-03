@@ -1,0 +1,17 @@
+[package]
+name = "agent-doc-focus-io"
+version = "0.34.67"
+edition = "2024"
+description = "Focused tmux pane focus command IO for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_focus_io"
+
+[dependencies]
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.67" }
+anyhow = "1"
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }

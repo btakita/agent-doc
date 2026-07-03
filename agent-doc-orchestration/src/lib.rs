@@ -40,7 +40,6 @@ pub mod codex_hook;
 pub mod compact;
 pub use agent_doc_crdt_relay_io as crdt_relay_host;
 pub mod flow;
-pub mod focus;
 pub mod git;
 pub use agent_doc_run_context_io as graph;
 pub mod preflight;

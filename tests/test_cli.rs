@@ -989,7 +989,7 @@ fn live_tmux_tests_are_not_in_default_development_suite() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         "src/autoclaim.rs",
-        "agent-doc-orchestration/src/focus.rs",
+        "agent-doc-focus-io/src/lib.rs",
         "agent-doc-orchestration/src/resync.rs",
         "agent-doc-orchestration/src/route.rs",
         "src/session_actor_cmd.rs",
@@ -9650,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 33,
+        ledger_rows.len() >= 34,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10020,6 +10020,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/session_check/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs}",
             "agent-doc-session-check-io/src/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs,guard_modes.rs}",
             "Split durable fact readers from guard-result assembly",
+        ),
+        (
+            "Focus command host IO",
+            "agent-doc-orchestration/src/focus.rs",
+            "agent-doc-focus-io/src/lib.rs",
+            "Split stash-window promotion and live-owner lookup out of `sync.rs`",
         ),
     ] {
         let row_text = ledger_rows
@@ -17944,7 +17950,7 @@ fn test_focus_no_stash_promote_compatibility_shim_is_removed() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     for relative in [
         "src/main.rs",
-        "agent-doc-orchestration/src/focus.rs",
+        "agent-doc-focus-io/src/lib.rs",
         "specs/07-session-tmux-commands.md",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -17972,16 +17978,36 @@ fn test_agent_doc_tmux_owns_focus_pane_decision() {
     );
 
     let focus_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/focus.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-focus-io/src/lib.rs")).unwrap();
     for forbidden_snippet in ["pub enum FocusPaneDecision", "pub fn decide_focus_pane("] {
         assert!(
             !focus_source.contains(forbidden_snippet),
-            "focus.rs must call agent_doc_tmux directly instead of re-owning focus pane policy: {forbidden_snippet}"
+            "agent-doc-focus-io must call agent_doc_tmux directly instead of re-owning focus pane policy: {forbidden_snippet}"
         );
     }
     assert!(
         focus_source.contains("use agent_doc_tmux::{FocusPaneDecision, decide_focus_pane};"),
-        "focus.rs should import the focused tmux pane decision API directly"
+        "agent-doc-focus-io should import the focused tmux pane decision API directly"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/focus.rs")
+            .exists(),
+        "orchestration must not keep a focus command facade module"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod focus;"),
+        "orchestration must not expose a focus command facade"
+    );
+    let focus_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-focus-io/Cargo.toml")).unwrap();
+    let focus_crate: toml::Value = toml::from_str(&focus_manifest).unwrap();
+    let focus_dependencies = focus_crate["dependencies"].as_table().unwrap();
+    assert!(
+        !focus_dependencies.contains_key("agent-doc-orchestration"),
+        "agent-doc-focus-io must stay free of orchestration dependencies"
     );
 
     for forbidden in [
@@ -19860,12 +19886,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
                 .contains("agent_doc_project_root_io::project_root_containing("),
         "workflow autofix should call focused project-root IO instead of owning .agent-doc root discovery"
     );
-    let focus_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/focus.rs")).unwrap();
+    let focus_source = fs::read_to_string(manifest_dir.join("src/focus_effects.rs")).unwrap();
     assert!(
         !focus_source.contains("agent_doc_fs::find_project_root(")
             && focus_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "focus should call focused project-root IO instead of owning .agent-doc root discovery"
+        "focus effects should call focused project-root IO instead of owning .agent-doc root discovery"
     );
     let claim_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();

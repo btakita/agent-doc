@@ -50,6 +50,7 @@ dependencies = [
  "agent-doc-ffi",
  "agent-doc-flow",
  "agent-doc-flow-io",
+ "agent-doc-focus-io",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
@@ -579,6 +580,17 @@ name = "agent-doc-flow-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-flow",
+]
+
+[[package]]
+name = "agent-doc-focus-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-frontmatter",
+ "agent-doc-session-registry-io",
+ "agent-doc-tmux",
+ "anyhow",
+ "tmux-router",
 ]
 
 [[package]]

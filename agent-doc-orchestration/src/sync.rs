@@ -613,8 +613,7 @@ fn project_authoritative_actor_binding(
     proof_cache: &SyncProofCache,
 ) -> Option<String> {
     if matches!(auto_start_mode, AutoStartMode::SafePassive)
-        && let Some(pane_id) =
-            crate::focus::local_actor_projection_pane_for_document(file, session_id, tmux)
+        && let Some(pane_id) = authoritative_actor_pane_for_document(tmux, file, session_id)
     {
         log_sync_latency(
             focus,

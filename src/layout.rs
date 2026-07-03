@@ -10,7 +10,7 @@
 //!   the default tmux server.
 //! - `run_with_tmux(files, split, pane, window, tmux)`:
 //!   - Requires at least one file; errors if `files` is empty.
-//!   - With exactly one file: delegates entirely to `focus::run_with_tmux` and returns.
+//!   - With exactly one file: delegates entirely to `agent-doc-focus-io` and returns.
 //!   - For each file: reads frontmatter to obtain the session UUID via
 //!     `frontmatter::ensure_session`, then looks up the live pane in `sessions.json`.
 //!     Files with no registered pane or a dead pane are skipped with a stderr warning.
@@ -100,7 +100,12 @@ pub fn run_with_tmux(
 
     if files.len() == 1 {
         // Single file — just focus it, no layout needed.
-        return agent_doc_orchestration::focus::run_with_tmux(files[0], pane, tmux);
+        return agent_doc_focus_io::run_with_tmux(
+            &crate::focus_effects::FOCUS_EFFECTS,
+            files[0],
+            pane,
+            tmux,
+        );
     }
 
     // Resolve each file to its session pane.

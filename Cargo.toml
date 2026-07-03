@@ -30,6 +30,7 @@ members = [
     "agent-doc-frontmatter",
     "agent-doc-frontmatter-io",
     "agent-doc-ffi",
+    "agent-doc-focus-io",
     "agent-doc-flow",
     "agent-doc-flow-io",
     "agent-doc-gc-io",
@@ -165,6 +166,7 @@ agent-doc-element-exchange = { path = "agent-doc-element-exchange", version = "0
 agent-doc-element-exchange-io = { path = "agent-doc-element-exchange-io", version = "0.34.67" }
 agent-doc-element-review = { path = "agent-doc-element-review", version = "0.34.67" }
 agent-doc-ffi = { path = "agent-doc-ffi", version = "0.34.67" }
+agent-doc-focus-io = { path = "agent-doc-focus-io", version = "0.34.67" }
 agent-doc-flow = { path = "agent-doc-flow", version = "0.34.67" }
 agent-doc-flow-io = { path = "agent-doc-flow-io", version = "0.34.67" }
 agent-doc-frontmatter = { path = "agent-doc-frontmatter", version = "0.34.67" }

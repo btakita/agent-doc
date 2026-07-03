@@ -51,6 +51,7 @@ mod dashboard_cmd;
 mod dedupe_cmd;
 mod describe_image;
 mod extract;
+mod focus_effects;
 mod history;
 mod hook_cmd;
 mod init;
@@ -3083,9 +3084,13 @@ fn main() -> anyhow::Result<()> {
             ..
         } => {
             if blocking {
-                agent_doc_orchestration::focus::run_blocking(&file, pane.as_deref())
+                agent_doc_focus_io::run_blocking(
+                    &focus_effects::FOCUS_EFFECTS,
+                    &file,
+                    pane.as_deref(),
+                )
             } else {
-                agent_doc_orchestration::focus::run(&file, pane.as_deref())
+                agent_doc_focus_io::run(&focus_effects::FOCUS_EFFECTS, &file, pane.as_deref())
             }
         }
         Commands::Layout {

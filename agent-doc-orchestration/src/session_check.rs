@@ -582,8 +582,8 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             }
         }
         for guard in [
-            check_pending_capture_guard(file, &rc)?,
-            check_pending_done_guard(file, &rc)?,
+            agent_doc_session_check_io::check_pending_capture_guard(file, &rc)?,
+            agent_doc_session_check_io::check_pending_done_guard(file, &rc)?,
             agent_doc_session_check_io::check_expect_done_or_gate_guard(file, &rc)?,
             agent_doc_session_check_io::check_partial_closeout_state_guard(file)?,
             agent_doc_session_check_io::check_partial_staging_closeout_guard(file)?,
@@ -1213,9 +1213,6 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
         .with_context(|| format!("failed to read {}", file.display()))?;
     Ok(agent_doc_turn::response_replay::first_duplicate_response_heading(&content))
 }
-
-mod pending_guards;
-pub(crate) use pending_guards::*;
 
 /// (`--pending-edit <id>=...`), adding a new follow-up item (`--pending-add*`),
 /// or an explicit no-follow-up justification phrase in the response. A

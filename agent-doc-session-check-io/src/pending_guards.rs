@@ -1,12 +1,17 @@
-use super::*;
+use std::path::Path;
 
-pub(crate) fn check_pending_capture_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
-    // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
-    let mode =
-        agent_doc_session_check_io::resolve_pending_capture_guard_mode_with_context(file, rc)?;
+use agent_doc_run_context_io::RunContext;
+use agent_doc_workflow::session_check::GuardResult;
+use anyhow::Result;
+
+use crate::{
+    promised_backlog_item_inventory_shortfall, promised_plan_reference_shortfall,
+    resolve_pending_capture_guard_mode_with_context, resolve_pending_done_guard_mode_with_context,
+    unresolved_backlog_capture_targets, unresolved_promised_backlog_item_ids,
+};
+
+pub fn check_pending_capture_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+    let mode = resolve_pending_capture_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
@@ -39,7 +44,7 @@ pub(crate) fn check_pending_capture_guard(
     if response_text.trim().is_empty() {
         return Ok(GuardResult::None);
     }
-    let missing_targets = crate::write::unresolved_backlog_capture_targets(file, &state);
+    let missing_targets = unresolved_backlog_capture_targets(file, &state);
     if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_targets.is_empty()
     {
@@ -51,7 +56,7 @@ pub(crate) fn check_pending_capture_guard(
     }
     if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) =
-            crate::write::promised_backlog_item_inventory_shortfall(&state, &response_text)
+            promised_backlog_item_inventory_shortfall(&state, &response_text)
     {
         let targets = state
             .required_backlog_targets
@@ -68,7 +73,7 @@ pub(crate) fn check_pending_capture_guard(
     }
     if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) =
-            crate::write::promised_plan_reference_shortfall(file, &state, &response_text)
+            promised_plan_reference_shortfall(file, &state, &response_text)
     {
         return Ok(
             agent_doc_workflow::session_check::pending_capture_plan_reference_shortfall_guard_result(
@@ -77,8 +82,7 @@ pub(crate) fn check_pending_capture_guard(
             ),
         );
     }
-    let missing_ids =
-        crate::write::unresolved_promised_backlog_item_ids(file, &state, &response_text);
+    let missing_ids = unresolved_promised_backlog_item_ids(file, &state, &response_text);
     if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_ids.is_empty()
     {
@@ -121,12 +125,8 @@ pub(crate) fn check_pending_capture_guard(
     )
 }
 
-pub(crate) fn check_pending_done_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
-    // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
-    let mode = agent_doc_session_check_io::resolve_pending_done_guard_mode_with_context(file, rc)?;
+pub fn check_pending_done_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }

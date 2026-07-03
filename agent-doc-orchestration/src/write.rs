@@ -1743,7 +1743,7 @@ fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
 }
 
 mod pending_checks;
-pub use pending_checks::*;
+pub(crate) use pending_checks::*;
 
 mod materialize;
 pub(crate) use materialize::*;

@@ -1120,6 +1120,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-route-io/src/cycle_ack.rs",
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-session-check-io/src/partial_staging.rs",
+        "agent-doc-session-check-io/src/pending_guards.rs",
         "agent-doc-orchestration/src/session_check/closeout_guards.rs",
         "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
         "agent-doc-session-check-io/src/guard_modes.rs",
@@ -1520,7 +1521,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // result formatting moved to `agent-doc-workflow`; this adapter keeps
         // only direct calls to the focused builders and no longer owns the
         // message strings.
-        ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 19,
+        ("agent-doc-session-check-io/src/pending_guards.rs", "guard_") => 19,
         // Guard-mode resolution moved out of orchestration as an IO adapter
         // batch. These `guard_` tokens are resolver names, not new flow guards.
         ("agent-doc-session-check-io/src/guard_modes.rs", "guard_") => 10,
@@ -5428,10 +5429,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
 
-    let pending_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/pending_guards.rs"),
-    )
-    .unwrap();
+    let pending_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/pending_guards.rs"))
+            .unwrap();
     assert!(
         !pending_guards.contains("pub fn response_text_for_guards"),
         "pending_guards must not re-own closeout response text normalization"
@@ -5458,7 +5458,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
 
     for relative in [
-        "agent-doc-orchestration/src/session_check/pending_guards.rs",
+        "agent-doc-session-check-io/src/pending_guards.rs",
         "agent-doc-orchestration/src/write/pending_checks.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -5494,8 +5494,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         manifest_dir.join("agent-doc-orchestration/src/write/pending_checks.rs"),
     )
     .unwrap();
-    let pending_capture =
+    let pending_capture_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/pending_capture.rs")).unwrap();
+    let pending_capture_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/pending_capture.rs"))
+            .unwrap();
     let cycle_state =
         fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
     for required in [
@@ -5538,7 +5541,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     for required in [
-        "agent_doc_element_backlog::backlog::tracked_work_ids_for_target",
         "agent_doc_turn::closeout_signal::pending_done_suppressed",
         "agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids",
         "agent_doc_turn::closeout_signal::tracked_work_completion_decision",
@@ -5551,9 +5553,16 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     assert!(
-        pending_capture.contains("backlog::normalize_pending_id")
-            && pending_checks.contains("pending_capture::missing_promised_backlog_item_ids"),
-        "write pending checks should route promised-id normalization through agent-doc-workflow pending-capture policy"
+        pending_capture_io
+            .contains("agent_doc_element_backlog::backlog::tracked_work_ids_for_target"),
+        "session-check pending-capture IO should own tracked-work target id lookup"
+    );
+    assert!(
+        pending_capture_policy.contains("backlog::normalize_pending_id")
+            && pending_capture_io
+                .contains("agent_doc_workflow::pending_capture::missing_promised_backlog_item_ids")
+            && pending_checks.contains("unresolved_promised_backlog_item_ids"),
+        "write pending checks should route promised-id normalization through session-check IO and agent-doc-workflow pending-capture policy"
     );
 
     let turn_response_text =
@@ -6579,7 +6588,7 @@ fn test_agent_doc_turn_owns_pending_capture_heuristics() {
     );
 
     for relative in [
-        "agent-doc-orchestration/src/session_check/pending_guards.rs",
+        "agent-doc-session-check-io/src/pending_guards.rs",
         "agent-doc-orchestration/src/write/pending_checks.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -8183,7 +8192,7 @@ fn test_agent_doc_fs_owns_markdown_reference_resolution() {
             "crate::security::referenced_markdown_path_checked",
         ),
         (
-            "agent-doc-orchestration/src/write/pending_checks.rs",
+            "agent-doc-session-check-io/src/pending_capture.rs",
             "agent_doc_fs::referenced_markdown_path",
             "crate::security::referenced_markdown_path",
         ),
@@ -10202,6 +10211,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-orchestration/src/session_check/queue_head_guards.rs",
         "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
         "agent-doc-orchestration/src/session_check/detect.rs",
+        "agent-doc-orchestration/src/session_check/pending_guards.rs",
     ] {
         assert!(
             !manifest_dir.join(old_path).exists(),
@@ -10217,6 +10227,8 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-session-check-io/src/guard_modes.rs",
         "agent-doc-session-check-io/src/prompt_bearing.rs",
         "agent-doc-session-check-io/src/detect.rs",
+        "agent-doc-session-check-io/src/pending_capture.rs",
+        "agent-doc-session-check-io/src/pending_guards.rs",
     ] {
         assert!(
             manifest_dir.join(new_path).exists(),
@@ -10233,6 +10245,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "mod queue_head_guards;",
         "mod queue_head_provenance_guards;",
         "mod detect;",
+        "mod pending_guards;",
     ] {
         assert!(
             !session_check.contains(forbidden),
@@ -10260,6 +10273,8 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
                 .contains("agent_doc_session_check_io::check_parent_submodule_pointer_guard")
             && session_check
                 .contains("agent_doc_session_check_io::check_prompt_only_exchange_tail_guard")
+            && session_check.contains("agent_doc_session_check_io::check_pending_capture_guard")
+            && session_check.contains("agent_doc_session_check_io::check_pending_done_guard")
             && session_check.contains("first_unstarted_prompt_bearing_change"),
         "session_check.rs should call the focused guard IO crate directly"
     );
@@ -18393,10 +18408,21 @@ fn test_extracted_pure_layers_keep_focused_owners() {
         );
     }
     assert!(
-        pending_checks.contains("use agent_doc_workflow::pending_capture;")
-            && pending_checks.contains("pending_capture::promised_backlog_item_ids_from_response")
-            && pending_checks.contains("pending_capture::missing_promised_backlog_item_ids"),
-        "write pending checks should call focused pending-capture policy directly"
+        pending_checks.contains("use agent_doc_session_check_io::{")
+            && pending_checks.contains("promised_backlog_item_inventory_shortfall")
+            && pending_checks.contains("unresolved_promised_backlog_item_ids")
+            && !pending_checks.contains("use agent_doc_workflow::pending_capture;"),
+        "write pending checks should call focused session-check IO pending-capture adapters directly"
+    );
+    let session_check_pending_capture =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/pending_capture.rs"))
+            .unwrap();
+    assert!(
+        session_check_pending_capture.contains(
+            "agent_doc_workflow::pending_capture::promised_backlog_item_ids_from_response"
+        ) && session_check_pending_capture
+            .contains("agent_doc_workflow::pending_capture::missing_promised_backlog_item_ids"),
+        "session-check IO pending-capture adapters should compose focused workflow policy directly"
     );
 
     let claim_binding =

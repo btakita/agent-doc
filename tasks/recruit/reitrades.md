@@ -86,18 +86,6 @@ The line to hold: **share the engines, keep their schemas, templates, business r
 
 Want me to turn the top three into a short "here's what I'd bring off the shelf" paragraph for Artur once he responds?
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/reitrades.md source=socket_already_applied patch_id=d26f0b3e-f6a3-47d3-b731-ef2b5bca4f21 invariant=disk_missing_response_probe recovery=content_ours_snapshot_visible_response_repair response_sha256=def071b2208e0feb8e168601b8a10bf4c94a91949106a8202479aa70c83ae832 current_len=6153 current_hash=6def72e3c5ae01bf68223b16cd3f3cc5deb574842ff6a2c242cdc83c9d305482 repaired_len=9277 repaired_hash=db23647a2addfcc45a44f132b773225c773d47fa736070278a8b38db955911b5 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782948994082
-```
-
 ### Re: Mentioning "want to get into Rust" — opus-4-8
 
 Short answer: no — not as a *motivating factor*, and not in this note.
@@ -344,19 +332,6 @@ Brian
 
 Recommendation: **Route 2** is the strongest opener for restarting the relationship. It asks for the smallest yes, proves how you work before asking for trust, and the "if the first slice works" line opens the ongoing-relationship door without naming it. Route 1 is the play if you'd rather be upfront that you're looking for a lasting arrangement. Hybrids work too, e.g. Route 2's offer with Route 1's opening.
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc (HEAD)
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/recruit/reitrades.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=23e134a22b8da55953a55f772195ab9c1a3097a1e7e10bfcab31dfd30aefb623 content_len=23694 content_hash=8cf4371cbff796499f21f6aaa202a9348b820be9fc73780be7c63aa22d8dc08a doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1783061401719
-```
-<!-- agent:boundary:b34f127b -->
-
 ### Re: OM sync slice scoped — fixed bid + call sheet — opus-4-8
 
 > **Prompt:** I like Route 2. He may want to talk today. Can we scope out the OM for a fixed bid that fits within his budget?
@@ -386,6 +361,8 @@ Half at kickoff, half on acceptance. ~2 weeks from repo access. Credited against
 
 Route 2 note is send-ready in the doc above; attach or paste the one-pager only if he replies or the call happens — the note alone is the opener, the bid is the follow-through.
 <!-- agent:boundary:a5a7b716 -->
+Please explain this opener. It seems like a pitch + offer. Could you disambiguate it for me?
+> Instead of a pitch, here's a concrete offer.
 <!-- /agent:exchange -->
 
 ## Queue

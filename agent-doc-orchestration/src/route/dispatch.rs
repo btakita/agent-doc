@@ -8,13 +8,12 @@ use agent_doc_controller::dispatch::{
     DirectPaneEnterResubmitAttemptFacts, DirectPaneExistingDraftSubmitFacts,
     DirectPaneFullResendFacts, DirectPaneNotDispatchedFacts, DirectPaneResubmitProofFacts,
     DirectPaneSubmitStatus as CommandDispatchStatus, DispatchInjectLogFacts,
-    FreshDispatchTargetAfterReadyWaitDecision, FreshDispatchTargetAfterReadyWaitFacts,
     RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
     classify_auto_start_dispatch_ready_block, classify_dead_harness_shell_dispatch_block,
-    decide_fresh_dispatch_target_after_ready_wait, direct_pane_acceptance_poll_status,
-    direct_pane_can_continue_enter_resubmit, direct_pane_can_enter_existing_draft,
-    direct_pane_can_full_resend_not_landed, direct_pane_fast_accept_on_processing,
-    direct_pane_max_enter_resubmits, direct_pane_not_dispatched, direct_pane_resubmit_proof_line,
+    direct_pane_acceptance_poll_status, direct_pane_can_continue_enter_resubmit,
+    direct_pane_can_enter_existing_draft, direct_pane_can_full_resend_not_landed,
+    direct_pane_fast_accept_on_processing, direct_pane_max_enter_resubmits,
+    direct_pane_not_dispatched, direct_pane_resubmit_proof_line,
     direct_pane_should_await_dispatch_start_proof, direct_pane_submit_acceptance_budget,
     direct_pane_submit_acceptance_timeout, direct_pane_submit_outcome, dispatch_inject_log_line,
     dispatch_start_busy_probe_timeout, recent_lines_contain_trigger,
@@ -1137,66 +1136,6 @@ pub(crate) fn authoritative_actor_dispatch_can_queue_optimistically(
     state: agent_doc_sqlite::state_store::ActorState,
 ) -> bool {
     agent_doc_controller::dispatch::actor_can_queue_optimistically(actor_dispatch_state(state))
-}
-
-pub(crate) fn resolve_fresh_dispatch_target_after_ready_wait(
-    tmux: &Tmux,
-    session_id: &str,
-    pane: &str,
-    file_path: &str,
-    _startup_miss_handoff_blocked_pane: Option<&str>,
-) -> Result<String> {
-    let registry_base_dir = dispatch_registry::registry_base_dir_for_dispatch(file_path);
-    let registry =
-        agent_doc_session_registry_io::load_in(&registry_base_dir).with_context(|| {
-            format!(
-                "failed to load route registry before fresh-dispatch validation from {}",
-                registry_base_dir.display()
-            )
-        })?;
-    let requested = dispatch_registry::canonical_dispatch_file(std::path::Path::new(file_path));
-    let requested_display = requested.display().to_string();
-    let pane_matches_file =
-        dispatch_registry::pane_registration_matches_file(&registry, pane, file_path);
-    let handoff_target = registry
-        .values()
-        .find(|entry| {
-            entry.session_id == session_id
-                && !entry.pane.is_empty()
-                && entry.pane != pane
-                && dispatch_registry::canonical_registered_file(entry) == requested
-        })
-        .map(|entry| entry.pane.as_str());
-    let registered_display = registry
-        .values()
-        .find(|entry| entry.pane == pane)
-        .map(dispatch_registry::canonical_registered_file)
-        .map(|path| path.display().to_string());
-    match decide_fresh_dispatch_target_after_ready_wait(FreshDispatchTargetAfterReadyWaitFacts {
-        requested_pane: pane,
-        dispatch_file_display: file_path,
-        requested_file_display: &requested_display,
-        pane_matches_file,
-        same_session_rebound_pane: handoff_target,
-        registered_file_display: registered_display.as_deref(),
-    }) {
-        FreshDispatchTargetAfterReadyWaitDecision::KeepRequestedPane => Ok(pane.to_string()),
-        FreshDispatchTargetAfterReadyWaitDecision::UseReboundPane { pane, log_line } => {
-            eprintln!("{log_line}");
-            Ok(pane.to_string())
-        }
-        FreshDispatchTargetAfterReadyWaitDecision::RejectCrossFile { message } => {
-            anyhow::bail!(message)
-        }
-        FreshDispatchTargetAfterReadyWaitDecision::RegisterRequestedPane => {
-            // A fresh route already created `pane` deliberately. If some concurrent
-            // sync/layout path rebinds the same document session back to another pane
-            // during the ready wait, keep the fresh pane authoritative instead of
-            // handing dispatch back to the older pane and making the new pane disposable.
-            register_dispatch_target(tmux, session_id, pane, file_path)?;
-            Ok(pane.to_string())
-        }
-    }
 }
 
 pub(crate) fn send_command_checked(

@@ -1110,6 +1110,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-route-io/src/startup_ready.rs",
         "agent-doc-route-io/src/startup_sync.rs",
         "agent-doc-route-io/src/busy_pane.rs",
+        "agent-doc-route-io/src/dispatch_recovery.rs",
         "agent-doc-route-io/src/dispatch_target.rs",
         "agent-doc-route-io/src/pane_provenance.rs",
         "agent-doc-route-io/src/restart_handoff.rs",
@@ -13067,6 +13068,9 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
     let route_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
             .unwrap();
+    let route_dispatch_recovery =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_recovery.rs"))
+            .unwrap();
     let route_dispatch_target =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     for forbidden in [
@@ -13080,6 +13084,7 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
         "pub(crate) fn pane_registration_matches_file(",
         "pub(crate) fn ensure_dispatch_target_matches_file(",
         "pub(crate) fn register_dispatch_target(",
+        "pub(crate) fn resolve_fresh_dispatch_target_after_ready_wait(",
     ] {
         assert!(
             !route_dispatch.contains(forbidden),
@@ -13088,9 +13093,8 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
     }
     assert!(
         route_dispatch.contains("use agent_doc_session_registry_io::dispatch_registry;")
-            && route_dispatch.contains("dispatch_registry::canonical_dispatch_file(")
             && route_dispatch.contains("dispatch_registry::ensure_dispatch_target_matches_file("),
-        "route/dispatch.rs should call focused session dispatch-registry IO directly"
+        "route/dispatch.rs should only call focused session dispatch-registry IO for direct pre-send match validation"
     );
     assert!(
         route_dispatch_target.contains("pub fn register_dispatch_target(")
@@ -13098,6 +13102,13 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
                 .contains("dispatch_registry::ensure_dispatch_target_can_bind_file(")
             && route_dispatch_target.contains("registration::register_full_with_cwd_in("),
         "agent-doc-route-io dispatch_target should own route dispatch target registry binding"
+    );
+    assert!(
+        route_dispatch_recovery.contains("pub fn resolve_fresh_dispatch_target_after_ready_wait(")
+            && route_dispatch_recovery.contains("dispatch_registry::canonical_dispatch_file(")
+            && route_dispatch_recovery
+                .contains("dispatch_registry::pane_registration_matches_file("),
+        "agent-doc-route-io dispatch_recovery should own fresh dispatch target registry validation"
     );
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -13913,6 +13924,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .unwrap();
     let route_busy_pane_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/busy_pane.rs")).unwrap();
+    let route_dispatch_recovery_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_recovery.rs"))
+            .unwrap();
     let route_dispatch_target_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     let route_pane_provenance_source =
@@ -14220,14 +14234,21 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         !route_source.contains("fn query_supervisor_runtime(")
             && !route_source.contains("fn restart_via_supervisor(")
             && !route_source.contains("fn pane_route_provenance(")
+            && !route_source.contains("fn wait_for_starting_pane_recovery_target(")
             && !route_dispatch_source.contains("fn register_dispatch_target(")
+            && !route_dispatch_source
+                .contains("fn resolve_fresh_dispatch_target_after_ready_wait(")
             && !route_pane_resolution_source.contains("fn wait_for_busy_restart_handoff(")
             && route_supervisor_runtime_source.contains("pub fn query_supervisor_runtime(")
             && route_supervisor_runtime_source.contains("pub fn restart_via_supervisor(")
             && route_pane_provenance_source.contains("pub fn pane_route_provenance(")
             && route_dispatch_target_source.contains("pub fn register_dispatch_target(")
+            && route_dispatch_recovery_source
+                .contains("pub fn wait_for_starting_pane_recovery_target(")
+            && route_dispatch_recovery_source
+                .contains("pub fn resolve_fresh_dispatch_target_after_ready_wait(")
             && route_restart_handoff_source.contains("pub fn wait_for_busy_restart_handoff("),
-        "shared route supervisor/provenance/dispatch-target/restart-handoff IO should live in agent-doc-route-io"
+        "shared route supervisor/provenance/dispatch-target/recovery/restart-handoff IO should live in agent-doc-route-io"
     );
     assert!(
         !manifest_dir
@@ -14278,8 +14299,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("RouteCloseoutDrainOutcome")
             && route_source.contains("route_closeout_user_outcome_fields")
             && route_source.contains("dispatch_only_starting_pane_ready_timeout_for_binary")
-            && route_source.contains("dispatch_only_starting_pane_recovery_retry_budget")
             && route_source.contains("dispatch_only_starting_pane_recovery_timeout_for_binary")
+            && route_dispatch_recovery_source
+                .contains("dispatch_only_starting_pane_recovery_retry_budget")
             && route_source.contains("STARTING_ACTOR_TIMEOUT_REASON")
             && route_source.contains("StartingTimeoutActorFacts")
             && route_source.contains("actor_blocked_by_starting_timeout")
@@ -14342,6 +14364,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn dispatch_start_busy_probe_timeout(",
         "fn classify_dead_harness_shell_dispatch_block(",
         "fn decide_fresh_dispatch_target_after_ready_wait(",
+        "fn resolve_fresh_dispatch_target_after_ready_wait(",
         "fresh restart re-bound",
         "fn resubmit_result_label(",
         "fn route_submit_resubmit_proof_line(",
@@ -14371,14 +14394,15 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("dispatch_start_busy_probe_timeout(cfg!(test))")
             && route_dispatch_source.contains("DeadHarnessShellDispatchFacts")
             && route_dispatch_source.contains("classify_dead_harness_shell_dispatch_block(")
-            && route_dispatch_source.contains("FreshDispatchTargetAfterReadyWaitFacts")
-            && route_dispatch_source.contains("FreshDispatchTargetAfterReadyWaitDecision")
-            && route_dispatch_source.contains("decide_fresh_dispatch_target_after_ready_wait(")
+            && route_dispatch_recovery_source.contains("FreshDispatchTargetAfterReadyWaitFacts")
+            && route_dispatch_recovery_source.contains("FreshDispatchTargetAfterReadyWaitDecision")
+            && route_dispatch_recovery_source
+                .contains("decide_fresh_dispatch_target_after_ready_wait(")
             && route_dispatch_source.contains("Some(harness.binary.as_str())")
             && route_dispatch_source.contains("cfg!(test)")
             && route_dispatch_source.contains("RoutedTriggerPayloadFacts")
             && route_dispatch_source.contains("routed_trigger_payload_rejection("),
-        "route/dispatch.rs should adapt tmux captures into focused controller direct-pane policy"
+        "route dispatch/recovery adapters should adapt tmux and registry facts into focused controller direct-pane policy"
     );
     for forbidden_snippet in [
         "fn route_dispatch_only_sent_log_message(",
@@ -16072,6 +16096,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     let orchestration_route =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_dispatch_recovery =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_recovery.rs"))
+            .unwrap();
     for forbidden_snippet in [
         "enum StartingPaneRecoveryTarget",
         "fn starting_pane_generation_changed(",
@@ -16083,9 +16110,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     assert!(
-        orchestration_route.contains("use agent_doc_supervisor::startup_miss::{")
-            && orchestration_route.contains("starting_pane_recovery_target("),
-        "route.rs should gather runtime facts and call focused startup-miss recovery policy directly"
+        !orchestration_route.contains("starting_pane_recovery_target(")
+            && route_dispatch_recovery.contains("use agent_doc_supervisor::startup_miss::{")
+            && route_dispatch_recovery.contains("starting_pane_recovery_target("),
+        "agent-doc-route-io dispatch_recovery should gather runtime facts and call focused startup-miss recovery policy directly"
     );
     for required_snippet in [
         "pub struct AgentLaunchArgsSources",

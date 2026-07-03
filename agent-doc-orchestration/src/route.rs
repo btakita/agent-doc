@@ -194,7 +194,6 @@ use agent_doc_controller::dispatch::{
     dispatch_only_should_print_unproven_progress, dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_actor_ready, dispatch_only_starting_pane_not_ready_message,
     dispatch_only_starting_pane_ready_timeout_for_binary,
-    dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, dispatch_proof_failed_event,
     duplicate_pane_policy_error_message, failclosed_wait_context, fresh_route_start_ack_timeout,
     opencode_pane_state_changed_from_idle, prompt_ready_barrier_failed_event,
@@ -227,6 +226,9 @@ pub(crate) use agent_doc_route_io::busy_pane::{
     attempt_busy_existing_pane_auto_fix, attempt_busy_existing_pane_interrupt_recovery,
     ensure_existing_pane_ready_for_dispatch,
 };
+pub(crate) use agent_doc_route_io::dispatch_recovery::{
+    resolve_fresh_dispatch_target_after_ready_wait, wait_for_starting_pane_recovery_target,
+};
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
 use agent_doc_route_io::pane_provenance::pane_route_provenance;
 use agent_doc_route_io::restart_handoff::wait_for_busy_restart_handoff;
@@ -242,9 +244,9 @@ use agent_doc_route_io::supervisor_runtime::{
 };
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
-use agent_doc_session_registry_io::dispatch_registry::{
-    lookup_dispatch_registration, pane_registration_matches_file, registry_base_dir_for_dispatch,
-};
+use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
+#[cfg(test)]
+use agent_doc_session_registry_io::dispatch_registry::pane_registration_matches_file;
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_supervisor::route_runtime::{
     DeferToBoundaryRestartRecoveryFacts, RouteActorState, SupervisorHealth, SupervisorRuntime,
@@ -252,9 +254,7 @@ use agent_doc_supervisor::route_runtime::{
     authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
     defer_to_boundary_restart_recovery_hint, effective_authoritative_actor_state,
 };
-use agent_doc_supervisor::startup_miss::{
-    StartingPaneRecoveryTarget, starting_pane_recovery_target,
-};
+use agent_doc_supervisor::startup_miss::StartingPaneRecoveryTarget;
 use agent_doc_tmux::is_first_column;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, blocked_closeout_recovery_command,
@@ -2175,58 +2175,6 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
             cfg!(test),
         )
     })
-}
-
-fn wait_for_starting_pane_recovery_target(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    current_pane: &str,
-    file_path: &str,
-    harness: &HarnessConfig,
-    initial_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
-) -> Option<StartingPaneRecoveryTarget> {
-    let registry_base_dir = registry_base_dir_for_dispatch(file_path);
-    let budget = dispatch_only_starting_pane_recovery_retry_budget(
-        Some(harness.binary.as_str()),
-        cfg!(test),
-    );
-    let deadline = std::time::Instant::now() + budget.timeout;
-
-    while std::time::Instant::now() < deadline {
-        let current_status =
-            agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
-                .ok()
-                .flatten();
-        let registry = agent_doc_session_registry_io::load_in(&registry_base_dir).ok();
-        let registered_pane =
-            agent_doc_session_registry_io::lookup_in(&registry_base_dir, session_id)
-                .ok()
-                .flatten();
-
-        match starting_pane_recovery_target(
-            initial_status,
-            current_status.as_ref(),
-            current_pane,
-            registered_pane.as_deref(),
-        ) {
-            Some(StartingPaneRecoveryTarget::DifferentPane(pane))
-                if registry.as_ref().is_some_and(|registry| {
-                    pane_registration_matches_file(registry, &pane, file_path)
-                }) && tmux.pane_alive(&pane) =>
-            {
-                return Some(StartingPaneRecoveryTarget::DifferentPane(pane));
-            }
-            Some(StartingPaneRecoveryTarget::SamePane) => {
-                return Some(StartingPaneRecoveryTarget::SamePane);
-            }
-            _ => {}
-        }
-
-        std::thread::sleep(budget.poll_interval);
-    }
-
-    None
 }
 
 mod dispatch_only;

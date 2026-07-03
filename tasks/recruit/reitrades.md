@@ -262,6 +262,84 @@ Judgment calls, flag if you disagree:
 - **Dropped the budget question.** "Worth a quick call?" replaced "give me a rough idea of your budget." The budget question made him do work before replying; the call ask is a lower-friction yes, and you negotiate the number live where you're stronger.
 - **Kept availability/flexibility as readiness, not need** (per the earlier exchange). "Room in my schedule" + "start this week" carries urgency without telegraphing it.
 <!-- agent:boundary:8a7153fe -->
+### Re: Four fresh routes — pick a direction — fable-5
+
+> **Prompt:** Instead of iterating on the message in reitrades.md, create a new message with the same parameters. I want to see a few different messages so I can pick the route I want to go. I want to work on this project. I need the work and it fits in my goal to be independent. I want to see if Arthur and I can have an ongoing relationship.
+
+Four alternatives, each a different route with the same parameters: your voice, no AI tells, open-source framing instead of "share of the work", readiness not neediness, budget-friendly, runs alongside his existing builders, and room for the ongoing relationship.
+
+**Route 1 — Relationship-first.** Says out loud that you want to be a long-term person he can lean on, not a one-off contractor. Most honest to your actual goal; slight risk it reads as a bigger commitment than he's ready to discuss.
+
+```
+Hi Artur,
+
+Happy 4th.
+
+I've been thinking about REItrades since we last talked. I'll be direct: I'd like to find a way to work with you, not just on a one-off project but as someone you can lean on as the platform grows.
+
+The place I'd start is accuracy. Your pitch is "100% accurate", and that's the part that breaks quietly. A listing's numbers change, the OM and teaser don't, and a buyer catches it first. I build systems that keep generated content in sync with the data underneath it, and I'd like to own that layer for you.
+
+The economics can work for a bootstrapped budget. The generic parts of the engine get open sourced, so you only pay for the REItrades-specific work. If cash plus equity fits this phase better, I'm open to it. This runs alongside whoever else is building for you.
+
+I have room in my schedule now. Worth a quick call?
+
+Brian
+```
+
+**Route 2 — Proof-of-work slice.** No pitch, just a concrete small first project with a defined off-ramp. Lowest-friction yes for a cost-sensitive founder, and it naturally seeds the ongoing relationship ("if the first slice works..."). Trade-off: smallest initial commitment, so slowest path to real income.
+
+```
+Hi Artur,
+
+Happy 4th.
+
+Instead of a pitch, here's a concrete offer. Pick one slice and let me build it. My suggestion: the layer that keeps the OM and teaser in sync when a listing's numbers change, so no buyer ever sees a stale figure. Small scope, fixed price, done fast, and you'll know exactly what working with me is like before committing to anything bigger.
+
+The core of it overlaps tooling I already maintain in Rust, so it drops straight into your stack. I'd open source the generic engine and you'd only pay for the REItrades-specific part. Your schemas, templates, and business rules stay yours.
+
+If the first slice works, the same approach applies to a lot more: extraction from old OMs and flyers, validation on AI output, audit trails. If it doesn't, you got a working piece of infrastructure cheap and we shake hands.
+
+I can start this week. Worth a call?
+
+Brian
+```
+
+**Route 3 — Deal-structure lead.** Opens with the economics, since budget is the known objection. Positions the open-source structure as reducing his lock-in to any one developer, including you, which is a trust move. Trade-off: leads with money rather than his problem.
+
+```
+Hi Artur,
+
+Happy 4th.
+
+I want to float a different way to work together, since budget was the sticking point last time.
+
+A lot of what REItrades needs underneath is generic: keeping generated documents in sync with changing data, validating AI output before a buyer sees it, audit trails, extraction from old OMs. None of that is your edge. Your edge is the CRE schemas, the templates, the business rules, the market.
+
+So here's the structure: I open source the generic layer and maintain it as my own tooling. You pay only for the REItrades-specific work on top, at a rate that fits a bootstrapped budget. If a cash plus equity mix works better for this phase, I'm open to that too. Either way you end up owning less custom code, which means less to maintain and less locked to any one developer, including me.
+
+This runs alongside whoever else is building for you. I have availability now and could take a first slice this week.
+
+Worth a call?
+
+Brian
+```
+
+**Route 4 — Short and direct.** Four sentences of substance. Respects his time, easy to answer from a phone. Trade-off: less persuasion; works best if he already remembers the earlier conversation well.
+
+```
+Hi Artur,
+
+Happy 4th.
+
+Short version: I'd still like to work on REItrades. The "100% accurate" promise is the hardest part of your product to keep, and it's the exact kind of problem I build for. I can make the budget work. The generic infrastructure gets open sourced so you only pay for what's REItrades-specific, and I'm open to cash plus equity.
+
+I have room now and can start small. Fifteen minutes this week?
+
+Brian
+```
+
+Recommendation: **Route 2** is the strongest opener for restarting the relationship. It asks for the smallest yes, proves how you work before asking for trust, and the "if the first slice works" line opens the ongoing-relationship door without naming it. Route 1 is the play if you'd rather be upfront that you're looking for a lasting arrangement. Hybrids work too, e.g. Route 2's offer with Route 1's opening.
+<!-- agent:boundary:c4f19a02 -->
 <!-- /agent:exchange -->
 
 ## Queue

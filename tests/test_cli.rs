@@ -1115,7 +1115,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-route-io/src/pane_provenance.rs",
         "agent-doc-route-io/src/restart_handoff.rs",
         "agent-doc-route-io/src/supervisor_runtime.rs",
-        "agent-doc-orchestration/src/route/cycle_ack.rs",
+        "agent-doc-route-io/src/cycle_ack.rs",
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-session-check-io/src/partial_staging.rs",
@@ -10219,6 +10219,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-session-check-io/src/queue_head_guards.rs",
         "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
         "agent-doc-session-check-io/src/guard_modes.rs",
+        "agent-doc-session-check-io/src/prompt_bearing.rs",
     ] {
         assert!(
             manifest_dir.join(new_path).exists(),
@@ -10240,10 +10241,24 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             "orchestration session_check.rs must not retain moved guard module facade: {forbidden}"
         );
     }
+    let closeout_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub fn first_unstarted_prompt_bearing_change(",
+        "pub fn detect_unstarted_prompt_bearing_diff(",
+    ] {
+        assert!(
+            !closeout_guards.contains(forbidden),
+            "orchestration closeout guards must not retain moved prompt-bearing IO adapter: {forbidden}"
+        );
+    }
     assert!(
         session_check.contains("agent_doc_session_check_io::check_shadow_backlog_guard")
             && session_check
-                .contains("agent_doc_session_check_io::check_free_text_queue_head_provenance"),
+                .contains("agent_doc_session_check_io::check_free_text_queue_head_provenance")
+            && session_check.contains("first_unstarted_prompt_bearing_change"),
         "session_check.rs should call the focused guard IO crate directly"
     );
 
@@ -13413,7 +13428,7 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
     }
 
     for relative in [
-        "agent-doc-orchestration/src/route/cycle_ack.rs",
+        "agent-doc-route-io/src/cycle_ack.rs",
         "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/start/detection.rs",
@@ -13986,8 +14001,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     )
     .unwrap();
     let route_cycle_ack_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/cycle_ack.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/cycle_ack.rs")).unwrap();
     let flow_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     let flow_types_source =
@@ -14007,6 +14021,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && !route_source.contains("mod authoritative_actor;")
             && route_source.contains("use agent_doc_route_io::authoritative_actor::{"),
         "orchestration must not keep a route authoritative-actor module after the actor/controller IO graph moves to agent-doc-route-io"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/route/cycle_ack.rs")
+            .exists()
+            && !route_source.contains("mod cycle_ack;")
+            && route_source.contains("use agent_doc_route_io::cycle_ack::{"),
+        "orchestration must not keep a route cycle-ack module after the route cycle acknowledgment graph moves to agent-doc-route-io"
     );
     assert!(
         authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
@@ -14538,10 +14560,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("startup_miss_superseded_by_later_open_start")
             && route_source.contains("startup_miss_should_restart_live_owner")
             && route_source.contains("startup_miss_should_fail_closed")
-            && route_source.contains("RoutedCycleAckFacts")
-            && route_source.contains("should_require_routed_cycle_ack")
-            && route_source.contains("MissingCycleAckFacts")
-            && route_source.contains("should_optimistically_accept_missing_cycle_ack")
+            && route_cycle_ack_source.contains("RoutedCycleAckFacts")
+            && route_cycle_ack_source.contains("should_require_routed_cycle_ack")
+            && route_cycle_ack_source.contains("MissingCycleAckFacts")
+            && route_cycle_ack_source.contains("should_optimistically_accept_missing_cycle_ack")
             && route_source.contains("RouteStartupMissDiagnosticFacts")
             && route_source.contains("route_startup_miss_diagnostic_message(")
             && route_source.contains("RouteBusyDiagnosticFacts")
@@ -14554,7 +14576,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("DispatchOnlyReopenDelivery")
             && route_source.contains("dispatch_only_should_print_unproven_progress")
             && route_source.contains("fresh_route_start_ack_timeout")
-            && route_source.contains("routed_cycle_ack_timeout")
+            && route_cycle_ack_source.contains("routed_cycle_ack_timeout")
             && route_source.contains("DispatchOnlyBusyRefusalFacts")
             && route_source.contains("controller_dispatch_only_busy_refusal_message(")
             && route_source.contains("DispatchActorState")
@@ -14656,14 +14678,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     ] {
         assert!(
             !route_cycle_ack_source.contains(forbidden_snippet),
-            "route/cycle_ack.rs must not wrap focused route timeout policy: {forbidden_snippet}"
+            "agent-doc-route-io cycle_ack.rs must not wrap focused route timeout policy: {forbidden_snippet}"
         );
     }
     assert!(
         route_cycle_ack_source.contains("fresh_route_start_ack_timeout(cfg!(test))")
             && route_cycle_ack_source
                 .contains("routed_cycle_ack_timeout(live_child_for_file, cfg!(test))"),
-        "route/cycle_ack.rs should pass route/test facts into focused controller timeout policy"
+        "agent-doc-route-io cycle_ack.rs should pass route/test facts into focused controller timeout policy"
     );
     assert!(
         !route_busy_pane_source.contains("fn existing_pane_ready_timeout(")
@@ -14745,7 +14767,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     ] {
         assert!(
             !route_cycle_ack_source.contains(forbidden_snippet),
-            "route/cycle_ack.rs must not re-own pure controller dispatch policy: {forbidden_snippet}"
+            "agent-doc-route-io cycle_ack.rs must not re-own pure controller dispatch policy: {forbidden_snippet}"
         );
     }
     assert!(
@@ -14753,7 +14775,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_cycle_ack_source.contains("should_require_routed_cycle_ack(")
             && route_cycle_ack_source.contains("MissingCycleAckFacts")
             && route_cycle_ack_source.contains("should_optimistically_accept_missing_cycle_ack("),
-        "route/cycle_ack.rs should adapt cycle and harness facts into focused controller policy"
+        "agent-doc-route-io cycle_ack.rs should adapt cycle and harness facts into focused controller policy"
     );
     let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
     assert!(
@@ -24815,8 +24837,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch_only.rs"))
             .unwrap();
     let route_cycle_ack =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/cycle_ack.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/cycle_ack.rs")).unwrap();
     let turn_cycle_ack =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/cycle_ack.rs")).unwrap();
     let preflight_source =

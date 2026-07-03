@@ -1,12 +1,35 @@
-//! Extracted from `write.rs` (large-module split). See parent module for context.
+//! Routed cycle-start acknowledgment I/O.
 
-use super::*;
+use anyhow::Result;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use crate::direct_pane_dispatch::log_route_latency;
+use crate::dispatch::{RouteDispatchEffects, dispatch_existing_managed_reopen};
+use crate::dispatch_recovery::resolve_fresh_dispatch_target_after_ready_wait;
+use crate::restart_handoff::wait_for_busy_restart_handoff;
+use crate::startup_ready::{AgentReadyWaitOutcome, wait_for_agent_ready_outcome};
+use crate::supervisor_runtime::restart_via_supervisor_with_mode;
+use agent_doc_controller::dispatch::{
+    MissingCycleAckFacts, RoutedCycleAckFacts, RoutedDispatchStartProof,
+    fresh_route_start_ack_timeout, routed_cycle_ack_timeout,
+    should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
+};
+use agent_doc_harness::HarnessConfig;
 use agent_doc_turn::cycle_ack::{
     CycleAckState, PromptBearingRouteContext, cycle_state_advances_start_ack,
     prompt_bearing_route_context_from_change,
 };
+use tmux_router::Tmux;
 
-pub(crate) fn wait_for_start_ack(
+#[derive(Debug, Clone, Copy)]
+pub struct RouteCycleAckEffects {
+    pub route_dispatch_effects: RouteDispatchEffects,
+    pub emit_startup_miss_diagnostic: fn(&Tmux, &str, &Path, &str),
+    pub emit_busy_route_diagnostic: fn(&Tmux, &str, &Path, &HarnessConfig),
+}
+
+pub fn wait_for_start_ack(
     file: &Path,
     baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     timeout: Duration,
@@ -39,7 +62,7 @@ pub(crate) fn wait_for_start_ack(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
+pub fn retry_routed_cycle_ack_after_fresh_restart(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
@@ -49,6 +72,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
     baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     marker: &str,
     ack_timeout: Duration,
+    effects: RouteCycleAckEffects,
 ) -> Result<Option<String>> {
     if harness.binary != "codex" {
         return Ok(None);
@@ -99,7 +123,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                 }
             ),
         );
-        emit_busy_route_diagnostic(tmux, &dispatch_pane, file, harness);
+        (effects.emit_busy_route_diagnostic)(tmux, &dispatch_pane, file, harness);
         if should_optimistically_accept_missing_cycle_ack(MissingCycleAckFacts {
             harness_binary: &harness.binary,
             live_child_for_file: true,
@@ -162,7 +186,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
         &dispatch_pane,
         file_path,
         harness,
-        route_dispatch_effects(),
+        effects.route_dispatch_effects,
     ) {
         Ok(proof) => proof,
         Err(_) => {
@@ -212,7 +236,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                     baseline_id,
                 )?;
                 let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
-                emit_startup_miss_diagnostic(
+                (effects.emit_startup_miss_diagnostic)(
                     tmux,
                     &dispatch_pane,
                     file,
@@ -250,14 +274,15 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
     }
 }
 
-pub(crate) fn pending_prompt_bearing_context_for_route(
+pub fn pending_prompt_bearing_context_for_route(
     file: &Path,
     baseline: Option<&agent_doc_cycle_state_io::CycleState>,
 ) -> Result<Option<PromptBearingRouteContext>> {
     if baseline.is_some_and(|state| state.is_open()) {
         return Ok(None);
     }
-    let Some(change) = crate::session_check::first_unstarted_prompt_bearing_change(file)? else {
+    let Some(change) = agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?
+    else {
         return Ok(None);
     };
     let Some(context) = prompt_bearing_route_context_from_change(&change) else {
@@ -267,7 +292,7 @@ pub(crate) fn pending_prompt_bearing_context_for_route(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn require_routed_cycle_ack(
+pub fn require_routed_cycle_ack(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
@@ -278,6 +303,7 @@ pub(crate) fn require_routed_cycle_ack(
     prompt_bearing_marker: Option<&str>,
     live_child_for_file: bool,
     dispatch_start: RoutedDispatchStartProof,
+    effects: RouteCycleAckEffects,
 ) -> Result<Option<String>> {
     if !should_require_routed_cycle_ack(RoutedCycleAckFacts {
         baseline_cycle_open: baseline.is_some_and(|state| state.is_open()),
@@ -351,6 +377,7 @@ pub(crate) fn require_routed_cycle_ack(
                     baseline,
                     marker,
                     ack_timeout,
+                    effects,
                 )?
             {
                 return Ok(Some(dispatch_pane));
@@ -377,7 +404,7 @@ pub(crate) fn require_routed_cycle_ack(
             )?;
             let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
             let dispatch_stage = dispatch_start.dispatch_stage_label();
-            emit_startup_miss_diagnostic(
+            (effects.emit_startup_miss_diagnostic)(
                 tmux,
                 pane,
                 file,
@@ -427,113 +454,32 @@ pub(crate) fn require_routed_cycle_ack(
 
 #[cfg(test)]
 mod tests {
-    #![allow(unused_imports)]
     use super::*;
-    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
-    use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
-    use agent_doc_supervisor_io::ipc::SupervisorIpc;
-    #[test]
-    fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
-        let snapshot = concat!(
-            "---\n",
-            "agent_doc_format: template\n",
-            "queue_active: false\n",
-            "---\n\n",
-            "<!-- agent:exchange -->\n",
-            "### Re: prior — gpt-5\n\n",
-            "Done.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let current = snapshot.replace(
-            "<!-- /agent:exchange -->",
-            "❯ /clear\n<!-- /agent:exchange -->",
-        );
-        std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
-        let ctx = pending_prompt_bearing_context_for_route(&doc, None)
-            .unwrap()
-            .expect("exchange slash command should be route-visible");
-        assert_eq!(ctx.prompt_text, "/clear");
-        assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
+    struct TestPipelineFrontmatterEffects;
 
-        let _force_disk_guard = super::super::ForceDiskRouteWritesGuard::set(true);
-        let outcome =
-            enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_exchange_slash")
-                .unwrap()
-                .expect("slash command should queue for idle drain");
-        assert!(outcome.appended);
-        assert_eq!(outcome.prompt_text, "/clear");
+    impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
+        for TestPipelineFrontmatterEffects
+    {
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current_content: &str,
+            target_content: &str,
+            _reason: &str,
+        ) -> anyhow::Result<()> {
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
 
-        let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: go"));
-        assert!(updated.contains("<!-- agent:queue go -->"));
-        assert!(!updated.contains("agent:queue auto"));
-        assert!(updated.contains("\n/clear\n"), "{updated}");
-        assert!(
-            !updated.contains(":pushpin: /clear"),
-            "slash command must stay literal so the idle-queue classifier sees it:\n{updated}"
-        );
-        assert_eq!(
-            agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
-            Some("/clear"),
-            "queued exchange slash command should be the active literal drain head"
-        );
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            snapshot, updated,
-            "route queueing must sync the snapshot so the command head is not treated as edited drift"
-        );
+        fn log_op(&self, file: &Path, message: &str) {
+            agent_doc_ops_log_io::log_op(file, message);
+        }
     }
-    #[test]
-    fn route_enqueue_bare_exchange_slash_command_for_idle_drain() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
-        let snapshot = concat!(
-            "---\n",
-            "agent_doc_format: template\n",
-            "queue_active: false\n",
-            "---\n\n",
-            "<!-- agent:exchange -->\n",
-            "### Re: prior — gpt-5\n\n",
-            "Done.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let current = snapshot.replace(
-            "<!-- /agent:exchange -->",
-            "/clear\n<!-- /agent:exchange -->",
-        );
-        std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
-        let ctx = pending_prompt_bearing_context_for_route(&doc, None)
-            .unwrap()
-            .expect("bare exchange slash command should be route-visible");
-        assert_eq!(ctx.prompt_text, "/clear");
-        assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
+    const TEST_PIPELINE_FRONTMATTER_EFFECTS: TestPipelineFrontmatterEffects =
+        TestPipelineFrontmatterEffects;
 
-        let _force_disk_guard = super::super::ForceDiskRouteWritesGuard::set(true);
-        let outcome = enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_bare_slash")
-            .unwrap()
-            .expect("slash command should queue for idle drain");
-        assert!(outcome.appended);
-        assert_eq!(outcome.prompt_text, "/clear");
-
-        let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: go"));
-        assert!(updated.contains("<!-- agent:queue go -->"));
-        assert!(!updated.contains("agent:queue auto"));
-        assert!(updated.contains("\n/clear\n"), "{updated}");
-        assert_eq!(
-            agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
-            Some("/clear"),
-            "bare exchange slash command should be the active literal drain head"
-        );
-    }
     #[test]
     fn wait_for_start_ack_detects_new_preflight_cycle() {
         let dir = tempfile::tempdir().unwrap();
@@ -567,7 +513,7 @@ mod tests {
 
         agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some("# Session\n"),
@@ -582,7 +528,7 @@ mod tests {
             agent_doc_cycle_state_io::start_preflight(&doc_for_thread, None, Some("# Session\n"))
                 .unwrap();
             agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-                &crate::PIPELINE_FRONTMATTER_EFFECTS,
+                &TEST_PIPELINE_FRONTMATTER_EFFECTS,
                 &doc_for_thread,
                 "commit_success",
                 Some("# Session\n"),
@@ -605,7 +551,7 @@ mod tests {
 
         agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some("# Session\n"),
@@ -629,7 +575,7 @@ mod tests {
 
         agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some("# Session\n"),
@@ -642,7 +588,7 @@ mod tests {
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
             agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-                &crate::PIPELINE_FRONTMATTER_EFFECTS,
+                &TEST_PIPELINE_FRONTMATTER_EFFECTS,
                 &doc_for_thread,
                 "commit_already_current",
                 Some("# Session\n"),
@@ -676,7 +622,7 @@ mod tests {
         }));
 
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some("# Session\n"),

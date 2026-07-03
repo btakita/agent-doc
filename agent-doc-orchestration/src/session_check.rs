@@ -73,6 +73,10 @@ use agent_doc_workflow::session_check::{BlockedCloseoutMessage, GuardResult};
 use anyhow::{Context, Result};
 use std::path::Path;
 
+pub use agent_doc_session_check_io::{
+    detect_unstarted_prompt_bearing_diff, first_unstarted_prompt_bearing_change,
+};
+
 mod response_guards;
 pub(crate) use response_guards::*;
 mod detect;

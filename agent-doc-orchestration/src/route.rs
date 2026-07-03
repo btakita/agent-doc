@@ -166,17 +166,16 @@ use agent_doc_controller::dispatch::{
     DispatchDrainRetryDecision, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyBusyRefusalFacts,
     DispatchOnlyReopenDelivery, DispatchOnlyStartingPaneActorReadyFacts,
     DispatchOnlyStartingPaneNotReadyMessageFacts, DispatchRuntimeHealth,
-    DuplicatePanePolicyErrorFacts, MissingCycleAckFacts, PromptReadyBarrierDecision, ReopenMode,
-    RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
-    RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts,
-    RoutedCycleAckFacts, RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
-    StartingTimeoutActorFacts, StartupMissRouteFacts, actor_blocked_by_starting_timeout,
-    actor_dispatch_blocker_reason, authoritative_actor_ready_retry_budget,
-    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
-    classify_authoritative_prompt_ready_barrier, classify_closeout_block_dispatch,
-    decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
-    dispatch_drain_retry_decision, dispatch_only_blocked_guard_reason,
-    dispatch_only_blocker_recovery_hint,
+    DuplicatePanePolicyErrorFacts, PromptReadyBarrierDecision, ReopenMode, RetryBudget,
+    RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts, RouteCloseoutDrainOutcome,
+    RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts, RoutedDispatchStartProof,
+    RoutedReopenFacts, RoutedReopenGuardReason, StartingTimeoutActorFacts, StartupMissRouteFacts,
+    actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
+    authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
+    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
+    classify_closeout_block_dispatch, decide_authoritative_reopen,
+    degraded_authoritative_actor_direct_submit_log_message, dispatch_drain_retry_decision,
+    dispatch_only_blocked_guard_reason, dispatch_only_blocker_recovery_hint,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_print_unproven_progress,
@@ -187,12 +186,10 @@ use agent_doc_controller::dispatch::{
     failclosed_wait_context, fresh_route_start_ack_timeout, prompt_ready_barrier_failed_event,
     route_busy_diagnostic_message, route_busy_queued_diagnostic_message,
     route_closeout_user_outcome_fields, route_dispatch_bug_report_item,
-    route_startup_miss_diagnostic_message, routed_cycle_ack_timeout,
-    should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
-    starting_actor_ready_log_line, starting_actor_terminal_log_line,
-    starting_actor_timeout_coalesced_log_line, startup_miss_requires_fresh_start,
-    startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
-    startup_miss_superseded_by_later_open_start,
+    route_startup_miss_diagnostic_message, starting_actor_ready_log_line,
+    starting_actor_terminal_log_line, starting_actor_timeout_coalesced_log_line,
+    startup_miss_requires_fresh_start, startup_miss_should_fail_closed,
+    startup_miss_should_restart_live_owner, startup_miss_superseded_by_later_open_start,
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
@@ -232,7 +229,11 @@ pub(crate) use agent_doc_route_io::busy_pane::{
     attempt_busy_existing_pane_auto_fix, attempt_busy_existing_pane_interrupt_recovery,
     ensure_existing_pane_ready_for_dispatch,
 };
-use agent_doc_route_io::direct_pane_dispatch::{editor_route_attempt_id, log_route_latency};
+pub(crate) use agent_doc_route_io::cycle_ack::{
+    RouteCycleAckEffects, pending_prompt_bearing_context_for_route, require_routed_cycle_ack,
+    wait_for_start_ack,
+};
+use agent_doc_route_io::direct_pane_dispatch::editor_route_attempt_id;
 #[cfg(test)]
 use agent_doc_route_io::dispatch::send_command_checked;
 use agent_doc_route_io::dispatch::{
@@ -250,8 +251,7 @@ use agent_doc_route_io::restart_handoff::wait_for_busy_restart_handoff;
 use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup_debounce::await_idle;
 pub(crate) use agent_doc_route_io::startup_ready::{
-    AgentReadyWaitOutcome, fresh_start_pane_idle_ready, wait_for_agent_ready,
-    wait_for_agent_ready_outcome,
+    fresh_start_pane_idle_ready, wait_for_agent_ready, wait_for_agent_ready_outcome,
 };
 use agent_doc_route_io::supervisor_runtime::{
     query_supervisor_health, query_supervisor_runtime, restart_via_supervisor,
@@ -396,6 +396,14 @@ fn route_dispatch_effects() -> RouteDispatchEffects {
     RouteDispatchEffects {
         file_route_dispatch_bug_report,
         emit_busy_route_queued_diagnostic: emit_busy_route_queued_diagnostic_from_facts,
+    }
+}
+
+fn route_cycle_ack_effects() -> RouteCycleAckEffects {
+    RouteCycleAckEffects {
+        route_dispatch_effects: route_dispatch_effects(),
+        emit_startup_miss_diagnostic,
+        emit_busy_route_diagnostic,
     }
 }
 
@@ -2778,6 +2786,7 @@ fn route_via_authoritative_actor(
                 prompt_bearing_marker,
                 true,
                 dispatch_start,
+                route_cycle_ack_effects(),
             )?;
             Ok(ack_pane.unwrap_or(dispatch_pane))
         }
@@ -2927,6 +2936,7 @@ fn route_via_authoritative_actor(
                 prompt_bearing_marker,
                 true,
                 dispatch_start,
+                route_cycle_ack_effects(),
             )?;
             Ok(ack_pane.unwrap_or(dispatch_pane))
         }
@@ -2935,9 +2945,6 @@ fn route_via_authoritative_actor(
 
 mod pane_resolution;
 pub(crate) use pane_resolution::*;
-
-mod cycle_ack;
-pub(crate) use cycle_ack::*;
 
 mod startup;
 pub use startup::*;
@@ -3600,6 +3607,110 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let current = snapshot.replace(
+            "<!-- /agent:exchange -->",
+            "❯ /clear\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None)
+            .unwrap()
+            .expect("exchange slash command should be route-visible");
+        assert_eq!(ctx.prompt_text, "/clear");
+        assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
+
+        let _force_disk_guard = ForceDiskRouteWritesGuard::set(true);
+        let outcome =
+            enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_exchange_slash")
+                .unwrap()
+                .expect("slash command should queue for idle drain");
+        assert!(outcome.appended);
+        assert_eq!(outcome.prompt_text, "/clear");
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue: go"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
+        assert!(!updated.contains("agent:queue auto"));
+        assert!(updated.contains("\n/clear\n"), "{updated}");
+        assert!(
+            !updated.contains(":pushpin: /clear"),
+            "slash command must stay literal so the idle-queue classifier sees it:\n{updated}"
+        );
+        assert_eq!(
+            agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
+            Some("/clear"),
+            "queued exchange slash command should be the active literal drain head"
+        );
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snapshot, updated,
+            "route queueing must sync the snapshot so the command head is not treated as edited drift"
+        );
+    }
+
+    #[test]
+    fn route_enqueue_bare_exchange_slash_command_for_idle_drain() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let current = snapshot.replace(
+            "<!-- /agent:exchange -->",
+            "/clear\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+
+        let ctx = pending_prompt_bearing_context_for_route(&doc, None)
+            .unwrap()
+            .expect("bare exchange slash command should be route-visible");
+        assert_eq!(ctx.prompt_text, "/clear");
+        assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
+
+        let _force_disk_guard = ForceDiskRouteWritesGuard::set(true);
+        let outcome = enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_bare_slash")
+            .unwrap()
+            .expect("slash command should queue for idle drain");
+        assert!(outcome.appended);
+        assert_eq!(outcome.prompt_text, "/clear");
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue: go"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
+        assert!(!updated.contains("agent:queue auto"));
+        assert!(updated.contains("\n/clear\n"), "{updated}");
+        assert_eq!(
+            agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
+            Some("/clear"),
+            "bare exchange slash command should be the active literal drain head"
+        );
     }
 
     #[test]

@@ -360,14 +360,33 @@ Half at kickoff, half on acceptance. ~2 weeks from repo access. Credited against
 **Acceptance test he'll understand on the phone:** "Change the asking price on a listing — the OM and teaser update without a full regen, and at no point could a buyer have seen the old number."
 
 Route 2 note is send-ready in the doc above; attach or paste the one-pager only if he replies or the call happens — the note alone is the opener, the bid is the follow-through.
-<!-- agent:boundary:a5a7b716 -->
-Please explain this opener. It seems like a pitch + offer. Could you disambiguate it for me?
-> Instead of a pitch, here's a concrete offer.
+### Re: "Instead of a pitch, here's a concrete offer" — what that line is doing — opus-4-8
+
+> **Queue prompt:** Please explain this opener. It seems like a pitch + offer. Could you disambiguate it for me?
+> > Instead of a pitch, here's a concrete offer.
+
+You read it right — it is both, and that's deliberate. Here's the disambiguation:
+
+**Pitch vs. offer, plainly:**
+- A **pitch** asks him to *believe* something: "I'm good at this, my approach is trustworthy, working with me will pay off." He has to evaluate you. The mental work is trust-assessment, and it's open-ended.
+- An **offer** asks him to *decide* something: "This scope, this price, this timeline — yes or no?" He has to evaluate a transaction. The mental work is bounded, and cheap for him.
+
+**What the line itself is doing:** it's one sentence of framing (a meta-pitch, honestly) that announces the switch from believe-mode to decide-mode. Artur has already been pitched — by you (the V1.2 proposal) and probably by every freelancer who contacted him. His guard is up for pitches. The line disarms that reflex by naming it: "I know you expect a pitch; skip it, here's something you can just say yes or no to." Then the body delivers on that promise — pick one slice, fixed price, off-ramp if it doesn't work.
+
+**So the anatomy of Route 2 is:** 1 sentence of pitch (the framing line) + 4 paragraphs of offer (the substance). The ratio is what makes it land — the old drafts were the inverse, mostly persuasion with the ask buried.
+
+**If the hybrid feel bothers you**, the line can be made pure-offer by dropping the meta-framing:
+- Current: "Instead of a pitch, here's a concrete offer. Pick one slice and let me build it."
+- Pure: "Here's a concrete offer. Pick one slice and let me build it."
+- Purest: "Pick one slice and let me build it."
+
+I'd keep the current version. The "instead of a pitch" clause does real work: it signals you know his time is scarce and his skepticism is earned, without saying either. Cut it only if it reads as too clever in your voice.
+<!-- agent:boundary:77ea6c9a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue stop -->
+<!-- agent:queue go -->
 <!-- /agent:queue -->
 
 ## Backlog

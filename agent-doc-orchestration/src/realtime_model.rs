@@ -903,14 +903,22 @@ mod tests {
         // A tiny limit still finds the most recent commit (B) but can miss the
         // older one; the never-committed content stays false regardless.
         assert!(content_matches_recent_committed_blob(&file, HEAL_B, 1));
-        assert!(!content_matches_recent_committed_blob(&file, "still never\n", 1));
+        assert!(!content_matches_recent_committed_blob(
+            &file,
+            "still never\n",
+            1
+        ));
     }
 
     #[test]
     fn content_matches_recent_committed_blob_false_outside_git_repo() {
         // No git repo (best-effort): any git error → false, never a panic.
         let (_dir, file, _canonical) = temp_doc("plain body\n");
-        assert!(!content_matches_recent_committed_blob(&file, "plain body\n", 15));
+        assert!(!content_matches_recent_committed_blob(
+            &file,
+            "plain body\n",
+            15
+        ));
     }
 
     #[test]

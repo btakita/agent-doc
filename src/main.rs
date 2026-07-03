@@ -113,13 +113,15 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
     ) -> anyhow::Result<
         Option<agent_doc_controller_io::project_controller::ControllerQueueConsumptionOutcome>,
     > {
-        Ok(agent_doc_orchestration::write::consume_queue_prompt_force_disk(file)?.map(
-            |outcome| agent_doc_controller_io::project_controller::ControllerQueueConsumptionOutcome {
-                consumed_text: outcome.consumed_text,
-                remaining: outcome.remaining,
-                drained: outcome.drained,
-            },
-        ))
+        Ok(
+            agent_doc_orchestration::write::consume_queue_prompt_force_disk(file)?.map(|outcome| {
+                agent_doc_controller_io::project_controller::ControllerQueueConsumptionOutcome {
+                    consumed_text: outcome.consumed_text,
+                    remaining: outcome.remaining,
+                    drained: outcome.drained,
+                }
+            }),
+        )
     }
 
     fn route_auto_start(
@@ -136,6 +138,72 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
 
 static PROJECT_CONTROLLER_RUNTIME_EFFECTS: CliProjectControllerRuntimeEffects =
     CliProjectControllerRuntimeEffects;
+
+struct CliSyncRuntimeEffects;
+
+impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
+    fn commit(&self, file: &Path) -> anyhow::Result<bool> {
+        agent_doc_orchestration::git::commit(file)
+    }
+
+    fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> anyhow::Result<bool> {
+        agent_doc_orchestration::session_check::detect_jb_cache_conflict_cancel_recoverable(file)
+    }
+
+    fn detect_uncommitted_closeout_drift(&self, file: &Path) -> anyhow::Result<Option<String>> {
+        agent_doc_orchestration::session_check::detect_uncommitted_closeout_drift(file)
+    }
+
+    fn repair(&self, file: &Path) -> anyhow::Result<agent_doc_turn::repair::RepairOutcome> {
+        agent_doc_orchestration::repair::repair(file)
+    }
+
+    fn repair_stale_preflight_started_cycle(
+        &self,
+        file: &Path,
+    ) -> anyhow::Result<agent_doc_turn::repair::RepairOutcome> {
+        agent_doc_orchestration::repair::repair_stale_preflight_started_cycle(file)
+    }
+
+    fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
+        agent_doc_orchestration::repair::save_pending(file, response)
+    }
+
+    fn session_check_inspect(
+        &self,
+        file: &Path,
+    ) -> anyhow::Result<agent_doc_sync_io::SyncSessionCheckStatus> {
+        match agent_doc_orchestration::session_check::inspect(file)? {
+            agent_doc_orchestration::session_check::SessionCheckStatus::Ok(message) => {
+                Ok(agent_doc_sync_io::SyncSessionCheckStatus::Ok(message))
+            }
+            agent_doc_orchestration::session_check::SessionCheckStatus::Interrupted(message) => Ok(
+                agent_doc_sync_io::SyncSessionCheckStatus::Interrupted(message),
+            ),
+        }
+    }
+
+    fn provision_pane(
+        &self,
+        tmux: &tmux_router::Tmux,
+        file: &Path,
+        session_id: &str,
+        file_path: &str,
+        context_session: Option<&str>,
+        col_args: &[String],
+    ) -> anyhow::Result<String> {
+        agent_doc_orchestration::route::provision_pane(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            context_session,
+            col_args,
+        )
+    }
+}
+
+static SYNC_RUNTIME_EFFECTS: CliSyncRuntimeEffects = CliSyncRuntimeEffects;
 
 /// Document mode for agent-doc sessions.
 #[derive(Clone, Debug, ValueEnum)]
@@ -2968,6 +3036,7 @@ fn main() -> anyhow::Result<()> {
     agent_doc_controller_io::project_controller::install_runtime_effects(
         &PROJECT_CONTROLLER_RUNTIME_EFFECTS,
     );
+    agent_doc_sync_io::install_runtime_effects(&SYNC_RUNTIME_EFFECTS);
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();
     let pending_alias_used = deprecated_pending_alias_used(&raw_args);
@@ -3140,7 +3209,7 @@ fn main() -> anyhow::Result<()> {
             wait_for_ready,
             force_disk,
         } => {
-            // NOTE: agent_doc_orchestration::sync::run_layout_only was previously called here after route when
+            // NOTE: agent_doc_sync_io::sync::run_layout_only was previously called here after route when
             // --col args were provided. Removed because the JB plugin calls `agent-doc sync`
             // separately with the correct --window arg. Running sync from both route AND
             // the plugin created a double-sync glitch (panes bouncing between stash and
@@ -3264,24 +3333,24 @@ fn main() -> anyhow::Result<()> {
             exact_visible,
         } => {
             if rename && let Some(ref f) = focus {
-                agent_doc_orchestration::sync::write_rename_debounce(f);
+                agent_doc_sync_io::sync::write_rename_debounce(f);
             }
             if no_autostart {
                 if exact_visible {
-                    agent_doc_orchestration::sync::run_layout_only_exact_visible(
+                    agent_doc_sync_io::sync::run_layout_only_exact_visible(
                         &columns,
                         window.as_deref(),
                         focus.as_deref(),
                     )
                 } else {
-                    agent_doc_orchestration::sync::run_layout_only(
+                    agent_doc_sync_io::sync::run_layout_only(
                         &columns,
                         window.as_deref(),
                         focus.as_deref(),
                     )
                 }
             } else {
-                agent_doc_orchestration::sync::run(&columns, window.as_deref(), focus.as_deref())
+                agent_doc_sync_io::sync::run(&columns, window.as_deref(), focus.as_deref())
             }
         }
         Commands::Patch {
@@ -3316,13 +3385,13 @@ fn main() -> anyhow::Result<()> {
         Commands::AutoDag { file, json } => auto_dag::run_command(&file, json),
         Commands::Resync { file, fix, session } => {
             if fix {
-                agent_doc_orchestration::resync::run_fix(file.as_deref(), session.as_deref())
+                agent_doc_sync_io::resync::run_fix(file.as_deref(), session.as_deref())
             } else {
-                agent_doc_orchestration::resync::run(false, session.as_deref(), file.as_deref())
+                agent_doc_sync_io::resync::run(false, session.as_deref(), file.as_deref())
             }
         }
         Commands::Fix { file, session } => {
-            agent_doc_orchestration::resync::run_fix(file.as_deref(), session.as_deref())
+            agent_doc_sync_io::resync::run_fix(file.as_deref(), session.as_deref())
         }
         Commands::Skill { command } => {
             match command {

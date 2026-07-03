@@ -1643,7 +1643,7 @@ fn existing_session_pane_action(
     current_pane: &str,
 ) -> Result<Option<ExistingSessionPaneAction>> {
     let entry = agent_doc_session_registry_io::lookup_entry(session_id)?;
-    let live_owner = crate::sync::find_normal_path_owner_pane_excluding_quiet(
+    let live_owner = agent_doc_sync_io::sync::find_normal_path_owner_pane_excluding_quiet(
         tmux,
         file,
         session_id,

@@ -1658,6 +1658,34 @@ new content here\n\
     }
 
     #[test]
+    fn bounded_preview_clamps_to_char_boundary_inside_multibyte() {
+        // Regression (`#utf8p`): the parser peeks up to 20 bytes past a `<!--`
+        // to decide whether it is an agent marker. When that window ended inside
+        // a multibyte glyph such as `❯` (3 bytes), the old raw
+        // `&doc[peek_start..peek_start + 20]` slice panicked with
+        // "byte index N is not a char boundary", which aborted the cdylib and
+        // crashed the host editor (SIGABRT on the `agent-doc-crdt-*` thread).
+        // `bounded_preview` must clamp the upper bound back to a char boundary.
+        let doc = format!("<!--{}❯ trailing", "x".repeat(18));
+        // peek_start = 4; peek_start + 20 = 24 lands on the 3rd byte of `❯`
+        // (which occupies bytes 22..25), so a raw slice would panic here.
+        let preview = bounded_preview(&doc, 4, 20);
+        assert!(doc.is_char_boundary(4 + preview.len()));
+        assert_eq!(preview, "x".repeat(18)); // stops just before `❯`
+    }
+
+    #[test]
+    fn parse_does_not_panic_on_prompt_glyph_adjacent_to_agent_marker() {
+        // Mirrors the live reitrades.md shape: `❯` prompt lines sitting directly
+        // against agent component / boundary markers. Parsing must stay panic-free
+        // and still recover the real `exchange` component.
+        let doc = "<!-- agent:exchange -->\n❯ tighten this up — simpler — lower rates\n<!-- agent:boundary:0d861cfa -->\n❯ His platform is in Rust & Vue.\n<!-- /agent:exchange -->\n";
+        let components = parse(doc).expect("prompt glyphs near markers must not panic");
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "exchange");
+    }
+
+    #[test]
     fn closing_tag_unchanged_with_attrs() {
         // Closing tags never have attributes
         let doc = "<!-- agent:status mode=replace -->\n- [x] Done\n<!-- /agent:status -->\n";

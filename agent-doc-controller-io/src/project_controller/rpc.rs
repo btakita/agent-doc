@@ -1404,11 +1404,11 @@ fn repair_spent_preset_pause_before_dispatch(
     let outcome = runtime_effects()?
         .consume_queue_prompt_force_disk(file)
         .with_context(|| {
-        format!(
-            "spent-preset pause repair: failed to consume #{}",
-            preset_id
-        )
-    })?;
+            format!(
+                "spent-preset pause repair: failed to consume #{}",
+                preset_id
+            )
+        })?;
     if let Some(outcome) = outcome {
         resume_spent_preset_pause(
             project_root,
@@ -1461,10 +1461,7 @@ pub(crate) fn reap_verified_controller_pid(project_root: &Path, pid: u32, genera
     if pid == std::process::id() || !is_same_project_controller_pid(project_root, pid) {
         return;
     }
-    crate::process::send_signal(
-        pid,
-        crate::process::ProcessSignal::Term,
-    );
+    crate::process::send_signal(pid, crate::process::ProcessSignal::Term);
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(750) {
         if !process_is_alive(pid) {
@@ -1473,10 +1470,7 @@ pub(crate) fn reap_verified_controller_pid(project_root: &Path, pid: u32, genera
         std::thread::sleep(Duration::from_millis(25));
     }
     if is_same_project_controller_pid(project_root, pid) {
-        crate::process::send_signal(
-            pid,
-            crate::process::ProcessSignal::Kill,
-        );
+        crate::process::send_signal(pid, crate::process::ProcessSignal::Kill);
         eprintln!(
             "[controller] reaped stale same-project controller pid={pid} generation={generation}"
         );
@@ -1585,8 +1579,7 @@ pub fn recycle_supervisors_all_projects() -> Result<(usize, usize)> {
 }
 
 pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usize)> {
-    let docs =
-        crate::process::route_owned_supervisor_documents(std::process::id());
+    let docs = crate::process::route_owned_supervisor_documents(std::process::id());
     let reason = if force {
         "install_fanout_force"
     } else {

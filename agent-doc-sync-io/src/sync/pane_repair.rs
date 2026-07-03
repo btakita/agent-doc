@@ -32,7 +32,7 @@ pub(crate) type OpenCycleProtectedPaneState = agent_doc_sync::OpenCycleProtected
 
 pub(crate) fn resolve_harness_for_sync(file: &Path) -> agent_doc_harness::HarnessConfig {
     let content = std::fs::read_to_string(file).unwrap_or_default();
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     rc.set_doc_content(content);
     let fm = rc.frontmatter();
     let global_config = rc.global_config();
@@ -122,26 +122,23 @@ pub(crate) fn capture_dead_pane_diagnostics(
         .or_else(|| last_known_window.map(ToOwned::to_owned));
     let cycle_phase = cycle_phase_label(file);
     let tail = tmux.capture_pane(pane_id, Some(80)).unwrap_or_default();
-    let capture_path =
-        agent_doc_sync_io::persist_dead_pane_capture(file, session_id, pane_id, &tail);
+    let capture_path = crate::persist_dead_pane_capture(file, session_id, pane_id, &tail);
     let last_visible_excerpt = last_visible_excerpt(&tail);
-    let event = agent_doc_sync_io::dead_pane_detected_event(
-        agent_doc_sync_io::DeadPaneDetectedEventFacts {
-            pane_id,
-            dead_status: dead_status.as_deref(),
-            cycle_phase: cycle_phase.as_deref(),
-            observed_window: observed_window.as_deref(),
-            capture_path: capture_path.as_deref(),
-            last_visible_excerpt: last_visible_excerpt.as_deref(),
-        },
-    );
+    let event = crate::dead_pane_detected_event(crate::DeadPaneDetectedEventFacts {
+        pane_id,
+        dead_status: dead_status.as_deref(),
+        cycle_phase: cycle_phase.as_deref(),
+        observed_window: observed_window.as_deref(),
+        capture_path: capture_path.as_deref(),
+        last_visible_excerpt: last_visible_excerpt.as_deref(),
+    });
     let _ =
         agent_doc_supervisor_io::startup_miss::append_session_log_event(file, session_id, &event);
 
     let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
         file,
         session_id,
-        &agent_doc_sync_io::dead_pane_cleanup_event(pane_id),
+        &crate::dead_pane_cleanup_event(pane_id),
     );
 
     Ok(Some(DeadPaneDiagnostics {
@@ -193,7 +190,7 @@ pub(crate) fn recover_missing_pane_closeout(
             state.cycle_id
         ),
     );
-    match crate::repair::repair(file) {
+    match crate::runtime_effects().and_then(|effects| effects.repair(file)) {
         Ok(outcome) => {
             let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
                 file,
@@ -240,6 +237,7 @@ pub(crate) fn repair_missing_registered_pane(
     last_known_window: Option<&str>,
     mode: MissingRegisteredPaneRepairMode,
 ) -> Result<MissingRegisteredPaneRepair> {
+    let effects = crate::runtime_effects()?;
     let dead_pane =
         capture_dead_pane_diagnostics(tmux, file, session_id, pane_id, last_known_window)?;
     let (closeout_recovery_phase, closeout_recovery_outcome, closeout_recovery_error) = match mode {
@@ -270,7 +268,7 @@ pub(crate) fn repair_missing_registered_pane(
         MissingRegisteredPaneRepairMode::InspectOnly => false,
         MissingRegisteredPaneRepairMode::ExplicitRepair if closeout_recovery_phase.is_none() => {
             matches!(
-                crate::repair::repair_stale_preflight_started_cycle(file)?,
+                effects.repair_stale_preflight_started_cycle(file)?,
                 agent_doc_turn::repair::RepairOutcome::StalePreflightLockRepaired
             )
         }
@@ -279,7 +277,7 @@ pub(crate) fn repair_missing_registered_pane(
     let block_auto_start_reason = match mode {
         MissingRegisteredPaneRepairMode::InspectOnly => {
             closeout_recovery_phase.as_deref().map(|phase| {
-                match crate::session_check::detect_uncommitted_closeout_drift(file) {
+                match effects.detect_uncommitted_closeout_drift(file) {
                     Ok(Some(message)) => message,
                     _ => agent_doc_tmux::format_missing_pane_manual_repair_reason(
                         file.display(),
@@ -292,16 +290,14 @@ pub(crate) fn repair_missing_registered_pane(
             if closeout_recovery_phase.is_some() && closeout_recovery_outcome.is_none() =>
         {
             let phase = closeout_recovery_phase.as_deref().unwrap_or("unknown");
-            Some(
-                match crate::session_check::detect_uncommitted_closeout_drift(file) {
-                    Ok(Some(message)) => message,
-                    _ => agent_doc_tmux::format_missing_pane_closeout_block_reason(
-                        file.display(),
-                        phase,
-                        closeout_recovery_error.as_deref(),
-                    ),
-                },
-            )
+            Some(match effects.detect_uncommitted_closeout_drift(file) {
+                Ok(Some(message)) => message,
+                _ => agent_doc_tmux::format_missing_pane_closeout_block_reason(
+                    file.display(),
+                    phase,
+                    closeout_recovery_error.as_deref(),
+                ),
+            })
         }
         MissingRegisteredPaneRepairMode::ExplicitRepair => None,
     };
@@ -510,7 +506,10 @@ mod tests {
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let response = "<!-- patch:exchange -->\n### Re: topic — gpt-5\nRecovered body.\n<!-- /patch:exchange -->\n";
-        crate::repair::save_pending(&doc, response).unwrap();
+        crate::runtime_effects()
+            .unwrap()
+            .save_pending(&doc, response)
+            .unwrap();
 
         let repair = repair_missing_registered_pane(
             &Tmux::default_server(),
@@ -568,7 +567,10 @@ mod tests {
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let response = "<!-- patch:exchange -->\n### Re: topic — gpt-5\nRecovered body.\n<!-- /patch:exchange -->\n";
-        crate::repair::save_pending(&doc, response).unwrap();
+        crate::runtime_effects()
+            .unwrap()
+            .save_pending(&doc, response)
+            .unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
         std::fs::create_dir_all(&log_dir).unwrap();
@@ -642,7 +644,10 @@ mod tests {
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let response = "<!-- patch:exchange -->\n### Re: topic — gpt-5\nRecovered body.\n<!-- /patch:exchange -->\n";
-        crate::repair::save_pending(&doc, response).unwrap();
+        crate::runtime_effects()
+            .unwrap()
+            .save_pending(&doc, response)
+            .unwrap();
 
         let updated = concat!(
             "---\n",

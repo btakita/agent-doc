@@ -826,7 +826,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // executing inside a tmux pane owning a different document (the
     // cross-document contamination vector — e.g. a tsift.md-owned pane
     // committing agent-doc-bugs2.md's response).
-    crate::sync::log_cross_document_execution_context(file, "write");
+    agent_doc_sync_io::sync::log_cross_document_execution_context(file, "write");
 
     // #manual-queue-head-loss: extend the `#queue-clear-unrun-items` removal-proof
     // anchor to user queue heads inserted AFTER preflight (for example a

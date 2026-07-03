@@ -4,6 +4,7 @@
 //! generation changes, lifecycle reports, and routed dispatch acceptance.
 //! `sessions.json` and tmux state remain projections and layout inputs.
 
+use crate::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_controller::dispatch::{
     ControllerDispatchProofScope, ControllerDispatchReceipt, ControllerDispatchResultStatus,
 };
@@ -19,7 +20,6 @@ use agent_doc_controller::status::{
     preparing_controller_is_stale, resolve_controller_identity_version,
     stale_preparing_controller_threshold_from_env_value,
 };
-use crate::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use anyhow::{Context, Result};
@@ -157,10 +157,8 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
             agent_doc_queue::queue_consume::consume_queue_nodes_by_key(&content, &node_keys.keys)?;
         let remaining = agent_doc_queue::queue_heads::active_queue_heads(&new_content).len();
         if remaining == 0 {
-            new_content = agent_doc_frontmatter::frontmatter::merge_queue_state(
-                &new_content,
-                false,
-            )?;
+            new_content =
+                agent_doc_frontmatter::frontmatter::merge_queue_state(&new_content, false)?;
         }
         std::fs::write(file, &new_content)
             .context("project controller test queue consume: failed to write document")?;
@@ -184,7 +182,8 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
 }
 
 #[cfg(test)]
-static TEST_RUNTIME_EFFECTS: TestProjectControllerRuntimeEffects = TestProjectControllerRuntimeEffects;
+static TEST_RUNTIME_EFFECTS: TestProjectControllerRuntimeEffects =
+    TestProjectControllerRuntimeEffects;
 
 #[derive(Clone, Debug)]
 pub struct SessionsProjectionHint {
@@ -1818,8 +1817,7 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
         if pid == std::process::id() {
             continue;
         }
-        let Some(root) = crate::process::controller_serve_project_root(pid)
-        else {
+        let Some(root) = crate::process::controller_serve_project_root(pid) else {
             continue;
         };
         if !crate::process::cmdline_has_preparing_handoff(pid) {
@@ -3531,9 +3529,8 @@ mod tests {
         assert_eq!(record.generation, 1);
 
         let conn = open_state_db(dir.path()).unwrap();
-        let boot_timestamp =
-            crate::process::system_boot_timestamp_secs(timestamp_secs())
-                .expect("/proc/uptime should be available in tests");
+        let boot_timestamp = crate::process::system_boot_timestamp_secs(timestamp_secs())
+            .expect("/proc/uptime should be available in tests");
         let old_transition_timestamp = boot_timestamp.saturating_sub(2);
         let preboot_pause_timestamp = boot_timestamp.saturating_sub(1);
         conn.execute(

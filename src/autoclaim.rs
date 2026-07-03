@@ -50,7 +50,7 @@
 
 use anyhow::Result;
 
-use agent_doc_orchestration::sync;
+use agent_doc_sync_io::sync;
 use tmux_router::Tmux;
 
 pub fn run() -> Result<()> {

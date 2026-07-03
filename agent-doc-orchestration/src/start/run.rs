@@ -721,7 +721,10 @@ pub fn run_with_reap_policy(
             start_generation
         ),
     );
-    agent_doc_controller_io::project_controller::ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    agent_doc_controller_io::project_controller::ensure_controller_running(
+        &project_root,
+        LaunchMode::Lazy,
+    )?;
     // `#jbdisprecycle` R2: a `start_session` that races a supervisor `execve`
     // hot-reload (lib-install auto-recycle / operator restart) fails because the
     // project controller is mid-teardown (the live repro's terminal
@@ -740,7 +743,10 @@ pub fn run_with_reap_policy(
         let file_path_str = file.to_string_lossy().to_string();
         let mut attempts_used = 0usize;
         loop {
-            match agent_doc_controller_io::project_controller::start_session(&project_root, start_request.clone()) {
+            match agent_doc_controller_io::project_controller::start_session(
+                &project_root,
+                start_request.clone(),
+            ) {
                 Ok(record) => break record,
                 Err(err) => {
                     let recycle_pending =

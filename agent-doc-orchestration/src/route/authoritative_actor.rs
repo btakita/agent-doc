@@ -23,7 +23,8 @@ pub(crate) fn load_authoritative_actor_binding(
     }
 
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    let Some(record) = agent_doc_controller_io::project_controller::authoritative_actor_binding(&base_dir, file)?
+    let Some(record) =
+        agent_doc_controller_io::project_controller::authoritative_actor_binding(&base_dir, file)?
     else {
         return Ok(None);
     };
@@ -428,7 +429,10 @@ pub(crate) fn authorize_controller_dispatch(
         command_kind: command_kind.to_string(),
         diagnostic_payload: diagnostic_payload.to_string(),
     };
-    match agent_doc_controller_io::project_controller::authorize_dispatch(&base_dir, dispatch_request()) {
+    match agent_doc_controller_io::project_controller::authorize_dispatch(
+        &base_dir,
+        dispatch_request(),
+    ) {
         Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
         Err(err)
             if agent_doc_controller::dispatch::dispatch_error_is_coalesced(&err.to_string()) =>
@@ -515,7 +519,10 @@ fn recover_dispatch_via_supervisor_restart(
             "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=restarted {outcome_fields}"
         ),
     );
-    match agent_doc_controller_io::project_controller::authorize_dispatch(base_dir, dispatch_request()) {
+    match agent_doc_controller_io::project_controller::authorize_dispatch(
+        base_dir,
+        dispatch_request(),
+    ) {
         Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
         Err(err)
             if agent_doc_controller::dispatch::dispatch_error_is_coalesced(&err.to_string()) =>

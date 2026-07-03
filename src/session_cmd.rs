@@ -28,8 +28,8 @@
 
 use anyhow::{Context, Result};
 
-use agent_doc_orchestration::resync;
 use agent_doc_project_config_io as project_config_io;
+use agent_doc_sync_io::resync;
 use tmux_router::Tmux;
 
 /// Show the currently configured tmux session.

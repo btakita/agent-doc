@@ -409,7 +409,9 @@ fn registry_for_project_root<'a>(
         .registries
         .entry(project_root.to_path_buf())
         .or_insert_with(|| {
-            let actor = crate::graph::ActorContext::for_project_root(project_root.to_path_buf());
+            let actor = agent_doc_run_context_io::ActorContext::for_project_root(
+                project_root.to_path_buf(),
+            );
             (*actor.context().session_registry()).clone()
         })
 }
@@ -1180,7 +1182,7 @@ pub fn run_fix(target_file: Option<&Path>, relocate_session: Option<&str>) -> Re
 /// a document that stays interrupted falls through to the routing fix with a
 /// warning rather than aborting the whole `fix`.
 fn finish_unfinished_turn(file: &Path) -> Result<()> {
-    use crate::session_check::SessionCheckStatus;
+    use crate::SyncSessionCheckStatus as SessionCheckStatus;
     if !file.exists() {
         return Ok(());
     }
@@ -1193,11 +1195,11 @@ fn finish_unfinished_turn(file: &Path) -> Result<()> {
         // interruption (no open cycle yet). `repair` bails on an interruption that
         // the *next* pass resolves (response commit → reap), so log and keep going
         // rather than aborting `fix` — never swallow the diagnostic.
-        if let Err(e) = crate::repair::repair(file) {
+        if let Err(e) = crate::runtime_effects()?.repair(file) {
             eprintln!("[fix] finish-turn pass interrupted (continuing): {e}");
         }
         if matches!(
-            crate::session_check::inspect(file)?,
+            crate::runtime_effects()?.session_check_inspect(file)?,
             SessionCheckStatus::Ok(_)
         ) {
             return Ok(());
@@ -1209,7 +1211,9 @@ fn finish_unfinished_turn(file: &Path) -> Result<()> {
             break; // no progress this pass and still not clean — stop looping
         }
     }
-    if let SessionCheckStatus::Interrupted(msg) = crate::session_check::inspect(file)? {
+    if let SessionCheckStatus::Interrupted(msg) =
+        crate::runtime_effects()?.session_check_inspect(file)?
+    {
         eprintln!("[fix] document still has an unfinished turn after finish-turn passes: {msg}");
     }
     Ok(())
@@ -2659,7 +2663,7 @@ mod tests {
             .ok();
 
         // Strand a response (the "unfinished turn").
-        crate::repair::save_pending(
+        crate::runtime_effects().unwrap().save_pending(
         &doc,
         "<!-- patch:exchange -->\n### Re: unfinished — gpt-5\n\nRecovered.\n<!-- /patch:exchange -->\n",
     )

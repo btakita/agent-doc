@@ -110,7 +110,7 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
 
-use crate::{git, repair, resync, sync};
+use crate::{git, repair};
 use agent_doc_document::write_normalization::editor_buffer_preserved_head_exchange;
 use agent_doc_element::element::{
     is_backlog_component, is_review_component, is_tracked_work_component,
@@ -721,7 +721,7 @@ fn stale_plugin_warnings_from_snapshots(
 ///
 /// The drift counter lives at `.agent-doc/state/drift.count`. Each call either
 /// increments it (drift present) or deletes it (drift absent). When the counter
-/// reaches >= 2 we invoke `resync::run(true, None, None)` and reset it to 0 so we do
+/// reaches >= 2 we invoke `agent_doc_sync_io::resync::run(true, None, None)` and reset it to 0 so we do
 /// not loop on every cycle.
 fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) {
     let has_drift = layout_issues
@@ -765,7 +765,7 @@ fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) 
             next
         );
         agent_doc_ops_log_io::log_op(file, &format!("auto_resync_on_drift consecutive={}", next));
-        if let Err(e) = resync::run(true, None, None) {
+        if let Err(e) = agent_doc_sync_io::resync::run(true, None, None) {
             eprintln!("[preflight] auto-resync failed: {}", e);
         } else {
             // Reset after successful fix — next cycle re-evaluates.
@@ -800,18 +800,24 @@ fn close_superseded_drift_sessions(file: &std::path::Path) {
             return;
         }
     };
-    let drift_sessions = resync::registered_pane_sessions(&tmux, &registry);
+    let drift_sessions = agent_doc_sync_io::resync::registered_pane_sessions(&tmux, &registry);
     if drift_sessions.len() <= 1 {
         return;
     }
-    let Some(canonical) = resync::canonical_session_for_document(&tmux, &registry, file) else {
+    let Some(canonical) =
+        agent_doc_sync_io::resync::canonical_session_for_document(&tmux, &registry, file)
+    else {
         eprintln!(
             "[preflight] session-drift: no canonical agent-doc session resolved for {}; preserving all sessions",
             file.display()
         );
         return;
     };
-    match resync::close_superseded_drift_sessions(&tmux, &canonical, &drift_sessions) {
+    match agent_doc_sync_io::resync::close_superseded_drift_sessions(
+        &tmux,
+        &canonical,
+        &drift_sessions,
+    ) {
         Ok(0) => {}
         Ok(n) => eprintln!(
             "[preflight] session-drift: closed {} superseded session(s) around canonical '{}'",
@@ -876,7 +882,7 @@ fn maybe_auto_repair_base_index(file: &std::path::Path, layout_issues: &[String]
         &format!("auto_repair_base_index immediate session={}", name),
     );
     let tmux = tmux_router::Tmux::default_server();
-    if let Err(e) = sync::repair_layout(&tmux, &name, "agent-doc") {
+    if let Err(e) = agent_doc_sync_io::sync::repair_layout(&tmux, &name, "agent-doc") {
         eprintln!(
             "[preflight] auto repair_layout failed: {}; run `agent-doc session doctor {} --repair`",
             e,

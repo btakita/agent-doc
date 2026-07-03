@@ -97,6 +97,7 @@ pub fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
         let mut block_indices = Vec::new();
         let mut cursor = idx;
         let mut stopped_on_response_heading = false;
+        let mut stopped_on_boundary = false;
         while cursor > 0 {
             cursor -= 1;
             let line = lines[cursor].trim_end_matches('\n');
@@ -108,6 +109,8 @@ pub fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
             {
                 stopped_on_response_heading =
                     !line_in_fence[cursor] && is_response_heading_line(trimmed);
+                stopped_on_boundary =
+                    !line_in_fence[cursor] && trimmed.starts_with("<!-- agent:boundary");
                 break;
             }
             block_indices.push(cursor);
@@ -128,8 +131,23 @@ pub fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
             .iter()
             .map(|&line_idx| lines[line_idx])
             .collect();
-        let Some(prefix_start) = answered_prompt_prelude_start(&block_lines) else {
-            continue;
+        // A prose block bounded above by an `<!-- agent:boundary -->` marker is,
+        // by construction, the operator's newly-answered prompt: the boundary
+        // separates it from the last committed response and the answering
+        // `### Re:` heading sits directly below it. Canonicalize the whole block
+        // back to `❯ ` even when it is a plain declarative sentence that the
+        // heuristic prompt-start detector (interrogative / imperative / soft
+        // request) would miss — otherwise a bare user prompt like "His platform
+        // is in Rust & Vue." blurs into the preceding assistant reply. Without a
+        // boundary the block is ambiguous (it may be trailing assistant prose),
+        // so keep the conservative opt-in heuristic there.
+        let prefix_start = if stopped_on_boundary {
+            0
+        } else {
+            match answered_prompt_prelude_start(&block_lines) {
+                Some(start) => start,
+                None => continue,
+            }
         };
         for line_idx in block_indices.into_iter().skip(prefix_start) {
             prefix_targets[line_idx] = true;
@@ -253,6 +271,42 @@ Done.
         assert!(
             normalized.contains("\n❯ Please rerun the deploy check.\n"),
             "soft prompt requests before a response heading should still be canonicalized:\n{normalized}"
+        );
+    }
+
+    #[test]
+    fn canonicalize_answered_prompt_prefixes_prefixes_plain_declarative_prompt_below_boundary() {
+        // A plain declarative operator prompt (no `?`, no imperative verb, no
+        // slash command) that sits between the last committed response's
+        // boundary marker and the answering `### Re:` heading must be
+        // canonicalized back to `❯ ` so it stays visually distinct from the
+        // preceding assistant reply. Regression: bare declarative prompts were
+        // left unprefixed, blurring the prompt into the reply above it.
+        let exchange = "\
+### Re: earlier reply — opus-4-8
+
+If you want, I can hold one optional talking point. Want that as a call-ready line?
+<!-- agent:boundary:a1b72cfc -->
+His platform is in Rust & Vue.
+### Re: stack fit — opus-4-8
+
+Noted.
+";
+
+        let normalized = canonicalize_answered_prompt_prefixes(exchange);
+
+        assert!(
+            normalized.contains("\n❯ His platform is in Rust & Vue.\n"),
+            "plain declarative prompt below the boundary must be prefixed:\n{normalized}"
+        );
+        assert!(
+            !normalized.contains("❯ If you want,"),
+            "assistant reply above the boundary must stay bare:\n{normalized}"
+        );
+        assert_eq!(
+            normalized.matches('❯').count(),
+            1,
+            "exactly the operator prompt keeps the marker:\n{normalized}"
         );
     }
 

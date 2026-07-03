@@ -17,7 +17,7 @@
 //!
 //! ## Spec
 //! - `run(file, position, pane, window, _force)` is the sole public entry point.
-//! - Prunes stale registry entries via `resync::prune()` before any resolution.
+//! - Prunes stale registry entries via `agent_doc_sync_io::resync::prune()` before any resolution.
 //! - Calls `validate_file_claim(file)` to remove dead-pane entries for this specific
 //!   file and log why the re-claim was needed (complements the bulk prune).
 //! - Canonicalises the file path to handle CWD drift (e.g. when called from a
@@ -112,7 +112,7 @@ use agent_doc_supervisor::claim_binding::{
     registry_entry_matches_claimed_document,
 };
 
-use crate::{resync, route};
+use crate::route;
 use agent_doc_project_config_io as project_config_io;
 use agent_doc_session_registry_io::registration as sessions;
 
@@ -173,7 +173,7 @@ pub fn run(
     if isolate {
         return run_isolate(file);
     }
-    let _ = resync::prune(); // Clean stale entries before window resolution
+    let _ = agent_doc_sync_io::resync::prune(); // Clean stale entries before window resolution
 
     // Check for stale claims on this specific file and log if found
     validate_file_claim(file);
@@ -352,7 +352,7 @@ pub fn run(
     // real pane for the new document ever appears.
     if !force
         && tmux.pane_alive(&pane_id)
-        && crate::sync::pane_runs_other_document_owner(&tmux, &pane_id, file)
+        && agent_doc_sync_io::sync::pane_runs_other_document_owner(&tmux, &pane_id, file)
     {
         eprintln!(
             "[claim] pane {} runs a live agent-doc/codex session for another document; provisioning a new pane instead of commandeering it",
@@ -504,7 +504,7 @@ pub fn run(
 /// remove it so the new claim can proceed cleanly. This handles the common case
 /// of stale claims after a machine restart (tmux pane IDs are reassigned).
 ///
-/// Called after `resync::prune()` which handles bulk dead-pane removal. This
+/// Called after `agent_doc_sync_io::resync::prune()` which handles bulk dead-pane removal. This
 /// function provides file-specific logging so the user sees *why* a re-claim
 /// was needed rather than getting a silent no-op.
 fn validate_file_claim(file: &Path) {

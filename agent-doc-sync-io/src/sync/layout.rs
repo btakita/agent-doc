@@ -50,7 +50,7 @@ pub(crate) fn lookup_registry_entry_for_file_session(
     session_id: &str,
 ) -> Option<tmux_router::RegistryEntry> {
     let (_, _project_root, registry_key) = registry_location_for_file(file)?;
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let registry = rc.session_registry();
     let entry = registry.get(&registry_key)?.clone();
     (entry.session_id == session_id).then_some(entry)

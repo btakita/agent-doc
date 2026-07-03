@@ -29,7 +29,11 @@ impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
         stale_after: std::time::Duration,
         dry_run: bool,
     ) -> Result<(usize, usize)> {
-        agent_doc_controller_io::project_controller::close_stale_starting_actors(project_root, stale_after, dry_run)
+        agent_doc_controller_io::project_controller::close_stale_starting_actors(
+            project_root,
+            stale_after,
+            dry_run,
+        )
     }
 
     fn close_stale_dead_pane_actors(
@@ -53,7 +57,11 @@ impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
         prune_after: std::time::Duration,
         dry_run: bool,
     ) -> Result<(usize, usize)> {
-        agent_doc_controller_io::project_controller::prune_dead_actors(project_root, prune_after, dry_run)
+        agent_doc_controller_io::project_controller::prune_dead_actors(
+            project_root,
+            prune_after,
+            dry_run,
+        )
     }
 
     fn terminate_stale_preparing_controllers(
@@ -104,7 +112,8 @@ fn run_auto_gc(root: &Path) -> Result<agent_doc_gc_io::GcResult> {
         &mut effects,
         agent_doc_gc_io::GcControllerConfig {
             stale_starting_after: std::time::Duration::from_secs(3600),
-            dead_actor_prune_after: agent_doc_controller_io::project_controller::DEAD_ACTOR_PRUNE_AFTER,
+            dead_actor_prune_after:
+                agent_doc_controller_io::project_controller::DEAD_ACTOR_PRUNE_AFTER,
             stale_preparing_controller_after:
                 agent_doc_controller_io::project_controller::stale_preparing_controller_threshold(),
         },
@@ -121,8 +130,9 @@ fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool)
     else {
         return;
     };
-    if let Err(err) = agent_doc_controller_io::project_controller::persist_session_actor_closeout(file)
-        .and_then(|_| crate::flow::closeout::record_terminal_closeout_proof(file, did_commit))
+    if let Err(err) =
+        agent_doc_controller_io::project_controller::persist_session_actor_closeout(file)
+            .and_then(|_| crate::flow::closeout::record_terminal_closeout_proof(file, did_commit))
     {
         eprintln!("[preflight] terminal proof warning: {err}");
     }
@@ -170,7 +180,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // long-running process hasn't been recycled). Surfaces the silent failure mode
     // instead of leaving the operator to re-file File-Cache-Conflict dialogs. Fail-open
     // — any status/stat error yields no warning and never blocks the cycle.
-    if let Some(message) = agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file) {
+    if let Some(message) =
+        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
+    {
         let warning = PreflightWarning {
             code: "supervisor_binary_stale".to_string(),
             message,
@@ -1896,14 +1908,21 @@ mod tests {
                 new_generation: 1,
             },
         };
-        agent_doc_controller_io::project_controller::store_actor_record(dir.path(), Some(0), &stale_record).unwrap();
+        agent_doc_controller_io::project_controller::store_actor_record(
+            dir.path(),
+            Some(0),
+            &stale_record,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
-        let updated =
-            agent_doc_controller_io::project_controller::load_actor_record(dir.path(), &stale_record.document_id)
-                .unwrap()
-                .unwrap();
+        let updated = agent_doc_controller_io::project_controller::load_actor_record(
+            dir.path(),
+            &stale_record.document_id,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(
             updated.state,
             agent_doc_sqlite::state_store::ActorState::Closed

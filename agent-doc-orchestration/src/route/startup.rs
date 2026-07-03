@@ -890,7 +890,9 @@ pub(crate) fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) 
     // Keep the reconcile scoped to the caller's tmux handle. Falling back to the
     // default server here can mutate an unrelated live agent-doc window during
     // isolated verification runs.
-    if let Err(e) = sync::run_with_tmux(&effective_col_args, Some(&window_id), None, tmux) {
+    if let Err(e) =
+        agent_doc_sync_io::sync::run_with_tmux(&effective_col_args, Some(&window_id), None, tmux)
+    {
         eprintln!("[route] warning: post-claim sync failed: {}", e);
     } else {
         eprintln!(
@@ -4691,7 +4693,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_after_claim_prefers_col_args_over_registry() {
         // Regression test: when editor provides col_args, sync_after_claim should
-        // pass those to sync::run instead of auto-discovering from registry.
+        // pass those to agent_doc_sync_io::sync::run instead of auto-discovering from registry.
         // The actual pane stashing is handled by tmux-router's reconcile —
         // this test verifies the col_args flow.
         let iso = IsolatedTmux::new("route-test-col-args");
@@ -4719,8 +4721,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "pane should stay in original window"
         );
 
-        // With 2+ col_args, sync_after_claim runs sync::run with those args.
-        // sync::run will fail to resolve files (no registrations), but shouldn't crash.
+        // With 2+ col_args, sync_after_claim runs agent_doc_sync_io::sync::run with those args.
+        // agent_doc_sync_io::sync::run will fail to resolve files (no registrations), but shouldn't crash.
         let col_args = vec!["file_a.md".to_string(), "file_b.md".to_string()];
         sync_after_claim(&iso, &pane_a, &col_args);
 

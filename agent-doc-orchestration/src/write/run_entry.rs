@@ -541,7 +541,7 @@ pub fn run_stream(
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     // #jb-tsift-pane-sync diagnostic: capture a streamed write/commit to `file`
     // executing inside a tmux pane that owns a different document.
-    crate::sync::log_cross_document_execution_context(file, "stream");
+    agent_doc_sync_io::sync::log_cross_document_execution_context(file, "stream");
 
     let mut response = read_response_input()?;
 

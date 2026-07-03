@@ -1153,7 +1153,12 @@ pub(crate) fn register_dispatch_target(
         pane_id,
         &requested_str,
         |entry, registered| {
-            crate::sync::find_normal_path_owner_pane(tmux, registered, &entry.session_id).as_deref()
+            agent_doc_sync_io::sync::find_normal_path_owner_pane(
+                tmux,
+                registered,
+                &entry.session_id,
+            )
+            .as_deref()
                 == Some(pane_id)
         },
     )?;

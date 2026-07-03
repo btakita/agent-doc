@@ -494,7 +494,8 @@ pub(crate) fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
         return false;
     };
-    if agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file).is_none() {
+    if agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file).is_none()
+    {
         return false;
     }
     let auto_recycle = agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(file);
@@ -512,7 +513,8 @@ pub(crate) fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -
         );
         return false;
     }
-    match agent_doc_controller_io::project_controller::recycle_controller_force(&project_root, true) {
+    match agent_doc_controller_io::project_controller::recycle_controller_force(&project_root, true)
+    {
         Ok(scheduled) => {
             agent_doc_ops_log_io::log_op(
                 file,

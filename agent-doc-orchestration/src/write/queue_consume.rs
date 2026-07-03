@@ -1660,8 +1660,9 @@ mod core_tests {
             .expect("consumed queue head should carry a node op")
             .node_id
             .clone();
-        let state_ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(root)
-            .expect("queue state events should reload from sqlite");
+        let state_ledger =
+            agent_doc_controller_io::project_controller::load_state_event_ledger(root)
+                .expect("queue state events should reload from sqlite");
         let queue_events = state_ledger
             .events()
             .iter()
@@ -1758,8 +1759,9 @@ mod core_tests {
         let document_hash = agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(
             &doc.canonicalize().unwrap(),
         );
-        let state_ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(root)
-            .expect("queue state events should reload from sqlite");
+        let state_ledger =
+            agent_doc_controller_io::project_controller::load_state_event_ledger(root)
+                .expect("queue state events should reload from sqlite");
         let projection = state_ledger
             .project_document(&document_hash)
             .expect("queue state events should project for document");
@@ -1824,8 +1826,9 @@ mod core_tests {
         let document_hash = agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(
             &doc.canonicalize().unwrap(),
         );
-        let state_ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(root)
-            .expect("queue state events should reload from sqlite");
+        let state_ledger =
+            agent_doc_controller_io::project_controller::load_state_event_ledger(root)
+                .expect("queue state events should reload from sqlite");
         let projection = state_ledger
             .project_document(&document_hash)
             .expect("queue state events should project for document");

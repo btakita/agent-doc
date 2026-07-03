@@ -10,7 +10,7 @@
 //!   `run_with_tmux` using the default tmux server. Accepts an optional explicit
 //!   `pane` override, a debounce delay in milliseconds, and column layout hints.
 //! - **`run_with_tmux(file, tmux, pane, debounce_ms, col_args, mode, plain_trigger)`**: Core routing logic.
-//!   1. Prunes stale session registry entries via `resync::prune`.
+//!   1. Prunes stale session registry entries via `agent_doc_sync_io::resync::prune`.
 //!   2. If `debounce_ms > 0`, waits for the file's mtime and shared editor typing
 //!      indicator to settle (`await_idle`).
 //!   3. Ensures a session UUID exists in the file's YAML frontmatter (generates one if missing).
@@ -91,7 +91,7 @@
 //!
 //! - **Session UUID guarantee**: `run_with_tmux` always ensures the file has a session UUID
 //!   in frontmatter before any registry lookup. Callers never see a file without a UUID.
-//! - **Stale-registry hygiene**: `resync::prune` is called at the start of every `run_with_tmux`
+//! - **Stale-registry hygiene**: `agent_doc_sync_io::resync::prune` is called at the start of every `run_with_tmux`
 //!   invocation; the registry is always pruned before a lookup is attempted.
 //! - **One pane per document**: Each document gets its own agent pane. Unregistered files
 //!   (no prior session) skip lazy-claim and always get a fresh pane via auto-start.
@@ -241,7 +241,6 @@ use agent_doc_turn::closeout_recovery::{
 use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 use tmux_router::Tmux;
 
-use crate::{resync, sync};
 use agent_doc_session_registry_io::registration as sessions;
 use std::cell::Cell;
 
@@ -1107,8 +1106,9 @@ fn reapply_harness_launch_contract_after_clear(
     }
 
     wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
-    let dispatch_pane = crate::sync::find_normal_path_owner_pane(tmux, file, session_id)
-        .unwrap_or_else(|| pane.to_string());
+    let dispatch_pane =
+        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
+            .unwrap_or_else(|| pane.to_string());
     if !wait_for_agent_ready(
         tmux,
         &dispatch_pane,
@@ -1282,8 +1282,9 @@ fn reapply_capability_contract_before_reuse(
     }
 
     wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
-    let dispatch_pane = crate::sync::find_normal_path_owner_pane(tmux, file, session_id)
-        .unwrap_or_else(|| pane.to_string());
+    let dispatch_pane =
+        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
+            .unwrap_or_else(|| pane.to_string());
     if !wait_for_agent_ready(
         tmux,
         &dispatch_pane,
@@ -1602,7 +1603,7 @@ pub fn run_with_tmux_with_options(
     // Route only needs stale registry rows + dead non-stash panes pruned for an
     // accurate pane lookup; orphaned stash-pane hygiene belongs to explicit
     // `resync`/`sync`, mirroring `safe_passive_prune_cleanup_mode`.
-    let _ = resync::prune_with_tmux_timed_in_mode(
+    let _ = agent_doc_sync_io::resync::prune_with_tmux_timed_in_mode(
         tmux,
         agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup,
     );

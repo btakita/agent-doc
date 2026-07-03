@@ -194,7 +194,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
-use agent_doc_controller::dispatch::is_stash_window_name;
+#[cfg(test)]
+use crate::SyncLockAcquire;
+use crate::acquire_sync_lock;
+use agent_doc_controller::dispatch::{is_stash_window_name, normalize_context_session};
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 #[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
@@ -210,9 +213,6 @@ use agent_doc_sync::{
     rename_debounce_expired, safe_passive_prune_cleanup_throttle, sanitize_excerpt,
     sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
 };
-#[cfg(test)]
-use agent_doc_sync_io::SyncLockAcquire;
-use agent_doc_sync_io::acquire_sync_lock;
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
     associated_pane_candidates_detail, auto_start_candidate_files, parse_pane_inventory_line,
@@ -223,7 +223,7 @@ use tmux_router::{PaneMoveOp, Tmux};
 
 use agent_doc_frontmatter::frontmatter;
 
-use crate::{resync, route};
+use crate::resync;
 use agent_doc_session_registry_io::registration as sessions;
 
 use tmux_router::FileResolution;
@@ -265,7 +265,7 @@ fn parse_frontmatter_for_sync<'a>(
     file: &Path,
     phase: &str,
 ) -> Result<(frontmatter::Frontmatter, &'a str)> {
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     agent_doc_frontmatter_io::session::parse_for_file_with_context(content, file, &rc.ssh_context())
         .map_err(|err| anyhow::anyhow!("sync {} frontmatter: {}", phase, err))
 }
@@ -315,17 +315,17 @@ pub fn repair_file_state(file: &Path) -> Result<Vec<String>> {
 }
 
 fn recover_jb_cache_conflict_cancel_commit_boundary(file: &Path) -> Result<Option<String>> {
-    if !crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file)? {
+    if !crate::runtime_effects()?.detect_jb_cache_conflict_cancel_recoverable(file)? {
         return Ok(None);
     }
 
-    crate::git::commit(file).with_context(|| {
+    crate::runtime_effects()?.commit(file).with_context(|| {
         format!(
             "failed to close recoverable jb_cache_conflict_cancel commit boundary for {}",
             file.display()
         )
     })?;
-    if crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file)? {
+    if crate::runtime_effects()?.detect_jb_cache_conflict_cancel_recoverable(file)? {
         anyhow::bail!(
             "recoverable jb_cache_conflict_cancel commit boundary remained after commit for {}",
             file.display()
@@ -558,9 +558,11 @@ fn load_live_authoritative_actor_record_uncached(
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
     let base_dir = agent_doc_project_root_io::project_root_containing(&canonical)?;
-    let record = agent_doc_controller_io::project_controller::authoritative_actor_binding(&base_dir, &canonical)
-        .ok()
-        .flatten()?;
+    let record = agent_doc_controller_io::project_controller::authoritative_actor_binding(
+        &base_dir, &canonical,
+    )
+    .ok()
+    .flatten()?;
     if record.session_id != session_id || !tmux.pane_alive(&record.pane_id) {
         return None;
     }
@@ -1181,7 +1183,7 @@ fn normalize_stash_window_name(tmux: &Tmux, window_id: &str) {
 }
 
 fn sync_log(msg: &str) {
-    agent_doc_sync_io::append_sync_log(msg);
+    crate::append_sync_log(msg);
 }
 
 /// Check the per-server-per-session destructive-repair stamp. Returns `true`
@@ -1225,6 +1227,30 @@ fn throttle_destructive_repair(tmux: &Tmux, session_name: &str) -> bool {
 
 fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
     tmux.current_session()
+}
+
+fn resolve_preferred_session(
+    tmux: &Tmux,
+    context_session: Option<&str>,
+    log_prefix: &str,
+) -> Option<String> {
+    if let Some(ctx) = normalize_context_session(context_session) {
+        return Some(ctx.to_string());
+    }
+
+    let configured = agent_doc_project_config_io::project_tmux_session();
+    if configured.as_ref().is_some_and(|s| tmux.session_alive(s)) {
+        return configured;
+    }
+
+    if let Some(ref stale) = configured {
+        eprintln!(
+            "{log_prefix} configured tmux_session '{}' is not alive, ignoring stale pin",
+            stale
+        );
+    }
+
+    current_tmux_session_name(tmux)
 }
 
 fn session_name_for_target_window(tmux: &Tmux, window: &str) -> Option<String> {
@@ -1309,7 +1335,7 @@ fn resolve_sync_target_session(
 ) -> Option<String> {
     let context_session = window.and_then(|target| session_name_for_target_window(tmux, target));
     if context_session.is_some() {
-        return crate::route::resolve_preferred_session(tmux, context_session.as_deref(), "[sync]");
+        return resolve_preferred_session(tmux, context_session.as_deref(), "[sync]");
     }
 
     if let Some(scope_root) = agent_doc_sync::shared_sync_scope_root(col_args, focus) {
@@ -1319,7 +1345,7 @@ fn resolve_sync_target_session(
         return current_tmux_session_name(tmux);
     }
 
-    crate::route::resolve_preferred_session(tmux, None, "[sync]")
+    resolve_preferred_session(tmux, None, "[sync]")
 }
 
 fn resolve_agent_doc_window_id(
@@ -1550,7 +1576,7 @@ fn normalize_window_to_index(
 /// Compares the embedded build timestamp against `.agent-doc/build.stamp`.
 /// On mismatch: clears startup locks (`.agent-doc/starting/*.lock`) and updates stamp.
 fn check_build_stamp() {
-    let build_ts = env!("AGENT_DOC_BUILD_TIMESTAMP");
+    let build_ts = option_env!("AGENT_DOC_BUILD_TIMESTAMP").unwrap_or(env!("CARGO_PKG_VERSION"));
     let cwd = match std::env::current_dir() {
         Ok(c) => c,
         Err(_) => return,
@@ -1707,20 +1733,21 @@ fn run_with_options_internal(
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let layout_state_root = agent_doc_sync::layout_state_scope_root(col_args, focus, &cwd);
     let layout_state_path = agent_doc_sync::layout_state_path(col_args, focus, &cwd);
-    let saved_layout = match agent_doc_controller_io::project_controller::load_layout_state(&layout_state_root) {
-        Ok(layout) => layout,
-        Err(err) => {
-            eprintln!(
-                "[sync] warning: failed to load controller layout state from {}: {}",
-                layout_state_root.display(),
-                err
-            );
-            std::fs::read_to_string(&layout_state_path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_default()
-        }
-    };
+    let saved_layout =
+        match agent_doc_controller_io::project_controller::load_layout_state(&layout_state_root) {
+            Ok(layout) => layout,
+            Err(err) => {
+                eprintln!(
+                    "[sync] warning: failed to load controller layout state from {}: {}",
+                    layout_state_root.display(),
+                    err
+                );
+                std::fs::read_to_string(&layout_state_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default()
+            }
+        };
 
     let input_cols = effective_sync_columns(col_args, &saved_layout, &layout_state_path)?;
     let column_memory = agent_doc_tmux::apply_column_memory(
@@ -2000,7 +2027,7 @@ fn run_with_options_internal(
                     );
                 }
                 // Commit the scaffolded file immediately.
-                if let Err(e) = crate::git::commit(path) {
+                if let Err(e) = crate::runtime_effects().and_then(|effects| effects.commit(path)) {
                     eprintln!(
                         "[sync] warning: failed to commit scaffold for {}: {}",
                         path.display(),
@@ -2015,7 +2042,7 @@ fn run_with_options_internal(
         // For files with agent_doc_format but no session, this assigns a UUID.
         if let Err(e) = agent_doc_workflow_io::document_init::ensure_initialized(
             path,
-            crate::git::commit,
+            |doc| crate::runtime_effects()?.commit(doc),
             agent_doc_ops_log_io::log_op,
         ) {
             eprintln!(
@@ -2033,7 +2060,7 @@ fn run_with_options_internal(
                 let warning = format!("[sync] warning: {}", e);
                 eprintln!("{}", warning);
                 sync_log(&warning);
-                agent_doc_sync_io::surface_frontmatter_status_with(
+                crate::surface_frontmatter_status_with(
                     path,
                     "resolve_file",
                     &e,
@@ -2043,11 +2070,7 @@ fn run_with_options_internal(
                 return None;
             }
         };
-        agent_doc_sync_io::clear_frontmatter_status_with(
-            path,
-            save_sync_status_snapshot,
-            log_sync_status,
-        );
+        crate::clear_frontmatter_status_with(path, save_sync_status_snapshot, log_sync_status);
 
         match fm.session {
             Some(ref key) => {
@@ -2118,7 +2141,7 @@ fn run_with_options_internal(
                     let warning = format!("[sync] warning: {}", e);
                     eprintln!("{}", warning);
                     sync_log(&warning);
-                    agent_doc_sync_io::surface_frontmatter_status_with(
+                    crate::surface_frontmatter_status_with(
                         file_path,
                         "auto-start",
                         &e,
@@ -2128,7 +2151,7 @@ fn run_with_options_internal(
                     continue;
                 }
             };
-            agent_doc_sync_io::clear_frontmatter_status_with(
+            crate::clear_frontmatter_status_with(
                 file_path,
                 save_sync_status_snapshot,
                 log_sync_status,
@@ -2474,7 +2497,7 @@ fn run_with_options_internal(
                     file_path.display()
                 );
                 let file_str = file_path.to_string_lossy().to_string();
-                match route::provision_pane(
+                match crate::runtime_effects()?.provision_pane(
                     tmux,
                     file_path,
                     &session_id,
@@ -2762,7 +2785,7 @@ fn run_with_options_internal(
                 auto_start_mode.log_label()
             );
             let file_str = file_path.to_string_lossy().to_string();
-            match route::provision_pane(
+            match crate::runtime_effects()?.provision_pane(
                 tmux,
                 file_path,
                 &session_id,
@@ -2999,8 +3022,10 @@ fn run_with_options_internal(
         );
         // Only save if at least one column has an agent doc
         if layout_state.iter().any(|s| !s.is_empty())
-            && let Err(err) =
-                agent_doc_controller_io::project_controller::store_layout_state(&layout_state_root, &layout_state)
+            && let Err(err) = agent_doc_controller_io::project_controller::store_layout_state(
+                &layout_state_root,
+                &layout_state,
+            )
         {
             eprintln!(
                 "[sync] warning: failed to persist controller layout state for {}: {}",
@@ -4109,11 +4134,7 @@ pub fn log_cross_document_execution_context(file: &Path, origin: &str) {
 /// `claimed_file`. Keyed on the live cmdline rather than any single root's
 /// `sessions.json`, so it enforces the one-live-pane-per-document binding
 /// invariant across project/submodule roots.
-pub(crate) fn pane_runs_other_document_owner(
-    tmux: &Tmux,
-    pane_id: &str,
-    claimed_file: &Path,
-) -> bool {
+pub fn pane_runs_other_document_owner(tmux: &Tmux, pane_id: &str, claimed_file: &Path) -> bool {
     let Some(pane_pid) = pane_pid_from_tmux(tmux, pane_id) else {
         return false;
     };
@@ -4376,6 +4397,31 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
+
+    struct TestPipelineFrontmatterEffects;
+
+    impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
+        for TestPipelineFrontmatterEffects
+    {
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current_content: &str,
+            target_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            std::fs::write(file, target_content)
+                .with_context(|| format!("failed to write {}", file.display()))
+        }
+
+        fn log_op(&self, file: &Path, message: &str) {
+            agent_doc_ops_log_io::log_op(file, message);
+        }
+    }
+
+    const TEST_PIPELINE_FRONTMATTER_EFFECTS: TestPipelineFrontmatterEffects =
+        TestPipelineFrontmatterEffects;
+
     #[test]
     fn sync_repair_closes_jb_cache_conflict_cancel_commit_boundary() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -4407,7 +4453,7 @@ mod tests {
         std::fs::write(&doc, &materialized).unwrap();
         agent_doc_snapshot_io::save(&doc, &materialized, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&materialized),
@@ -4416,7 +4462,10 @@ mod tests {
         .unwrap();
 
         assert!(
-            crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            crate::runtime_effects()
+                .unwrap()
+                .detect_jb_cache_conflict_cancel_recoverable(&doc)
+                .unwrap(),
             "precondition: visible response/snapshot should be ahead of HEAD"
         );
 
@@ -4429,7 +4478,10 @@ mod tests {
             agent_doc_snapshot_io::SnapshotCommitStatus::Committed
         ));
         assert!(
-            !crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            !crate::runtime_effects()
+                .unwrap()
+                .detect_jb_cache_conflict_cancel_recoverable(&doc)
+                .unwrap(),
             "repair should remove the recoverable crash shape"
         );
 
@@ -4885,7 +4937,7 @@ mod tests {
         )
         .unwrap_err();
 
-        agent_doc_sync_io::surface_frontmatter_status_with(
+        crate::surface_frontmatter_status_with(
             &doc,
             "auto-start",
             &err,
@@ -4912,11 +4964,7 @@ mod tests {
         )
         .unwrap();
 
-        agent_doc_sync_io::clear_frontmatter_status_with(
-            &doc,
-            save_sync_status_snapshot,
-            log_sync_status,
-        );
+        crate::clear_frontmatter_status_with(&doc, save_sync_status_snapshot, log_sync_status);
 
         let cleared = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -4941,11 +4989,7 @@ mod tests {
         std::fs::write(&doc, original).unwrap();
         agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
 
-        agent_doc_sync_io::clear_frontmatter_status_with(
-            &doc,
-            save_sync_status_snapshot,
-            log_sync_status,
-        );
+        crate::clear_frontmatter_status_with(&doc, save_sync_status_snapshot, log_sync_status);
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), original);
         assert_eq!(

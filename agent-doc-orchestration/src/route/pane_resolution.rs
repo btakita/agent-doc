@@ -132,12 +132,13 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
         );
     }
     let live_owner = if registered.is_some() {
-        crate::sync::find_normal_path_owner_pane(tmux, file, session_id)
+        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
     } else {
         None
     };
     let preferred_active_window = tmux.active_window(target_session);
-    let associated_candidates = crate::sync::find_associated_panes(tmux, file, session_id);
+    let associated_candidates =
+        agent_doc_sync_io::sync::find_associated_panes(tmux, file, session_id);
     let associated_resolution = agent_doc_tmux::resolve_associated_panes(
         associated_candidates.clone(),
         preferred_active_window.as_deref(),
@@ -489,7 +490,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         );
     }
     let live_owner = if registered.is_some() {
-        crate::sync::find_normal_path_owner_pane(tmux, file, session_id)
+        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
     } else {
         None
     };
@@ -499,7 +500,8 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         SupervisorHealth::NoSocket
     };
     let preferred_active_window = tmux.active_window(target_session);
-    let associated_candidates = crate::sync::find_associated_panes(tmux, file, session_id);
+    let associated_candidates =
+        agent_doc_sync_io::sync::find_associated_panes(tmux, file, session_id);
     let associated_resolution = agent_doc_tmux::resolve_associated_panes(
         associated_candidates.clone(),
         preferred_active_window.as_deref(),
@@ -1029,7 +1031,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
     // provable a little later in the turn; the normal path must still fail
     // closed instead of silently re-electing that pane via auto-start.
     let late_associated_resolution = agent_doc_tmux::resolve_associated_panes(
-        crate::sync::find_associated_panes(tmux, file, session_id),
+        agent_doc_sync_io::sync::find_associated_panes(tmux, file, session_id),
         tmux.active_window(target_session).as_deref(),
     );
     if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) =
@@ -1375,7 +1377,8 @@ pub(crate) fn wait_for_busy_restart_handoff(
         {
             if entry.pane != previous_pane {
                 handed_off_pane = Some(entry.pane.clone());
-                if crate::sync::find_normal_path_owner_pane(tmux, file, session_id).as_deref()
+                if agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
+                    .as_deref()
                     == Some(entry.pane.as_str())
                 {
                     eprintln!(
@@ -1389,7 +1392,7 @@ pub(crate) fn wait_for_busy_restart_handoff(
             }
         }
         match agent_doc_tmux::resolve_associated_panes(
-            crate::sync::find_associated_panes(tmux, file, session_id),
+            agent_doc_sync_io::sync::find_associated_panes(tmux, file, session_id),
             None,
         ) {
             agent_doc_tmux::AssociatedPaneResolution::Selected { winner, .. }
@@ -3657,9 +3660,12 @@ mod tests {
                 "unrelated panes in the split must remain visible"
             );
         }
-        let record = agent_doc_controller_io::project_controller::authoritative_actor_binding(dir.path(), &doc)
-            .unwrap()
-            .unwrap();
+        let record = agent_doc_controller_io::project_controller::authoritative_actor_binding(
+            dir.path(),
+            &doc,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(record.pane_id, actor_pane);
 
         ipc.stop();

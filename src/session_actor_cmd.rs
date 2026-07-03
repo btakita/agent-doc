@@ -2131,7 +2131,7 @@ fn resolve_direct_submit_pane(
         return Some((pane.to_string(), DirectSubmitPaneSource::AuthoritativeActor));
     }
 
-    if let Some(pane) = agent_doc_orchestration::sync::find_normal_path_owner_pane(
+    if let Some(pane) = agent_doc_sync_io::sync::find_normal_path_owner_pane(
         tmux,
         &ctx.canonical_file,
         &ctx.session_id,
@@ -2373,12 +2373,12 @@ fn idle_projection_needs_reconciliation(ctx: &SessionContext, evidence: &LivePan
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
     if repair {
         let closeout = agent_doc_orchestration::repair::repair(file)?;
-        let mut repair_notes = agent_doc_orchestration::sync::repair_file_state(file)?;
+        let mut repair_notes = agent_doc_sync_io::sync::repair_file_state(file)?;
         let repair_ctx = build_context(file)?;
         if let Some(note) = clear_closed_actor_pane_projection(&repair_ctx)? {
             repair_notes.push(note);
         }
-        agent_doc_orchestration::resync::run_fix(Some(file), None)?;
+        agent_doc_sync_io::resync::run_fix(Some(file), None)?;
         println!("Applied repair path for {}.", file.display());
         if closeout.repaired() {
             println!("closeout_repair: {}", closeout.doctor_message());

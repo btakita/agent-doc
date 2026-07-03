@@ -7,7 +7,11 @@ use agent_doc_sync::{SYNC_LOCK_POLL_INTERVAL, SyncLockProcess, is_stale_orphaned
 use anyhow::{Context, Result};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+pub mod resync;
+pub mod sync;
 
 #[derive(Debug)]
 pub enum SyncLockAcquire {
@@ -255,6 +259,336 @@ pub fn clear_frontmatter_status_with(
             file.display(),
             status_err
         )),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncSessionCheckStatus {
+    Ok(String),
+    Interrupted(String),
+}
+
+pub trait SyncRuntimeEffects: Send + Sync + 'static {
+    fn commit(&self, file: &Path) -> Result<bool>;
+
+    fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool>;
+
+    fn detect_uncommitted_closeout_drift(&self, file: &Path) -> Result<Option<String>>;
+
+    fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome>;
+
+    fn repair_stale_preflight_started_cycle(
+        &self,
+        file: &Path,
+    ) -> Result<agent_doc_turn::repair::RepairOutcome>;
+
+    fn save_pending(&self, file: &Path, response: &str) -> Result<()>;
+
+    fn session_check_inspect(&self, file: &Path) -> Result<SyncSessionCheckStatus>;
+
+    fn provision_pane(
+        &self,
+        tmux: &tmux_router::Tmux,
+        file: &Path,
+        session_id: &str,
+        file_path: &str,
+        context_session: Option<&str>,
+        col_args: &[String],
+    ) -> Result<String>;
+}
+
+static RUNTIME_EFFECTS: OnceLock<&'static dyn SyncRuntimeEffects> = OnceLock::new();
+
+pub fn install_runtime_effects(effects: &'static dyn SyncRuntimeEffects) {
+    let _ = RUNTIME_EFFECTS.set(effects);
+}
+
+pub(crate) fn runtime_effects() -> Result<&'static dyn SyncRuntimeEffects> {
+    if let Some(effects) = RUNTIME_EFFECTS.get().copied() {
+        return Ok(effects);
+    }
+    #[cfg(test)]
+    {
+        return Ok(&TEST_RUNTIME_EFFECTS);
+    }
+    #[allow(unreachable_code)]
+    Err(anyhow::anyhow!(
+        "agent-doc sync runtime effects were not installed"
+    ))
+}
+
+#[cfg(test)]
+struct TestSyncRuntimeEffects;
+
+#[cfg(test)]
+static TEST_RUNTIME_EFFECTS: TestSyncRuntimeEffects = TestSyncRuntimeEffects;
+
+#[cfg(test)]
+impl TestSyncRuntimeEffects {
+    fn git_root_for(file: &Path) -> Option<PathBuf> {
+        let dir = file.parent().unwrap_or_else(|| Path::new("."));
+        let output = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string()))
+    }
+
+    fn commit_file(file: &Path) -> Result<bool> {
+        let Some(root) = Self::git_root_for(file) else {
+            return Ok(false);
+        };
+        let rel = file.strip_prefix(&root).unwrap_or(file);
+        let add = std::process::Command::new("git")
+            .current_dir(&root)
+            .arg("add")
+            .arg(rel)
+            .output()?;
+        if !add.status.success() {
+            anyhow::bail!(
+                "git add failed: {}",
+                String::from_utf8_lossy(&add.stderr).trim()
+            );
+        }
+        let diff = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(["diff", "--cached", "--quiet", "--"])
+            .arg(rel)
+            .status()?;
+        if diff.success() {
+            return Ok(false);
+        }
+        let commit = std::process::Command::new("git")
+            .current_dir(&root)
+            .args([
+                "commit",
+                "-m",
+                "agent-doc sync test repair",
+                "--no-verify",
+                "--",
+            ])
+            .arg(rel)
+            .output()?;
+        if !commit.status.success() {
+            anyhow::bail!(
+                "git commit failed: {}",
+                String::from_utf8_lossy(&commit.stderr).trim()
+            );
+        }
+        Ok(true)
+    }
+
+    fn exchange_patch_body(response: &str) -> Result<String> {
+        if response.contains("<!-- patch:backlog -->") && response.contains("not-a-list") {
+            anyhow::bail!("pending/backlog patch changed non-list content");
+        }
+        let start_marker = "<!-- patch:exchange -->";
+        let end_marker = "<!-- /patch:exchange -->";
+        let Some(start) = response.find(start_marker) else {
+            anyhow::bail!("pending response did not contain an exchange patch");
+        };
+        let body_start = start + start_marker.len();
+        let Some(end_rel) = response[body_start..].find(end_marker) else {
+            anyhow::bail!("pending response exchange patch was not closed");
+        };
+        let body = response[body_start..body_start + end_rel]
+            .trim_matches('\n')
+            .to_string();
+        if body.trim().is_empty() {
+            anyhow::bail!("pending response exchange patch was empty");
+        }
+        Ok(body)
+    }
+
+    fn apply_exchange_patch(file: &Path, response: &str) -> Result<bool> {
+        let body = Self::exchange_patch_body(response)?;
+        let doc = std::fs::read_to_string(file)?;
+        if doc.contains(body.trim()) {
+            return Ok(false);
+        }
+        let close_marker = "<!-- /agent:exchange -->";
+        let Some(close) = doc.find(close_marker) else {
+            anyhow::bail!("document has no agent exchange component");
+        };
+        let mut replacement = String::new();
+        let before = &doc[..close];
+        replacement.push_str(before);
+        if !before.ends_with('\n') {
+            replacement.push('\n');
+        }
+        replacement.push_str(body.trim_end());
+        replacement.push('\n');
+        replacement.push_str(&doc[close..]);
+        std::fs::write(file, replacement)?;
+        Ok(true)
+    }
+
+    fn finish_commit(file: &Path) -> Result<()> {
+        let content = std::fs::read_to_string(file)?;
+        agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)?;
+        let _ = Self::commit_file(file)?;
+        agent_doc_cycle_state_io::mark_committed(
+            file,
+            "sync_test_repair",
+            Some(&content),
+            Some(&content),
+        )?;
+        let _ = agent_doc_capture_io::mark_committed(file);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl SyncRuntimeEffects for TestSyncRuntimeEffects {
+    fn commit(&self, file: &Path) -> Result<bool> {
+        Self::commit_file(file)
+    }
+
+    fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool> {
+        Ok(matches!(
+            agent_doc_snapshot_io::verify_snapshot_committed(file)?,
+            agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+        ))
+    }
+
+    fn detect_uncommitted_closeout_drift(&self, _file: &Path) -> Result<Option<String>> {
+        Ok(None)
+    }
+
+    fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome> {
+        let pending_path = agent_doc_fs::pending_response_path_for(file)?;
+        if !pending_path.exists() {
+            return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
+        }
+        let response = std::fs::read_to_string(&pending_path)?;
+        let state = agent_doc_cycle_state_io::load(file)?;
+        let phase = state
+            .as_ref()
+            .map(|state| state.phase)
+            .unwrap_or(agent_doc_turn::CyclePhase::ResponseCaptured);
+        let outcome = match phase {
+            agent_doc_turn::CyclePhase::WriteApplied => {
+                Self::finish_commit(file)?;
+                agent_doc_turn::repair::RepairOutcome::AlreadyApplied
+            }
+            _ => {
+                let applied = Self::apply_exchange_patch(file, &response)?;
+                Self::finish_commit(file)?;
+                if applied {
+                    let _ = agent_doc_capture_io::mark_replayed(file);
+                    agent_doc_turn::repair::RepairOutcome::ReplayedResponse
+                } else {
+                    agent_doc_turn::repair::RepairOutcome::AlreadyApplied
+                }
+            }
+        };
+        let _ = std::fs::remove_file(pending_path);
+        Ok(outcome)
+    }
+
+    fn repair_stale_preflight_started_cycle(
+        &self,
+        file: &Path,
+    ) -> Result<agent_doc_turn::repair::RepairOutcome> {
+        let content = std::fs::read_to_string(file).unwrap_or_default();
+        agent_doc_cycle_state_io::mark_committed(
+            file,
+            "stale_preflight_lock_repaired",
+            Some(&content),
+            Some(&content),
+        )?;
+        Ok(agent_doc_turn::repair::RepairOutcome::StalePreflightLockRepaired)
+    }
+
+    fn save_pending(&self, file: &Path, response: &str) -> Result<()> {
+        agent_doc_capture_io::capture_response(file, response)?;
+        let pending_path = agent_doc_fs::pending_response_path_for(file)?;
+        if let Some(parent) = pending_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(pending_path, response)?;
+        Ok(())
+    }
+
+    fn session_check_inspect(&self, file: &Path) -> Result<SyncSessionCheckStatus> {
+        let pending_path = agent_doc_fs::pending_response_path_for(file)?;
+        if pending_path.exists() {
+            return Ok(SyncSessionCheckStatus::Interrupted(
+                "pending response remains".to_string(),
+            ));
+        }
+        if agent_doc_cycle_state_io::load(file)?
+            .as_ref()
+            .is_some_and(|state| state.phase.is_open())
+        {
+            return Ok(SyncSessionCheckStatus::Interrupted(
+                "cycle remains open".to_string(),
+            ));
+        }
+        Ok(SyncSessionCheckStatus::Ok("clean".to_string()))
+    }
+
+    fn provision_pane(
+        &self,
+        tmux: &tmux_router::Tmux,
+        _file: &Path,
+        session_id: &str,
+        _file_path: &str,
+        _context_session: Option<&str>,
+        _col_args: &[String],
+    ) -> Result<String> {
+        if let Some(pane) = agent_doc_session_registry_io::lookup(session_id)?
+            && tmux.pane_alive(&pane)
+        {
+            return Ok(pane);
+        }
+        anyhow::bail!("test sync runtime cannot provision a new pane")
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::MutexGuard;
+
+    thread_local! {
+        static PROCESS_GLOBAL_LOCK_DEPTH: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+    }
+
+    pub(crate) struct ProcessGlobalLockGuard {
+        _guard: Option<MutexGuard<'static, ()>>,
+    }
+
+    impl Drop for ProcessGlobalLockGuard {
+        fn drop(&mut self) {
+            PROCESS_GLOBAL_LOCK_DEPTH.with(|depth| {
+                let current = depth.get();
+                debug_assert!(current > 0, "process-global test lock depth underflow");
+                depth.set(current.saturating_sub(1));
+            });
+        }
+    }
+
+    pub(crate) fn env_lock() -> ProcessGlobalLockGuard {
+        let already_held = PROCESS_GLOBAL_LOCK_DEPTH.with(|depth| {
+            let current = depth.get();
+            depth.set(current + 1);
+            current > 0
+        });
+        if already_held {
+            return ProcessGlobalLockGuard { _guard: None };
+        }
+
+        let guard = agent_doc_harness::prompt_source::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ProcessGlobalLockGuard {
+            _guard: Some(guard),
+        }
     }
 }
 

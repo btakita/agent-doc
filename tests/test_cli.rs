@@ -991,12 +991,12 @@ fn live_tmux_tests_are_not_in_default_development_suite() {
     let sources = [
         "src/autoclaim.rs",
         "agent-doc-focus-io/src/lib.rs",
-        "agent-doc-orchestration/src/resync.rs",
+        "agent-doc-sync-io/src/resync.rs",
         "agent-doc-orchestration/src/route.rs",
         "src/session_actor_cmd.rs",
         "agent-doc-session-registry-io/src/registration.rs",
         "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-sync-io/src/sync.rs",
     ];
     let mut unignored = Vec::new();
 
@@ -7023,7 +7023,7 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
         "agent-doc-ops-log-io/src/lib.rs",
         "agent-doc-session-accretion-io/src/lib.rs",
         "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-sync-io/src/sync.rs",
         "agent-doc-orchestration/src/write.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -9627,7 +9627,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         })
         .collect();
     assert!(
-        coverage_lines.len() >= 33,
+        coverage_lines.len() >= 34,
         "coarse extraction commit coverage should include prior large-chunk rounds and current rounds; found {} rows",
         coverage_lines.len()
     );
@@ -9651,7 +9651,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 37,
+        ledger_rows.len() >= 38,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -9856,6 +9856,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("369280b0", "Session actor store and mailbox IO"),
         ("5dc7c322", "Session registration and projection IO"),
         ("0f90f7cf", "Project controller runtime IO"),
+        ("pending-current-round", "Sync and resync runtime IO graph"),
     ] {
         assert!(
             coverage_lines
@@ -9888,7 +9889,13 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Legacy git/sync/frontmatter helper wave",
             "agent-doc-orchestration/src/{git.rs,sync.rs,resync.rs,resync/*,frontmatter_io.rs}",
             "agent-doc-process-owner-io",
-            "Extract the remaining whole `sync.rs` graph only after tmux/controller/project-controller callbacks are narrowed",
+            "Keep splitting the moved sync/resync graph inside `agent-doc-sync-io`",
+        ),
+        (
+            "Sync and resync runtime IO graph",
+            "agent-doc-orchestration/src/{sync.rs,sync/*,resync.rs,resync/*}",
+            "agent-doc-sync-io/src/{sync.rs,sync/*,resync.rs,resync/*}",
+            "extract the temporary `SyncRuntimeEffects` callbacks",
         ),
         (
             "Legacy supervisor/agent runtime IO wave",
@@ -11487,8 +11494,8 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-orchestration/src/claim.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/session_resolution.rs",
-        "agent-doc-orchestration/src/resync.rs",
-        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-sync-io/src/resync.rs",
+        "agent-doc-sync-io/src/sync.rs",
         "agent-doc-session-check-io/src/guard_modes.rs",
         "agent-doc-supervisor-io/src/config.rs",
         "agent-doc-orchestration/src/start.rs",
@@ -13722,12 +13729,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
-        project_controller_source
-            .contains("crate::process::process_start_age_secs(")
-            && project_controller_source
-                .contains("crate::process::controller_serve_project_root(")
-            && project_controller_source
-                .contains("crate::process::cmdline_has_preparing_handoff(")
+        project_controller_source.contains("crate::process::process_start_age_secs(")
+            && project_controller_source.contains("crate::process::controller_serve_project_root(")
+            && project_controller_source.contains("crate::process::cmdline_has_preparing_handoff(")
             && project_controller_source.contains(
                 "use crate::process::{is_same_project_controller_pid, process_is_alive};"
             ),
@@ -13740,7 +13744,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "agent-doc-controller-io process scanning should call focused controller command-line parsing directly"
     );
     let sync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     let process_owner_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-process-owner-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
@@ -14530,7 +14534,7 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
     );
     for relative in [
         "agent-doc-orchestration/src/route.rs",
-        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-sync-io/src/sync.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -14742,12 +14746,7 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
             "agent-doc-controller-io must not depend on orchestration-side systems: {forbidden}"
         );
     }
-    for forbidden in [
-        "agent_doc_sqlite",
-        "interprocess",
-        "notify",
-        "tmux_router",
-    ] {
+    for forbidden in ["agent_doc_sqlite", "interprocess", "notify", "tmux_router"] {
         assert!(
             !controller_dashboard_source.contains(forbidden),
             "agent-doc-controller-io dashboard adapter must not directly use controller runtime systems: {forbidden}"
@@ -15796,7 +15795,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-sync-io/src/sync.rs",
         "src/queue_dispatch.rs",
         "src/session_actor_cmd.rs",
     ] {
@@ -15875,7 +15874,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     for (relative, required) in [
         (
-            "agent-doc-orchestration/src/sync.rs",
+            "agent-doc-sync-io/src/sync.rs",
             "agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(",
         ),
         (
@@ -15900,7 +15899,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     for relative in [
-        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-sync-io/src/sync.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
@@ -18159,10 +18158,9 @@ fn test_agent_doc_tmux_owns_editor_column_split_policy() {
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     let sync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     let pane_repair_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/pane_repair.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync/pane_repair.rs")).unwrap();
     for forbidden in ["pub fn is_first_column(", "fn is_first_column("] {
         assert!(
             !route_source.contains(forbidden),
@@ -18213,7 +18211,7 @@ fn test_agent_doc_tmux_owns_destructive_repair_policy() {
     }
 
     let sync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     for forbidden in [
         "fn repair_layout_skips_rescue_phase(",
         "const DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS",
@@ -18265,8 +18263,7 @@ fn test_agent_doc_tmux_owns_missing_pane_repair_message_policy() {
     }
 
     let pane_repair_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/pane_repair.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync/pane_repair.rs")).unwrap();
     for forbidden in [
         "fn missing_pane_manual_repair_reason(",
         "fn missing_pane_closeout_block_reason(",
@@ -18308,7 +18305,7 @@ fn test_agent_doc_tmux_owns_stash_prune_policy() {
     }
 
     let resync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/resync.rs")).unwrap();
     for forbidden in [
         "pub enum PruneCleanupMode",
         "pub struct StashTtlCandidate",
@@ -18331,7 +18328,7 @@ fn test_agent_doc_tmux_owns_stash_prune_policy() {
     );
 
     let sync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     assert!(
         !sync_source.contains("resync::PruneCleanupMode")
             && !sync_source.contains("crate::resync::PruneCleanupMode"),
@@ -18430,12 +18427,12 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
 
     let direct_call_sources = [
         "src/rename.rs",
-        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-sync-io/src/sync.rs",
         "agent-doc-session-actor-io/src/lib.rs",
         "agent-doc-controller-io/src/project_controller.rs",
-        "agent-doc-orchestration/src/sync/pane_repair.rs",
-        "agent-doc-orchestration/src/sync/registry.rs",
-        "agent-doc-orchestration/src/sync/layout.rs",
+        "agent-doc-sync-io/src/sync/pane_repair.rs",
+        "agent-doc-sync-io/src/sync/registry.rs",
+        "agent-doc-sync-io/src/sync/layout.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-prompt-io/src/lib.rs",
     ];
@@ -18550,7 +18547,7 @@ fn test_agent_doc_tmux_owns_associated_pane_resolution_policy() {
     }
 
     let sync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     for forbidden in [
         "pub enum AssociatedPaneSource",
         "pub struct AssociatedPaneCandidate",
@@ -18579,7 +18576,7 @@ fn test_agent_doc_tmux_owns_associated_pane_resolution_policy() {
 
     for relative_path in [
         "agent-doc-orchestration/src/route.rs",
-        "agent-doc-orchestration/src/resync.rs",
+        "agent-doc-sync-io/src/resync.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
@@ -18664,9 +18661,9 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     );
 
     for relative in [
-        "agent-doc-orchestration/src/resync.rs",
-        "agent-doc-orchestration/src/resync/prune.rs",
-        "agent-doc-orchestration/src/resync/stash.rs",
+        "agent-doc-sync-io/src/resync.rs",
+        "agent-doc-sync-io/src/resync/prune.rs",
+        "agent-doc-sync-io/src/resync/stash.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in [
@@ -18711,7 +18708,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         }
     }
     let resync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/resync.rs")).unwrap();
     let route_session_resolution = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/session_resolution.rs"),
     )
@@ -18740,7 +18737,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let watch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/daemon.rs")).unwrap();
     let sync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let preflight_source =
@@ -19099,7 +19096,7 @@ fn test_agent_doc_tmux_owns_layout_memory_policy() {
     }
 
     let sync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     assert!(
         sync_source.contains("agent_doc_tmux::apply_column_memory(")
             && sync_source.contains("agent_doc_tmux::build_layout_state(")
@@ -19110,11 +19107,9 @@ fn test_agent_doc_tmux_owns_layout_memory_policy() {
     );
 
     let sync_layout_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/layout.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync/layout.rs")).unwrap();
     let sync_registry_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/registry.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync/registry.rs")).unwrap();
     assert!(
         sync_layout_source.contains("active_pane_column_index(")
             && sync_layout_source.contains("agent_doc_tmux::classify_sync_layout_columns(")
@@ -19933,8 +19928,8 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let safe_passive_source = read_first_existing_source(
         manifest_dir,
         &[
-            "agent-doc-orchestration/src/sync/safe_passive.rs",
-            "agent-doc-orchestration/src/sync.rs",
+            "agent-doc-sync-io/src/sync/safe_passive.rs",
+            "agent-doc-sync-io/src/sync.rs",
         ],
     );
     assert_source_omits_all(
@@ -19948,15 +19943,14 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         &["agent_doc_project_root_io", "project_root_containing"],
     );
     let sync_registry_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/registry.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync/registry.rs")).unwrap();
     assert!(
         !sync_registry_source.contains("agent_doc_fs::find_project_root(")
             && sync_registry_source.contains("agent_doc_project_root_io::project_root_containing("),
         "sync registry should call focused project-root IO instead of owning registry location root discovery"
     );
     let sync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     assert!(
         !sync_source.contains("agent_doc_fs::find_project_root(")
             && sync_source.contains("agent_doc_project_root_io::project_root_containing("),
@@ -20018,7 +20012,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "claim should call focused project-root IO instead of owning lease/log root discovery"
     );
     let resync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/resync.rs")).unwrap();
     assert!(
         !resync_source.contains("agent_doc_fs::find_project_root(")
             && resync_source.contains("agent_doc_project_root_io::project_root_containing("),
@@ -20475,7 +20469,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-orchestration/src/route/dispatch.rs",
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-session-registry-io/src/registration.rs",
-        "agent-doc-orchestration/src/sync/pane_repair.rs",
+        "agent-doc-sync-io/src/sync/pane_repair.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
@@ -20499,7 +20493,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/route/dispatch.rs",
         "agent-doc-orchestration/src/route/startup.rs",
-        "agent-doc-orchestration/src/sync/pane_repair.rs",
+        "agent-doc-sync-io/src/sync/pane_repair.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",
@@ -24490,8 +24484,8 @@ fn test_agent_doc_controller_owns_route_text_predicates() {
     for relative_path in [
         "agent-doc-orchestration/src/route/busy_pane.rs",
         "agent-doc-orchestration/src/route/session_resolution.rs",
-        "agent-doc-orchestration/src/sync.rs",
-        "agent-doc-orchestration/src/resync.rs",
+        "agent-doc-sync-io/src/sync.rs",
+        "agent-doc-sync-io/src/resync.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         for forbidden_snippet in [
@@ -24663,8 +24657,7 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         );
     }
     let sync_layout_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/layout.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync/layout.rs")).unwrap();
     assert!(
         sync_layout_source.contains("agent_doc_sync::filter_synthetic_registry_candidate_facts")
             && sync_layout_source.contains("agent_doc_sync::SyntheticRegistryCandidateFacts"),
@@ -24693,20 +24686,15 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         );
     }
     for forbidden_dependency in [
-        "agent-doc-fs",
-        "agent-doc-controller",
         "agent-doc-orchestration",
-        "agent-doc-tmux",
         "agent-doc-tmux-commands",
-        "agent-doc-tmux-io",
-        "tmux-router",
         "notify",
         "rusqlite",
         "interprocess",
     ] {
         assert!(
             !sync_io_dependencies.contains_key(forbidden_dependency),
-            "agent-doc-sync-io must stay free of orchestration and tmux/controller effects: {forbidden_dependency}"
+            "agent-doc-sync-io must not regain orchestration or unrelated command/watch/db/socket dependencies: {forbidden_dependency}"
         );
     }
     let sync_io_source =
@@ -24777,13 +24765,13 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         );
     }
 
-    let sync_orchestration =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    let sync_runtime_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     let sync_safe_passive = read_first_existing_source(
         manifest_dir,
         &[
-            "agent-doc-orchestration/src/sync/safe_passive.rs",
-            "agent-doc-orchestration/src/sync.rs",
+            "agent-doc-sync-io/src/sync/safe_passive.rs",
+            "agent-doc-sync-io/src/sync.rs",
         ],
     );
     let route_session_resolution = fs::read_to_string(
@@ -24791,10 +24779,9 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
     )
     .unwrap();
     let resync_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/resync.rs")).unwrap();
     let resync_prune =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync/prune.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/resync/prune.rs")).unwrap();
     for forbidden_snippet in [
         "fn normalize_scope_arg",
         "fn sync_candidate_files(",
@@ -24861,22 +24848,22 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "fn pid_is_agent_session(",
     ] {
         assert!(
-            !sync_orchestration.contains(forbidden_snippet)
+            !sync_runtime_source.contains(forbidden_snippet)
                 && !sync_safe_passive.contains(forbidden_snippet),
-            "orchestration sync modules must not re-own or facade sync scope policy: {forbidden_snippet}"
+            "agent-doc-sync-io sync modules must not re-own or facade sync scope policy: {forbidden_snippet}"
         );
     }
     assert!(
         !manifest_dir
-            .join("agent-doc-orchestration/src/sync/lock.rs")
+            .join("agent-doc-sync-io/src/sync/lock.rs")
             .exists(),
-        "orchestration must not keep a sync lock/process IO facade"
+        "agent-doc-sync-io must not keep a nested sync lock/process IO facade"
     );
     assert!(
         !manifest_dir
-            .join("agent-doc-orchestration/src/sync/frontmatter_status.rs")
+            .join("agent-doc-sync-io/src/sync/frontmatter_status.rs")
             .exists(),
-        "orchestration must not keep a sync frontmatter-status IO facade"
+        "agent-doc-sync-io must not keep a nested sync frontmatter-status IO facade"
     );
     for forbidden_snippet in [
         "fn same_document_path",
@@ -24887,43 +24874,43 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
     ] {
         assert!(
             !resync_source.contains(forbidden_snippet) && !resync_prune.contains(forbidden_snippet),
-            "orchestration resync must not re-own or facade target matching policy: {forbidden_snippet}"
+            "agent-doc-sync-io resync must not re-own or facade target matching policy: {forbidden_snippet}"
         );
     }
     assert!(
-        sync_orchestration.contains("agent_doc_sync::normalize_scope_arg")
-            && sync_orchestration.contains("agent_doc_sync::shared_sync_scope_root")
-            && sync_orchestration.contains("agent_doc_sync::layout_state_scope_root")
-            && sync_orchestration.contains("agent_doc_sync::layout_state_path")
-            && sync_orchestration.contains("agent_doc_sync::sync_prune_state_path")
-            && sync_orchestration.contains("use agent_doc_sync::{")
-            && sync_orchestration.contains("effective_sync_columns")
-            && sync_orchestration.contains("is_file_rename")
-            && sync_orchestration.contains("latency_budget_status")
-            && sync_orchestration.contains("sync_latency_message")
-            && sync_orchestration.contains("agent_doc_sync::safe_passive_lock_contention_message")
-            && sync_orchestration.contains("agent_doc_sync_io::surface_frontmatter_status_with")
-            && sync_orchestration.contains("agent_doc_sync_io::clear_frontmatter_status_with")
-            && sync_orchestration.contains("sync_prune_state_update")
-            && sync_orchestration.contains("planned_stash_window_indices")
-            && sync_orchestration.contains("AutoStartMode")
-            && sync_orchestration.contains("safe_passive_prune_cleanup_throttle")
-            && sync_orchestration.contains("epoch_millis_now")
-            && sync_orchestration.contains("sync_repair_stamp_path")
-            && sync_orchestration.contains("rename_debounce_expired")
-            && sync_orchestration.contains("auto_started_panes_summary")
-            && sync_orchestration.contains("WindowIndexNormalizationPlan")
-            && sync_orchestration.contains("plan_window_index_normalization")
-            && sync_orchestration.contains("use agent_doc_sync_io::acquire_sync_lock;")
-            && sync_orchestration.contains("acquire_sync_lock(lock_path, sync_lock_wait_budget")
-            && sync_orchestration
+        sync_runtime_source.contains("agent_doc_sync::normalize_scope_arg")
+            && sync_runtime_source.contains("agent_doc_sync::shared_sync_scope_root")
+            && sync_runtime_source.contains("agent_doc_sync::layout_state_scope_root")
+            && sync_runtime_source.contains("agent_doc_sync::layout_state_path")
+            && sync_runtime_source.contains("agent_doc_sync::sync_prune_state_path")
+            && sync_runtime_source.contains("use agent_doc_sync::{")
+            && sync_runtime_source.contains("effective_sync_columns")
+            && sync_runtime_source.contains("is_file_rename")
+            && sync_runtime_source.contains("latency_budget_status")
+            && sync_runtime_source.contains("sync_latency_message")
+            && sync_runtime_source.contains("agent_doc_sync::safe_passive_lock_contention_message")
+            && sync_runtime_source.contains("crate::surface_frontmatter_status_with")
+            && sync_runtime_source.contains("crate::clear_frontmatter_status_with")
+            && sync_runtime_source.contains("sync_prune_state_update")
+            && sync_runtime_source.contains("planned_stash_window_indices")
+            && sync_runtime_source.contains("AutoStartMode")
+            && sync_runtime_source.contains("safe_passive_prune_cleanup_throttle")
+            && sync_runtime_source.contains("epoch_millis_now")
+            && sync_runtime_source.contains("sync_repair_stamp_path")
+            && sync_runtime_source.contains("rename_debounce_expired")
+            && sync_runtime_source.contains("auto_started_panes_summary")
+            && sync_runtime_source.contains("WindowIndexNormalizationPlan")
+            && sync_runtime_source.contains("plan_window_index_normalization")
+            && sync_runtime_source.contains("use crate::acquire_sync_lock;")
+            && sync_runtime_source.contains("acquire_sync_lock(lock_path, sync_lock_wait_budget")
+            && sync_runtime_source
                 .contains("agent_doc_process_owner_io::process_tree_contains_pid(")
-            && sync_orchestration
+            && sync_runtime_source
                 .contains("agent_doc_process_owner_io::process_tree_agent_doc_owner_pid_for_file(")
-            && sync_orchestration
+            && sync_runtime_source
                 .contains("agent_doc_process_owner_io::process_tree_has_agent_doc_owner_for_file(")
             && route_session_resolution.contains("agent_doc_sync::shared_sync_scope_root"),
-        "orchestration should call focused sync policy, sync IO, and process-owner IO crates directly"
+        "agent-doc-sync-io runtime graph should call focused sync policy and process-owner IO crates directly, while route session resolution keeps using focused sync scope policy"
     );
     assert!(
         resync_source.contains("use agent_doc_sync::{")
@@ -24933,7 +24920,7 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && resync_source.contains("superseded_candidates(canonical, drift_sessions)")
             && resync_source.contains("agent_doc_process_owner_io::process_tree_contains_pid(")
             && resync_prune.contains("ResyncTargetMatcher::new"),
-        "orchestration resync should call focused target matching/planner and process-owner IO directly"
+        "agent-doc-sync-io resync should call focused target matching/planner and process-owner IO directly"
     );
 }
 

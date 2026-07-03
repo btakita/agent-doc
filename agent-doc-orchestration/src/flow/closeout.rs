@@ -704,10 +704,11 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
         capture.as_ref(),
     )?;
     let editor_ipc = closeout_editor_ipc_evidence(file, &visible);
-    let binary_freshness = match agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file) {
-        Some(warning) => CloseoutBinaryFreshnessEvidence::Stale { warning },
-        None => CloseoutBinaryFreshnessEvidence::NoStaleWarning,
-    };
+    let binary_freshness =
+        match agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file) {
+            Some(warning) => CloseoutBinaryFreshnessEvidence::Stale { warning },
+            None => CloseoutBinaryFreshnessEvidence::NoStaleWarning,
+        };
 
     Ok(CloseoutRecoveryEvidence {
         visible_markdown_hash,

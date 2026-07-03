@@ -46,13 +46,11 @@ pub mod preflight;
 pub use agent_doc_queue_io::queue_continuation;
 pub mod realtime_model;
 pub mod repair;
-pub mod resync;
 pub mod route;
 pub mod run;
 pub mod session_check;
 pub mod start;
 pub mod stream;
-pub mod sync;
 pub mod write;
 
 pub(crate) struct BacklogCommandEffects;

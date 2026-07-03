@@ -93,7 +93,7 @@ pub(crate) fn attempt_busy_existing_pane_auto_fix(
         ),
     );
     let test_hook_changed = maybe_run_test_busy_auto_fix_hook(tmux, file, pane)?;
-    let fix_outcome = resync::apply_targeted_fix_for_route(tmux, file)?;
+    let fix_outcome = agent_doc_sync_io::resync::apply_targeted_fix_for_route(tmux, file)?;
     let post_fix_binding = lookup_dispatch_registration(file_path, session_id)?;
     let pane_still_authoritative = post_fix_binding.as_deref() == Some(pane);
     let supervisor_health = Some(query_supervisor_health(file, session_id));

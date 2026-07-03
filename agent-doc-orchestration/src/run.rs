@@ -353,7 +353,7 @@ pub fn run_with_context(
     // pane that owns a *different* document (cross-document contamination vector
     // — e.g. a tsift.md-owned pane running agent-doc-bugs2.md's cycle). The
     // same-document recursion guard below only catches same-document re-entry.
-    crate::sync::log_cross_document_execution_context(file, "run");
+    agent_doc_sync_io::sync::log_cross_document_execution_context(file, "run");
 
     let mut create_branch = branch;
     let mut completed_queue_items = 0usize;
@@ -943,7 +943,8 @@ fn typed_queue_prompt_state(file: &Path, content: &str) -> Option<ActiveQueuePro
     let canonical = file.canonicalize().ok()?;
     let project_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
     let document_hash = agent_doc_fs::document_state_hash(&canonical).ok()?;
-    let ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(&project_root).ok()?;
+    let ledger =
+        agent_doc_controller_io::project_controller::load_state_event_ledger(&project_root).ok()?;
     let projection = ledger.project_document(&document_hash)?;
     let current_nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").ok()?;
     let current_head = current_nodes.iter().find(|node| !node.item.struck)?;
@@ -2064,7 +2065,8 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event).unwrap();
+        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event)
+            .unwrap();
 
         assert_eq!(
             active_queue_prompt_state(&doc).unwrap(),
@@ -2196,7 +2198,8 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event).unwrap();
+        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event)
+            .unwrap();
 
         assert_eq!(
             active_queue_prompt_state(&doc).unwrap(),
@@ -2245,7 +2248,8 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &selected).unwrap();
+        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &selected)
+            .unwrap();
         let deferred = agent_doc_state_backbone::StateEvent::new(
             "typed-deferred-stop-head",
             agent_doc_state_backbone::StateFact::QueueHeadDeferred {
@@ -2255,7 +2259,8 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &deferred).unwrap();
+        agent_doc_controller_io::project_controller::append_state_event(dir.path(), &deferred)
+            .unwrap();
 
         assert_eq!(
             active_queue_prompt_state(&doc).unwrap(),

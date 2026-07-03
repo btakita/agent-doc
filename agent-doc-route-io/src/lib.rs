@@ -17,6 +17,7 @@ pub mod dispatch_target;
 pub mod launch_contract;
 pub mod pane_provenance;
 pub mod pane_resolution;
+pub mod queue_dispatch;
 pub mod restart_handoff;
 pub mod session_resolution;
 pub mod startup;

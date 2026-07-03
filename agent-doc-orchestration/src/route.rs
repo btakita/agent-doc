@@ -154,9 +154,7 @@
 //! - (aspirational) `autostart_inhibited`: `AGENT_DOC_NO_AUTOSTART` set → returns Err, no pane spawned
 
 use anyhow::{Context, Result};
-use fs2::FileExt;
-use std::fs::{File, OpenOptions};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use agent_doc_controller::dispatch::{
@@ -259,6 +257,13 @@ use agent_doc_route_io::pane_resolution::{
 use agent_doc_route_io::pane_resolution::{
     fail_if_recent_session_loss_window, is_agent_process, startup_miss_route_facts,
     startup_miss_route_provenance,
+};
+use agent_doc_route_io::queue_dispatch::{
+    RouteQueueEffects, RouteQueueEnqueueOutcome,
+    activate_existing_route_queue_head as activate_existing_route_queue_head_with_effects,
+    enqueue_exchange_slash_command_for_idle_drain as enqueue_exchange_slash_command_for_idle_drain_with_effects,
+    enqueue_route_dispatch_prompt as enqueue_route_dispatch_prompt_with_effects,
+    inactive_route_queue_head,
 };
 use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup::RouteStartupEffects;
@@ -376,16 +381,6 @@ pub enum RouteMode {
     DispatchOnly,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RouteQueueEnqueueOutcome {
-    prompt_text: String,
-    appended: bool,
-    already_present: bool,
-    superseded: bool,
-    component_created: bool,
-    activated: bool,
-}
-
 fn route_dispatch_effects() -> RouteDispatchEffects {
     RouteDispatchEffects {
         file_route_dispatch_bug_report,
@@ -434,6 +429,12 @@ pub fn route_startup_effects() -> RouteStartupEffects {
         route_dispatch_effects: route_dispatch_effects(),
         dispatch_only_route_effects: route_dispatch_only_effects(),
         route_cycle_ack_effects: route_cycle_ack_effects(),
+    }
+}
+
+fn route_queue_effects() -> RouteQueueEffects {
+    RouteQueueEffects {
+        write_document: route_write_document,
     }
 }
 
@@ -999,85 +1000,19 @@ fn classify_route_closeout_block(
     (recovery_decision, dispatch_decision)
 }
 
-/// Enqueue a routed dispatch prompt into a document's `agent:queue`.
-///
-/// `priority` marks a manual operator dispatch (JB `Run Agent Doc`) into a
-/// busy/blocked pane: it must PREEMPT pending auto-loop items, so the prompt is
-/// inserted ahead of the first queued prompt and never supersedes a lone
-/// prompt (#jb-run-preempt-autoloop-priority). Non-priority callers keep the
-/// legacy tail-append (+ lone stale-prompt supersede) behavior.
 fn enqueue_route_dispatch_prompt(
     file: &Path,
     prompt_text: &str,
     source: &str,
     priority: bool,
 ) -> Result<RouteQueueEnqueueOutcome> {
-    let _lock = acquire_route_queue_lock(file)?;
-    let original = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    let update = agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update(
-        &original,
-        prompt_text,
-        priority,
-    )?;
-    if let Some(parse_err) = update.unparseable_queue_error.as_deref() {
-        // The existing agent:queue body is polluted (e.g. user prose / log dumps
-        // merged into the component by an earlier corruption). The focused queue
-        // transform preserves the polluted body and appends the pending dispatch;
-        // route owns only the effect-side diagnostic.
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
-                file.display(),
-                agent_doc_hash::content_hash(&update.prompt_text),
-                parse_err
-            ),
-        );
-    }
-
-    let content = update.content;
-    let activated = content != original;
-    if activated {
-        route_write_document(file, &content, &original, "route_dispatch_queue").with_context(
-            || {
-                format!(
-                    "failed to converge queued dispatch for {} through editor IPC/disk",
-                    file.display()
-                )
-            },
-        )?;
-        agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op).with_context(
-            || {
-                format!(
-                    "failed to sync snapshot after queueing dispatch for {}",
-                    file.display()
-                )
-            },
-        )?;
-    }
-    agent_doc_ops_log_io::log_op(
+    enqueue_route_dispatch_prompt_with_effects(
         file,
-        &format!(
-            "route_dispatch_queued file={} source={} appended={} already_present={} superseded={} component_created={} activated={} prompt={:?}",
-            file.display(),
-            source,
-            update.appended,
-            update.already_present,
-            update.superseded,
-            update.component_created,
-            activated,
-            update.prompt_text
-        ),
-    );
-    Ok(RouteQueueEnqueueOutcome {
-        prompt_text: update.prompt_text,
-        appended: update.appended,
-        already_present: update.already_present,
-        superseded: update.superseded,
-        component_created: update.component_created,
-        activated,
-    })
+        prompt_text,
+        source,
+        priority,
+        route_queue_effects(),
+    )
 }
 
 fn enqueue_exchange_slash_command_for_idle_drain(
@@ -1085,152 +1020,19 @@ fn enqueue_exchange_slash_command_for_idle_drain(
     context: &PromptBearingRouteContext,
     source: &str,
 ) -> Result<Option<RouteQueueEnqueueOutcome>> {
-    let Some(command) = context.slash_command.as_deref() else {
-        return Ok(None);
-    };
-    let queued = enqueue_route_dispatch_prompt(file, command, source, true)?;
-    agent_doc_ops_log_io::log_op(
+    enqueue_exchange_slash_command_for_idle_drain_with_effects(
         file,
-        &format!(
-            "route_exchange_slash_command_queued file={} source={} command={:?} appended={} already_present={} superseded={} activated={}",
-            file.display(),
-            source,
-            command,
-            queued.appended,
-            queued.already_present,
-            queued.superseded,
-            queued.activated
-        ),
-    );
-    Ok(Some(queued))
-}
-
-fn inactive_route_queue_head(file: &Path) -> Result<Option<String>> {
-    let content = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err.into()),
-    };
-    inactive_route_queue_head_in_content(file, &content)
-}
-
-fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Option<String>> {
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
-    let (fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
-        content,
-        file,
-        &rc.ssh_context(),
-    )?;
-    let committed_snapshot = match agent_doc_snapshot_io::load(file) {
-        Ok(snapshot) => snapshot,
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_dispatch_uncommitted_head_snapshot_unreadable file={} err={} decision=allow",
-                    file.display(),
-                    err
-                ),
-            );
-            None
-        }
-    };
-    match agent_doc_queue::route_dispatch::inactive_route_queue_head(
-        content,
-        fm.queue_active,
-        committed_snapshot.as_deref(),
-    )? {
-        agent_doc_queue::route_dispatch::RouteInactiveQueueHead::None => Ok(None),
-        agent_doc_queue::route_dispatch::RouteInactiveQueueHead::Dispatchable(head_text) => {
-            Ok(Some(head_text))
-        }
-        agent_doc_queue::route_dispatch::RouteInactiveQueueHead::Uncommitted(head_text) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_dispatch_uncommitted_head file={} decision=defer reason=head_not_in_committed_snapshot head={:?}",
-                    file.display(),
-                    agent_doc_secret_redact::redact(&head_text)
-                ),
-            );
-            Ok(None)
-        }
-    }
+        context,
+        source,
+        route_queue_effects(),
+    )
 }
 
 fn activate_existing_route_queue_head(
     file: &Path,
     source: &str,
 ) -> Result<Option<RouteQueueEnqueueOutcome>> {
-    let _lock = acquire_route_queue_lock(file)?;
-    let original = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
-        return Ok(None);
-    };
-    let content =
-        agent_doc_queue::route_dispatch::activate_existing_route_queue_content(&original)?;
-    let activated = content != original;
-    if activated {
-        route_write_document(file, &content, &original, "route_queue_activation")
-            .with_context(|| format!("failed to activate queue in {}", file.display()))?;
-        agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op).with_context(
-            || {
-                format!(
-                    "failed to sync snapshot after activating queue for {}",
-                    file.display()
-                )
-            },
-        )?;
-    }
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "route_existing_queue_head_activated file={} source={} activated={} prompt={:?}",
-            file.display(),
-            source,
-            activated,
-            prompt_text
-        ),
-    );
-    Ok(Some(RouteQueueEnqueueOutcome {
-        prompt_text,
-        appended: false,
-        already_present: true,
-        superseded: false,
-        component_created: false,
-        activated,
-    }))
-}
-
-fn route_queue_lock_path(file: &Path) -> Result<PathBuf> {
-    let canonical = std::fs::canonicalize(file)
-        .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let base = agent_doc_project_root_io::project_root_containing(&canonical)
-        .or_else(|| canonical.parent().map(Path::to_path_buf))
-        .ok_or_else(|| {
-            anyhow::anyhow!("failed to resolve queue lock root for {}", file.display())
-        })?;
-    let hash = agent_doc_fs::document_state_hash_from_str(&canonical.to_string_lossy());
-    Ok(base
-        .join(".agent-doc/route-queue")
-        .join(format!("{hash}.lock")))
-}
-
-fn acquire_route_queue_lock(file: &Path) -> Result<File> {
-    let lock_path = route_queue_lock_path(file)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let lock = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open route queue lock {}", lock_path.display()))?;
-    lock.lock_exclusive()
-        .with_context(|| format!("failed to acquire route queue lock {}", lock_path.display()))?;
-    Ok(lock)
+    activate_existing_route_queue_head_with_effects(file, source, route_queue_effects())
 }
 
 fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {

@@ -9650,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 46,
+        ledger_rows.len() >= 47,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -20783,10 +20783,14 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     );
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_queue_dispatch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/queue_dispatch.rs")).unwrap();
     assert!(
         !route_source.contains("agent_doc_fs::find_project_root(")
-            && route_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "route should call focused project-root IO instead of owning actor/supervisor/route-queue root discovery"
+            && !route_queue_dispatch_source.contains("agent_doc_fs::find_project_root(")
+            && route_queue_dispatch_source
+                .contains("agent_doc_project_root_io::project_root_containing("),
+        "route queue IO should call focused project-root IO instead of owning route-queue root discovery"
     );
     let route_startup_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup.rs")).unwrap();
@@ -25336,6 +25340,8 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
 
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_queue_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/queue_dispatch.rs")).unwrap();
     let route_dispatch_only =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_only.rs")).unwrap();
     let route_cycle_ack =
@@ -25360,9 +25366,22 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     ] {
         assert!(
             !route_source.contains(forbidden_snippet)
+                && !route_queue_dispatch.contains(forbidden_snippet)
                 && !route_dispatch_only.contains(forbidden_snippet)
                 && !route_cycle_ack.contains(forbidden_snippet),
             "route must stay an effect adapter and not re-own route-dispatch queue policy: {forbidden_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "fn route_queue_lock_path(",
+        "fn acquire_route_queue_lock(",
+        "agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update",
+        "agent_doc_queue::route_dispatch::inactive_route_queue_head",
+        "agent_doc_queue::route_dispatch::activate_existing_route_queue_content",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own route dispatch queue writeback IO after it moves to agent-doc-route-io: {forbidden_snippet}"
         );
     }
     for forbidden_snippet in [
@@ -25376,11 +25395,19 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
         );
     }
     assert!(
-        route_source
+        route_queue_dispatch
             .contains("agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update")
-            && route_source.contains("agent_doc_queue::route_dispatch::inactive_route_queue_head")
-            && route_source
+            && route_queue_dispatch
+                .contains("agent_doc_queue::route_dispatch::inactive_route_queue_head")
+            && route_queue_dispatch
                 .contains("agent_doc_queue::route_dispatch::activate_existing_route_queue_content")
+            && route_queue_dispatch.contains("pub struct RouteQueueEffects")
+            && route_queue_dispatch.contains("pub struct RouteQueueEnqueueOutcome")
+            && route_queue_dispatch.contains("pub fn enqueue_route_dispatch_prompt(")
+            && route_queue_dispatch.contains("pub fn activate_existing_route_queue_head(")
+            && route_queue_dispatch.contains("pub fn inactive_route_queue_head(")
+            && route_source.contains("use agent_doc_route_io::queue_dispatch::{")
+            && route_source.contains("RouteQueueEffects")
             && route_cycle_ack.contains("agent_doc_turn::cycle_ack")
             && turn_cycle_ack
                 .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change")
@@ -25392,7 +25419,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             && preflight_source.contains("agent_doc_debounce::preflight_debounce_max_wait")
             && route_dispatch_only
                 .contains("agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source"),
-        "route/preflight should call route-dispatch queue policy through agent-doc-queue directly"
+        "route/preflight should call route-dispatch queue policy through focused effect adapters and agent-doc-queue directly"
     );
 }
 

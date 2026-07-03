@@ -8992,7 +8992,7 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
             "agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight",
         ),
         (
-            "agent-doc-orchestration/src/route/dispatch_only.rs",
+            "agent-doc-route-io/src/dispatch_only.rs",
             "agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending",
         ),
     ] {
@@ -13964,6 +13964,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .unwrap();
     let route_dispatch_start_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_start.rs")).unwrap();
+    let route_dispatch_only_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_only.rs")).unwrap();
     let route_dispatch_target_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     let route_pane_provenance_source =
@@ -14073,9 +14075,53 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         route_source.contains("use agent_doc_route_io::dispatch_start::{")
             && route_source.contains("RoutedDispatchStartTracker")
             && route_source.contains("build_routed_dispatch_start_tracker")
-            && route_source.contains("codex_dispatch_start_tracking_enabled")
             && route_source.contains("wait_for_routed_dispatch_start"),
         "route.rs should call focused route dispatch-start IO directly"
+    );
+    for required_snippet in [
+        "pub fn wait_for_dispatch_only_recycle_inflight_settle(",
+        "pub fn dispatch_only_dispatch_start_proof_required(",
+        "pub fn require_dispatch_only_dispatch_start_proof(",
+        "pub fn dispatch_only_sent_log_message_for(",
+        "pub fn dispatch_only_sent_console_message_for(",
+        "agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(",
+        "agent_doc_supervisor_io::route_submit_inflight::mark_route_submit_blocked(",
+        "agent_doc_flow_io::log_flow_event(",
+        "crate::dispatch_start::codex_dispatch_start_tracking_enabled(",
+        "DispatchOnlyProofOutcomeFacts",
+        "DispatchOnlyRecycleInflightMessageFacts",
+        "accepted_only_dispatch_start_log_message(",
+        "accepted_only_dispatch_start_refusal_message(",
+        "dispatch_only_recycle_inflight_message(",
+        "routed_dispatch_start_timeout_for_binary(",
+    ] {
+        assert!(
+            route_dispatch_only_io_source.contains(required_snippet),
+            "agent-doc-route-io dispatch_only should own dispatch-only proof/recycle gate IO: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "pub(crate) fn dispatch_only_dispatch_start_proof_required(",
+        "fn dispatch_only_test_sent_log_message(",
+        "DispatchOnlyProofOutcomeFacts",
+        "DispatchOnlyRecycleInflightMessageFacts",
+        "accepted_only_dispatch_start_log_message(",
+        "accepted_only_dispatch_start_refusal_message(",
+        "dispatch_only_recycle_inflight_message(",
+        "route_dispatch_only_recycle_inflight_unsettled file=",
+    ] {
+        assert!(
+            !route_dispatch_only_source.contains(forbidden_snippet),
+            "route/dispatch_only.rs must not re-own dispatch-only proof/recycle gate IO: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_dispatch_only_source.contains("use agent_doc_route_io::dispatch_only::{")
+            && route_dispatch_only_source
+                .contains("wait_for_dispatch_only_recycle_inflight_settle")
+            && route_dispatch_only_source.contains("dispatch_only_dispatch_start_proof_required")
+            && route_dispatch_only_source.contains("require_dispatch_only_dispatch_start_proof("),
+        "route/dispatch_only.rs should call focused dispatch-only route IO directly"
     );
     for required_snippet in [
         "pub enum DispatchActorState",
@@ -14358,13 +14404,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("classify_authoritative_prompt_ready_barrier")
             && route_source.contains("RoutedReopenGuardReason")
             && route_source.contains("prompt_ready_barrier_failed_event")
-            && route_source.contains("dispatch_proof_failed_event")
             && route_source.contains("agent_doc_flow_io::log_flow_event")
             && route_source.contains("dispatch_only_blocked_guard_reason")
             && route_source.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
-            && route_source.contains("classify_dispatch_start_proof")
             && route_source.contains("DirectPaneSubmitStatus as CommandDispatchStatus")
             && route_source.contains("RetryBudget")
             && route_source.contains("authoritative_actor_ready_retry_budget")
@@ -14408,11 +14452,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("RouteDispatchBugReportItemFacts")
             && route_source.contains("route_dispatch_bug_report_item(")
             && route_source.contains("DispatchOnlyReopenDelivery")
-            && route_source.contains("DispatchOnlyProofOutcomeFacts")
-            && route_source.contains("dispatch_only_sent_log_message")
-            && route_source.contains("dispatch_only_sent_console_message")
-            && route_source.contains("accepted_only_dispatch_start_log_message")
-            && route_source.contains("accepted_only_dispatch_start_refusal_message")
             && route_source.contains("dispatch_only_should_print_unproven_progress")
             && route_source.contains("fresh_route_start_ack_timeout")
             && route_source.contains("routed_cycle_ack_timeout")
@@ -14495,25 +14534,17 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
-        route_dispatch_only_source.contains("DispatchOnlyProofOutcomeFacts")
-            && route_dispatch_only_source.contains("DispatchOnlyStartingPaneActorReadyFacts")
+        route_dispatch_only_source.contains("DispatchOnlyStartingPaneActorReadyFacts")
             && route_dispatch_only_source.contains("dispatch_only_starting_pane_actor_ready(")
             && route_dispatch_only_source.contains("DispatchOnlyStartingPaneNotReadyMessageFacts")
             && route_dispatch_only_source
                 .contains("dispatch_only_starting_pane_not_ready_message(")
-            && route_dispatch_only_source.contains("DispatchOnlyRecycleInflightMessageFacts")
-            && route_dispatch_only_source.contains("dispatch_only_recycle_inflight_message(")
             && route_dispatch_only_source.contains("DispatchOnlyBlockerRecoveryHintFacts")
             && route_dispatch_only_source.contains("dispatch_only_blocker_recovery_hint(")
-            && route_dispatch_only_source.contains("dispatch_only_sent_log_message(")
-            && route_dispatch_only_source.contains("dispatch_only_sent_console_message(")
-            && route_dispatch_only_source.contains("accepted_only_dispatch_start_log_message(")
-            && route_dispatch_only_source.contains("accepted_only_dispatch_start_refusal_message(")
-            && route_dispatch_only_source.contains("routed_dispatch_start_timeout_for_binary(")
-            && route_dispatch_only_source.contains("Some(harness.binary.as_str())")
-            && route_dispatch_only_source.contains("cfg!(test)")
+            && route_dispatch_only_source.contains("dispatch_only_sent_log_message_for(")
+            && route_dispatch_only_source.contains("dispatch_only_sent_console_message_for(")
             && route_dispatch_only_source.contains("dispatch_only_should_print_unproven_progress("),
-        "route/dispatch_only.rs should adapt route facts into focused controller dispatch-only proof policy"
+        "route/dispatch_only.rs should adapt route facts into focused route dispatch-only IO and controller readiness policy"
     );
     for forbidden_snippet in [
         "pub(crate) fn fresh_route_start_ack_timeout(",

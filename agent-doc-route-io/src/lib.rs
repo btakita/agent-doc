@@ -5,6 +5,7 @@
 //! queue policy, or supervisor process startup.
 
 pub mod busy_pane;
+pub mod dispatch_only;
 pub mod dispatch_recovery;
 pub mod dispatch_start;
 pub mod dispatch_target;

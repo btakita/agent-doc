@@ -13,6 +13,7 @@ pub mod dispatch_only;
 pub mod dispatch_recovery;
 pub mod dispatch_start;
 pub mod dispatch_target;
+pub mod launch_contract;
 pub mod pane_provenance;
 pub mod restart_handoff;
 pub mod session_resolution;

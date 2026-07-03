@@ -84,6 +84,7 @@ pub(crate) fn recover_dispatch_only_authoritative_waiting_input(
         DispatchOnlySendReopenOptions {
             delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
             queue_prompt_text: None,
+            effects: route_dispatch_only_effects(),
         },
     )
 }
@@ -228,6 +229,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
                 false,
                 dispatch_pane.as_str(),
                 DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                route_dispatch_only_effects(),
                 true,
             );
         }
@@ -313,6 +315,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
             false,
             dispatch_pane,
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            route_dispatch_only_effects(),
             false,
         );
     }
@@ -386,6 +389,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
             false,
             &new_pane,
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            route_dispatch_only_effects(),
             false,
         );
     }

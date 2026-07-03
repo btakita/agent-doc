@@ -163,24 +163,20 @@ use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixOutcome, CloseoutBlockDispatchDecision,
     CloseoutBlockDispatchFacts, DegradedAuthoritativeActorDirectSubmit, DispatchActorState,
-    DispatchDrainRetryDecision, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyBusyRefusalFacts,
-    DispatchOnlyReopenDelivery, DispatchOnlyStartingPaneActorReadyFacts,
-    DispatchOnlyStartingPaneNotReadyMessageFacts, DispatchRuntimeHealth,
-    DuplicatePanePolicyErrorFacts, PromptReadyBarrierDecision, ReopenMode, RetryBudget,
-    RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts, RouteCloseoutDrainOutcome,
-    RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts, RoutedDispatchStartProof,
-    RoutedReopenFacts, RoutedReopenGuardReason, StartingTimeoutActorFacts, StartupMissRouteFacts,
-    actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
-    authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
-    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
-    classify_closeout_block_dispatch, decide_authoritative_reopen,
-    degraded_authoritative_actor_direct_submit_log_message, dispatch_drain_retry_decision,
-    dispatch_only_blocked_guard_reason, dispatch_only_blocker_recovery_hint,
+    DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts, DispatchOnlyReopenDelivery,
+    DispatchRuntimeHealth, DuplicatePanePolicyErrorFacts, PromptReadyBarrierDecision, ReopenMode,
+    RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
+    RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts,
+    RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
+    StartingTimeoutActorFacts, StartupMissRouteFacts, actor_blocked_by_starting_timeout,
+    actor_dispatch_blocker_reason, authoritative_actor_ready_retry_budget,
+    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
+    classify_authoritative_prompt_ready_barrier, classify_closeout_block_dispatch,
+    decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
+    dispatch_drain_retry_decision,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
-    dispatch_only_focus_only_should_fail_closed, dispatch_only_should_print_unproven_progress,
-    dispatch_only_should_probe_active_turn_cue, dispatch_only_starting_pane_actor_ready,
-    dispatch_only_starting_pane_not_ready_message,
+    dispatch_only_focus_only_should_fail_closed, dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
     failclosed_wait_context, fresh_route_start_ack_timeout, prompt_ready_barrier_failed_event,
@@ -209,20 +205,20 @@ use agent_doc_controller_io::starting_actor_timeout::{
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
 use agent_doc_route_io::authoritative_actor::{
-    AuthoritativeActorDispatchTarget, ManagedCapabilityProofStatus, RouteDispatchAuthorization,
-    actor_dispatch_state, authoritative_actor_dispatch_recovery_hint,
-    authoritative_actor_ready_facts_from_target, authorize_controller_dispatch,
-    current_generation_ready_prompt_proven, dispatch_only_can_use_degraded_authoritative_actor,
-    load_authoritative_actor_binding, load_authoritative_actor_dispatch_target,
-    load_authoritative_actor_for_registered_pane, managed_capability_proof_status,
+    AuthoritativeActorDispatchTarget, RouteDispatchAuthorization, actor_dispatch_state,
+    authoritative_actor_dispatch_recovery_hint, authoritative_actor_ready_facts_from_target,
+    authorize_controller_dispatch, current_generation_ready_prompt_proven,
+    dispatch_only_can_use_degraded_authoritative_actor, load_authoritative_actor_binding,
+    load_authoritative_actor_dispatch_target, load_authoritative_actor_for_registered_pane,
     mark_starting_actor_timeout_blocked, promote_starting_authoritative_actor_if_dispatch_ready,
     recover_starting_timeout_blocked_actor_if_dispatch_ready, route_dispatch_deduped_pane,
-    route_starting_actor_not_ready_log_line, tracked_harness_clear_requires_fresh_restart,
+    route_starting_actor_not_ready_log_line,
 };
 #[cfg(test)]
 use agent_doc_route_io::authoritative_actor::{
-    authoritative_actor_dispatch_can_queue_optimistically,
-    authoritative_actor_start_wait_terminal_state,
+    ManagedCapabilityProofStatus, authoritative_actor_dispatch_can_queue_optimistically,
+    authoritative_actor_start_wait_terminal_state, managed_capability_proof_status,
+    tracked_harness_clear_requires_fresh_restart,
 };
 pub(crate) use agent_doc_route_io::busy_pane::{
     BusyPaneInterruptRecoveryOutcome, ExistingPaneDispatchReadiness,
@@ -237,22 +233,22 @@ use agent_doc_route_io::direct_pane_dispatch::editor_route_attempt_id;
 #[cfg(test)]
 use agent_doc_route_io::dispatch::send_command_checked;
 use agent_doc_route_io::dispatch::{
-    BusyRouteQueuedDiagnosticFacts, DirectPaneDispatchOptions, RouteDispatchBugReportFacts,
-    RouteDispatchEffects, SupervisorIpcDispatchOptions, dispatch_existing_managed_reopen,
-    dispatch_routed_reopen, dispatch_routed_reopen_with_mode, dispatch_via_supervisor_ipc,
-    dispatch_via_supervisor_ipc_with_mode,
+    BusyRouteQueuedDiagnosticFacts, RouteDispatchBugReportFacts, RouteDispatchEffects,
+    dispatch_existing_managed_reopen, dispatch_routed_reopen, dispatch_via_supervisor_ipc,
+};
+pub(crate) use agent_doc_route_io::dispatch_only::{
+    DispatchOnlyQueuedPromptOutcome, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
+    dispatch_only_reopen_existing_pane, dispatch_only_send_reopen,
 };
 pub(crate) use agent_doc_route_io::dispatch_recovery::{
     resolve_fresh_dispatch_target_after_ready_wait, wait_for_starting_pane_recovery_target,
 };
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
+use agent_doc_route_io::launch_contract::reapply_codex_launch_contract_before_reuse;
 use agent_doc_route_io::pane_provenance::pane_route_provenance;
 use agent_doc_route_io::restart_handoff::wait_for_busy_restart_handoff;
 use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup_debounce::await_idle;
-pub(crate) use agent_doc_route_io::startup_ready::{
-    fresh_start_pane_idle_ready, wait_for_agent_ready, wait_for_agent_ready_outcome,
-};
 use agent_doc_route_io::supervisor_runtime::{
     query_supervisor_health, query_supervisor_runtime, restart_via_supervisor,
     restart_via_supervisor_with_mode,
@@ -407,6 +403,32 @@ fn route_cycle_ack_effects() -> RouteCycleAckEffects {
     }
 }
 
+fn route_dispatch_only_effects() -> DispatchOnlyRouteEffects {
+    DispatchOnlyRouteEffects {
+        route_dispatch_effects: route_dispatch_effects(),
+        enqueue_route_dispatch_prompt: enqueue_route_dispatch_prompt_for_dispatch_only,
+        emit_busy_route_queued_diagnostic,
+        emit_busy_route_diagnostic,
+        dispatch_only_starting_pane_ready_timeout,
+        file_route_dispatch_bug_report,
+    }
+}
+
+fn enqueue_route_dispatch_prompt_for_dispatch_only(
+    file: &Path,
+    prompt_text: &str,
+    source: &str,
+    priority: bool,
+) -> Result<DispatchOnlyQueuedPromptOutcome> {
+    let outcome = enqueue_route_dispatch_prompt(file, prompt_text, source, priority)?;
+    Ok(DispatchOnlyQueuedPromptOutcome {
+        prompt_text: outcome.prompt_text,
+        appended: outcome.appended,
+        already_present: outcome.already_present,
+        superseded: outcome.superseded,
+    })
+}
+
 fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
     let document_display = facts.file.display().to_string();
     let document_id = agent_doc_hash::document_id_for_path(facts.file);
@@ -530,226 +552,6 @@ fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
         SupervisorHealth::Unreachable => DispatchRuntimeHealth::Unreachable,
         SupervisorHealth::NoSocket => DispatchRuntimeHealth::NoSocket,
     }
-}
-
-fn reapply_harness_launch_contract_after_clear(
-    tmux: &Tmux,
-    file: &Path,
-    pane: &str,
-    session_id: &str,
-    file_path: &str,
-    harness: &HarnessConfig,
-    respect_tracked_clear_restart: bool,
-) -> Result<String> {
-    let latest_prompt = agent_doc_codex_hook_io::load_latest_prompt_for_file(file)?;
-    if !respect_tracked_clear_restart
-        || !tracked_harness_clear_requires_fresh_restart(harness, latest_prompt.as_deref())
-    {
-        return Ok(pane.to_string());
-    }
-    let latest_prompt_label = latest_prompt
-        .as_deref()
-        .map(str::trim)
-        .filter(|prompt| !prompt.is_empty())
-        .unwrap_or("<unknown>");
-
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "route_harness_clear_restart_fresh file={} pane={} harness={} latest_prompt={:?}",
-            file.display(),
-            pane,
-            harness.binary,
-            latest_prompt_label
-        ),
-    );
-    eprintln!(
-        "[route] latest tracked {} prompt for {} was `{}` — restarting the live session fresh before reroute so sandbox, writable roots, and network policy are reapplied",
-        harness.binary,
-        file.display(),
-        latest_prompt_label
-    );
-
-    if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
-        anyhow::bail!(
-            "latest tracked {} prompt for {} was `{}`, but route could not restart the live session fresh to reapply the original launch policy. Run `agent-doc start {}` manually to recover",
-            harness.binary,
-            file.display(),
-            latest_prompt_label,
-            file.display()
-        );
-    }
-
-    wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
-    let dispatch_pane =
-        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
-            .unwrap_or_else(|| pane.to_string());
-    if !wait_for_agent_ready(
-        tmux,
-        &dispatch_pane,
-        fresh_route_start_ack_timeout(cfg!(test)),
-        harness,
-    ) {
-        anyhow::bail!(
-            "latest tracked {} prompt for {} was `{}`, and the fresh recovery session in pane {} never became ready. Run `agent-doc start {}` manually to recover",
-            harness.binary,
-            file.display(),
-            latest_prompt_label,
-            dispatch_pane,
-            file.display()
-        );
-    }
-    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
-    Ok(dispatch_pane)
-}
-
-fn reapply_capability_contract_before_reuse(
-    tmux: &Tmux,
-    file: &Path,
-    pane: &str,
-    session_id: &str,
-    file_path: &str,
-    harness: &HarnessConfig,
-    enforce_capability_proof: bool,
-) -> Result<String> {
-    if !enforce_capability_proof {
-        return Ok(pane.to_string());
-    }
-    // `#capproofbg`: do NOT block the `Run Agent Doc` dispatch waiting for the
-    // proof to finish. Read the current status without polling for it to leave
-    // `Pending` — a still-running proof lets dispatch proceed on the live pane
-    // immediately; the proof keeps running in the background and a later FAILURE
-    // is surfaced asynchronously (the supervisor flips the actor to Blocked,
-    // emits a tmux `display-message`, and gates *subsequent* dispatch). Only a
-    // proof that has ALREADY failed (or is missing) forces the fresh-restart
-    // recovery path here.
-    let proof_status = managed_capability_proof_status(file, session_id, harness)?;
-    let reason = match proof_status {
-        ManagedCapabilityProofStatus::NotRequired
-        | ManagedCapabilityProofStatus::Proven
-        | ManagedCapabilityProofStatus::Pending => {
-            return Ok(pane.to_string());
-        }
-        ManagedCapabilityProofStatus::Failed => {
-            anyhow::bail!(
-                "managed {} capability proof for {} on pane {} failed; prompt dispatch is disabled for this pane. Inspect diagnostics, then run `agent-doc start {}` manually to recover",
-                harness.binary,
-                file.display(),
-                pane,
-                file.display()
-            );
-        }
-        ManagedCapabilityProofStatus::Missing => {
-            format!(
-                "managed {} session has no current capability proof for requested network, SSH, or writable-root access",
-                harness.binary
-            )
-        }
-    };
-
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "route_{}_capability_restart_fresh file={} pane={} harness={} reason={}",
-            harness.binary,
-            file.display(),
-            pane,
-            harness.binary,
-            reason.replace(' ', "_")
-        ),
-    );
-    eprintln!(
-        "[route] {} for {} on pane {} — restarting the live {} session fresh once before reuse",
-        reason,
-        file.display(),
-        pane,
-        harness.binary
-    );
-
-    if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
-        anyhow::bail!(
-            "{} for {} on pane {}, and route could not restart the live session fresh. Run `agent-doc start {}` manually to recover",
-            reason,
-            file.display(),
-            pane,
-            file.display()
-        );
-    }
-
-    wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
-    let dispatch_pane =
-        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
-            .unwrap_or_else(|| pane.to_string());
-    if !wait_for_agent_ready(
-        tmux,
-        &dispatch_pane,
-        fresh_route_start_ack_timeout(cfg!(test)),
-        harness,
-    ) {
-        anyhow::bail!(
-            "{} for {}, and the fresh recovery session in pane {} never became ready. Run `agent-doc start {}` manually to recover",
-            reason,
-            file.display(),
-            dispatch_pane,
-            file.display()
-        );
-    }
-    // `#capproofbg`: the fresh recovery session also dispatches immediately while
-    // its capability proof runs in the background — a still-`Pending` proof no
-    // longer blocks dispatch (a later FAILURE is surfaced asynchronously by the
-    // supervisor). Only an already-failed/missing proof aborts recovery.
-    match managed_capability_proof_status(file, session_id, harness)? {
-        ManagedCapabilityProofStatus::NotRequired
-        | ManagedCapabilityProofStatus::Proven
-        | ManagedCapabilityProofStatus::Pending => {}
-        ManagedCapabilityProofStatus::Failed => anyhow::bail!(
-            "{} for {}, and the fresh recovery session in pane {} failed capability proof. Run `agent-doc start {}` manually to recover",
-            reason,
-            file.display(),
-            dispatch_pane,
-            file.display()
-        ),
-        ManagedCapabilityProofStatus::Missing => anyhow::bail!(
-            "{} for {}, and the fresh recovery session in pane {} never recorded a capability proof. Run `agent-doc start {}` manually to recover",
-            reason,
-            file.display(),
-            dispatch_pane,
-            file.display()
-        ),
-    }
-    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
-    Ok(dispatch_pane)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn reapply_codex_launch_contract_before_reuse(
-    tmux: &Tmux,
-    file: &Path,
-    pane: &str,
-    session_id: &str,
-    file_path: &str,
-    harness: &HarnessConfig,
-    respect_tracked_clear_restart: bool,
-    enforce_capability_proof: bool,
-) -> Result<String> {
-    let dispatch_pane = reapply_harness_launch_contract_after_clear(
-        tmux,
-        file,
-        pane,
-        session_id,
-        file_path,
-        harness,
-        respect_tracked_clear_restart,
-    )?;
-    reapply_capability_contract_before_reuse(
-        tmux,
-        file,
-        &dispatch_pane,
-        session_id,
-        file_path,
-        harness,
-        enforce_capability_proof,
-    )
 }
 
 fn startup_miss_route_facts(
@@ -1698,9 +1500,6 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
         )
     })
 }
-
-mod dispatch_only;
-pub(crate) use dispatch_only::*;
 
 /// `#jb-run-agent-doc-busy-wait-deadlock`: the `wait_for_ready` override exists
 /// for a slow-`starting` supervisor (JB `Run Agent Doc` passes `--wait-for-ready
@@ -2878,6 +2677,7 @@ fn route_via_authoritative_actor(
                 DispatchOnlySendReopenOptions {
                     delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
                     queue_prompt_text: queue_prompt.as_deref(),
+                    effects: route_dispatch_only_effects(),
                 },
             )?;
             agent_doc_ops_log_io::log_op(
@@ -3228,25 +3028,6 @@ pub(crate) fn write_mock_registered_agent_doc_extra_line_detector(
     std::fs::write(
             &script,
             "#!/bin/bash\nprintf \"> \\n\"\nIFS= read -r CMD || exit 0\nprintf 'GOT:%s\\n' \"$CMD\"\nif IFS= read -r -t 0.5 EXTRA; then\n  printf 'EXTRA:%s\\n' \"$EXTRA\"\nfi\ncat\n",
-        )
-        .unwrap();
-    let mut perms = std::fs::metadata(&script).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&script, perms).unwrap();
-    script
-}
-#[cfg(test)]
-pub(crate) fn write_mock_registered_agent_doc_with_stale_trigger(
-    base: &Path,
-) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let bin_dir = base.join("bin");
-    std::fs::create_dir_all(&bin_dir).unwrap();
-    let script = bin_dir.join("agent-doc-stale-trigger-detector");
-    std::fs::write(
-            &script,
-            "#!/bin/bash\nprintf '> %s\\n' \"$1\"\nIFS= read -r CMD || exit 0\nprintf 'GOT:%s\\n' \"$CMD\"\nif IFS= read -r -t 0.5 EXTRA; then\n  printf 'EXTRA:%s\\n' \"$EXTRA\"\nfi\ncat\n",
         )
         .unwrap();
     let mut perms = std::fs::metadata(&script).unwrap().permissions();

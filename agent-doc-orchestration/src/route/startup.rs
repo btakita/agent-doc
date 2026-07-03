@@ -11,6 +11,9 @@ use agent_doc_route_io::startup_harness::resolve_harness_for_file;
 use agent_doc_route_io::startup_locks::{
     StartupLockAcquire, StartupLockMode, acquire_startup_locks,
 };
+#[cfg(test)]
+use agent_doc_route_io::startup_ready::wait_for_agent_ready_outcome;
+use agent_doc_route_io::startup_ready::{fresh_start_pane_idle_ready, wait_for_agent_ready};
 
 /// `#jbtsiftnosub`: bounded re-verify window for the auto-start cold-start gate.
 /// After `wait_for_agent_ready` reports ready, the pane should already show a
@@ -417,6 +420,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                     DispatchOnlySendReopenOptions {
                         delivery: DispatchOnlyReopenDelivery::SupervisorIpcOnce,
                         queue_prompt_text: None,
+                        effects: route_dispatch_only_effects(),
                     },
                 )?;
                 RoutedDispatchStartProof::CommandAcceptedOnly
@@ -460,6 +464,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                     DispatchOnlySendReopenOptions {
                         delivery: DispatchOnlyReopenDelivery::SupervisorIpcOnce,
                         queue_prompt_text: None,
+                        effects: route_dispatch_only_effects(),
                     },
                 )
                 .map(|_| RoutedDispatchStartProof::CommandAcceptedOnly)

@@ -27,8 +27,10 @@ agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
 agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.67" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.67" }
+agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.67" }
 agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.34.67" }
 agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.67" }
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }

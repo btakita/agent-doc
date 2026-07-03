@@ -1102,7 +1102,8 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/preflight/maintenance.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/route.rs",
-        "agent-doc-orchestration/src/route/dispatch_only.rs",
+        "agent-doc-route-io/src/dispatch_only.rs",
+        "agent-doc-route-io/src/dispatch_only/proof.rs",
         "agent-doc-route-io/src/authoritative_actor.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
         "agent-doc-route-io/src/dispatch.rs",
@@ -1314,13 +1315,17 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // escape hatch logs when `--force-disk` bypasses editor convergence for
         // route-owned session/queue writes.
         ("agent-doc-orchestration/src/route.rs", "reason=") => 10,
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "guard_") => 4,
+        // Route dispatch-only send/retry moved out of orchestration with its
+        // remaining route-local guard terms. Proof wording lives in the nested
+        // proof module below.
+        ("agent-doc-route-io/src/dispatch_only.rs", "guard_") => 5,
+        ("agent-doc-route-io/src/dispatch_only.rs", "reason=") => 2,
         // +1/+1 (#jbsimpleroute): the Codex accepted-only delivery regression
         // asserts the typed `proof=accepted proof_scope=accepted_only` log shape
         // now that accepted Enter delivery is success instead of a hard route
         // failure.
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof=") => 5,
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "proof_scope=") => 5,
+        ("agent-doc-route-io/src/dispatch_only/proof.rs", "proof=") => 5,
+        ("agent-doc-route-io/src/dispatch_only/proof.rs", "proof_scope=") => 5,
         // +3 (#jbdisprecycle): the recycle-in-flight dispatch guard adds three
         // audited route-local `reason=` ops_log lines
         // (`route_dispatch_only_recycle_inflight_wait/_unsettled/_settled ... reason={}`).
@@ -1329,11 +1334,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // All route-local reason tokens carry the supervisor recycle reason
         // (`auto_install_reexec` / `restart_reexec`) so a deferred-then-settled
         // or fail-closed dispatch is auditable against the marker that gated it.
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "reason=") => 5,
+        ("agent-doc-route-io/src/dispatch_only/proof.rs", "reason=") => 3,
         // +1 (#3x90): regression coverage for tracked dispatch-start timeouts
         // asserts that `DispatchStartUnproven` fails closed even though plain
         // `CommandAcceptedOnly` remains allowed for harnesses with no tracker.
-        ("agent-doc-orchestration/src/route/dispatch_only.rs", "accepted_only") => 10,
+        ("agent-doc-route-io/src/dispatch_only/proof.rs", "accepted_only") => 12,
         // +1 (`reason=in_flight_coalesce`): #qflood2 `route_dispatch_deduped_pane`
         // logs the benign in-flight dedup before returning deduped-success without a
         // re-send. Routed through the `RouteDispatchAuthorization::CoalescedDeduped`
@@ -8933,7 +8938,7 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
     }
 
     for (relative, forbidden) in [(
-        "agent-doc-orchestration/src/route/dispatch_only.rs",
+        "agent-doc-route-io/src/dispatch_only/proof.rs",
         vec!["const RECYCLE_SETTLE_WAIT", "const RECYCLE_SETTLE_POLL"],
     )] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -9095,7 +9100,7 @@ fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
             "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit",
         ),
         (
-            "agent-doc-orchestration/src/route/dispatch_only.rs",
+            "agent-doc-route-io/src/dispatch_only.rs",
             "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit_with_reason",
         ),
         (
@@ -13974,8 +13979,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
             .unwrap();
     let route_dispatch_only_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch_only.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_only.rs")).unwrap();
     let route_busy_pane_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/busy_pane.rs")).unwrap();
     let route_dispatch_recovery_source =
@@ -13983,8 +13987,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .unwrap();
     let route_dispatch_start_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_start.rs")).unwrap();
-    let route_dispatch_only_io_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_only.rs")).unwrap();
+    let route_dispatch_only_proof_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_only/proof.rs"))
+            .unwrap();
     let route_dispatch_target_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     let route_pane_provenance_source =
@@ -14032,6 +14037,16 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && !route_source.contains("mod cycle_ack;")
             && route_source.contains("use agent_doc_route_io::cycle_ack::{"),
         "orchestration must not keep a route cycle-ack module after the route cycle acknowledgment graph moves to agent-doc-route-io"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/route/dispatch_only.rs")
+            .exists()
+            && !route_source.contains("mod dispatch_only;")
+            && route_source.contains("agent_doc_route_io::dispatch_only::{")
+            && route_source.contains("DispatchOnlyRouteEffects")
+            && route_source.contains("dispatch_only_send_reopen"),
+        "orchestration must not keep a route dispatch-only module after the send/retry graph moves to agent-doc-route-io"
     );
     assert!(
         authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
@@ -14138,7 +14153,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "routed_dispatch_start_timeout_for_binary(",
     ] {
         assert!(
-            route_dispatch_only_io_source.contains(required_snippet),
+            route_dispatch_only_proof_source.contains(required_snippet),
             "agent-doc-route-io dispatch_only should own dispatch-only proof/recycle gate IO: {required_snippet}"
         );
     }
@@ -14153,17 +14168,23 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "route_dispatch_only_recycle_inflight_unsettled file=",
     ] {
         assert!(
-            !route_dispatch_only_source.contains(forbidden_snippet),
-            "route/dispatch_only.rs must not re-own dispatch-only proof/recycle gate IO: {forbidden_snippet}"
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own dispatch-only proof/recycle gate IO after route/dispatch_only.rs moves to agent-doc-route-io: {forbidden_snippet}"
         );
     }
     assert!(
-        route_dispatch_only_source.contains("use agent_doc_route_io::dispatch_only::{")
+        route_dispatch_only_source.contains("pub struct DispatchOnlyQueuedPromptOutcome")
+            && route_dispatch_only_source.contains("pub struct DispatchOnlyRouteEffects")
+            && route_dispatch_only_source.contains("pub struct DispatchOnlySendReopenOptions")
+            && route_dispatch_only_source.contains("pub fn dispatch_only_send_reopen(")
+            && route_dispatch_only_source.contains("pub fn dispatch_only_reopen_existing_pane(")
+            && route_dispatch_only_source.contains("pub fn retry_dispatch_only_after_busy_pane(")
             && route_dispatch_only_source
-                .contains("wait_for_dispatch_only_recycle_inflight_settle")
-            && route_dispatch_only_source.contains("dispatch_only_dispatch_start_proof_required")
-            && route_dispatch_only_source.contains("require_dispatch_only_dispatch_start_proof("),
-        "route/dispatch_only.rs should call focused dispatch-only route IO directly"
+                .contains("agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source")
+            && route_dispatch_only_source.contains(
+                "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit_with_reason"
+            ),
+        "agent-doc-route-io dispatch_only.rs should own dispatch-only send/retry IO directly"
     );
     for required_snippet in [
         "pub struct RouteDispatchEffects",
@@ -14539,7 +14560,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("RoutedReopenGuardReason")
             && route_source.contains("prompt_ready_barrier_failed_event")
             && route_source.contains("agent_doc_flow_io::log_flow_event")
-            && route_source.contains("dispatch_only_blocked_guard_reason")
+            && route_dispatch_only_source.contains("dispatch_only_blocked_guard_reason")
             && authoritative_actor.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
@@ -14577,7 +14598,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("RouteDispatchBugReportItemFacts")
             && route_source.contains("route_dispatch_bug_report_item(")
             && route_source.contains("DispatchOnlyReopenDelivery")
-            && route_source.contains("dispatch_only_should_print_unproven_progress")
+            && route_dispatch_only_source.contains("dispatch_only_should_print_unproven_progress")
             && route_source.contains("fresh_route_start_ack_timeout")
             && route_cycle_ack_source.contains("routed_cycle_ack_timeout")
             && route_source.contains("DispatchOnlyBusyRefusalFacts")
@@ -14659,7 +14680,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     ] {
         assert!(
             !route_dispatch_only_source.contains(forbidden_snippet),
-            "route/dispatch_only.rs must not re-own dispatch-only proof outcome policy: {forbidden_snippet}"
+            "agent-doc-route-io dispatch_only.rs must not re-own dispatch-only proof outcome policy: {forbidden_snippet}"
         );
     }
     assert!(
@@ -14673,7 +14694,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_only_source.contains("dispatch_only_sent_log_message_for(")
             && route_dispatch_only_source.contains("dispatch_only_sent_console_message_for(")
             && route_dispatch_only_source.contains("dispatch_only_should_print_unproven_progress("),
-        "route/dispatch_only.rs should adapt route facts into focused route dispatch-only IO and controller readiness policy"
+        "agent-doc-route-io dispatch_only.rs should adapt route facts into focused controller readiness/proof policy"
     );
     for forbidden_snippet in [
         "pub(crate) fn fresh_route_start_ack_timeout(",
@@ -24837,8 +24858,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     let route_dispatch_only =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch_only.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_only.rs")).unwrap();
     let route_cycle_ack =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/cycle_ack.rs")).unwrap();
     let turn_cycle_ack =

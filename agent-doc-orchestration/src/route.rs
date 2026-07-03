@@ -165,12 +165,12 @@ use agent_doc_controller::dispatch::{
     CloseoutBlockDispatchFacts, DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts,
     DispatchOnlyReopenDelivery, PromptReadyBarrierDecision, ReopenMode, RetryBudget,
     RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts, RouteCloseoutDrainOutcome,
-    RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts, RoutedDispatchStartProof,
-    RoutedReopenFacts, RoutedReopenGuardReason, StartingTimeoutActorFacts,
-    actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
-    authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
-    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
-    classify_closeout_block_dispatch, decide_authoritative_reopen, dispatch_drain_retry_decision,
+    RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts, RoutedReopenFacts,
+    RoutedReopenGuardReason, StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
+    actor_dispatch_blocker_reason, authoritative_actor_ready_retry_budget,
+    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
+    classify_authoritative_prompt_ready_barrier, classify_closeout_block_dispatch,
+    decide_authoritative_reopen, dispatch_drain_retry_decision,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_probe_active_turn_cue,
@@ -180,14 +180,14 @@ use agent_doc_controller::dispatch::{
     route_busy_queued_diagnostic_message, route_closeout_user_outcome_fields,
     route_dispatch_bug_report_item, route_startup_miss_diagnostic_message,
     starting_actor_ready_log_line, starting_actor_terminal_log_line,
-    starting_actor_timeout_coalesced_log_line, startup_miss_requires_fresh_start,
-    startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
-    startup_miss_superseded_by_later_open_start,
+    starting_actor_timeout_coalesced_log_line,
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
-    AuthoritativeActorReadyFacts, STARTING_ACTOR_TIMEOUT_REASON,
-    starting_timeout_blocked_actor_can_recover,
+    AuthoritativeActorReadyFacts, RoutedDispatchStartProof, STARTING_ACTOR_TIMEOUT_REASON,
+    starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
+    startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
+    startup_miss_superseded_by_later_open_start,
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
@@ -209,8 +209,8 @@ use agent_doc_route_io::authoritative_actor::{
     AuthoritativeActorDispatchTarget, RouteDispatchAuthorization, actor_dispatch_state,
     authoritative_actor_dispatch_recovery_hint, authoritative_actor_ready_facts_from_target,
     authorize_controller_dispatch, current_generation_ready_prompt_proven,
-    load_authoritative_actor_binding, load_authoritative_actor_dispatch_target,
-    mark_starting_actor_timeout_blocked, promote_starting_authoritative_actor_if_dispatch_ready,
+    load_authoritative_actor_binding, mark_starting_actor_timeout_blocked,
+    promote_starting_authoritative_actor_if_dispatch_ready,
     recover_starting_timeout_blocked_actor_if_dispatch_ready, route_dispatch_deduped_pane,
     route_starting_actor_not_ready_log_line,
 };
@@ -218,19 +218,21 @@ use agent_doc_route_io::authoritative_actor::{
 use agent_doc_route_io::authoritative_actor::{
     ManagedCapabilityProofStatus, authoritative_actor_dispatch_can_queue_optimistically,
     authoritative_actor_start_wait_terminal_state,
-    dispatch_only_can_use_degraded_authoritative_actor,
+    dispatch_only_can_use_degraded_authoritative_actor, load_authoritative_actor_dispatch_target,
     load_authoritative_actor_for_registered_pane, managed_capability_proof_status,
     tracked_harness_clear_requires_fresh_restart,
 };
-pub(crate) use agent_doc_route_io::cycle_ack::{
-    RouteCycleAckEffects, pending_prompt_bearing_context_for_route, require_routed_cycle_ack,
-};
+#[cfg(test)]
+use agent_doc_route_io::cycle_ack::pending_prompt_bearing_context_for_route;
+pub(crate) use agent_doc_route_io::cycle_ack::{RouteCycleAckEffects, require_routed_cycle_ack};
 use agent_doc_route_io::direct_pane_dispatch::editor_route_attempt_id;
+#[cfg(test)]
+use agent_doc_route_io::dispatch::dispatch_existing_managed_reopen;
 #[cfg(test)]
 use agent_doc_route_io::dispatch::send_command_checked;
 use agent_doc_route_io::dispatch::{
     BusyRouteQueuedDiagnosticFacts, RouteDispatchBugReportFacts, RouteDispatchEffects,
-    dispatch_existing_managed_reopen, dispatch_via_supervisor_ipc,
+    dispatch_via_supervisor_ipc,
 };
 #[cfg(test)]
 use agent_doc_route_io::dispatch_only::dispatch_only_reopen_existing_pane;
@@ -241,35 +243,41 @@ pub(crate) use agent_doc_route_io::dispatch_only::{
 #[cfg(test)]
 use agent_doc_route_io::dispatch_recovery::resolve_fresh_dispatch_target_after_ready_wait;
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
+#[cfg(test)]
 use agent_doc_route_io::launch_contract::reapply_codex_launch_contract_before_reuse;
+#[cfg(test)]
 use agent_doc_route_io::pane_provenance::pane_route_provenance;
 #[cfg(test)]
 use agent_doc_route_io::pane_resolution::should_preserve_failed_route_pane;
 use agent_doc_route_io::pane_resolution::{
-    RouteBusyPaneRetryEffects, cleanup_failed_route_panes, controller_dispatch_actor_state,
-    fail_if_recent_session_loss_window, is_agent_process,
-    recover_dispatch_only_authoritative_waiting_input, rescue_from_stash, startup_miss_route_facts,
+    ManagedPaneResolutionEffects, RouteBusyPaneRetryEffects, cleanup_failed_route_panes,
+    controller_dispatch_actor_state, recover_dispatch_only_authoritative_waiting_input,
+    rescue_from_stash,
+};
+#[cfg(test)]
+use agent_doc_route_io::pane_resolution::{
+    fail_if_recent_session_loss_window, is_agent_process, startup_miss_route_facts,
     startup_miss_route_provenance,
 };
 use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup::RouteStartupEffects;
 use agent_doc_route_io::startup_debounce::await_idle;
-use agent_doc_route_io::supervisor_runtime::{
-    query_supervisor_health, query_supervisor_runtime, restart_via_supervisor,
-};
+use agent_doc_route_io::supervisor_runtime::query_supervisor_runtime;
+#[cfg(test)]
+use agent_doc_route_io::supervisor_runtime::{query_supervisor_health, restart_via_supervisor};
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::pane_registration_matches_file;
 #[cfg(test)]
+use agent_doc_supervisor::route_runtime::SupervisorHealth;
+#[cfg(test)]
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason;
+use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
 #[cfg(test)]
 use agent_doc_supervisor::route_runtime::{RouteActorState, SupervisorRuntime};
-use agent_doc_supervisor::route_runtime::{
-    SupervisorHealth,
-    authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
-};
+#[cfg(test)]
 use agent_doc_tmux::is_first_column;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, blocked_closeout_recovery_command,
@@ -412,6 +420,15 @@ fn route_busy_pane_retry_effects() -> RouteBusyPaneRetryEffects {
         route_dispatch_effects: route_dispatch_effects(),
         route_cycle_ack_effects: route_cycle_ack_effects(),
         emit_busy_route_diagnostic,
+    }
+}
+
+fn route_managed_pane_resolution_effects() -> ManagedPaneResolutionEffects {
+    ManagedPaneResolutionEffects {
+        route_dispatch_effects: route_dispatch_effects(),
+        route_cycle_ack_effects: route_cycle_ack_effects(),
+        route_busy_pane_retry_effects: route_busy_pane_retry_effects(),
+        route_startup_effects: route_startup_effects(),
     }
 }
 
@@ -836,7 +853,7 @@ pub fn run_with_tmux_with_options(
     let mut created_panes = Vec::new();
 
     let pane_id = match mode {
-        RouteMode::Managed => resolve_or_create_pane(
+        RouteMode::Managed => agent_doc_route_io::pane_resolution::resolve_or_create_pane(
             tmux,
             file,
             pane,
@@ -846,6 +863,22 @@ pub fn run_with_tmux_with_options(
             &target_session,
             &harness,
             &mut created_panes,
+            |split_before, baseline, prompt_context, actor| {
+                route_via_authoritative_actor(
+                    tmux,
+                    file,
+                    &session_id,
+                    &file_path,
+                    &target_session,
+                    split_before,
+                    &harness,
+                    baseline,
+                    prompt_context,
+                    false,
+                    actor,
+                )
+            },
+            route_managed_pane_resolution_effects(),
         ),
         RouteMode::DispatchOnly => {
             agent_doc_route_io::pane_resolution::resolve_or_create_pane_dispatch_only(
@@ -2599,7 +2632,9 @@ fn route_via_authoritative_actor(
     }
 }
 
+#[cfg(test)]
 mod pane_resolution;
+#[cfg(test)]
 pub(crate) use pane_resolution::*;
 
 #[cfg(test)]

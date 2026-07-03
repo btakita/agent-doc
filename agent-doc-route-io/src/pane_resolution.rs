@@ -6,11 +6,13 @@ use std::path::{Path, PathBuf};
 use crate::authoritative_actor::{
     AuthoritativeActorDispatchTarget, RouteDispatchAuthorization, authorize_controller_dispatch,
     dispatch_only_can_use_degraded_authoritative_actor, load_authoritative_actor_binding,
-    load_authoritative_actor_for_registered_pane, route_dispatch_deduped_pane,
+    load_authoritative_actor_dispatch_target, load_authoritative_actor_for_registered_pane,
+    route_dispatch_deduped_pane,
 };
 use crate::busy_pane::{
-    BusyPaneInterruptRecoveryOutcome, attempt_busy_existing_pane_auto_fix,
-    attempt_busy_existing_pane_interrupt_recovery,
+    BusyPaneInterruptRecoveryOutcome, ExistingPaneDispatchReadiness,
+    attempt_busy_existing_pane_auto_fix, attempt_busy_existing_pane_interrupt_recovery,
+    ensure_existing_pane_ready_for_dispatch,
 };
 use crate::cycle_ack::{
     RouteCycleAckEffects, pending_prompt_bearing_context_for_route, require_routed_cycle_ack,
@@ -24,19 +26,24 @@ use crate::dispatch_recovery::{
     resolve_fresh_dispatch_target_after_ready_wait, wait_for_starting_pane_recovery_target,
 };
 use crate::dispatch_target::register_dispatch_target;
+use crate::launch_contract::reapply_codex_launch_contract_before_reuse;
 use crate::pane_provenance::pane_route_provenance;
 use crate::restart_handoff::wait_for_busy_restart_handoff;
 use crate::session_resolution::{ensure_auto_start_target_session, find_target_pane};
 use crate::startup::RouteStartupEffects;
-use crate::supervisor_runtime::restart_via_supervisor_with_mode;
+use crate::supervisor_runtime::{
+    query_supervisor_health, restart_via_supervisor, restart_via_supervisor_with_mode,
+};
 use agent_doc_controller::dispatch::{
     BusyPaneAutoFixOutcome, DegradedAuthoritativeActorDirectSubmit, DispatchActorState,
-    DispatchOnlyReopenDelivery, DispatchRuntimeHealth, StartupMissRouteFacts,
-    degraded_authoritative_actor_direct_submit_log_message, is_stash_window_name,
+    DispatchOnlyReopenDelivery, DispatchRuntimeHealth, RoutedDispatchStartProof,
+    StartupMissRouteFacts, degraded_authoritative_actor_direct_submit_log_message,
+    is_stash_window_name, startup_miss_requires_fresh_start, startup_miss_should_fail_closed,
+    startup_miss_should_restart_live_owner, startup_miss_superseded_by_later_open_start,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry::{
-    load_dispatch_registry, lookup_dispatch_registration,
+    deregister_dispatch_registration, load_dispatch_registry, lookup_dispatch_registration,
 };
 use agent_doc_supervisor::route_runtime::{
     SupervisorHealth,
@@ -47,6 +54,14 @@ use agent_doc_supervisor::startup_miss::StartingPaneRecoveryTarget;
 use agent_doc_tmux::is_first_column;
 use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 use tmux_router::Tmux;
+
+type RouteAuthoritativeActorFn<'a> = dyn FnMut(
+        bool,
+        Option<&agent_doc_cycle_state_io::CycleState>,
+        Option<&PromptBearingRouteContext>,
+        AuthoritativeActorDispatchTarget,
+    ) -> Result<String>
+    + 'a;
 
 pub fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
     match health {
@@ -556,6 +571,719 @@ pub fn resolve_or_create_pane_dispatch_only(
         Some(created_panes),
         true,
         startup_effects,
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ManagedPaneResolutionEffects {
+    pub route_dispatch_effects: RouteDispatchEffects,
+    pub route_cycle_ack_effects: RouteCycleAckEffects,
+    pub route_busy_pane_retry_effects: RouteBusyPaneRetryEffects,
+    pub route_startup_effects: RouteStartupEffects,
+}
+
+/// Resolve an existing managed pane or create a new one. Returns the pane ID.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_or_create_pane(
+    tmux: &Tmux,
+    file: &Path,
+    pane: Option<&str>,
+    col_args: &[String],
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    harness: &HarnessConfig,
+    created_panes: &mut Vec<String>,
+    mut route_authoritative_actor: impl FnMut(
+        bool,
+        Option<&agent_doc_cycle_state_io::CycleState>,
+        Option<&PromptBearingRouteContext>,
+        AuthoritativeActorDispatchTarget,
+    ) -> Result<String>,
+    effects: ManagedPaneResolutionEffects,
+) -> Result<String> {
+    resolve_or_create_pane_with_auto_fix_retry(
+        tmux,
+        file,
+        pane,
+        col_args,
+        session_id,
+        file_path,
+        target_session,
+        harness,
+        created_panes,
+        &mut route_authoritative_actor,
+        effects,
+        true,
+        true,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_or_create_pane_with_auto_fix_retry(
+    tmux: &Tmux,
+    file: &Path,
+    pane: Option<&str>,
+    col_args: &[String],
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    harness: &HarnessConfig,
+    created_panes: &mut Vec<String>,
+    route_authoritative_actor: &mut RouteAuthoritativeActorFn<'_>,
+    effects: ManagedPaneResolutionEffects,
+    allow_auto_fix_retry: bool,
+    allow_busy_interrupt_retry: bool,
+    auto_fix_attempted: bool,
+) -> Result<String> {
+    tracing::debug!(
+        session_id = &session_id[..8.min(session_id.len())],
+        file = file_path,
+        target_session,
+        "route::resolve_or_create_pane"
+    );
+    let registered = lookup_dispatch_registration(file_path, session_id)?;
+    let cycle_baseline = agent_doc_cycle_state_io::load(file)?;
+    let pending_prompt_context =
+        pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
+    if let Some(actor) = load_authoritative_actor_dispatch_target(
+        tmux, file, session_id, file_path, harness, true, true,
+    )? {
+        return route_authoritative_actor(
+            is_first_column(file, col_args),
+            cycle_baseline.as_ref(),
+            pending_prompt_context.as_ref(),
+            actor,
+        );
+    }
+    let live_owner = if registered.is_some() {
+        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
+    } else {
+        None
+    };
+    let supervisor_health = if registered.is_some() {
+        query_supervisor_health(file, session_id)
+    } else {
+        SupervisorHealth::NoSocket
+    };
+    let preferred_active_window = tmux.active_window(target_session);
+    let associated_candidates =
+        agent_doc_sync_io::sync::find_associated_panes(tmux, file, session_id);
+    let associated_resolution = agent_doc_tmux::resolve_associated_panes(
+        associated_candidates.clone(),
+        preferred_active_window.as_deref(),
+    );
+
+    if let Ok(Some(miss)) = agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
+        && let Some(supersession) =
+            agent_doc_supervisor_io::startup_miss::superseded_by_newer_registered_start(
+                agent_doc_supervisor_io::startup_miss::session_registry_lookup(),
+                file,
+                &miss,
+            )?
+    {
+        let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
+        eprintln!(
+            "[route] startup-miss on pane {} from {} for {} is superseded by newer registered owner {} — clearing stale marker",
+            miss.pane_id, miss_ts, file_path, supersession.registered_pane
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_startup_miss_cleared_superseded_owner file={} stale_pane={} registered_pane={} miss_timestamp={} latest_start_timestamp={}",
+                file_path,
+                miss.pane_id,
+                supersession.registered_pane,
+                miss_ts,
+                supersession.latest_start_timestamp
+            ),
+        );
+        let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
+    }
+
+    if let Some(ref registered_pane) = registered
+        && let Ok(Some(miss)) = agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
+        && miss.pane_id == *registered_pane
+        && tmux.pane_alive(registered_pane)
+    {
+        let log_status =
+            agent_doc_supervisor_io::startup_miss::session_log_status(file, &miss.session_id)
+                .ok()
+                .flatten();
+        let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
+        let provenance = startup_miss_route_provenance(
+            tmux,
+            registered_pane,
+            live_owner.as_deref(),
+            supervisor_health,
+            log_status.as_ref(),
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_startup_miss_detected file={} origin={:?} miss_timestamp={} {}",
+                file_path, miss.origin, miss_ts, provenance
+            ),
+        );
+        let startup_facts = startup_miss_route_facts(
+            &miss,
+            registered_pane,
+            true,
+            live_owner.as_deref(),
+            supervisor_health,
+            log_status.as_ref(),
+        );
+        if startup_miss_should_fail_closed(startup_facts) {
+            eprintln!(
+                "[route] startup-miss for {} is stranded, not crashed: {}",
+                file_path, provenance
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_startup_miss_stranded file={} origin={:?} {}",
+                    file_path, miss.origin, provenance
+                ),
+            );
+            anyhow::bail!(
+                "startup-miss for {} remains unresolved on alive pane {}: {}. The last session never recorded a child exit or session_end, so route will not auto-start a replacement pane over a stranded session",
+                file.display(),
+                registered_pane,
+                provenance
+            );
+        }
+        if startup_miss_requires_fresh_start(startup_facts)
+            || startup_miss_should_restart_live_owner(startup_facts)
+        {
+            eprintln!(
+                "[route] registered pane {} has an unresolved startup-miss marker from {} for {} — deregistering and starting fresh",
+                registered_pane, miss_ts, file_path
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_startup_miss_deregistered file={} pane={} miss_timestamp={}",
+                    file_path, registered_pane, miss_ts
+                ),
+            );
+            let _ = deregister_dispatch_registration(file_path, session_id)?;
+            let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
+            eprintln!("[route] No active pane found, auto-starting...");
+            if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
+                anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
+            }
+            fail_if_recent_session_loss_window(file, session_id)?;
+            let split_before = is_first_column(file, col_args);
+            ensure_auto_start_target_session(tmux, None, target_session, harness)?;
+            return crate::startup::auto_start_in_session(
+                tmux,
+                file,
+                session_id,
+                file_path,
+                target_session,
+                false,
+                split_before,
+                harness,
+                Some(registered_pane.as_str()),
+                Some(created_panes),
+                false,
+                effects.route_startup_effects,
+            );
+        }
+
+        if startup_miss_superseded_by_later_open_start(startup_facts) {
+            eprintln!(
+                "[route] registered pane {} proves a newer open harness run after startup-miss {} for {} — clearing stale marker",
+                registered_pane, miss_ts, file_path
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_startup_miss_cleared_live_owner file={} pane={} miss_timestamp={}",
+                    file_path, registered_pane, miss_ts
+                ),
+            );
+            let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
+        } else {
+            eprintln!(
+                "[route] registered pane {} still owns {} but startup-miss {} is not superseded by a newer open harness run — keeping marker until dispatch proves recovery",
+                registered_pane, file_path, miss_ts
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_startup_miss_retained_live_owner file={} pane={} miss_timestamp={}",
+                    file_path, registered_pane, miss_ts
+                ),
+            );
+        }
+    }
+
+    if let Some(ref registered_pane) = registered {
+        if tmux.pane_alive(registered_pane) {
+            if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) =
+                &associated_resolution
+            {
+                let error = agent_doc_tmux::format_associated_pane_resolution_error(
+                    file.display(),
+                    candidates,
+                    preferred_active_window.as_deref(),
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_associated_pane_ambiguous file={} count={}",
+                        file_path,
+                        candidates.len()
+                    ),
+                );
+                anyhow::bail!(error);
+            }
+            if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
+                &associated_resolution
+                && winner.pane_id != *registered_pane
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_associated_pane_requires_manual_claim file={} pane={} sources={}",
+                        file_path,
+                        winner.pane_id,
+                        winner.source_summary()
+                    ),
+                );
+                anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
+                    file.display(),
+                    winner,
+                    redundant
+                ));
+            }
+            let mut stale_registration_cleared = false;
+            match live_owner.as_deref() {
+                Some(_) => {}
+                None => match supervisor_health {
+                    SupervisorHealth::Healthy => {
+                        eprintln!(
+                            "[route] registered pane {} has a healthy supervisor for {} despite missing actor/registered-owner proof — reusing registered pane",
+                            registered_pane, file_path
+                        );
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_reused_via_supervisor file={} pane={} health=healthy",
+                                file_path, registered_pane
+                            ),
+                        );
+                    }
+                    SupervisorHealth::Restartable => {
+                        eprintln!(
+                            "[route] registered pane {} has a restartable supervisor for {} — restarting in place",
+                            registered_pane, file_path
+                        );
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_restart_via_supervisor file={} pane={}",
+                                file_path, registered_pane
+                            ),
+                        );
+                        if restart_via_supervisor(file, session_id) {
+                            if let Err(e) = tmux.select_pane(registered_pane) {
+                                eprintln!(
+                                    "[route] warning: failed to focus restarted pane {}: {}",
+                                    registered_pane, e
+                                );
+                            }
+                            require_routed_cycle_ack(
+                                tmux,
+                                file,
+                                registered_pane,
+                                session_id,
+                                file_path,
+                                harness,
+                                cycle_baseline.as_ref(),
+                                pending_prompt_context
+                                    .as_ref()
+                                    .map(|context| context.marker.as_str()),
+                                false,
+                                RoutedDispatchStartProof::CommandAcceptedOnly,
+                                effects.route_cycle_ack_effects,
+                            )?;
+                            return Ok(registered_pane.clone());
+                        }
+                        eprintln!(
+                            "[route] supervisor restart failed for pane {} — deregistering and continuing recovery",
+                            registered_pane
+                        );
+                        let provenance = pane_route_provenance(tmux, registered_pane);
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_restart_failed file={} {}",
+                                file_path, provenance
+                            ),
+                        );
+                        let _ = deregister_dispatch_registration(file_path, session_id)?;
+                        stale_registration_cleared = true;
+                    }
+                    SupervisorHealth::Halted { restart_count } => {
+                        let provenance = pane_route_provenance(tmux, registered_pane);
+                        eprintln!(
+                            "[route] registered pane {} for {} has a halted supervisor after {} restarts — refusing automatic restart",
+                            registered_pane, file_path, restart_count
+                        );
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_halted file={} pane={} restart_count={} {}",
+                                file_path, registered_pane, restart_count, provenance
+                            ),
+                        );
+                        anyhow::bail!(
+                            "registered pane {} for {} has a halted supervisor after {} restarts; route will not auto-restart or replace it automatically. Inspect the pane, then run `agent-doc start {}` manually to recover",
+                            registered_pane,
+                            file.display(),
+                            restart_count,
+                            file.display()
+                        );
+                    }
+                    SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
+                        let provenance = pane_route_provenance(tmux, registered_pane);
+                        eprintln!(
+                            "[route] registered pane {} is alive but no actor/registered owner for {} was proven and supervisor is unavailable — deregistering stale entry and continuing recovery",
+                            registered_pane, file_path
+                        );
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_deregistered_no_live_owner file={} {}",
+                                file_path, provenance
+                            ),
+                        );
+                        let _ = deregister_dispatch_registration(file_path, session_id)?;
+                        stale_registration_cleared = true;
+                    }
+                },
+            }
+            if !stale_registration_cleared {
+                rescue_from_stash(
+                    tmux,
+                    registered_pane,
+                    session_id,
+                    file_path,
+                    target_session,
+                    is_first_column(file, col_args),
+                );
+                let registered_pane = reapply_codex_launch_contract_before_reuse(
+                    tmux,
+                    file,
+                    registered_pane,
+                    session_id,
+                    file_path,
+                    harness,
+                    true,
+                    true,
+                )?;
+                register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
+                let supervisor_recovered_without_path_owner =
+                    live_owner.is_none() && matches!(supervisor_health, SupervisorHealth::Healthy);
+                match ensure_existing_pane_ready_for_dispatch(
+                    tmux,
+                    file,
+                    &registered_pane,
+                    harness,
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.marker.as_str()),
+                )? {
+                    ExistingPaneDispatchReadiness::Ready => {}
+                    ExistingPaneDispatchReadiness::BusyAlreadyRunning
+                        if supervisor_recovered_without_path_owner =>
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_dispatch_via_healthy_supervisor file={} pane={} reason=missing_path_owner_prompt_probe_not_authoritative",
+                                file_path, registered_pane
+                            ),
+                        );
+                    }
+                    ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
+                        return Ok(registered_pane);
+                    }
+                    ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
+                        provenance,
+                        blocker_reason,
+                    } => {
+                        return retry_route_after_busy_pane_auto_fix(
+                            tmux,
+                            file,
+                            session_id,
+                            file_path,
+                            harness,
+                            cycle_baseline.as_ref(),
+                            pending_prompt_context
+                                .as_ref()
+                                .map(|context| context.marker.as_str()),
+                            allow_auto_fix_retry,
+                            allow_busy_interrupt_retry,
+                            auto_fix_attempted,
+                            &registered_pane,
+                            &provenance,
+                            blocker_reason.as_deref(),
+                            |next_allow_auto_fix_retry,
+                             next_allow_busy_interrupt_retry,
+                             next_auto_fix_attempted| {
+                                resolve_or_create_pane_with_auto_fix_retry(
+                                    tmux,
+                                    file,
+                                    pane,
+                                    col_args,
+                                    session_id,
+                                    file_path,
+                                    target_session,
+                                    harness,
+                                    created_panes,
+                                    route_authoritative_actor,
+                                    effects,
+                                    next_allow_auto_fix_retry,
+                                    next_allow_busy_interrupt_retry,
+                                    next_auto_fix_attempted,
+                                )
+                            },
+                            effects.route_busy_pane_retry_effects,
+                        );
+                    }
+                }
+                register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
+                eprintln!("[route] Pane {} is alive, sending command", registered_pane);
+                let dispatch_start = dispatch_existing_managed_reopen(
+                    tmux,
+                    file,
+                    session_id,
+                    &registered_pane,
+                    file_path,
+                    harness,
+                    effects.route_dispatch_effects,
+                )?;
+                require_routed_cycle_ack(
+                    tmux,
+                    file,
+                    &registered_pane,
+                    session_id,
+                    file_path,
+                    harness,
+                    cycle_baseline.as_ref(),
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.marker.as_str()),
+                    true,
+                    dispatch_start,
+                    effects.route_cycle_ack_effects,
+                )?;
+                return Ok(registered_pane);
+            }
+        }
+        eprintln!("[route] Pane {} is dead", registered_pane);
+    } else {
+        eprintln!(
+            "[route] No pane registered for session {}",
+            &session_id[..std::cmp::min(8, session_id.len())]
+        );
+    }
+
+    let claimed_panes: std::collections::HashSet<String> = load_dispatch_registry(file_path)
+        .unwrap_or_default()
+        .values()
+        .filter(|e| tmux.pane_alive(&e.pane))
+        .map(|e| e.pane.clone())
+        .collect();
+    if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) = &associated_resolution
+    {
+        let error = agent_doc_tmux::format_associated_pane_resolution_error(
+            file.display(),
+            candidates,
+            preferred_active_window.as_deref(),
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_associated_pane_ambiguous file={} count={}",
+                file_path,
+                candidates.len()
+            ),
+        );
+        anyhow::bail!(error);
+    }
+    if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
+        &associated_resolution
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_associated_pane_requires_manual_claim file={} pane={} sources={}",
+                file_path,
+                winner.pane_id,
+                winner.source_summary()
+            ),
+        );
+        anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
+            file.display(),
+            winner,
+            redundant
+        ));
+    }
+    if registered.is_some()
+        && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)
+        && is_agent_process(tmux, &new_pane, harness)
+    {
+        eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
+        register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
+        match ensure_existing_pane_ready_for_dispatch(
+            tmux,
+            file,
+            &new_pane,
+            harness,
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+        )? {
+            ExistingPaneDispatchReadiness::Ready => {}
+            ExistingPaneDispatchReadiness::BusyAlreadyRunning => return Ok(new_pane),
+            ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
+                provenance,
+                blocker_reason,
+            } => {
+                return retry_route_after_busy_pane_auto_fix(
+                    tmux,
+                    file,
+                    session_id,
+                    file_path,
+                    harness,
+                    cycle_baseline.as_ref(),
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.marker.as_str()),
+                    allow_auto_fix_retry,
+                    allow_busy_interrupt_retry,
+                    auto_fix_attempted,
+                    &new_pane,
+                    &provenance,
+                    blocker_reason.as_deref(),
+                    |next_allow_auto_fix_retry,
+                     next_allow_busy_interrupt_retry,
+                     next_auto_fix_attempted| {
+                        resolve_or_create_pane_with_auto_fix_retry(
+                            tmux,
+                            file,
+                            pane,
+                            col_args,
+                            session_id,
+                            file_path,
+                            target_session,
+                            harness,
+                            created_panes,
+                            route_authoritative_actor,
+                            effects,
+                            next_allow_auto_fix_retry,
+                            next_allow_busy_interrupt_retry,
+                            next_auto_fix_attempted,
+                        )
+                    },
+                    effects.route_busy_pane_retry_effects,
+                );
+            }
+        }
+        register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
+        let dispatch_start = dispatch_existing_managed_reopen(
+            tmux,
+            file,
+            session_id,
+            &new_pane,
+            file_path,
+            harness,
+            effects.route_dispatch_effects,
+        )?;
+        let ack_pane = require_routed_cycle_ack(
+            tmux,
+            file,
+            &new_pane,
+            session_id,
+            file_path,
+            harness,
+            cycle_baseline.as_ref(),
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+            false,
+            dispatch_start,
+            effects.route_cycle_ack_effects,
+        )?;
+        return Ok(ack_pane.unwrap_or(new_pane));
+    }
+
+    let late_associated_resolution = agent_doc_tmux::resolve_associated_panes(
+        agent_doc_sync_io::sync::find_associated_panes(tmux, file, session_id),
+        tmux.active_window(target_session).as_deref(),
+    );
+    if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) =
+        &late_associated_resolution
+    {
+        let error = agent_doc_tmux::format_associated_pane_resolution_error(
+            file.display(),
+            candidates,
+            tmux.active_window(target_session).as_deref(),
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_associated_pane_ambiguous_late file={} count={}",
+                file_path,
+                candidates.len()
+            ),
+        );
+        anyhow::bail!(error);
+    }
+    if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
+        &late_associated_resolution
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_associated_pane_requires_manual_claim_late file={} pane={} sources={}",
+                file_path,
+                winner.pane_id,
+                winner.source_summary()
+            ),
+        );
+        anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
+            file.display(),
+            winner,
+            redundant
+        ));
+    }
+
+    eprintln!("[route] No active pane found, auto-starting...");
+    if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
+        anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
+    }
+    fail_if_recent_session_loss_window(file, session_id)?;
+    let split_before = is_first_column(file, col_args);
+    ensure_auto_start_target_session(tmux, None, target_session, harness)?;
+    crate::startup::auto_start_in_session(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        target_session,
+        false,
+        split_before,
+        harness,
+        None,
+        Some(created_panes),
+        false,
+        effects.route_startup_effects,
     )
 }
 

@@ -9650,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 44,
+        ledger_rows.len() >= 45,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -14649,8 +14649,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
                 .contains("pub fn recover_dispatch_only_authoritative_waiting_input(")
             && route_pane_resolution_io_source
                 .contains("pub fn resolve_or_create_pane_dispatch_only(")
+            && route_pane_resolution_io_source.contains("pub struct ManagedPaneResolutionEffects")
+            && route_pane_resolution_io_source.contains("pub fn resolve_or_create_pane(")
             && route_pane_resolution_io_source.contains("pub fn rescue_from_stash(")
             && route_pane_resolution_io_source.contains("DispatchOnlyRouteEffects")
+            && route_source
+                .contains("agent_doc_route_io::pane_resolution::resolve_or_create_pane(")
+            && route_source.contains("#[cfg(test)]\nmod pane_resolution;")
             && route_pane_resolution_io_source.contains("dispatch_only_send_reopen(")
             && route_pane_resolution_io_source.contains("pub fn optimistic_busy_pane_dispatch(")
             && route_pane_resolution_io_source.contains("pub struct RouteBusyPaneRetryEffects")

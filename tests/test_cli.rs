@@ -9602,6 +9602,78 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         tracker.contains("## Coarse Extraction Ledger"),
         "crate decomposition PRD must track intentionally coarse extraction rounds"
     );
+    let coarse_section = tracker
+        .split("## Coarse Extraction Ledger")
+        .nth(1)
+        .expect("crate decomposition PRD should contain a coarse extraction ledger");
+    let mut ledger_rows: Vec<Vec<&str>> = Vec::new();
+    let mut in_coarse_table = false;
+    for line in coarse_section.lines() {
+        let line = line.trim();
+        if line.starts_with("| Coarse graph |") {
+            in_coarse_table = true;
+            continue;
+        }
+        if !in_coarse_table {
+            continue;
+        }
+        if !line.starts_with('|') {
+            break;
+        }
+        if line.starts_with("|---") {
+            continue;
+        }
+        ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
+    }
+    assert!(
+        ledger_rows.len() >= 24,
+        "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
+        ledger_rows.len()
+    );
+    for cells in &ledger_rows {
+        assert_eq!(
+            cells.len(),
+            5,
+            "coarse extraction ledger rows must preserve graph/from/to/why/follow-up columns: {cells:?}"
+        );
+        let graph = cells[0];
+        let moved_from = cells[1];
+        let moved_to = cells[2];
+        let why = cells[3];
+        let follow_up = cells[4];
+        for (label, cell) in [
+            ("graph", graph),
+            ("moved-from", moved_from),
+            ("moved-to", moved_to),
+            ("why", why),
+            ("follow-up", follow_up),
+        ] {
+            assert!(
+                !cell.is_empty(),
+                "coarse extraction ledger row must not leave {label} empty: {cells:?}"
+            );
+        }
+        assert!(
+            moved_from.contains("agent-doc-orchestration/src"),
+            "coarse extraction ledger row should name the orchestration source graph: {cells:?}"
+        );
+        assert!(
+            moved_to.contains("agent-doc-")
+                || moved_to.contains("src/main.rs")
+                || moved_to.contains("Focused crates"),
+            "coarse extraction ledger row should name the focused destination graph: {cells:?}"
+        );
+        assert!(
+            follow_up.contains("Split")
+                || follow_up.contains("Move")
+                || follow_up.contains("Keep")
+                || follow_up.contains("Finish")
+                || follow_up.contains("Extract")
+                || follow_up.contains("Separate")
+                || follow_up.contains("delete"),
+            "coarse extraction ledger row must name the fine-grained seams to revisit: {cells:?}"
+        );
+    }
 
     for (graph, moved_from, moved_to, follow_up) in [
         (
@@ -9719,6 +9791,18 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move controller/state-event and stream-flush effect bindings out of the CLI",
         ),
         (
+            "Controller dashboard policy and IO",
+            "agent-doc-orchestration/src/dashboard.rs",
+            "agent-doc-controller-io/src/dashboard.rs",
+            "Split controller-inspection effects from session-registry/pane-liveness snapshot assembly",
+        ),
+        (
+            "Controller admin command IO host",
+            "agent-doc-orchestration/src/admin.rs",
+            "agent-doc-admin-io/src/lib.rs",
+            "Split JSON view structs from project-controller RPC structs once controller RPC types move",
+        ),
+        (
             "CRDT relay host IO",
             "agent-doc-orchestration/src/crdt_relay_host.rs",
             "agent-doc-crdt-relay-io/src/lib.rs",
@@ -9737,9 +9821,14 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move pure queue policy regression tests into `agent-doc-queue`",
         ),
     ] {
+        let row_text = ledger_rows
+            .iter()
+            .find(|cells| cells.first().copied() == Some(graph))
+            .map(|cells| cells.join(" | "))
+            .unwrap_or_else(|| panic!("coarse extraction tracker is missing a row for {graph}"));
         for required in [graph, moved_from, moved_to, follow_up] {
             assert!(
-                tracker.contains(required),
+                row_text.contains(required),
                 "coarse extraction tracker is missing {required:?} for {graph}"
             );
         }
@@ -14127,14 +14216,19 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         );
     }
 
-    let orchestration_admin =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/admin.rs")).unwrap();
+    let admin_io = fs::read_to_string(manifest_dir.join("agent-doc-admin-io/src/lib.rs")).unwrap();
     let cli_dashboard = fs::read_to_string(manifest_dir.join("src/dashboard_cmd.rs")).unwrap();
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/dashboard.rs")
             .exists(),
         "orchestration must not keep a dashboard facade module"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/admin.rs")
+            .exists(),
+        "orchestration must not keep an admin command facade module"
     );
     for forbidden in [
         "pub struct AdminActor",
@@ -14155,7 +14249,7 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         "pub(crate) use agent_doc_controller::fleet",
     ] {
         assert!(
-            !orchestration_admin.contains(forbidden) && !cli_dashboard.contains(forbidden),
+            !cli_dashboard.contains(forbidden),
             "orchestration must not re-own or facade fleet dashboard policy: {forbidden}"
         );
     }
@@ -14174,13 +14268,29 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         );
     }
     assert!(
-        orchestration_admin.contains("use agent_doc_controller::fleet::{")
-            && orchestration_admin.contains("ActorListRecord")
-            && orchestration_admin.contains("ActorListRegistryBinding")
-            && orchestration_admin.contains("build_admin_actor_list")
-            && orchestration_admin.contains("detect_admin_findings")
-            && orchestration_admin.contains("format_admin_receipt_line"),
-        "admin should adapt IO rows and call focused fleet list/finding/receipt policy directly"
+        admin_io.contains("pub trait AdminControllerEffects")
+            && admin_io.contains("use agent_doc_controller::fleet::{")
+            && admin_io.contains("ActorListRecord")
+            && admin_io.contains("ActorListRegistryBinding")
+            && admin_io.contains("build_admin_actor_list")
+            && admin_io.contains("detect_admin_findings")
+            && admin_io.contains("format_admin_receipt_line")
+            && admin_io.contains("pub fn list(")
+            && admin_io.contains("pub fn inspect(")
+            && admin_io.contains("pub fn queue_control(")
+            && admin_io.contains("pub fn reap_all_stale("),
+        "agent-doc-admin-io should own admin command rendering and call focused fleet list/finding/receipt policy directly"
+    );
+    let cli_main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        cli_main.contains(
+            "impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects"
+        ) && cli_main.contains("agent_doc_orchestration::project_controller::load_actor_store")
+            && cli_main.contains("agent_doc_session_registry_io::load_in")
+            && cli_main.contains("tmux_router::Tmux::default_server")
+            && cli_main.contains("agent_doc_admin_io::inspect(")
+            && !cli_main.contains("agent_doc_orchestration::admin::"),
+        "CLI should adapt concrete admin effects and call agent-doc-admin-io directly"
     );
     assert!(
         cli_dashboard.contains("impl DashboardEffects for CliDashboardEffects")
@@ -19259,7 +19369,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "git orchestration should call focused project-root IO instead of owning VCS-refresh root discovery"
     );
     let admin_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/admin.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-admin-io/src/lib.rs")).unwrap();
     assert!(
         !admin_source.contains("fn resolve_root(")
             && !admin_source.contains("fn resolve_root_for_target(")

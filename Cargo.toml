@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "agent-doc-admin-io",
     "agent-doc-agent-io",
     "agent-doc-hash",
     "agent-doc-archive-io",
@@ -138,6 +139,7 @@ name = "agent-doc"
 path = "src/main.rs"
 
 [dependencies]
+agent-doc-admin-io = { path = "agent-doc-admin-io", version = "0.34.67" }
 agent-doc-archive-io = { path = "agent-doc-archive-io", version = "0.34.67" }
 agent-doc-agent-io = { path = "agent-doc-agent-io", version = "0.34.67" }
 agent-doc-boundary-io = { path = "agent-doc-boundary-io", version = "0.34.67" }

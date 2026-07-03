@@ -35,7 +35,6 @@
 //! split into narrower crates.
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
-pub mod admin;
 pub mod backlog_cmd;
 pub mod claim;
 pub mod codex_hook;

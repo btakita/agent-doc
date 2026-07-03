@@ -284,6 +284,207 @@ impl agent_doc_gc_io::GcControllerEffects for CliGcControllerEffects {
     }
 }
 
+struct CliAdminControllerEffects {
+    tmux: tmux_router::Tmux,
+}
+
+impl Default for CliAdminControllerEffects {
+    fn default() -> Self {
+        Self {
+            tmux: tmux_router::Tmux::default_server(),
+        }
+    }
+}
+
+fn admin_receipt_view(
+    receipt: agent_doc_orchestration::project_controller::ControllerAdminReceipt,
+) -> agent_doc_admin_io::ControllerAdminReceiptView {
+    agent_doc_admin_io::ControllerAdminReceiptView {
+        receipt_id: receipt.receipt_id,
+        operation_kind: receipt.operation_kind,
+        document_id: receipt.document_id,
+        status: receipt.status,
+        diagnostic_payload: receipt.diagnostic_payload,
+        failed_stage: receipt.failed_stage,
+        unblock_hint: receipt.unblock_hint,
+        observed_generation: receipt.observed_generation,
+        current_generation: receipt.current_generation,
+    }
+}
+
+fn actor_inspection_view(
+    inspection: agent_doc_orchestration::project_controller::ControllerActorInspection,
+) -> agent_doc_admin_io::ControllerActorInspectionView {
+    agent_doc_admin_io::ControllerActorInspectionView {
+        target: inspection.target,
+        document_id: inspection.document_id,
+        record: inspection.record,
+        supervisor_lease: inspection.supervisor_lease,
+        freshness: inspection.freshness,
+        queue_head: inspection.queue_head,
+        queue_control: inspection.queue_control,
+        queue_backpressure: inspection.queue_backpressure,
+        projection_lag: inspection.projection_lag,
+        dispatch_attempts: inspection.dispatch_attempts,
+        admin_operations: inspection.admin_operations,
+        projection_diagnostics: inspection.projection_diagnostics,
+    }
+}
+
+impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
+    fn load_actor_list(
+        &self,
+        root: &Path,
+    ) -> anyhow::Result<Vec<agent_doc_controller::fleet::ActorListRecord>> {
+        let actors = agent_doc_orchestration::project_controller::load_actor_store(root)?;
+        Ok(actors
+            .values()
+            .map(|record| agent_doc_controller::fleet::ActorListRecord {
+                document_id: record.document_id.clone(),
+                session_id: record.session_id.clone(),
+                pane: record.pane_id.clone(),
+                window: record.window_id.clone(),
+                harness: record.harness.clone(),
+                generation: record.generation,
+                state: record.state.as_str().to_string(),
+            })
+            .collect())
+    }
+
+    fn load_registry_bindings(
+        &self,
+        root: &Path,
+    ) -> anyhow::Result<Vec<agent_doc_controller::fleet::ActorListRegistryBinding>> {
+        let registry = agent_doc_session_registry_io::load_in(root)?;
+        Ok(registry
+            .values()
+            .map(
+                |entry| agent_doc_controller::fleet::ActorListRegistryBinding {
+                    session_id: entry.session_id.clone(),
+                    supervisor_pid: entry.pid,
+                    cwd: entry.cwd.clone(),
+                },
+            )
+            .collect())
+    }
+
+    fn pane_alive(&self, pane: &str) -> bool {
+        self.tmux.pane_alive(pane)
+    }
+
+    fn inspect_actor(
+        &self,
+        root: &Path,
+        document: Option<&Path>,
+        session: Option<&str>,
+        pane: Option<&str>,
+    ) -> anyhow::Result<agent_doc_admin_io::ControllerActorInspectionView> {
+        agent_doc_orchestration::project_controller::inspect_actor(root, document, session, pane)
+            .map(actor_inspection_view)
+    }
+
+    fn control_queue(
+        &self,
+        root: &Path,
+        document: Option<&Path>,
+        action: &str,
+        observed_generation: Option<u64>,
+        reason: Option<&str>,
+        item_id: Option<&str>,
+    ) -> anyhow::Result<agent_doc_admin_io::ControllerAdminReceiptView> {
+        agent_doc_orchestration::project_controller::control_queue(
+            root,
+            document,
+            action,
+            observed_generation,
+            reason,
+            item_id,
+        )
+        .map(admin_receipt_view)
+    }
+
+    fn admin_reap(
+        &self,
+        root: &Path,
+        document: Option<&Path>,
+        session: Option<&str>,
+        pane: Option<&str>,
+        observed_generation: u64,
+        reason: &str,
+    ) -> anyhow::Result<agent_doc_admin_io::ControllerAdminReceiptView> {
+        agent_doc_orchestration::project_controller::admin_reap(
+            root,
+            document,
+            session,
+            pane,
+            observed_generation,
+            reason,
+        )
+        .map(admin_receipt_view)
+    }
+
+    fn close_stale_dead_pane_actors_with_liveness(
+        &self,
+        root: &Path,
+        pane_alive: &mut dyn FnMut(&str) -> bool,
+        dry_run: bool,
+        caller: &str,
+        reason: &str,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_orchestration::project_controller::close_stale_dead_pane_actors_for_caller(
+            root, pane_alive, dry_run, caller, reason,
+        )
+    }
+
+    fn close_stale_dead_pane_actors_with_tmux(
+        &self,
+        root: &Path,
+        dry_run: bool,
+        caller: &str,
+        reason: &str,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_orchestration::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+            root, dry_run, caller, reason,
+        )
+    }
+
+    fn admin_handoff(
+        &self,
+        root: &Path,
+        document: &Path,
+        to_pane: &str,
+        observed_generation: u64,
+        reason: &str,
+    ) -> anyhow::Result<agent_doc_admin_io::ControllerAdminReceiptView> {
+        agent_doc_orchestration::project_controller::admin_handoff(
+            root,
+            document,
+            to_pane,
+            observed_generation,
+            reason,
+        )
+        .map(admin_receipt_view)
+    }
+
+    fn repair_projection(
+        &self,
+        root: &Path,
+        document: Option<&Path>,
+        projection: &str,
+        observed_generation: Option<u64>,
+        reason: Option<&str>,
+    ) -> anyhow::Result<agent_doc_admin_io::ControllerAdminReceiptView> {
+        agent_doc_orchestration::project_controller::repair_projection(
+            root,
+            document,
+            projection,
+            observed_generation,
+            reason,
+        )
+        .map(admin_receipt_view)
+    }
+}
+
 #[derive(Default)]
 struct CliWatchDaemonEffects {
     actor_contexts: HashMap<PathBuf, agent_doc_run_context_io::ActorContext>,
@@ -3579,83 +3780,88 @@ fn main() -> anyhow::Result<()> {
                 agent_doc_orchestration::project_controller::run_shutdown(project_root.as_deref())
             }
         },
-        Commands::Admin { action } => match action {
-            AdminAction::Inspect {
-                document,
-                session,
-                pane,
-                project_root,
-                json,
-            } => agent_doc_orchestration::admin::inspect(
-                project_root.as_deref(),
-                document.as_deref(),
-                session.as_deref(),
-                pane.as_deref(),
-                json,
-            ),
-            AdminAction::List { project_root, json } => {
-                agent_doc_orchestration::admin::list(project_root.as_deref(), json)
-            }
-            AdminAction::Detect { project_root, json } => {
-                agent_doc_orchestration::admin::detect(project_root.as_deref(), json)
-            }
-            AdminAction::Dashboard {
-                project_root,
-                json,
-                once,
-                interval,
-            } => dashboard_cmd::dashboard(project_root.as_deref(), json, once, interval),
-            AdminAction::ReapStaleControllers {
-                project_root,
-                dry_run,
-            } => {
-                let root = match project_root {
-                    Some(r) => r,
-                    None => {
-                        let cwd = std::env::current_dir()?;
-                        agent_doc_fs::find_project_root(&cwd).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                ".agent-doc/ project root not found from {}",
-                                cwd.display()
-                            )
-                        })?
-                    }
-                };
-                let threshold =
+        Commands::Admin { action } => {
+            let admin_effects = CliAdminControllerEffects::default();
+            match action {
+                AdminAction::Inspect {
+                    document,
+                    session,
+                    pane,
+                    project_root,
+                    json,
+                } => agent_doc_admin_io::inspect(
+                    &admin_effects,
+                    project_root.as_deref(),
+                    document.as_deref(),
+                    session.as_deref(),
+                    pane.as_deref(),
+                    json,
+                ),
+                AdminAction::List { project_root, json } => {
+                    agent_doc_admin_io::list(&admin_effects, project_root.as_deref(), json)
+                }
+                AdminAction::Detect { project_root, json } => {
+                    agent_doc_admin_io::detect(&admin_effects, project_root.as_deref(), json)
+                }
+                AdminAction::Dashboard {
+                    project_root,
+                    json,
+                    once,
+                    interval,
+                } => dashboard_cmd::dashboard(project_root.as_deref(), json, once, interval),
+                AdminAction::ReapStaleControllers {
+                    project_root,
+                    dry_run,
+                } => {
+                    let root = match project_root {
+                        Some(r) => r,
+                        None => {
+                            let cwd = std::env::current_dir()?;
+                            agent_doc_fs::find_project_root(&cwd).ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    ".agent-doc/ project root not found from {}",
+                                    cwd.display()
+                                )
+                            })?
+                        }
+                    };
+                    let threshold =
                     agent_doc_orchestration::project_controller::stale_preparing_controller_threshold();
-                let (reaped, kept) =
+                    let (reaped, kept) =
                     agent_doc_orchestration::project_controller::terminate_stale_preparing_controllers_for_caller(
                         &root, threshold, dry_run, "admin",
                     )?;
-                if dry_run {
-                    println!(
-                        "[admin] reap-stale-controllers (dry-run): {reaped} would be terminated, {kept} kept"
-                    );
-                } else {
-                    println!("[admin] reap-stale-controllers: {reaped} terminated, {kept} kept");
-                }
-                Ok(())
-            }
-            AdminAction::Recycle {
-                target,
-                project_root,
-                all_projects,
-                force,
-                json,
-            } => {
-                if all_projects {
-                    if target.is_some() || project_root.is_some() {
-                        anyhow::bail!(
-                            "admin recycle --all-projects cannot be combined with FILE_OR_PROJECT_ROOT or --project-root"
+                    if dry_run {
+                        println!(
+                            "[admin] reap-stale-controllers (dry-run): {reaped} would be terminated, {kept} kept"
+                        );
+                    } else {
+                        println!(
+                            "[admin] reap-stale-controllers: {reaped} terminated, {kept} kept"
                         );
                     }
-                    let (recycled, skipped) =
+                    Ok(())
+                }
+                AdminAction::Recycle {
+                    target,
+                    project_root,
+                    all_projects,
+                    force,
+                    json,
+                } => {
+                    if all_projects {
+                        if target.is_some() || project_root.is_some() {
+                            anyhow::bail!(
+                                "admin recycle --all-projects cannot be combined with FILE_OR_PROJECT_ROOT or --project-root"
+                            );
+                        }
+                        let (recycled, skipped) =
                         agent_doc_orchestration::project_controller::recycle_controllers_all_projects_force(force)?;
-                    // #recycle-supervisor-fanout: an explicit fleet recycle also schedules a
-                    // recycle of every valid-state route-owned supervisor (they host the agent
-                    // turns), honored at each supervisor's next idle boundary. Fail-open — a
-                    // supervisor enumeration hiccup must not abort the controller recycle.
-                    let (supervisors_marked, supervisors_skipped) =
+                        // #recycle-supervisor-fanout: an explicit fleet recycle also schedules a
+                        // recycle of every valid-state route-owned supervisor (they host the agent
+                        // turns), honored at each supervisor's next idle boundary. Fail-open — a
+                        // supervisor enumeration hiccup must not abort the controller recycle.
+                        let (supervisors_marked, supervisors_skipped) =
                         agent_doc_orchestration::project_controller::recycle_supervisors_all_projects_force(force)
                             .unwrap_or_else(|err| {
                                 eprintln!(
@@ -3663,329 +3869,346 @@ fn main() -> anyhow::Result<()> {
                                 );
                                 (0, 0)
                             });
-                    if json {
-                        println!(
-                            "{}",
-                            all_projects_recycle_json(
-                                recycled,
-                                skipped,
-                                supervisors_marked,
-                                supervisors_skipped,
-                                force
-                            )
-                        );
+                        if json {
+                            println!(
+                                "{}",
+                                all_projects_recycle_json(
+                                    recycled,
+                                    skipped,
+                                    supervisors_marked,
+                                    supervisors_skipped,
+                                    force
+                                )
+                            );
+                        } else {
+                            let boundary = if force {
+                                "now (forced, overriding the in-flight-dispatch deferral)"
+                            } else {
+                                "at next idle boundary"
+                            };
+                            println!(
+                                "[admin] recycle (all projects{}): {recycled} controller(s) marked to recycle {boundary}, {skipped} skipped; {supervisors_marked} route-owned supervisor(s) scheduled to recycle at next idle boundary, {supervisors_skipped} skipped",
+                                if force { ", forced" } else { "" }
+                            );
+                        }
                     } else {
-                        let boundary = if force {
-                            "now (forced, overriding the in-flight-dispatch deferral)"
-                        } else {
-                            "at next idle boundary"
-                        };
-                        println!(
-                            "[admin] recycle (all projects{}): {recycled} controller(s) marked to recycle {boundary}, {skipped} skipped; {supervisors_marked} route-owned supervisor(s) scheduled to recycle at next idle boundary, {supervisors_skipped} skipped",
-                            if force { ", forced" } else { "" }
-                        );
+                        if target.is_some() && project_root.is_some() {
+                            anyhow::bail!(
+                                "admin recycle accepts either FILE_OR_PROJECT_ROOT or --project-root, not both"
+                            );
+                        }
+                        let root_arg = project_root.as_deref().or(target.as_deref());
+                        let root = agent_doc_project_root_io::project_root_from_arg(root_arg)?;
+                        let recycled =
+                            agent_doc_orchestration::project_controller::recycle_controller_force(
+                                &root, force,
+                            )?;
+                        // `#recycle-no-boundaries`: when NO live controller answered, this
+                        // is almost always an operator trying to bring a document's session
+                        // back (a dead supervisor, or a live supervisor whose controller went
+                        // away). Escalate to the kill+cold-start path
+                        // (`session restart-supervisor`) automatically instead of a dead-end
+                        // no-op, whenever a session-document path was given — no `--force`
+                        // required. `--force` still flows through to the restart, where it
+                        // only governs interrupting a *busy* pane.
+                        //
+                        // Only escalate for an actual session document (one carrying an
+                        // `agent_doc_session` frontmatter id). A path that is not a startable
+                        // session — a stray file, a scratch doc — degrades to the informative
+                        // message instead of hard-failing the `restart` cold-start, so
+                        // `admin recycle <anything>` never errors out where the old no-op
+                        // silently succeeded.
+                        let escalate =
+                            recycle_should_escalate_dead_supervisor(recycled, target.as_deref())
+                                && target
+                                    .as_deref()
+                                    .map(|p| {
+                                        agent_doc_frontmatter_io::session::read_session_id(p)
+                                            .is_some()
+                                    })
+                                    .unwrap_or(false);
+                        if json {
+                            println!(
+                                "{}",
+                                serde_json::json!({ "scope": "project", "project_root": root.display().to_string(), "recycled": recycled, "forced": force, "escalated_cold_start": escalate })
+                            );
+                        } else if recycled {
+                            let boundary = if force {
+                                "now (forced, overriding the in-flight-dispatch deferral)"
+                            } else {
+                                "at next idle boundary"
+                            };
+                            println!(
+                                "[admin] recycle{}: controller for {} marked to recycle {boundary}",
+                                if force { " (forced)" } else { "" },
+                                root.display()
+                            );
+                        } else if !escalate {
+                            // No session-document path to cold-start (a bare project-root /
+                            // `--project-root` form). `admin recycle` can only re-exec a
+                            // *live* controller onto the fresh binary; with none running and
+                            // no document to revive, point at the one-step remedy.
+                            println!(
+                                "[admin] recycle: no running controller for {} (nothing to recycle). Pass a session-document path (`agent-doc admin recycle <FILE>`) to cold-start its supervisor automatically.",
+                                root.display()
+                            );
+                        }
+                        if escalate {
+                            let file = target.as_deref().expect(
+                                "recycle_should_escalate_dead_supervisor guarantees a target",
+                            );
+                            eprintln!(
+                                "[admin] recycle: no live controller for {} — escalating to a kill+cold-start via `session restart-supervisor {}`",
+                                root.display(),
+                                file.display()
+                            );
+                            session_actor_cmd::restart(
+                                file,
+                                session_actor_cmd::RestartMode::Continue,
+                                force,
+                            )?;
+                        }
                     }
-                } else {
-                    if target.is_some() && project_root.is_some() {
-                        anyhow::bail!(
-                            "admin recycle accepts either FILE_OR_PROJECT_ROOT or --project-root, not both"
-                        );
-                    }
-                    let root_arg = project_root.as_deref().or(target.as_deref());
-                    let root = agent_doc_project_root_io::project_root_from_arg(root_arg)?;
-                    let recycled =
-                        agent_doc_orchestration::project_controller::recycle_controller_force(
-                            &root, force,
-                        )?;
-                    // `#recycle-no-boundaries`: when NO live controller answered, this
-                    // is almost always an operator trying to bring a document's session
-                    // back (a dead supervisor, or a live supervisor whose controller went
-                    // away). Escalate to the kill+cold-start path
-                    // (`session restart-supervisor`) automatically instead of a dead-end
-                    // no-op, whenever a session-document path was given — no `--force`
-                    // required. `--force` still flows through to the restart, where it
-                    // only governs interrupting a *busy* pane.
-                    //
-                    // Only escalate for an actual session document (one carrying an
-                    // `agent_doc_session` frontmatter id). A path that is not a startable
-                    // session — a stray file, a scratch doc — degrades to the informative
-                    // message instead of hard-failing the `restart` cold-start, so
-                    // `admin recycle <anything>` never errors out where the old no-op
-                    // silently succeeded.
-                    let escalate =
-                        recycle_should_escalate_dead_supervisor(recycled, target.as_deref())
-                            && target
-                                .as_deref()
-                                .map(|p| {
-                                    agent_doc_frontmatter_io::session::read_session_id(p).is_some()
-                                })
-                                .unwrap_or(false);
-                    if json {
-                        println!(
-                            "{}",
-                            serde_json::json!({ "scope": "project", "project_root": root.display().to_string(), "recycled": recycled, "forced": force, "escalated_cold_start": escalate })
-                        );
-                    } else if recycled {
-                        let boundary = if force {
-                            "now (forced, overriding the in-flight-dispatch deferral)"
-                        } else {
-                            "at next idle boundary"
-                        };
-                        println!(
-                            "[admin] recycle{}: controller for {} marked to recycle {boundary}",
-                            if force { " (forced)" } else { "" },
-                            root.display()
-                        );
-                    } else if !escalate {
-                        // No session-document path to cold-start (a bare project-root /
-                        // `--project-root` form). `admin recycle` can only re-exec a
-                        // *live* controller onto the fresh binary; with none running and
-                        // no document to revive, point at the one-step remedy.
-                        println!(
-                            "[admin] recycle: no running controller for {} (nothing to recycle). Pass a session-document path (`agent-doc admin recycle <FILE>`) to cold-start its supervisor automatically.",
-                            root.display()
-                        );
-                    }
-                    if escalate {
-                        let file = target
-                            .as_deref()
-                            .expect("recycle_should_escalate_dead_supervisor guarantees a target");
-                        eprintln!(
-                            "[admin] recycle: no live controller for {} — escalating to a kill+cold-start via `session restart-supervisor {}`",
-                            root.display(),
-                            file.display()
-                        );
-                        session_actor_cmd::restart(
-                            file,
-                            session_actor_cmd::RestartMode::Continue,
-                            force,
-                        )?;
-                    }
+                    Ok(())
                 }
-                Ok(())
-            }
-            AdminAction::ReloadLib { json } => {
-                // `#cdylib-reload-broadcast`: write the global reload-broadcast file
-                // for the currently-installed cdylib and report how many editor
-                // projects it could also signal. Deterministic logic lives in
-                // `lib_install::reload_lib_now`; main.rs only renders the report.
-                let report = lib_install::reload_lib_now()?;
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "broadcast_path": report.broadcast_path.display().to_string(),
-                            "lib_version": report.lib_version,
-                            "editor_projects": report.editor_projects,
-                        })
-                    );
-                } else {
-                    println!(
-                        "[admin] reload-lib: cdylib v{} reload announced to editor plugins ({}); {} editor project(s) could also be signaled directly",
-                        report.lib_version,
-                        report.broadcast_path.display(),
-                        report.editor_projects,
-                    );
-                }
-                Ok(())
-            }
-            AdminAction::KillSupervisor {
-                document,
-                grace_secs,
-                dry_run,
-                json,
-            } => {
-                #[cfg(unix)]
-                {
-                    use agent_doc_supervisor_io::selfkill::{
-                        SupervisorKillOutcome, drive_supervisor_kill, selfkill_grace,
-                    };
-                    let grace = grace_secs
-                        .map(std::time::Duration::from_secs)
-                        .unwrap_or_else(selfkill_grace);
-                    let outcome = drive_supervisor_kill(&document, grace, dry_run)?;
-                    let (status, pid, message) = match outcome {
-                        SupervisorKillOutcome::NoSupervisor => (
-                            "no_supervisor",
-                            None,
-                            format!(
-                                "no running route-owned supervisor for {}",
-                                document.display()
-                            ),
-                        ),
-                        SupervisorKillOutcome::RefusedSelfAncestor(pid) => (
-                            "refused_self_ancestor",
-                            Some(pid),
-                            format!(
-                                "supervisor pid {pid} is this session's own ancestor — refused; run `agent-doc admin kill-supervisor` from a different pane, or let the project controller drive it"
-                            ),
-                        ),
-                        SupervisorKillOutcome::WouldKill(pid) => (
-                            "would_kill",
-                            Some(pid),
-                            format!("dry-run: would kill supervisor pid {pid}"),
-                        ),
-                        SupervisorKillOutcome::Graceful(pid) => (
-                            "graceful",
-                            Some(pid),
-                            format!("supervisor pid {pid} self-killed within the grace window"),
-                        ),
-                        SupervisorKillOutcome::Forced(pid) => (
-                            "forced",
-                            Some(pid),
-                            format!(
-                                "supervisor pid {pid} force-killed after the {}s grace window",
-                                grace.as_secs()
-                            ),
-                        ),
-                    };
+                AdminAction::ReloadLib { json } => {
+                    // `#cdylib-reload-broadcast`: write the global reload-broadcast file
+                    // for the currently-installed cdylib and report how many editor
+                    // projects it could also signal. Deterministic logic lives in
+                    // `lib_install::reload_lib_now`; main.rs only renders the report.
+                    let report = lib_install::reload_lib_now()?;
                     if json {
                         println!(
                             "{}",
                             serde_json::json!({
-                                "status": status,
-                                "pid": pid,
-                                "document": document.display().to_string(),
-                                "grace_secs": grace.as_secs(),
+                                "broadcast_path": report.broadcast_path.display().to_string(),
+                                "lib_version": report.lib_version,
+                                "editor_projects": report.editor_projects,
                             })
                         );
                     } else {
-                        println!("[admin] kill-supervisor: {message}");
-                    }
-                    // A refused self-ancestor is an operator error worth a non-zero exit
-                    // so scripts can branch; everything else (incl. no_supervisor) is Ok.
-                    if status == "refused_self_ancestor" {
-                        anyhow::bail!("{message}");
+                        println!(
+                            "[admin] reload-lib: cdylib v{} reload announced to editor plugins ({}); {} editor project(s) could also be signaled directly",
+                            report.lib_version,
+                            report.broadcast_path.display(),
+                            report.editor_projects,
+                        );
                     }
                     Ok(())
                 }
-                #[cfg(not(unix))]
-                {
-                    let _ = (document, grace_secs, dry_run, json);
-                    anyhow::bail!("admin kill-supervisor is only supported on Unix");
-                }
-            }
-            AdminAction::Queue { action } => match action {
-                AdminQueueAction::Pause {
+                AdminAction::KillSupervisor {
                     document,
-                    project_root,
-                    observed_generation,
-                    reason,
+                    grace_secs,
+                    dry_run,
                     json,
-                } => agent_doc_orchestration::admin::queue_control(
-                    project_root.as_deref(),
-                    document.as_deref(),
-                    "pause",
-                    observed_generation,
-                    Some(&reason),
-                    None,
-                    json,
-                ),
-                AdminQueueAction::Resume {
-                    document,
-                    project_root,
-                    observed_generation,
-                    reason,
-                    json,
-                } => agent_doc_orchestration::admin::queue_control(
-                    project_root.as_deref(),
-                    document.as_deref(),
-                    "resume",
-                    observed_generation,
-                    reason.as_deref(),
-                    None,
-                    json,
-                ),
-                AdminQueueAction::Drain {
-                    document,
-                    project_root,
-                    observed_generation,
-                    until_id,
-                    reason,
-                    json,
-                } => agent_doc_orchestration::admin::queue_control(
-                    project_root.as_deref(),
-                    Some(document.as_path()),
-                    "drain",
-                    observed_generation,
-                    reason.as_deref(),
-                    until_id.as_deref(),
-                    json,
-                ),
-            },
-            AdminAction::Reap {
-                document,
-                all_stale,
-                session,
-                pane,
-                project_root,
-                observed_generation,
-                reason,
-                json,
-            } => {
-                if all_stale {
-                    if document.is_some()
-                        || session.is_some()
-                        || pane.is_some()
-                        || observed_generation.is_some()
+                } => {
+                    #[cfg(unix)]
                     {
-                        anyhow::bail!(
-                            "admin reap --all-stale cannot be combined with a document, --session, --pane, or --observed-generation"
-                        );
+                        use agent_doc_supervisor_io::selfkill::{
+                            SupervisorKillOutcome, drive_supervisor_kill, selfkill_grace,
+                        };
+                        let grace = grace_secs
+                            .map(std::time::Duration::from_secs)
+                            .unwrap_or_else(selfkill_grace);
+                        let outcome = drive_supervisor_kill(&document, grace, dry_run)?;
+                        let (status, pid, message) = match outcome {
+                            SupervisorKillOutcome::NoSupervisor => (
+                                "no_supervisor",
+                                None,
+                                format!(
+                                    "no running route-owned supervisor for {}",
+                                    document.display()
+                                ),
+                            ),
+                            SupervisorKillOutcome::RefusedSelfAncestor(pid) => (
+                                "refused_self_ancestor",
+                                Some(pid),
+                                format!(
+                                    "supervisor pid {pid} is this session's own ancestor — refused; run `agent-doc admin kill-supervisor` from a different pane, or let the project controller drive it"
+                                ),
+                            ),
+                            SupervisorKillOutcome::WouldKill(pid) => (
+                                "would_kill",
+                                Some(pid),
+                                format!("dry-run: would kill supervisor pid {pid}"),
+                            ),
+                            SupervisorKillOutcome::Graceful(pid) => (
+                                "graceful",
+                                Some(pid),
+                                format!("supervisor pid {pid} self-killed within the grace window"),
+                            ),
+                            SupervisorKillOutcome::Forced(pid) => (
+                                "forced",
+                                Some(pid),
+                                format!(
+                                    "supervisor pid {pid} force-killed after the {}s grace window",
+                                    grace.as_secs()
+                                ),
+                            ),
+                        };
+                        if json {
+                            println!(
+                                "{}",
+                                serde_json::json!({
+                                    "status": status,
+                                    "pid": pid,
+                                    "document": document.display().to_string(),
+                                    "grace_secs": grace.as_secs(),
+                                })
+                            );
+                        } else {
+                            println!("[admin] kill-supervisor: {message}");
+                        }
+                        // A refused self-ancestor is an operator error worth a non-zero exit
+                        // so scripts can branch; everything else (incl. no_supervisor) is Ok.
+                        if status == "refused_self_ancestor" {
+                            anyhow::bail!("{message}");
+                        }
+                        Ok(())
                     }
-                    agent_doc_orchestration::admin::reap_all_stale(
-                        project_root.as_deref(),
-                        &reason,
+                    #[cfg(not(unix))]
+                    {
+                        let _ = (document, grace_secs, dry_run, json);
+                        anyhow::bail!("admin kill-supervisor is only supported on Unix");
+                    }
+                }
+                AdminAction::Queue { action } => match action {
+                    AdminQueueAction::Pause {
+                        document,
+                        project_root,
+                        observed_generation,
+                        reason,
                         json,
-                    )
-                } else {
-                    let observed_generation = observed_generation.ok_or_else(|| {
+                    } => agent_doc_admin_io::queue_control(
+                        &admin_effects,
+                        agent_doc_admin_io::QueueControlOptions {
+                            project_root: project_root.as_deref(),
+                            document: document.as_deref(),
+                            action: "pause",
+                            observed_generation,
+                            reason: Some(&reason),
+                            item_id: None,
+                            json,
+                        },
+                    ),
+                    AdminQueueAction::Resume {
+                        document,
+                        project_root,
+                        observed_generation,
+                        reason,
+                        json,
+                    } => agent_doc_admin_io::queue_control(
+                        &admin_effects,
+                        agent_doc_admin_io::QueueControlOptions {
+                            project_root: project_root.as_deref(),
+                            document: document.as_deref(),
+                            action: "resume",
+                            observed_generation,
+                            reason: reason.as_deref(),
+                            item_id: None,
+                            json,
+                        },
+                    ),
+                    AdminQueueAction::Drain {
+                        document,
+                        project_root,
+                        observed_generation,
+                        until_id,
+                        reason,
+                        json,
+                    } => agent_doc_admin_io::queue_control(
+                        &admin_effects,
+                        agent_doc_admin_io::QueueControlOptions {
+                            project_root: project_root.as_deref(),
+                            document: Some(document.as_path()),
+                            action: "drain",
+                            observed_generation,
+                            reason: reason.as_deref(),
+                            item_id: until_id.as_deref(),
+                            json,
+                        },
+                    ),
+                },
+                AdminAction::Reap {
+                    document,
+                    all_stale,
+                    session,
+                    pane,
+                    project_root,
+                    observed_generation,
+                    reason,
+                    json,
+                } => {
+                    if all_stale {
+                        if document.is_some()
+                            || session.is_some()
+                            || pane.is_some()
+                            || observed_generation.is_some()
+                        {
+                            anyhow::bail!(
+                                "admin reap --all-stale cannot be combined with a document, --session, --pane, or --observed-generation"
+                            );
+                        }
+                        agent_doc_admin_io::reap_all_stale(
+                            &admin_effects,
+                            project_root.as_deref(),
+                            &reason,
+                            json,
+                        )
+                    } else {
+                        let observed_generation = observed_generation.ok_or_else(|| {
                         anyhow::anyhow!(
                             "admin reap requires --observed-generation unless --all-stale is used"
                         )
                     })?;
-                    agent_doc_orchestration::admin::reap(
-                        project_root.as_deref(),
-                        document.as_deref(),
-                        session.as_deref(),
-                        pane.as_deref(),
-                        observed_generation,
-                        &reason,
-                        json,
-                    )
+                        agent_doc_admin_io::reap(
+                            &admin_effects,
+                            agent_doc_admin_io::ReapOptions {
+                                project_root: project_root.as_deref(),
+                                document: document.as_deref(),
+                                session: session.as_deref(),
+                                pane: pane.as_deref(),
+                                observed_generation,
+                                reason: &reason,
+                                json,
+                            },
+                        )
+                    }
                 }
+                AdminAction::Handoff {
+                    document,
+                    to_pane,
+                    project_root,
+                    observed_generation,
+                    reason,
+                    json,
+                } => agent_doc_admin_io::handoff(
+                    &admin_effects,
+                    project_root.as_deref(),
+                    &document,
+                    &to_pane,
+                    observed_generation,
+                    &reason,
+                    json,
+                ),
+                AdminAction::RepairProjection {
+                    document,
+                    project_root,
+                    projection,
+                    observed_generation,
+                    reason,
+                    json,
+                } => agent_doc_admin_io::repair_projection(
+                    &admin_effects,
+                    project_root.as_deref(),
+                    document.as_deref(),
+                    &projection,
+                    observed_generation,
+                    reason.as_deref(),
+                    json,
+                ),
             }
-            AdminAction::Handoff {
-                document,
-                to_pane,
-                project_root,
-                observed_generation,
-                reason,
-                json,
-            } => agent_doc_orchestration::admin::handoff(
-                project_root.as_deref(),
-                &document,
-                &to_pane,
-                observed_generation,
-                &reason,
-                json,
-            ),
-            AdminAction::RepairProjection {
-                document,
-                project_root,
-                projection,
-                observed_generation,
-                reason,
-                json,
-            } => agent_doc_orchestration::admin::repair_projection(
-                project_root.as_deref(),
-                document.as_deref(),
-                &projection,
-                observed_generation,
-                reason.as_deref(),
-                json,
-            ),
-        },
+        }
         Commands::Hook { action } => match action {
             HookAction::Fire {
                 event,

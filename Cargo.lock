@@ -23,6 +23,7 @@ dependencies = [
 name = "agent-doc"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-admin-io",
  "agent-doc-agent-io",
  "agent-doc-archive-io",
  "agent-doc-boundary-io",
@@ -141,6 +142,19 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "zip",
+]
+
+[[package]]
+name = "agent-doc-admin-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-controller",
+ "agent-doc-project-root-io",
+ "agent-doc-sqlite",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

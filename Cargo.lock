@@ -824,7 +824,11 @@ dependencies = [
 name = "agent-doc-ipc-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-debounce",
+ "agent-doc-document-realtime",
  "agent-doc-ipc-protocol",
+ "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
  "anyhow",
  "interprocess",
  "serde_json",

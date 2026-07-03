@@ -50,6 +50,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+pub mod editor_target;
+
 /// Socket filename within `.agent-doc/` directory.
 const SOCKET_FILENAME: &str = "ipc.sock";
 

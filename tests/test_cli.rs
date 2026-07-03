@@ -20538,7 +20538,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let ipc_io_manifest: toml::Value = toml::from_str(&ipc_io_manifest).unwrap();
     let ipc_io_dependencies = ipc_io_manifest["dependencies"].as_table().unwrap();
     for required in [
+        "agent-doc-debounce",
+        "agent-doc-document-realtime",
         "agent-doc-ipc-protocol",
+        "agent-doc-ops-log-io",
+        "agent-doc-plugin-owner",
         "anyhow",
         "interprocess",
         "serde_json",
@@ -20575,6 +20579,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && ipc_io_source.contains("vcs_refresh_message")
             && ipc_io_source.contains("interprocess::local_socket")
             && ipc_io_source.contains("pub type OpsLogger")
+            && ipc_io_source.contains("pub mod editor_target;")
             && ipc_io_source.contains("pub fn start_listener_with_logger")
             && ipc_io_source.contains("pub fn send_publish_live_buffer_file_signal")
             && ipc_io_source.contains("pub fn send_save_document_file_signal"),
@@ -20605,6 +20610,20 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             "agent-doc-ipc-io must not keep old IPC protocol policy after extraction: {forbidden}"
         );
     }
+    let ipc_io_editor_target_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-ipc-io/src/editor_target.rs")).unwrap();
+    assert!(
+        ipc_io_editor_target_source.contains("pub fn live_editor_delivery_target(")
+            && ipc_io_editor_target_source
+                .contains("pub fn live_editor_delivery_has_operator_authority(")
+            && ipc_io_editor_target_source.contains("pub fn target_payload_to_live_editor(")
+            && ipc_io_editor_target_source.contains("agent_doc_plugin_owner::")
+            && ipc_io_editor_target_source.contains("agent_doc_debounce::live_buffer_snapshots(")
+            && ipc_io_editor_target_source
+                .contains("agent_doc_document_realtime::select_live_editor_delivery_target(")
+            && ipc_io_editor_target_source.contains("agent_doc_ops_log_io::log_op("),
+        "agent-doc-ipc-io editor_target should own live-editor IPC payload targeting"
+    );
 
     let ipc_forensics_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-ipc-forensics-io/Cargo.toml")).unwrap();
@@ -20779,6 +20798,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             .unwrap();
     assert!(
         write_ipc_transport_source.contains("use agent_doc_ipc_protocol::{")
+            && write_ipc_transport_source.contains("use agent_doc_ipc_io::editor_target::{")
             && write_ipc_transport_source.contains("FullContentIpcMode")
             && write_ipc_transport_source.contains("is_already_applied_ack_error_message")
             && write_ipc_transport_source.contains("is_socket_ack_timeout_error")
@@ -20793,6 +20813,9 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "fn existing_patch_is_reposition_only(",
         "crate::ipc_socket::is_already_applied_error",
         "pub use agent_doc_ipc_protocol",
+        "fn live_editor_delivery_target(",
+        "fn live_editor_delivery_has_operator_authority(",
+        "fn target_payload_to_live_editor(",
     ] {
         assert!(
             !write_ipc_transport_source.contains(forbidden),
@@ -20805,8 +20828,9 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     assert!(
         write_converge_source.contains(
             "use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};"
-        ),
-        "write convergence should import socket error classifiers from the focused protocol crate"
+        ) && write_converge_source
+            .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;"),
+        "write convergence should import socket error classifiers and editor targeting from focused IPC crates"
     );
     for forbidden in [
         "fn is_socket_ack_timeout_error(",

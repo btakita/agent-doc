@@ -13,6 +13,7 @@ use agent_doc_document_realtime::write_policy::{
     normalize_visible_recovery_compare, should_refuse_disk_fallback,
     snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
+use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};
 use std::collections::HashSet;
 

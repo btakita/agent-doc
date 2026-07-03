@@ -14002,6 +14002,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup.rs")).unwrap();
     let route_startup_ready_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_ready.rs")).unwrap();
+    let route_pane_resolution_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
     let route_pane_resolution_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
     )
@@ -14525,9 +14527,33 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
                 .contains("pub fn wait_for_starting_pane_recovery_target(")
             && route_dispatch_recovery_source
                 .contains("pub fn resolve_fresh_dispatch_target_after_ready_wait(")
-            && route_restart_handoff_source.contains("pub fn wait_for_busy_restart_handoff("),
-        "shared route supervisor/provenance/dispatch-target/recovery/restart-handoff IO should live in agent-doc-route-io"
+            && route_restart_handoff_source.contains("pub fn wait_for_busy_restart_handoff(")
+            && route_pane_resolution_io_source.contains("pub fn dispatch_runtime_health(")
+            && route_pane_resolution_io_source.contains("pub fn startup_miss_route_facts(")
+            && route_pane_resolution_io_source
+                .contains("pub fn fail_if_recent_session_loss_window(")
+            && route_pane_resolution_io_source.contains("pub fn is_agent_process(")
+            && route_pane_resolution_io_source.contains("pub fn cleanup_failed_route_panes(")
+            && route_pane_resolution_io_source.contains("pub fn controller_dispatch_actor_state("),
+        "shared route supervisor/provenance/dispatch-target/recovery/restart-handoff/pane-resolution helper IO should live in agent-doc-route-io"
     );
+    for forbidden_snippet in [
+        "fn dispatch_runtime_health(",
+        "fn startup_miss_route_facts(",
+        "fn startup_miss_route_provenance(",
+        "fn fail_if_recent_session_loss_window(",
+        "fn is_agent_process(",
+        "fn cleanup_failed_route_panes(",
+        "fn failed_route_pane_has_startup_miss(",
+        "fn failed_route_registry_root(",
+        "fn should_preserve_failed_route_pane(",
+        "fn controller_dispatch_actor_state(",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own route pane-resolution helper IO after it moves to agent-doc-route-io: {forbidden_snippet}"
+        );
+    }
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/flow/routed_reopen.rs")
@@ -14560,7 +14586,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("agent_doc_flow_io::log_flow_event")
             && route_dispatch_only_source.contains("dispatch_only_blocked_guard_reason")
             && authoritative_actor.contains("effective_authoritative_actor_state")
-            && route_source.contains("DispatchRuntimeHealth")
+            && route_pane_resolution_io_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
             && route_source.contains("RetryBudget")
             && route_source.contains("authoritative_actor_ready_retry_budget")
@@ -14577,7 +14603,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("StartingTimeoutActorFacts")
             && route_source.contains("actor_blocked_by_starting_timeout")
             && authoritative_actor.contains("starting_timeout_blocked_actor_can_recover")
-            && route_source.contains("StartupMissRouteFacts")
+            && route_pane_resolution_io_source.contains("StartupMissRouteFacts")
             && route_source.contains("startup_miss_requires_fresh_start")
             && route_source.contains("startup_miss_superseded_by_later_open_start")
             && route_source.contains("startup_miss_should_restart_live_owner")
@@ -14601,7 +14627,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_cycle_ack_source.contains("routed_cycle_ack_timeout")
             && route_source.contains("DispatchOnlyBusyRefusalFacts")
             && route_source.contains("controller_dispatch_only_busy_refusal_message(")
-            && route_source.contains("DispatchActorState")
+            && route_pane_resolution_io_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")
             && route_source.contains("DispatchDrainRetryDecision")
@@ -14725,6 +14751,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     );
     assert!(
         route_pane_resolution_source.contains("startup_miss_route_facts(")
+            && route_pane_resolution_io_source.contains("StartupMissRouteFacts")
             && route_pane_resolution_source.contains("startup_miss_requires_fresh_start(")
             && route_pane_resolution_source
                 .contains("startup_miss_superseded_by_later_open_start(")

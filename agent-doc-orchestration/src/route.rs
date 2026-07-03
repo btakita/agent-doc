@@ -162,13 +162,12 @@ use std::time::{Duration, Instant};
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixOutcome, CloseoutBlockDispatchDecision,
-    CloseoutBlockDispatchFacts, DegradedAuthoritativeActorDirectSubmit, DispatchActorState,
-    DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts, DispatchOnlyReopenDelivery,
-    DispatchRuntimeHealth, PromptReadyBarrierDecision, ReopenMode, RetryBudget,
-    RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts, RouteCloseoutDrainOutcome,
-    RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts, RoutedDispatchStartProof,
-    RoutedReopenFacts, RoutedReopenGuardReason, StartingTimeoutActorFacts, StartupMissRouteFacts,
-    actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
+    CloseoutBlockDispatchFacts, DegradedAuthoritativeActorDirectSubmit, DispatchDrainRetryDecision,
+    DispatchOnlyBusyRefusalFacts, DispatchOnlyReopenDelivery, PromptReadyBarrierDecision,
+    ReopenMode, RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
+    RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts,
+    RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
+    StartingTimeoutActorFacts, actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
     authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
     classify_closeout_block_dispatch, decide_authoritative_reopen,
@@ -244,6 +243,13 @@ pub(crate) use agent_doc_route_io::dispatch_recovery::{
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
 use agent_doc_route_io::launch_contract::reapply_codex_launch_contract_before_reuse;
 use agent_doc_route_io::pane_provenance::pane_route_provenance;
+#[cfg(test)]
+use agent_doc_route_io::pane_resolution::should_preserve_failed_route_pane;
+use agent_doc_route_io::pane_resolution::{
+    cleanup_failed_route_panes, controller_dispatch_actor_state,
+    fail_if_recent_session_loss_window, is_agent_process, startup_miss_route_facts,
+    startup_miss_route_provenance,
+};
 use agent_doc_route_io::restart_handoff::wait_for_busy_restart_handoff;
 use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup_debounce::await_idle;
@@ -540,105 +546,8 @@ fn emit_busy_route_queued_diagnostic_from_facts(facts: BusyRouteQueuedDiagnostic
     emit_busy_route_queued_diagnostic(facts.tmux, facts.pane, facts.file, facts.harness);
 }
 
-fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
-    match health {
-        SupervisorHealth::Healthy => DispatchRuntimeHealth::Healthy,
-        SupervisorHealth::Restartable => DispatchRuntimeHealth::Restartable,
-        SupervisorHealth::Halted { restart_count } => {
-            DispatchRuntimeHealth::Halted { restart_count }
-        }
-        SupervisorHealth::Unreachable => DispatchRuntimeHealth::Unreachable,
-        SupervisorHealth::NoSocket => DispatchRuntimeHealth::NoSocket,
-    }
-}
-
-fn startup_miss_route_facts(
-    miss: &agent_doc_supervisor::startup_miss::StartupMiss,
-    registered_pane: &str,
-    pane_alive: bool,
-    live_owner: Option<&str>,
-    supervisor_health: SupervisorHealth,
-    log_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
-) -> StartupMissRouteFacts {
-    StartupMissRouteFacts {
-        miss_timestamp: miss.timestamp,
-        registered_pane_is_live_owner: live_owner == Some(registered_pane),
-        pane_alive,
-        supervisor_health: dispatch_runtime_health(supervisor_health),
-        latest_start_matches_registered_pane: log_status
-            .and_then(|status| status.latest_start_pane.as_deref())
-            == Some(registered_pane),
-        latest_session_open: log_status
-            .is_some_and(agent_doc_supervisor::startup_miss::SessionLogStatus::latest_session_open),
-        latest_session_closed: log_status.is_some_and(
-            agent_doc_supervisor::startup_miss::SessionLogStatus::latest_session_closed,
-        ),
-        latest_start_timestamp: log_status.and_then(|status| status.latest_start_timestamp),
-        latest_open_run_timestamp: log_status
-            .and_then(agent_doc_supervisor::startup_miss::latest_open_run_timestamp),
-    }
-}
-
-fn startup_miss_route_provenance(
-    tmux: &Tmux,
-    pane_id: &str,
-    live_owner: Option<&str>,
-    supervisor_health: SupervisorHealth,
-    log_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
-) -> String {
-    let log_detail = match log_status {
-        Some(status) => format!(
-            "session_log={} {} last_event={}",
-            agent_doc_supervisor::startup_miss::latest_log_outcome(status),
-            agent_doc_supervisor::startup_miss::latest_log_anchor(status),
-            agent_doc_supervisor::startup_miss::latest_log_last_event(status)
-        ),
-        None => "session_log=missing".to_string(),
-    };
-    format!(
-        "{} live_owner={} supervisor_health={:?} {}",
-        pane_route_provenance(tmux, pane_id),
-        live_owner.unwrap_or("none"),
-        supervisor_health,
-        log_detail
-    )
-}
-
 const STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
 const BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
-
-fn fail_if_recent_session_loss_window(file: &Path, session_id: &str) -> Result<()> {
-    let Some(window) =
-        agent_doc_supervisor_io::startup_miss::recent_session_loss_window(file, session_id)?
-    else {
-        return Ok(());
-    };
-
-    let first = agent_doc_supervisor::startup_miss::format_timestamp(window.first_timestamp);
-    let last = agent_doc_supervisor::startup_miss::format_timestamp(window.last_timestamp);
-    let latest_reason = window.latest_reason.as_deref().unwrap_or("unknown");
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "route_repeated_session_loss_fail_closed file={} session={} count={} first={} last={} latest_reason={}",
-            file.display(),
-            session_id,
-            window.count,
-            first,
-            last,
-            latest_reason
-        ),
-    );
-    anyhow::bail!(
-        "refusing to auto-start {} after {} unexpected pane-loss events since {} (latest reason={} at {}). Route will not keep spawning replacements over a repeated crash window; inspect the last dead-pane/session-loss diagnostics, then run `agent-doc start {}` manually to recover",
-        file.display(),
-        window.count,
-        first,
-        latest_reason,
-        last,
-        file.display()
-    );
-}
 
 fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason: &str) {
     let file_display = file.display().to_string();
@@ -695,14 +604,6 @@ fn emit_busy_route_queued_diagnostic(
             pane_id, e
         );
     }
-}
-
-/// Returns true if the pane is running an agent process for the given harness.
-/// Returns true on query failure (conservative — don't skip panes we can't inspect).
-fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
-    agent_doc_tmux_io::target_current_command(tmux, pane_id)
-        .map(|cmd| harness.is_agent_process_name(&cmd))
-        .unwrap_or(true)
 }
 
 pub fn run(
@@ -1411,85 +1312,6 @@ fn acquire_route_queue_lock(file: &Path) -> Result<File> {
     Ok(lock)
 }
 
-fn cleanup_failed_route_panes(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    created_panes: &[String],
-) {
-    for p in created_panes {
-        if !tmux.pane_alive(p) {
-            continue;
-        }
-        if failed_route_pane_has_startup_miss(file, p) {
-            eprintln!(
-                "[route] reaping startup-miss pane {} after failed fresh route for {}",
-                p,
-                file.display()
-            );
-            tracing::warn!(pane = %p, "route: killing startup-miss pane from failed fresh route");
-            let _ = agent_doc_tmux_io::kill_pane(tmux, p);
-            continue;
-        }
-        if should_preserve_failed_route_pane(tmux, file, p, session_id) {
-            eprintln!(
-                "[route] preserving newly-created pane {} after failed route because it is still the live registered owner for {}",
-                p,
-                file.display()
-            );
-            continue;
-        }
-        eprintln!(
-            "[route] cleaning up orphaned pane {} (created during failed route)",
-            p
-        );
-        tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
-        let _ = agent_doc_tmux_io::kill_pane(tmux, p);
-    }
-}
-
-fn failed_route_pane_has_startup_miss(file: &Path, pane_id: &str) -> bool {
-    agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
-        .ok()
-        .flatten()
-        .is_some_and(|miss| {
-            miss.pane_id == pane_id
-                && matches!(
-                    miss.origin,
-                    agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart
-                )
-        })
-}
-
-fn failed_route_registry_root(file: &Path) -> Option<std::path::PathBuf> {
-    let canonical = std::fs::canonicalize(file)
-        .ok()
-        .unwrap_or_else(|| file.to_path_buf());
-    agent_doc_project_root_io::project_root_containing(&canonical)
-        .or_else(|| canonical.parent().map(|parent| parent.to_path_buf()))
-}
-
-fn should_preserve_failed_route_pane(
-    tmux: &Tmux,
-    file: &Path,
-    pane_id: &str,
-    session_id: &str,
-) -> bool {
-    let Some(root) = failed_route_registry_root(file) else {
-        return false;
-    };
-    agent_doc_session_registry_io::load_in(&root)
-        .ok()
-        .and_then(|registry| {
-            registry
-                .values()
-                .find(|entry| entry.session_id == session_id)
-                .map(|entry| entry.pane.as_str() == pane_id)
-        })
-        .unwrap_or(false)
-        && tmux.pane_alive(pane_id)
-}
-
 fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {
     wait_for_ready_override().unwrap_or_else(|| {
         dispatch_only_starting_pane_ready_timeout_for_binary(
@@ -1510,16 +1332,6 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
 /// watch to drain; a stale-busy-but-actually-ready projection is still repaired
 /// by the later direct-pane-evidence check (`#snrun`). Only wait when there is
 /// no queue fallback (where route would otherwise have to bail).
-fn controller_dispatch_actor_state(
-    actor_state: agent_doc_sqlite::state_store::ActorState,
-) -> DispatchActorState {
-    match actor_state {
-        agent_doc_sqlite::state_store::ActorState::Ready => DispatchActorState::Ready,
-        agent_doc_sqlite::state_store::ActorState::Busy => DispatchActorState::Busy,
-        _ => DispatchActorState::Other,
-    }
-}
-
 fn wait_for_authoritative_actor_ready(
     tmux: &Tmux,
     file: &Path,

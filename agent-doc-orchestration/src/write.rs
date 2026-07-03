@@ -1662,7 +1662,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
 }
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::flow::closeout_effects())
+    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
 }
 
 fn log_closeout_guard(

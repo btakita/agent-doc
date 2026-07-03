@@ -10083,6 +10083,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the test-only session-check boundary tests into `agent-doc-session-check-io`",
         ),
         (
+            "Flow closeout effects facade demotion",
+            "agent-doc-orchestration/src/flow/mod.rs",
+            "agent-doc-flow-io",
+            "Move the test-only closeout boundary tests into `agent-doc-flow-io`",
+        ),
+        (
             "Focus command host IO",
             "agent-doc-orchestration/src/focus.rs",
             "agent-doc-focus-io/src/lib.rs",
@@ -10280,6 +10286,66 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             && !pending_write_checks.contains("crate::session_check::resolve_"),
         "focused write pending checks must not route guard-mode resolvers through orchestration"
     );
+}
+
+#[test]
+fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-flow-io")),
+        "agent-doc-flow-io must stay a first-class workspace crate"
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod flow;")
+            && orchestration_lib.contains("#[cfg(test)]")
+            && orchestration_lib.contains("mod flow;")
+            && orchestration_lib.contains("pub fn closeout_effects()")
+            && orchestration_lib.contains(
+                "impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffects"
+            ),
+        "orchestration must keep flow as a test-only shim and expose only the focused CloseoutEffects port"
+    );
+
+    let flow_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
+    assert!(
+        !flow_mod.contains("pub fn closeout_effects()")
+            && !flow_mod.contains("OrchestrationCloseoutEffects"),
+        "flow/mod.rs must not retain the production closeout effects facade"
+    );
+
+    let closeout_tests =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
+            .unwrap();
+    assert!(
+        !closeout_tests.contains("crate::flow::closeout_effects()")
+            && closeout_tests.contains("crate::closeout_effects()"),
+        "test-only closeout wrappers should use the crate-root CloseoutEffects port"
+    );
+
+    for production_source in [
+        "src/main.rs",
+        "src/session_actor_cmd.rs",
+        "agent-doc-orchestration/src/lib.rs",
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/write.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();
+        assert!(
+            !source.contains("crate::flow::")
+                && !source.contains("agent_doc_orchestration::flow::"),
+            "{production_source} must call agent-doc-flow-io directly with the root closeout effects port instead of the orchestration flow facade"
+        );
+    }
 }
 
 #[test]

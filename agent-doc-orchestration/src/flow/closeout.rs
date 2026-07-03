@@ -5,15 +5,14 @@ pub use agent_doc_turn::closeout_recovery::CloseoutRecoveryState;
 
 pub use agent_doc_flow_io::closeout::{
     CloseoutBinaryFreshnessEvidence, CloseoutCaptureEvidence, CloseoutCycleEvidence,
-    CloseoutEditorIpcEvidence, CloseoutEffects, CloseoutQueueOnlyDriftEvidence,
-    CloseoutRecoveryEvidence, CloseoutRecoveryMutation, CloseoutResponseBodyEvidence,
-    RecoveryApplication, StuckCapturedCycleInfo, cleanup_fallback_patch_files,
-    closeout_recovery_command_for_file, cycle_already_committed, log_closeout_guard_event,
-    reconcile_compacted_committed_capture, stuck_captured_cycle, write_claimed_patch_sentinel,
+    CloseoutEditorIpcEvidence, CloseoutQueueOnlyDriftEvidence, CloseoutRecoveryEvidence,
+    CloseoutRecoveryMutation, CloseoutResponseBodyEvidence, RecoveryApplication,
+    closeout_recovery_command_for_file, reconcile_compacted_committed_capture,
+    stuck_captured_cycle,
 };
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::flow::closeout_effects())
+    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
 }
 
 pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<()> {
@@ -21,25 +20,18 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
 }
 
 pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
-    agent_doc_flow_io::closeout::apply_closeout_recovery(file, &crate::flow::closeout_effects())
+    agent_doc_flow_io::closeout::apply_closeout_recovery(file, &crate::closeout_effects())
 }
 
 pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecoveryEvidence> {
-    agent_doc_flow_io::closeout::gather_closeout_recovery_evidence(
-        file,
-        &crate::flow::closeout_effects(),
-    )
+    agent_doc_flow_io::closeout::gather_closeout_recovery_evidence(file, &crate::closeout_effects())
 }
 
 pub fn decide_closeout_recovery(
     file: &Path,
     input: agent_doc_turn::closeout_recovery::CloseoutRecoveryDecisionInput<'_>,
 ) -> agent_doc_turn::closeout_recovery::CloseoutRecoveryDecision {
-    agent_doc_flow_io::closeout::decide_closeout_recovery(
-        file,
-        input,
-        &crate::flow::closeout_effects(),
-    )
+    agent_doc_flow_io::closeout::decide_closeout_recovery(file, input, &crate::closeout_effects())
 }
 
 pub fn apply_closeout_recovery_mutation(
@@ -49,7 +41,7 @@ pub fn apply_closeout_recovery_mutation(
     agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
         file,
         mutation,
-        &crate::flow::closeout_effects(),
+        &crate::closeout_effects(),
     )
 }
 
@@ -58,7 +50,7 @@ pub fn classify_closeout_recovery_state_for_file(
 ) -> agent_doc_turn::closeout_recovery::CloseoutRecoveryState {
     agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
         file,
-        &crate::flow::closeout_effects(),
+        &crate::closeout_effects(),
     )
 }
 

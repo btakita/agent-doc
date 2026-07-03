@@ -1076,7 +1076,7 @@ fn classify_route_closeout_block(
             blocker_reason: Some(&reason),
             stale_capture_supersession_proof: None,
         },
-        &crate::flow::closeout_effects(),
+        &crate::closeout_effects(),
     );
     let recovery_queues_prompt_for_after_closeout = matches!(
         recovery_decision,

@@ -37,7 +37,8 @@
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod codex_hook;
 pub use agent_doc_crdt_relay_io as crdt_relay_host;
-pub mod flow;
+#[cfg(test)]
+mod flow;
 pub mod git;
 pub use agent_doc_run_context_io as graph;
 pub mod preflight;
@@ -190,10 +191,86 @@ impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionChe
     }
 }
 
+pub struct OrchestrationCloseoutEffects;
+
+pub fn closeout_effects() -> OrchestrationCloseoutEffects {
+    OrchestrationCloseoutEffects
+}
+
+impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffects {
+    fn commit(&self, file: &std::path::Path) -> anyhow::Result<bool> {
+        crate::git::commit(file)
+    }
+
+    fn run_pending_maintenance(
+        &self,
+        file: &std::path::Path,
+        force_disk: bool,
+    ) -> anyhow::Result<agent_doc_preflight_io::PendingMaintenanceReport> {
+        if force_disk {
+            agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                file,
+                &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            )
+        } else {
+            agent_doc_preflight_io::run_pending_maintenance(
+                file,
+                &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            )
+        }
+    }
+
+    fn enforce_clean_closeout(&self, file: &std::path::Path) -> anyhow::Result<()> {
+        agent_doc_session_check_io::enforce_clean_closeout(file, &crate::session_check_effects())
+    }
+
+    fn cancel_preflight_cycle(&self, file: &std::path::Path) -> anyhow::Result<()> {
+        crate::repair::cancel_preflight_cycle(file).map(|_| ())
+    }
+
+    fn ipc_direct_disk_degraded_for_file(
+        &self,
+        project_root: &std::path::Path,
+        file: &std::path::Path,
+    ) -> anyhow::Result<bool> {
+        crate::write::ipc_direct_disk_degraded_for_file(project_root, file)
+    }
+
+    fn detect_jb_cache_conflict_cancel_recoverable(
+        &self,
+        file: &std::path::Path,
+    ) -> anyhow::Result<bool> {
+        agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(file)
+    }
+
+    fn detect_bypassed_response_write(
+        &self,
+        file: &std::path::Path,
+    ) -> anyhow::Result<Option<String>> {
+        agent_doc_session_check_io::detect_bypassed_response_write(file)
+    }
+
+    fn mark_committed_frontmatter(
+        &self,
+        file: &std::path::Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> anyhow::Result<agent_doc_cycle_state_io::CycleState> {
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            event,
+            snapshot_content,
+            file_content,
+        )
+    }
+}
+
 pub fn closeout_recovery_hint(file: &std::path::Path) -> String {
     let state = agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
         file,
-        &crate::flow::closeout_effects(),
+        &crate::closeout_effects(),
     );
     match agent_doc_flow_io::closeout::closeout_recovery_command_for_file(file, state) {
         Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),

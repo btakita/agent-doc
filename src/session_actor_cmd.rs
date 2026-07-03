@@ -270,7 +270,7 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
             .map(|s| phase_str(s.phase));
         let recovery_state = agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
             doc_path,
-            &agent_doc_orchestration::flow::closeout_effects(),
+            &agent_doc_orchestration::closeout_effects(),
         );
         let recovery_command = agent_doc_flow_io::closeout::closeout_recovery_command_for_file(
             doc_path,

@@ -931,7 +931,7 @@ fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> 
             mark_cycle_committed_event: Some("repair_respect_manual_exchange_tail_removal"),
             reason: CloseoutRecoveryMutationReason::RespectManualTailRemoval,
         },
-        &crate::flow::closeout_effects(),
+        &crate::closeout_effects(),
     )?;
     agent_doc_ops_log_io::log_op(
         file,
@@ -985,7 +985,7 @@ fn retire_stale_capture_if_drifted(
                     mark_cycle_committed_event: Some("repair_retire_wedged_write_applied_capture"),
                     reason: CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
                 },
-                &crate::flow::closeout_effects(),
+                &crate::closeout_effects(),
             )?;
             agent_doc_ops_log_io::log_op(
                 file,
@@ -1012,7 +1012,7 @@ fn retire_stale_capture_if_drifted(
                     mark_cycle_committed_event: None,
                     reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
                 },
-                &crate::flow::closeout_effects(),
+                &crate::closeout_effects(),
             )?;
             agent_doc_ops_log_io::log_op(
                 file,

@@ -6,77 +6,8 @@
 
 #![allow(dead_code)]
 
-use anyhow::Result;
-use std::path::Path;
-
 #[cfg(test)]
 pub mod closeout;
-
-pub struct OrchestrationCloseoutEffects;
-
-pub fn closeout_effects() -> OrchestrationCloseoutEffects {
-    OrchestrationCloseoutEffects
-}
-
-impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffects {
-    fn commit(&self, file: &Path) -> Result<bool> {
-        crate::git::commit(file)
-    }
-
-    fn run_pending_maintenance(
-        &self,
-        file: &Path,
-        force_disk: bool,
-    ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport> {
-        if force_disk {
-            agent_doc_preflight_io::run_pending_maintenance_force_disk(
-                file,
-                &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-            )
-        } else {
-            agent_doc_preflight_io::run_pending_maintenance(
-                file,
-                &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-            )
-        }
-    }
-
-    fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
-        agent_doc_session_check_io::enforce_clean_closeout(file, &crate::session_check_effects())
-    }
-
-    fn cancel_preflight_cycle(&self, file: &Path) -> Result<()> {
-        crate::repair::cancel_preflight_cycle(file).map(|_| ())
-    }
-
-    fn ipc_direct_disk_degraded_for_file(&self, project_root: &Path, file: &Path) -> Result<bool> {
-        crate::write::ipc_direct_disk_degraded_for_file(project_root, file)
-    }
-
-    fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool> {
-        agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(file)
-    }
-
-    fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>> {
-        agent_doc_session_check_io::detect_bypassed_response_write(file)
-    }
-
-    fn mark_committed_frontmatter(
-        &self,
-        file: &Path,
-        event: &str,
-        snapshot_content: Option<&str>,
-        file_content: Option<&str>,
-    ) -> Result<agent_doc_cycle_state_io::CycleState> {
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            event,
-            snapshot_content,
-            file_content,
-        )
-    }
-}
 
 #[cfg(test)]
 mod tests {

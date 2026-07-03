@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -53,7 +53,24 @@ Done. On the Lender Pipeline **Advance lender** dialog, the lender-document uplo
 **Committed + pushed:** EFS `d52d7d9` → `origin/main`; superproject submodule pointer bumped (`83cd4f3`).
 
 `deploy` is still queued but the queue is paused — unpause (or say the word) and I'll ship it to production.
-<!-- agent:boundary:3955f1e0 -->
+❯ All deal state in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline should be updated in realtime via websockets. The following events should trigger an onscreen + desktop notification to pop up.
+- Lender is interested in a deal
+- Borrower completes an application
+- Borrower fills out a preapproval
+
+❯ Should this event pipeline be named deal_pipeline_bus?
+
+### Re: deploy — opus-4-8
+
+> **Queue prompt:** deploy
+
+Deployed the advance-lender change to EFS production.
+
+- `bun run deploy:worker` — built the worker, ran remote D1 migrations (no new migrations from this change), uploaded the new browser bundle `/index.browser-FU76KGNV.js`, and deployed via wrangler.
+- **Live:** https://equityfundingsource.brian-takita.workers.dev/ → HTTP 200; new worker **Version ID `56d33654-631b-4096-ad23-c1a8db55a22b`**.
+
+The Advance-lender dialog now serves the annual accreditation questionnaire in place of the document-upload checklist in production.
+<!-- agent:boundary:a8c27d7b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,6 +90,7 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" stop -->
+/goal Implement backlog item(s): #3q3g
 - ~~On https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=advance-lender, the upload fields should be replaced by the questionaire. Remove all lender annual requirements uploads.~~
 - ~~deploy~~ ✅ live — worker version 56d33654, https://equityfundingsource.brian-takita.workers.dev/
 <!-- /agent:queue -->
@@ -80,6 +98,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#pipe-rt-notify] [recommended] Admin pipeline realtime + desktop notifications. Bus already exists (AdminEventsRoom / notify_admin_event_ / admin-events hub, #7djh) — do NOT add deal_pipeline_bus. Work: (1) client desktop Notification API + toast on pipeline event types, (2) emit lender_interest_created on investor self-service interest path, (3) preapproval trigger blocked on defining what 'preapproval' is. Plan: src/equityfundingsource-dev/prds/admin-pipeline-realtime-notifications.md
 - [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
 <!-- /agent:backlog -->
 

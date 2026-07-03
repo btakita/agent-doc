@@ -18,6 +18,12 @@ use agent_doc_template::{
     ComponentInfo, PatchBlock, TemplateInfo, apply_patches_pure, apply_patches_with_overrides_pure,
 };
 
+pub mod backlog_normalization;
+pub use backlog_normalization::{
+    NormalizedTemplateResponse, canonicalize_response_for_capture, enforce_no_replace_pending,
+    normalize_backlog_patch_response, pending_replace_escape_hatch_enabled,
+};
+
 /// Parse a model response for template patchback blocks and log parse decisions
 /// through an injected sink.
 pub fn parse_template_patchback(

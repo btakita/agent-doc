@@ -23330,6 +23330,8 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
 
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let realtime_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "enum SnapshotPersistMode",
         "fn snapshot_persist_mode(",
@@ -23347,6 +23349,7 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "pub enum VisibleWriteReconcile",
         "pub fn reconcile_visible_write<",
         "fn reconcile_visible_write<",
+        "fn guard_visible_write_reconcile_with_target(",
         "pub use agent_doc_document_realtime::write_policy::{",
     ] {
         assert!(
@@ -23373,10 +23376,16 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "write/run_entry.rs should import focused realtime snapshot persistence policy directly"
     );
     assert!(
-        write_source.contains("agent_doc_document_realtime::write_policy::{")
-            && write_source.contains("VisibleWriteReconcile")
-            && write_source.contains("reconcile_visible_write"),
-        "write.rs should adapt visible-write effects into focused realtime reconcile policy directly"
+        realtime_io_source.contains("write_policy::{self, VisibleWriteReconcile}")
+            && realtime_io_source.contains("agent_doc_debounce::live_buffer_diverges_from_content")
+            && realtime_io_source.contains("VisibleWriteReconcile::DiskDrifted")
+            && realtime_io_source.contains("pub fn guard_visible_write_reconcile_with_target("),
+        "agent-doc-document-realtime-io should adapt visible-write effects into focused realtime reconcile outcomes directly"
+    );
+    assert!(
+        write_source.contains("pub(crate) use agent_doc_document_realtime_io::{")
+            && write_source.contains("guard_visible_write_reconcile_with_target"),
+        "write.rs should import the focused visible-write reconcile IO adapter directly"
     );
     assert!(
         write_ipc.contains("agent_doc_document_realtime::write_policy::{")
@@ -23706,6 +23715,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     }
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let realtime_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "fn response_already_in_current(",
         "fn inserted_delta_hunks(",
@@ -23722,10 +23733,16 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         );
     }
     assert!(
-        write_source.contains(
-            "agent_doc_document_realtime::write_policy::decide_visible_write_after_typing"
-        ),
-        "orchestration write path should call the focused realtime policy directly"
+        realtime_io_source.contains("write_policy::decide_visible_write_after_typing")
+            && realtime_io_source.contains("write_policy::visible_write_guard_event")
+            && realtime_io_source.contains("agent_doc_debounce::await_idle_via_file"),
+        "agent-doc-document-realtime-io must own the visible-write guard effect adapter"
+    );
+    assert!(
+        write_source.contains("agent_doc_document_realtime_io::guard_visible_write_idle")
+            && write_source.contains("pub(crate) use agent_doc_document_realtime_io::{")
+            && write_source.contains("guard_visible_write_reconcile_with_target"),
+        "orchestration write path should import focused realtime IO guard adapters directly"
     );
     let write_ipc_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
@@ -23950,6 +23967,7 @@ fn test_patch_pending_compatibility_strings_do_not_remain_in_production_code() {
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/write/materialize.rs",
+        "agent-doc-template-io/src/backlog_normalization.rs",
     ];
     let forbidden_snippets = [
         "--allow-patch-pending",
@@ -24206,6 +24224,9 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
     );
     let template_io =
         fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/lib.rs")).unwrap();
+    let template_io_backlog =
+        fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/backlog_normalization.rs"))
+            .unwrap();
     assert!(
         template_io.contains("pub fn response_materialization_probe_from_ipc_payload(")
             && template_io.contains("response_materialization_probe(&patches, unmatched)"),
@@ -24217,10 +24238,33 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
             && !template_io.contains("tmux_router"),
         "agent-doc-template-io response materialization adapters must stay free of orchestration effects"
     );
+    for required_snippet in [
+        "pub struct NormalizedTemplateResponse",
+        "pub fn pending_replace_escape_hatch_enabled(",
+        "pub fn enforce_no_replace_pending(",
+        "pub fn normalize_backlog_patch_response(",
+        "pub fn canonicalize_response_for_capture(",
+        "agent_doc_document_realtime_io::guard_visible_write_idle",
+        "agent_doc_cycle_state_io::mark_pending_mutations",
+        "agent_doc_cycle_state_io::record_pending_done_ids",
+    ] {
+        assert!(
+            template_io_backlog.contains(required_snippet),
+            "agent-doc-template-io must own backlog patch normalization IO: {required_snippet}"
+        );
+    }
+    assert!(
+        !template_io_backlog.contains("agent_doc_orchestration")
+            && !template_io_backlog.contains("crate::write")
+            && !template_io_backlog.contains("tmux_router"),
+        "agent-doc-template-io backlog normalization must stay free of orchestration/tmux facades"
+    );
 
     let write_materialize =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
             .unwrap();
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     for forbidden_snippet in [
         "pub struct TemplateResponseWriteProof",
         "pub(crate) struct TemplateResponseWriteProof",
@@ -24249,10 +24293,27 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "pub fn sanitize_template_patchback_response",
         "pub(crate) fn sanitize_template_patchback_response",
         "sanitize_template_patchback_response_for_write",
+        "pub struct NormalizedTemplateResponse",
+        "pub fn normalize_backlog_patch_response",
+        "pub fn canonicalize_response_for_capture",
+        "pub fn enforce_no_replace_pending",
+        "pub(crate) fn pending_replace_escape_hatch_enabled",
     ] {
         assert!(
             !write_materialize.contains(forbidden_snippet),
             "orchestration must not re-own or facade template response materialization policy: {forbidden_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "pub use agent_doc_template_io::{",
+        "pub fn normalize_backlog_patch_response",
+        "pub fn canonicalize_response_for_capture",
+        "pub fn enforce_no_replace_pending",
+        "pub(crate) fn pending_replace_escape_hatch_enabled",
+    ] {
+        assert!(
+            !write_source.contains(forbidden_snippet),
+            "orchestration write must not re-own or facade template backlog normalization: {forbidden_snippet}"
         );
     }
     let transport_source =
@@ -24264,8 +24325,9 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "write IPC transport should call the focused template-io IPC payload adapter directly"
     );
     assert!(
-        write_materialize.contains("use agent_doc_template::response_materialization::{"),
-        "write materialization adapters should import the focused response materialization API directly"
+        write_materialize
+            .contains("strip_partial_response_materialization_from_exchange(&current, response)"),
+        "write materialization adapters should call the focused response materialization API directly"
     );
 
     let write_ipc =
@@ -25539,6 +25601,9 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
     let write_materialize =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
             .unwrap();
+    let template_io_backlog =
+        fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/backlog_normalization.rs"))
+            .unwrap();
     let run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
     for (source, content) in [
@@ -25547,10 +25612,9 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
             write_run_entry.as_str(),
         ),
         (
-            "agent-doc-orchestration/src/write/materialize.rs",
-            write_materialize.as_str(),
+            "agent-doc-template-io/src/backlog_normalization.rs",
+            template_io_backlog.as_str(),
         ),
-        ("agent-doc-orchestration/src/run.rs", run_source.as_str()),
     ] {
         assert!(
             content.contains("agent_doc_template::sanitize")
@@ -25558,6 +25622,18 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
             "template write adapters should call focused sanitization directly in {source}"
         );
     }
+    assert!(
+        run_source.contains("agent_doc_template_io::{")
+            && run_source.contains("normalize_backlog_patch_response"),
+        "run.rs should delegate pending patch normalization to focused template IO"
+    );
+    assert!(
+        write_materialize.contains(
+            "agent_doc_template::response_materialization::strip_partial_response_materialization_from_exchange"
+        ) && !write_materialize.contains("agent_doc_template::sanitize")
+            && !write_materialize.contains("template::sanitize"),
+        "write/materialize.rs should stay limited to response materialization helpers"
+    );
 }
 
 #[test]

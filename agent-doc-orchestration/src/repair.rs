@@ -63,6 +63,7 @@
 
 use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines;
 use agent_doc_queue_io::queue_consume;
+use agent_doc_template_io::canonicalize_response_for_capture;
 use agent_doc_turn::{
     closeout_recovery::{
         CloseoutRecoveryMutationReason, content_matches_ignoring_trailing_newlines,
@@ -1541,7 +1542,7 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
 /// Save a response to the pending store before attempting write-back.
 /// This makes the response durable across context compaction.
 pub fn save_pending(file: &Path, response: &str) -> Result<()> {
-    let response = write::canonicalize_response_for_capture(file, response)?;
+    let response = canonicalize_response_for_capture(file, response)?;
     agent_doc_capture_io::capture_response(file, &response)?;
     let pending_path = agent_doc_fs::pending_response_path_for(file)?;
     if let Some(parent) = pending_path.parent() {

@@ -501,6 +501,7 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-flow-io",
  "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-git-io",
@@ -1794,11 +1795,15 @@ dependencies = [
 name = "agent-doc-template-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-cycle-state-io",
+ "agent-doc-document-realtime-io",
  "agent-doc-element",
+ "agent-doc-element-backlog",
  "agent-doc-flow",
  "agent-doc-flow-io",
  "agent-doc-frontmatter",
  "agent-doc-hash",
+ "agent-doc-ops-log-io",
  "agent-doc-project-config-io",
  "agent-doc-template",
  "anyhow",

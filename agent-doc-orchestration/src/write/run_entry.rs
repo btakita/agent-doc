@@ -250,7 +250,7 @@ pub fn run_template(
     template::sanitize::sanitize_patches(&mut patches);
     template::sanitize::sanitize_unmatched(&mut unmatched);
 
-    let normalized = normalize_backlog_patch_response(
+    let normalized = template_io::normalize_backlog_patch_response(
         file,
         &current_content,
         patches,
@@ -264,7 +264,7 @@ pub fn run_template(
     let unmatched = normalized.unmatched;
 
     // Enforcement: reject tracked-work full-replacement blocks unless allowed.
-    enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
+    template_io::enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_no_destructive_todo_patch(&current_content, &patches)?;
     if let Err(reason) = agent_doc_template::patchback::enforce_orchestrate_patchback_contract(
         origin, &patches, &unmatched,
@@ -275,7 +275,7 @@ pub fn run_template(
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
-    if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
+    if !flags.allow_replace_pending && !template_io::pending_replace_escape_hatch_enabled() {
         agent_doc_template::response_materialization::ensure_template_response_write_proof(
             &patches, &unmatched,
         )?;
@@ -594,7 +594,7 @@ pub fn run_stream(
     template::sanitize::sanitize_patches(&mut patches);
     template::sanitize::sanitize_unmatched(&mut unmatched);
 
-    let normalized = normalize_backlog_patch_response(
+    let normalized = template_io::normalize_backlog_patch_response(
         file,
         &current_content,
         patches,
@@ -608,7 +608,7 @@ pub fn run_stream(
     let unmatched = normalized.unmatched;
 
     // Enforcement: reject tracked-work full-replacement blocks unless allowed.
-    enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
+    template_io::enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_no_destructive_todo_patch(&current_content, &patches)?;
     if let Err(reason) = agent_doc_template::patchback::enforce_orchestrate_patchback_contract(
         origin, &patches, &unmatched,
@@ -619,7 +619,7 @@ pub fn run_stream(
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
-    if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
+    if !flags.allow_replace_pending && !template_io::pending_replace_escape_hatch_enabled() {
         agent_doc_template::response_materialization::ensure_template_response_write_proof(
             &patches, &unmatched,
         )?;
@@ -1298,7 +1298,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     template::sanitize::sanitize_patches(&mut patches);
     template::sanitize::sanitize_unmatched(&mut unmatched);
 
-    let normalized = normalize_backlog_patch_response(
+    let normalized = template_io::normalize_backlog_patch_response(
         file,
         &current_content,
         patches,
@@ -1315,13 +1315,13 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     repair::save_pending(file, &response)?;
 
     // Enforcement: reject tracked-work full-replacement blocks unless allowed.
-    enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
+    template_io::enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_no_destructive_todo_patch(&current_content, &patches)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
-    if !flags.allow_replace_pending && !pending_replace_escape_hatch_enabled() {
+    if !flags.allow_replace_pending && !template_io::pending_replace_escape_hatch_enabled() {
         agent_doc_template::response_materialization::ensure_template_response_write_proof(
             &patches, &unmatched,
         )?;
@@ -1696,12 +1696,13 @@ pub fn apply_template_from_string_with_options(
     template::sanitize::sanitize_patches(&mut patches);
     template::sanitize::sanitize_unmatched(&mut unmatched);
 
-    let normalized = normalize_backlog_patch_response(file, &content, patches, unmatched, false)?;
+    let normalized =
+        template_io::normalize_backlog_patch_response(file, &content, patches, unmatched, false)?;
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
 
     // Enforcement: reject tracked-work full-replacement blocks unless allowed.
-    enforce_no_replace_pending(&patches, false)?;
+    template_io::enforce_no_replace_pending(&patches, false)?;
     enforce_no_destructive_todo_patch(&content, &patches)?;
 
     let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);

@@ -135,6 +135,7 @@ use agent_doc_prompt_cache::{
 };
 use agent_doc_queue_io::queue_consume;
 use agent_doc_template as template;
+use agent_doc_template_io::{enforce_no_replace_pending, normalize_backlog_patch_response};
 use agent_doc_turn::no_change::{
     NoChangeCycleStateInput, NoChangeVerdict, classify_no_change_cycle_state,
 };
@@ -1744,10 +1745,10 @@ fn apply_template_response(
         template::parse_patches(response).context("failed to parse patch blocks from response")?;
     agent_doc_template::sanitize::sanitize_patches(&mut patches);
     let normalized =
-        write::normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;
+        normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
-    write::enforce_no_replace_pending(&patches, false)?;
+    enforce_no_replace_pending(&patches, false)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");

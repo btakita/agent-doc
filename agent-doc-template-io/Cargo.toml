@@ -11,10 +11,14 @@ name = "agent_doc_template_io"
 
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.67" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
 agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
 anyhow = "1"

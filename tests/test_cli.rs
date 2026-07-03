@@ -9611,6 +9611,26 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         .split("## Coarse Extraction Ledger")
         .nth(1)
         .expect("crate decomposition PRD should contain a coarse extraction ledger");
+    let coverage_section = coarse_section
+        .split("| Coarse graph |")
+        .next()
+        .expect("coarse extraction ledger should have a coverage section");
+    assert!(
+        coverage_section.contains("### Coarse Commit Coverage"),
+        "coarse extraction ledger must track commit coverage for current and prior large-chunk rounds"
+    );
+    let coverage_lines: Vec<&str> = coverage_section
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            line.starts_with('|') && !line.starts_with("|---") && !line.starts_with("| Commit(s) |")
+        })
+        .collect();
+    assert!(
+        coverage_lines.len() >= 30,
+        "coarse extraction commit coverage should include prior large-chunk rounds and current rounds; found {} rows",
+        coverage_lines.len()
+    );
     let mut ledger_rows: Vec<Vec<&str>> = Vec::new();
     let mut in_coarse_table = false;
     for line in coarse_section.lines() {
@@ -9677,6 +9697,126 @@ fn test_coarse_orchestration_extractions_are_tracked() {
                 || follow_up.contains("Separate")
                 || follow_up.contains("delete"),
             "coarse extraction ledger row must name the fine-grained seams to revisit: {cells:?}"
+        );
+    }
+
+    for (commit, graph) in [
+        ("539eabb9", "Focused IO crate wave"),
+        ("539eabb9", "Codex hook blocked-stop sidecar IO"),
+        ("bf6b1735", "Legacy route/controller policy wave"),
+        ("a0bb0402", "Legacy route/controller policy wave"),
+        ("571c7d0a", "Legacy route/controller policy wave"),
+        ("664504cd", "Legacy route/controller policy wave"),
+        ("b5a4b32c", "Legacy route/controller policy wave"),
+        ("21f3fc3f", "Legacy route/controller policy wave"),
+        ("039981a3", "Legacy route/controller policy wave"),
+        ("328936a1", "Legacy route/controller policy wave"),
+        ("c27e67b3", "Legacy route/controller policy wave"),
+        ("79b4677f", "Legacy route/controller policy wave"),
+        ("e401939a", "Legacy route/controller policy wave"),
+        ("19ac1edf", "Legacy route/controller policy wave"),
+        ("31474257", "Legacy route/controller policy wave"),
+        ("4adf538e", "Legacy route/controller policy wave"),
+        ("66541752", "Legacy route/controller policy wave"),
+        ("9f6ad677", "Legacy route/controller policy wave"),
+        ("5bcfc07b", "Legacy route/controller policy wave"),
+        (
+            "27a7a849",
+            "Legacy write/realtime/session-check policy wave",
+        ),
+        (
+            "882f1219",
+            "Legacy write/realtime/session-check policy wave",
+        ),
+        (
+            "e320fd49",
+            "Legacy write/realtime/session-check policy wave",
+        ),
+        (
+            "f6c4f88f",
+            "Legacy write/realtime/session-check policy wave",
+        ),
+        (
+            "702e980c",
+            "Legacy write/realtime/session-check policy wave",
+        ),
+        (
+            "73abc196",
+            "Legacy write/realtime/session-check policy wave",
+        ),
+        (
+            "8dce5536",
+            "Legacy write/realtime/session-check policy wave",
+        ),
+        (
+            "b0ebca68",
+            "Legacy write/realtime/session-check policy wave",
+        ),
+        (
+            "571c7d0a",
+            "Legacy write/realtime/session-check policy wave",
+        ),
+        ("6bc00090", "Legacy git/sync/frontmatter helper wave"),
+        ("39ad285a", "Legacy git/sync/frontmatter helper wave"),
+        ("56f965b6", "Legacy git/sync/frontmatter helper wave"),
+        ("10a3b66e", "Legacy git/sync/frontmatter helper wave"),
+        ("a5d24044", "Legacy git/sync/frontmatter helper wave"),
+        ("6bc00090", "Legacy supervisor/agent runtime IO wave"),
+        ("42d504fc", "Legacy supervisor/agent runtime IO wave"),
+        ("0a8e273b", "Legacy supervisor/agent runtime IO wave"),
+        ("971cb2e2", "Legacy supervisor/agent runtime IO wave"),
+        ("b4c9f10c", "Legacy supervisor/agent runtime IO wave"),
+        ("8dce5536", "Legacy supervisor/agent runtime IO wave"),
+        ("5bcfc07b", "Legacy supervisor/agent runtime IO wave"),
+        ("664504cd", "Legacy supervisor/agent runtime IO wave"),
+        ("1c57b988", "Legacy memory/queue/harness adapter wave"),
+        ("41b388ab", "Legacy memory/queue/harness adapter wave"),
+        ("b4c9f10c", "Legacy memory/queue/harness adapter wave"),
+        ("8dce5536", "Legacy memory/queue/harness adapter wave"),
+        ("96ac3af1", "Agent backend process adapters"),
+        ("96ac3af1", "Supervisor process runtime adapters"),
+        ("2811d37e", "Orchestration facade deletion sweep"),
+        ("8c008cea", "Cycle state sidecar IO"),
+        ("016184a3", "Operation-log facade deletion"),
+        ("fc5d5de9", "Realtime admission cycle opener"),
+        ("e41a6004", "Workflow doctor/autofix IO"),
+        ("d30b9b13", "State backbone chart and observer graph"),
+        ("cd553da8", "State backbone chart and observer graph"),
+        ("8000c8cf", "State backbone chart and observer graph"),
+        ("c8ed0f7c", "State backbone chart and observer graph"),
+        ("c2e6ca12", "State backbone chart and observer graph"),
+        ("ebade5a9", "State wire subscription boundary"),
+        ("0a95a821", "Turn-scope sidecar IO"),
+        ("160e9f4b", "Turn-scope sidecar IO"),
+        ("614a8819", "Transcript context and model-tier graph"),
+        ("c886927e", "Transcript context and model-tier graph"),
+        ("5c19aee1", "Transcript context and model-tier graph"),
+        ("486913a7", "Prompt-cache policy and history IO"),
+        ("0a24fa2e", "Prompt-cache policy and history IO"),
+        ("1cb21bb6", "Prompt-cache policy and history IO"),
+        ("76df51a7", "Session accretion IO adapter"),
+        ("f32e1b61", "Response capture IO adapter"),
+        ("b3e3edd4", "Prompt and state observer IO"),
+        ("05ce84af", "Watch daemon IO"),
+        ("44c998d8", "GC IO host"),
+        ("0a71ce02", "GC/watch CLI effect adapter cleanup"),
+        ("af1b5d32", "Controller dashboard policy and IO"),
+        ("539eabb9", "Controller dashboard policy and IO"),
+        ("001d5390", "Controller admin command IO host"),
+        (
+            "8c3efe03",
+            "Queue command, pipeline mirror, and write-queue adapter batch",
+        ),
+        ("d4f20b8c", "CRDT relay host IO"),
+        ("b23eb844", "Lazily run-context graph"),
+        ("1c0abe65", "Queue continuation host IO"),
+        ("35752f5c", "Tracked-work command and done-archive IO"),
+    ] {
+        assert!(
+            coverage_lines
+                .iter()
+                .any(|line| line.contains(commit) && line.contains(graph)),
+            "coarse extraction commit coverage is missing {commit} for {graph}"
         );
     }
 

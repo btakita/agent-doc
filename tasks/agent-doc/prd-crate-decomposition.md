@@ -48,6 +48,45 @@ its internal seams are fully split. Coarse moves are acceptable when they delete
 orchestration ownership quickly, but each entry must name the follow-up seams so
 the next passes can split the moved graph without rediscovering the debt.
 
+### Coarse Commit Coverage
+
+This coverage table backfills the coarse extraction rounds that happened before
+the ledger existed and records the recent large-chunk turns. The detailed ledger
+rows below remain the source of truth for moved graphs and follow-up seams.
+
+| Commit(s) | Ledger row(s) |
+|---|---|
+| `539eabb9` | Focused IO crate wave; Codex hook blocked-stop sidecar IO |
+| `bf6b1735`, `a0bb0402`, `571c7d0a`, `664504cd`, `b5a4b32c`, `21f3fc3f`, `039981a3`, `328936a1`, `c27e67b3`, `79b4677f`, `e401939a`, `19ac1edf`, `31474257`, `4adf538e`, `66541752`, `9f6ad677`, `5bcfc07b` | Legacy route/controller policy wave |
+| `27a7a849`, `882f1219`, `e320fd49`, `f6c4f88f`, `702e980c`, `73abc196`, `8dce5536`, `b0ebca68`, `571c7d0a` | Legacy write/realtime/session-check policy wave |
+| `6bc00090`, `39ad285a`, `56f965b6`, `10a3b66e`, `a5d24044` | Legacy git/sync/frontmatter helper wave |
+| `6bc00090`, `42d504fc`, `0a8e273b`, `971cb2e2`, `b4c9f10c`, `8dce5536`, `5bcfc07b`, `664504cd` | Legacy supervisor/agent runtime IO wave |
+| `1c57b988`, `41b388ab`, `b4c9f10c`, `8dce5536` | Legacy memory/queue/harness adapter wave |
+| `96ac3af1` | Agent backend process adapters; Supervisor process runtime adapters |
+| `2811d37e` | Orchestration facade deletion sweep |
+| `8c008cea` | Cycle state sidecar IO |
+| `016184a3` | Operation-log facade deletion |
+| `fc5d5de9` | Realtime admission cycle opener |
+| `e41a6004` | Workflow doctor/autofix IO |
+| `d30b9b13`, `cd553da8`, `8000c8cf`, `c8ed0f7c`, `c2e6ca12` | State backbone chart and observer graph |
+| `ebade5a9` | State wire subscription boundary |
+| `0a95a821`, `160e9f4b` | Turn-scope sidecar IO |
+| `614a8819`, `c886927e`, `5c19aee1` | Transcript context and model-tier graph |
+| `486913a7`, `0a24fa2e`, `1cb21bb6` | Prompt-cache policy and history IO |
+| `76df51a7` | Session accretion IO adapter |
+| `f32e1b61` | Response capture IO adapter |
+| `b3e3edd4` | Prompt and state observer IO |
+| `05ce84af` | Watch daemon IO |
+| `44c998d8` | GC IO host |
+| `0a71ce02` | GC/watch CLI effect adapter cleanup |
+| `af1b5d32`, `539eabb9` | Controller dashboard policy and IO |
+| `001d5390` | Controller admin command IO host |
+| `8c3efe03` | Queue command, pipeline mirror, and write-queue adapter batch |
+| `d4f20b8c` | CRDT relay host IO |
+| `b23eb844` | Lazily run-context graph |
+| `1c0abe65` | Queue continuation host IO |
+| `35752f5c` | Tracked-work command and done-archive IO |
+
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|
 | Focused IO crate wave | `agent-doc-orchestration/src/{snapshot.rs,diff_io.rs,template_io.rs,status_cmd.rs,startup_miss.rs,supervisor/ipc.rs,flow/*.rs}` and related facade adapters | `agent-doc-{archive,codex-hook,controller,diff,flow,git,hooks,ipc,lease,lint,memory,merge,ops-log,prompt-context,repair,response-replay,session-registry,snapshot,status,sync,template,workflow}-io` plus focused domain crates | Commit `539eabb9` created the first broad homes for file/process/socket/sidecar adapters and deleted many orchestration-owned facade modules in one batch so later rounds had real crate seams to move into. | Split the broad IO wave by durable domain once call sites settle; keep pure policy in non-IO crates; keep deleting compatibility re-exports so callers import focused crates directly instead of rebuilding an orchestration facade layer. |

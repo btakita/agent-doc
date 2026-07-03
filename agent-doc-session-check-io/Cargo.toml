@@ -13,9 +13,12 @@ name = "agent_doc_session_check_io"
 agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.34.67" }
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.67" }
 agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.34.67" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.67" }
 agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.34.67" }
@@ -29,8 +32,11 @@ agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.67" }
 agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.67" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
+agent-doc-state-observer-io = { path = "../agent-doc-state-observer-io", version = "0.34.67" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.67" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.67" }
 anyhow = "1"

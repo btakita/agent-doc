@@ -5933,7 +5933,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
     );
 
     let session_check =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
             .unwrap();
     let closeout_guards =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/closeout_guards.rs"))
@@ -6095,11 +6095,8 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
             && session_check.contains("event_name")
             && session_check.contains("is_write_completed_commit_missing_event")
             && session_check.contains("PREFLIGHT_START_EVENT")
-            && session_check.contains("agent_doc_ops_log_io::last_ops_event(")
-            && session_check.contains("agent_doc_ops_log_io::latest_ipc_proof_diagnostic(")
-            && session_check
-                .contains("agent_doc_ops_log_io::detect_write_completed_commit_missing("),
-        "session_check should import focused ops-log policy and call focused ops-log IO directly"
+            && session_check.contains("agent_doc_ops_log_io::last_ops_event("),
+        "session-check command IO should import focused ops-log policy and call focused ops-log IO directly"
     );
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
@@ -6666,7 +6663,7 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
         "preflight must consume focused drain-stall marker IO directly"
     );
     let session_check_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
             .unwrap();
     let idle_watch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
@@ -6676,7 +6673,7 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
             .contains("agent_doc_queue_io::drain_stall::mark_continuation_pending",)
             && idle_watch_source
                 .contains("agent_doc_queue_io::drain_stall::clear_continuation_pending"),
-        "orchestration adapters must call focused drain-stall marker IO directly"
+        "session-check command IO must call focused drain-stall marker IO directly"
     );
     let turn_drain_stall =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/drain_stall.rs")).unwrap();
@@ -10253,22 +10250,20 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             "session-check closeout guards must not retain moved prompt-bearing IO adapter: {forbidden}"
         );
     }
+    let session_check_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
+            .unwrap();
     assert!(
-        session_check.contains("agent_doc_session_check_io::check_shadow_backlog_guard")
-            && session_check
-                .contains("agent_doc_session_check_io::check_free_text_queue_head_provenance")
-            && session_check
-                .contains("agent_doc_session_check_io::check_parent_submodule_pointer_guard")
-            && session_check
-                .contains("agent_doc_session_check_io::check_prompt_only_exchange_tail_guard")
-            && session_check.contains("agent_doc_session_check_io::check_pending_capture_guard")
-            && session_check.contains("agent_doc_session_check_io::check_pending_done_guard")
-            && session_check
-                .contains("agent_doc_session_check_io::check_blocked_closeout_followup_guard")
-            && session_check
-                .contains("agent_doc_session_check_io::check_dropped_exchange_prompt_guard")
+        session_check_command.contains("crate::check_shadow_backlog_guard")
+            && session_check_command.contains("crate::check_free_text_queue_head_provenance")
+            && session_check_command.contains("crate::check_parent_submodule_pointer_guard")
+            && session_check_command.contains("crate::check_prompt_only_exchange_tail_guard")
+            && session_check_command.contains("crate::check_pending_capture_guard")
+            && session_check_command.contains("crate::check_pending_done_guard")
+            && session_check_command.contains("crate::check_blocked_closeout_followup_guard")
+            && session_check_command.contains("crate::check_dropped_exchange_prompt_guard")
             && session_check.contains("first_unstarted_prompt_bearing_change"),
-        "session_check.rs should call the focused guard IO crate directly"
+        "session-check command IO should call the focused guard adapters directly"
     );
 
     let write_source =
@@ -16392,7 +16387,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(",
         ),
         (
-            "agent-doc-orchestration/src/session_check.rs",
+            "agent-doc-session-check-io/src/command.rs",
             "agent_doc_supervisor_io::startup_miss::superseded_by_newer_registered_start(",
         ),
         (
@@ -16411,7 +16406,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     for relative in [
         "agent-doc-sync-io/src/sync.rs",
         "agent-doc-orchestration/src/start/run.rs",
-        "agent-doc-orchestration/src/session_check.rs",
+        "agent-doc-session-check-io/src/command.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -17750,7 +17745,7 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
     let session_check =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
             .unwrap();
     assert!(
         preflight_run
@@ -18318,7 +18313,7 @@ fn test_extracted_pure_layers_keep_focused_owners() {
     let detect =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
     let session_check =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
             .unwrap();
     for forbidden in [
         "fn short_oid(",
@@ -18333,7 +18328,7 @@ fn test_extracted_pure_layers_keep_focused_owners() {
     assert!(
         detect.contains("agent_doc_git::parent_submodule_pointer_guard_message(")
             && session_check.contains("agent_doc_git::parent_submodule_pointer_message("),
-        "session-check detect IO and the remaining uncommitted-drift adapter should call agent-doc-git messaging helpers directly"
+        "session-check detect IO and command IO should call agent-doc-git messaging helpers directly"
     );
 
     let compact_archive =
@@ -21773,7 +21768,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
 
     for relative in [
         "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/session_check.rs",
+        "agent-doc-session-check-io/src/command.rs",
         "agent-doc-session-check-io/src/detect.rs",
         "agent-doc-session-check-io/src/closeout_guards.rs",
         "agent-doc-orchestration/src/write.rs",
@@ -22318,7 +22313,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     let detect_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
     let session_check_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
             .unwrap();
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
@@ -22358,7 +22353,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
                 .contains("agent_doc_git_io::revision::last_commit_mtime(&resolved)")
             && preflight_run_source
                 .contains("agent_doc_git_io::revision::last_commit_mtime(&doc_path)"),
-        "orchestration callers should use focused git IO status/submodule/revision helpers directly"
+        "runtime callers should use focused git IO status/submodule/revision helpers directly"
     );
     for forbidden in [
         "mod dirs;",

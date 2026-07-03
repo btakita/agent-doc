@@ -1,5 +1,6 @@
 pub mod backlog_guards;
 pub mod closeout_guards;
+pub mod command;
 pub mod detect;
 pub mod guard_modes;
 pub mod partial_staging;
@@ -13,6 +14,7 @@ pub mod write_pending_checks;
 
 pub use backlog_guards::*;
 pub use closeout_guards::*;
+pub use command::*;
 pub use detect::*;
 pub use guard_modes::*;
 pub use partial_staging::*;

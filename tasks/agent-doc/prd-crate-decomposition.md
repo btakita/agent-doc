@@ -91,7 +91,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `369280b0` | Session actor store and mailbox IO |
 | `5dc7c322` | Session registration and projection IO |
 | `0f90f7cf` | Project controller runtime IO |
-| `pending-current-round` | Sync and resync runtime IO graph |
+| `d6387afa` | Sync and resync runtime IO graph |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

@@ -9856,7 +9856,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("369280b0", "Session actor store and mailbox IO"),
         ("5dc7c322", "Session registration and projection IO"),
         ("0f90f7cf", "Project controller runtime IO"),
-        ("pending-current-round", "Sync and resync runtime IO graph"),
+        ("d6387afa", "Sync and resync runtime IO graph"),
     ] {
         assert!(
             coverage_lines

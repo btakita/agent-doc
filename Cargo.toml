@@ -7,6 +7,7 @@ members = [
     "agent-doc-boundary-io",
     "agent-doc-callback-io",
     "agent-doc-capture-io",
+    "agent-doc-claim-io",
     "agent-doc-codex-hook-io",
     "agent-doc-compact-io",
     "agent-doc-config",
@@ -151,6 +152,7 @@ agent-doc-agent-io = { path = "agent-doc-agent-io", version = "0.34.67" }
 agent-doc-boundary-io = { path = "agent-doc-boundary-io", version = "0.34.67" }
 agent-doc-callback-io = { path = "agent-doc-callback-io", version = "0.34.67" }
 agent-doc-capture-io = { path = "agent-doc-capture-io", version = "0.34.67" }
+agent-doc-claim-io = { path = "agent-doc-claim-io", version = "0.34.67" }
 agent-doc-codex-hook-io = { path = "agent-doc-codex-hook-io", version = "0.34.67" }
 agent-doc-compact-io = { path = "agent-doc-compact-io", version = "0.34.67" }
 agent-doc-config = { path = "agent-doc-config", version = "0.34.67" }

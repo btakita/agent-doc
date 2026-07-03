@@ -9626,7 +9626,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         })
         .collect();
     assert!(
-        coverage_lines.len() >= 36,
+        coverage_lines.len() >= 37,
         "coarse extraction commit coverage should include prior large-chunk rounds and current rounds; found {} rows",
         coverage_lines.len()
     );
@@ -9650,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 40,
+        ledger_rows.len() >= 41,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -9857,10 +9857,8 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("0f90f7cf", "Project controller runtime IO"),
         ("d6387afa", "Sync and resync runtime IO graph"),
         ("c65b9260", "Compact command archive/write IO graph"),
-        (
-            "af54bb9f",
-            "Document realtime authority IO graph",
-        ),
+        ("af54bb9f", "Document realtime authority IO graph"),
+        ("pending-current-round", "Claim command binding IO graph"),
     ] {
         assert!(
             coverage_lines
@@ -9912,6 +9910,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/realtime_model.rs",
             "agent-doc-document-realtime-io/src/lib.rs",
             "Split durable live-buffer feed",
+        ),
+        (
+            "Claim command binding IO graph",
+            "agent-doc-orchestration/src/claim.rs",
+            "agent-doc-claim-io/src/lib.rs",
+            "Split git commit, route pane provisioning, sync prune",
         ),
         (
             "Legacy supervisor/agent runtime IO wave",
@@ -11507,7 +11511,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-template-io/src/lib.rs",
         "agent-doc-lint-io/src/lib.rs",
         "agent-doc-run-context-io/src/lib.rs",
-        "agent-doc-orchestration/src/claim.rs",
+        "agent-doc-claim-io/src/lib.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/session_resolution.rs",
         "agent-doc-sync-io/src/resync.rs",
@@ -14397,7 +14401,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     let claim_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-claim-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub enum CrossSessionDecision",
         "pub const CROSS_SESSION_REJECT_MARKER",
@@ -14413,6 +14417,37 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     assert!(
         claim_source.contains("use agent_doc_controller::claim::{"),
         "claim.rs should call focused controller claim policy directly"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/claim.rs")
+            .exists(),
+        "orchestration must not keep claim.rs as a command adapter facade"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod claim;"),
+        "orchestration must not expose a claim command facade"
+    );
+    let workspace_manifest_source = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace_manifest: toml::Value = toml::from_str(&workspace_manifest_source).unwrap();
+    let workspace_members = workspace_manifest["workspace"]["members"]
+        .as_array()
+        .unwrap();
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-claim-io")),
+        "workspace must include agent-doc-claim-io"
+    );
+    let claim_manifest_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-claim-io/Cargo.toml")).unwrap();
+    let claim_manifest: toml::Value = toml::from_str(&claim_manifest_source).unwrap();
+    let claim_dependencies = claim_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        !claim_dependencies.contains_key("agent-doc-orchestration"),
+        "claim IO must not depend back on orchestration"
     );
     let controller_operator_clear =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/operator_clear.rs"))
@@ -17931,8 +17966,7 @@ fn test_extracted_pure_layers_keep_focused_owners() {
             "agent-doc-supervisor must own pure claim binding policy: {required}"
         );
     }
-    let claim =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+    let claim = fs::read_to_string(manifest_dir.join("agent-doc-claim-io/src/lib.rs")).unwrap();
     let git_io_dirs =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/dirs.rs")).unwrap();
     assert!(
@@ -18473,7 +18507,7 @@ fn test_agent_doc_tmux_owns_pane_position_selection() {
     let tmux_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-tmux-io/src/lib.rs")).unwrap();
     let claim_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-claim-io/src/lib.rs")).unwrap();
     for required in [
         "pub const TMUX_PANE_GEOMETRY_FORMAT",
         "pub enum PanePosition",
@@ -18743,7 +18777,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
             .unwrap();
     let claim_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-claim-io/src/lib.rs")).unwrap();
     let session_actor_cmd_source =
         fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
     let prompt_source =
@@ -20017,7 +20051,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "focus effects should call focused project-root IO instead of owning .agent-doc root discovery"
     );
     let claim_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-claim-io/src/lib.rs")).unwrap();
     assert!(
         !claim_source.contains("agent_doc_fs::find_project_root(")
             && claim_source.contains("agent_doc_project_root_io::project_root_containing(")
@@ -21133,8 +21167,7 @@ fn test_agent_doc_document_owns_claim_scaffold_policy() {
         "agent-doc-document should expose claim scaffold policy through its owning module"
     );
 
-    let claim =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+    let claim = fs::read_to_string(manifest_dir.join("agent-doc-claim-io/src/lib.rs")).unwrap();
     for forbidden in [
         "project_config::ComponentConfig",
         "frontmatter::set_format_and_write",
@@ -22149,7 +22182,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "workflow document initialization should import exchange stripping policy from the focused crate"
     );
     let claim_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-claim-io/src/lib.rs")).unwrap();
     assert!(
         !claim_source.contains("fn strip_exchange_content(")
             && !claim_source.contains("pub fn strip_exchange_content("),

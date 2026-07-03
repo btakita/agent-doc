@@ -112,9 +112,22 @@ use agent_doc_supervisor::claim_binding::{
     registry_entry_matches_claimed_document,
 };
 
-use crate::route;
 use agent_doc_project_config_io as project_config_io;
 use agent_doc_session_registry_io::registration as sessions;
+
+pub trait ClaimRuntimeEffects {
+    fn commit(&self, file: &Path) -> Result<bool>;
+
+    fn provision_pane(
+        &self,
+        tmux: &tmux_router::Tmux,
+        file: &Path,
+        session_id: &str,
+        file_path: &str,
+        context_session: Option<&str>,
+        col_args: &[String],
+    ) -> Result<String>;
+}
 
 fn enforce_cross_session_claim(
     file: &Path,
@@ -167,6 +180,7 @@ pub fn run(
     window: Option<&str>,
     force: bool,
     isolate: bool,
+    effects: &dyn ClaimRuntimeEffects,
 ) -> Result<()> {
     // --isolate: spawn a fresh Claude Code process in a new tmux window scoped to
     // the nearest git repo root for this document (#8jzg).
@@ -281,7 +295,7 @@ pub fn run(
             let scaffold = render_empty_template_scaffold(&session_id.to_string());
             std::fs::write(file, &scaffold)?;
             agent_doc_snapshot_io::save(file, &scaffold, agent_doc_ops_log_io::log_op)?;
-            crate::git::commit(file).ok(); // best-effort commit
+            effects.commit(file).ok(); // best-effort commit
         }
     }
 
@@ -334,7 +348,8 @@ pub fn run(
                         "[claim] pane {} is already claimed by {} (file: {}); provisioning a new pane",
                         pane_id, existing_label, entry.file
                     );
-                    route::provision_pane(&tmux, file, &session_id, &file_str, None, &[])
+                    effects
+                        .provision_pane(&tmux, file, &session_id, &file_str, None, &[])
                         .map(|_| ())?;
                     return Ok(());
                 }
@@ -358,7 +373,9 @@ pub fn run(
             "[claim] pane {} runs a live agent-doc/codex session for another document; provisioning a new pane instead of commandeering it",
             pane_id
         );
-        route::provision_pane(&tmux, file, &session_id, &file_str, None, &[]).map(|_| ())?;
+        effects
+            .provision_pane(&tmux, file, &session_id, &file_str, None, &[])
+            .map(|_| ())?;
         return Ok(());
     }
 
@@ -484,7 +501,7 @@ pub fn run(
     // (snapshot exists), this is a no-op.
     if let Err(e) = agent_doc_workflow_io::document_init::ensure_initialized(
         file,
-        crate::git::commit,
+        |file| effects.commit(file),
         agent_doc_ops_log_io::log_op,
     ) {
         eprintln!("warning: failed to initialize document: {}", e);

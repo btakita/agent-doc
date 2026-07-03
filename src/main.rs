@@ -93,6 +93,7 @@ mod undo;
 mod upgrade;
 mod worktree;
 
+use agent_doc_claim_io::ClaimRuntimeEffects;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_template_io as template_io;
 use anyhow::Context;
@@ -101,6 +102,33 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+struct CliClaimRuntimeEffects;
+
+impl ClaimRuntimeEffects for CliClaimRuntimeEffects {
+    fn commit(&self, file: &Path) -> anyhow::Result<bool> {
+        agent_doc_orchestration::git::commit(file)
+    }
+
+    fn provision_pane(
+        &self,
+        tmux: &tmux_router::Tmux,
+        file: &Path,
+        session_id: &str,
+        file_path: &str,
+        context_session: Option<&str>,
+        col_args: &[String],
+    ) -> anyhow::Result<String> {
+        agent_doc_orchestration::route::provision_pane(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            context_session,
+            col_args,
+        )
+    }
+}
 
 struct CliProjectControllerRuntimeEffects;
 
@@ -890,9 +918,7 @@ fn session_error_is_missing_supervisor(err: &anyhow::Error) -> bool {
         let msg = cause.to_string();
         msg.contains("no live supervisor socket for")
             || msg.contains("failed to contact supervisor for")
-            || msg.contains(
-                "supervisor does not support clear IPC and no live pane is available",
-            )
+            || msg.contains("supervisor does not support clear IPC and no live pane is available")
     })
 }
 
@@ -3317,13 +3343,14 @@ fn main() -> anyhow::Result<()> {
             window,
             force,
             isolate,
-        } => agent_doc_orchestration::claim::run(
+        } => agent_doc_claim_io::run(
             &file,
             position.as_deref(),
             pane.as_deref(),
             window.as_deref(),
             force,
             isolate,
+            &CliClaimRuntimeEffects,
         ),
         Commands::DrainClaim {
             file,

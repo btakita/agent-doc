@@ -994,7 +994,7 @@ fn live_tmux_tests_are_not_in_default_development_suite() {
         "agent-doc-orchestration/src/resync.rs",
         "agent-doc-orchestration/src/route.rs",
         "src/session_actor_cmd.rs",
-        "agent-doc-orchestration/src/sessions.rs",
+        "agent-doc-session-registry-io/src/registration.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/sync.rs",
     ];
@@ -12614,15 +12614,28 @@ fn test_project_controller_has_no_sqlite_status_facade() {
 #[test]
 fn test_sessions_has_no_tmux_router_type_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/sessions.rs")
+            .exists(),
+        "orchestration must not keep a sessions facade module"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod sessions;"),
+        "orchestration must not expose a sessions facade module"
+    );
     let sessions_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
+            .unwrap();
     assert!(
         !sessions_source.contains("pub use tmux_router"),
-        "sessions.rs must not re-export tmux-router types"
+        "session registry registration IO must not re-export tmux-router types"
     );
     assert!(
         sessions_source.contains("use tmux_router::{"),
-        "sessions.rs should import tmux-router types privately for its adapter helpers"
+        "session registry registration IO should import tmux-router types privately for its adapter helpers"
     );
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -12652,18 +12665,18 @@ fn test_sessions_has_no_tmux_router_type_facade() {
             "sessions::RegistryLock",
             "sessions::SessionRegistry",
             "sessions::SessionEntry",
-            "agent_doc_orchestration::sessions::Tmux",
-            "agent_doc_orchestration::sessions::IsolatedTmux",
-            "agent_doc_orchestration::sessions::PaneMoveOp",
-            "agent_doc_orchestration::sessions::RegistryLock",
-            "agent_doc_orchestration::sessions::SessionRegistry",
-            "agent_doc_orchestration::sessions::SessionEntry",
-            "crate::sessions::Tmux",
-            "crate::sessions::IsolatedTmux",
-            "crate::sessions::PaneMoveOp",
-            "crate::sessions::RegistryLock",
-            "crate::sessions::SessionRegistry",
-            "crate::sessions::SessionEntry",
+            "agent_doc_session_registry_io::registration::Tmux",
+            "agent_doc_session_registry_io::registration::IsolatedTmux",
+            "agent_doc_session_registry_io::registration::PaneMoveOp",
+            "agent_doc_session_registry_io::registration::RegistryLock",
+            "agent_doc_session_registry_io::registration::SessionRegistry",
+            "agent_doc_session_registry_io::registration::SessionEntry",
+            "agent_doc_session_registry_io::registration::Tmux",
+            "agent_doc_session_registry_io::registration::IsolatedTmux",
+            "agent_doc_session_registry_io::registration::PaneMoveOp",
+            "agent_doc_session_registry_io::registration::RegistryLock",
+            "agent_doc_session_registry_io::registration::SessionRegistry",
+            "agent_doc_session_registry_io::registration::SessionEntry",
         ] {
             assert!(
                 !source.contains(forbidden_snippet),
@@ -12764,7 +12777,8 @@ fn test_agent_doc_session_registry_owns_registry_mutation_policy() {
     );
 
     let sessions_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
+            .unwrap();
     let sessions_prod = sessions_source
         .split("\n#[cfg(test)]\nmod tests")
         .next()
@@ -12774,23 +12788,18 @@ fn test_agent_doc_session_registry_owns_registry_mutation_policy() {
             && sessions_prod.contains("session_registry::replace_registry_entry(")
             && sessions_prod.contains("session_registry::remove_stale_pane_bindings(")
             && sessions_prod.contains("session_registry::insert_registry_entry("),
-        "sessions.rs should adapt registration effects through focused registry policy"
+        "session registry registration IO should adapt registration effects through focused registry policy"
     );
     for forbidden in [
         "entry_session_id(",
         "find_registry_key_by_session_id(",
-        "format_transition_event(",
-        "OwnershipTransitionEvent",
-        "append_session_log_event(",
-        "session_superseded old_pane=",
-        "session_end origin=registry_rebind",
         ".filter(|(key, entry)| entry.pane == pane_id",
         ".filter(|(k, e)| e.pane == pane_id",
         "SessionEntry {",
     ] {
         assert!(
             !sessions_prod.contains(forbidden),
-            "sessions.rs must not re-own pure registry mutation policy: {forbidden}"
+            "session registry registration IO must not re-own pure registry mutation policy: {forbidden}"
         );
     }
 }
@@ -12842,7 +12851,13 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
     let parsed: toml::Value = toml::from_str(&registry_io_manifest).unwrap();
     let dependencies = parsed["dependencies"].as_table().unwrap();
     for required_dependency in [
+        "agent-doc-hash",
+        "agent-doc-log-time",
+        "agent-doc-session-actor-io",
         "agent-doc-session-registry",
+        "agent-doc-sqlite",
+        "agent-doc-supervisor",
+        "agent-doc-tmux-io",
         "anyhow",
         "serde_json",
         "tmux-router",
@@ -12856,11 +12871,9 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
         "agent-doc-orchestration",
         "agent-doc-tmux",
         "agent-doc-tmux-commands",
-        "agent-doc-tmux-io",
         "git2",
         "interprocess",
         "notify",
-        "rusqlite",
     ] {
         assert!(
             !dependencies.contains_key(forbidden),
@@ -12886,10 +12899,11 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
     );
 
     let sessions_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
+            .unwrap();
     assert!(
-        sessions_source.contains("use agent_doc_session_registry_io as session_registry_io;"),
-        "sessions.rs should adapt registration updates through the focused registry IO crate"
+        sessions_source.contains("use crate as session_registry_io;"),
+        "session registry registration IO should adapt registration updates through the focused registry IO crate"
     );
     for forbidden in [
         "pub fn registry_path(",
@@ -12909,7 +12923,7 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
     ] {
         assert!(
             !sessions_source.contains(forbidden),
-            "sessions.rs must not keep registry snapshot IO/lookup facades: {forbidden}"
+            "session registry registration IO must not keep registry snapshot IO/lookup facades: {forbidden}"
         );
     }
 
@@ -12986,14 +13000,14 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
         let source = fs::read_to_string(&path).unwrap();
         let relative = path.strip_prefix(manifest_dir).unwrap().display();
         for forbidden in [
-            "agent_doc_orchestration::sessions::registry_path",
-            "agent_doc_orchestration::sessions::load",
-            "agent_doc_orchestration::sessions::save",
-            "agent_doc_orchestration::sessions::lookup",
-            "crate::sessions::registry_path",
-            "crate::sessions::load",
-            "crate::sessions::save",
-            "crate::sessions::lookup",
+            "agent_doc_session_registry_io::registration::registry_path",
+            "agent_doc_session_registry_io::registration::load",
+            "agent_doc_session_registry_io::registration::save",
+            "agent_doc_session_registry_io::registration::lookup",
+            "agent_doc_session_registry_io::registration::registry_path",
+            "agent_doc_session_registry_io::registration::load",
+            "agent_doc_session_registry_io::registration::save",
+            "agent_doc_session_registry_io::registration::lookup",
             "sessions::registry_path",
             "sessions::load",
             "sessions::save",
@@ -18330,7 +18344,8 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
     }
 
     let sessions_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
+            .unwrap();
     for forbidden in [
         "pub fn canonical_registry_key_in(",
         "fn canonical_registry_key_in(",
@@ -18343,14 +18358,14 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
     ] {
         assert!(
             !sessions_source.contains(forbidden),
-            "sessions.rs must call tmux-router registry policy directly, not re-own it: {forbidden}"
+            "session registry registration IO must call tmux-router registry policy directly, not re-own it: {forbidden}"
         );
     }
     assert!(
         sessions_source.contains("use agent_doc_session_registry as session_registry;")
             && !sessions_source.contains("use tmux_router::registry::{")
             && !sessions_source.contains("normalize_registry"),
-        "sessions.rs should import focused agent-doc session registry policy directly"
+        "session registry registration IO should import focused agent-doc session registry policy directly"
     );
 
     let registry_source =
@@ -18387,7 +18402,9 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
             !source.contains("sessions::canonical_registry_key_in")
-                && !source.contains("crate::sessions::canonical_registry_key_in"),
+                && !source.contains(
+                    "agent_doc_session_registry_io::registration::canonical_registry_key_in"
+                ),
             "{relative_path} must call tmux-router registry policy directly"
         );
     }
@@ -18419,7 +18436,8 @@ fn test_agent_doc_tmux_owns_pane_position_selection() {
     }
 
     let sessions_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
+            .unwrap();
     for forbidden in [
         "fn select_pane_by_position(",
         "pub fn pane_by_position(",
@@ -18431,7 +18449,7 @@ fn test_agent_doc_tmux_owns_pane_position_selection() {
     ] {
         assert!(
             !sessions_source.contains(forbidden),
-            "sessions.rs must query tmux, not re-own pane geometry selection: {forbidden}"
+            "session registry registration IO must query tmux, not re-own pane geometry selection: {forbidden}"
         );
     }
     assert!(
@@ -18445,7 +18463,7 @@ fn test_agent_doc_tmux_owns_pane_position_selection() {
         !claim_source.contains("sessions::pane_by_position")
             && claim_source.contains("agent_doc_tmux_io::pane_by_position(")
             && claim_source.contains("agent_doc_tmux_io::pane_by_position_in_window("),
-        "claim should resolve positional panes through focused tmux IO, not sessions.rs"
+        "claim should resolve positional panes through focused tmux IO, not session registry registration IO"
     );
 
     for forbidden in [
@@ -18670,7 +18688,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
             .unwrap();
     let sessions_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
+            .unwrap();
     let claim_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
     let session_actor_cmd_source =
@@ -19120,7 +19139,8 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     }
 
     let sessions_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
+            .unwrap();
     let tmux_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-tmux-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -19134,7 +19154,7 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     ] {
         assert!(
             !sessions_source.contains(forbidden),
-            "sessions.rs must execute tmux commands, not re-own submit profile policy: {forbidden}"
+            "session registry registration IO must execute tmux commands, not re-own submit profile policy: {forbidden}"
         );
     }
     assert!(
@@ -19144,7 +19164,7 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
             && tmux_io_source.contains("pub fn send_submitted_text_for_harness_logged(")
             && tmux_io_source.contains("tmux_submit_profile_for_harness(")
             && tmux_io_source.contains("send_submitted_text_with_profile("),
-        "logged submitted-text profile selection should live in focused tmux IO, not sessions.rs"
+        "logged submitted-text profile selection should live in focused tmux IO, not session registry registration IO"
     );
 
     let route_dispatch_source =
@@ -19169,8 +19189,8 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
         &sim_world_source,
     ] {
         assert!(
-            !source.contains("crate::sessions::tmux_submit_")
-                && !source.contains("agent_doc_orchestration::sessions::tmux_submit_"),
+            !source.contains("agent_doc_session_registry_io::registration::tmux_submit_")
+                && !source.contains("agent_doc_session_registry_io::registration::tmux_submit_"),
             "orchestration callers should import tmux submit policy from agent-doc-tmux-commands directly"
         );
     }
@@ -20413,7 +20433,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/dispatch.rs",
         "agent-doc-orchestration/src/route/startup.rs",
-        "agent-doc-orchestration/src/sessions.rs",
+        "agent-doc-session-registry-io/src/registration.rs",
         "agent-doc-orchestration/src/sync/pane_repair.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/start.rs",

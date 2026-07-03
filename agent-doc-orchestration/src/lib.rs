@@ -51,7 +51,6 @@ pub mod resync;
 pub mod route;
 pub mod run;
 pub mod session_check;
-pub mod sessions;
 pub mod start;
 pub mod stream;
 pub mod sync;

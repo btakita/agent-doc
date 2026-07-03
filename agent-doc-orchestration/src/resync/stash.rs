@@ -2,7 +2,7 @@
 
 use super::*;
 #[cfg(test)]
-use crate::sessions;
+use agent_doc_session_registry_io::registration as sessions;
 #[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
 

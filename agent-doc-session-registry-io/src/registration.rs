@@ -43,9 +43,19 @@
 //! - tmux_auto_start_cascade: auto_start on no-server, no-session, and existing-session
 //!   each produce a live pane in the correct session.
 
+use crate as session_registry_io;
+use agent_doc_controller::status;
 use agent_doc_session_registry as session_registry;
-use agent_doc_session_registry_io as session_registry_io;
+use agent_doc_sqlite::state_store::{
+    self, ProjectionDiagnosticInsert, insert_projection_diagnostic_with_metadata,
+    load_supervisor_lease_from_db, open_state_db,
+};
+use agent_doc_supervisor::{
+    OwnershipGeneration, OwnershipTransitionEvent, format_transition_event,
+};
 use anyhow::Result;
+use std::collections::BTreeSet;
+use std::io::Write;
 use std::path::Path;
 
 #[cfg(test)]
@@ -239,7 +249,7 @@ pub fn register_full(
 }
 
 /// Like `register_full` but with an explicit `base_dir` for the registry.
-#[cfg(test)]
+#[allow(dead_code)]
 pub fn register_full_in(
     base_dir: &Path,
     session_id: &str,
@@ -269,7 +279,7 @@ pub fn register_full_in(
 }
 
 /// Like `register_full` but uses the provided `cwd` instead of querying the process cwd.
-#[cfg(test)]
+#[allow(dead_code)]
 pub fn register_full_with_cwd(
     session_id: &str,
     pane_id: &str,
@@ -468,12 +478,12 @@ fn register_full_internal(
             transition_reason,
         )?;
         controller_row_exists = true;
-    } else if crate::project_controller::load_actor_record(base_dir, &registry_key)?.is_some() {
+    } else if load_actor_record(base_dir, &registry_key)?.is_some() {
         controller_row_exists = true;
     }
 
     if controller_row_exists {
-        let hint = crate::project_controller::SessionsProjectionHint {
+        let hint = SessionsProjectionHint {
             session_id: session_id.to_string(),
             pane_id: pane_id.to_string(),
             file: file.to_string(),
@@ -482,11 +492,7 @@ fn register_full_internal(
             cwd: cwd.to_string(),
             supervisor_instance_id: supervisor_instance_id.clone(),
         };
-        crate::project_controller::project_sessions_projection_for_actor_with_hint(
-            base_dir,
-            &registry_key,
-            Some(&hint),
-        )?;
+        project_sessions_projection_for_actor_with_hint(base_dir, &registry_key, Some(&hint))?;
         return Ok(());
     }
 
@@ -505,8 +511,7 @@ fn register_full_internal(
         },
     );
     session_registry_io::save_in(base_dir, registry)?;
-    let _ =
-        crate::project_controller::project_sessions_projection_for_actor(base_dir, &registry_key);
+    let _ = project_sessions_projection_for_actor(base_dir, &registry_key);
     Ok(())
 }
 
@@ -515,6 +520,230 @@ fn log_stale_registry_keys(stale_keys: &[String], pane_id: &str) {
         eprintln!(
             "[registry] removing stale session {} (was pane {})",
             key, pane_id
+        );
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionsProjectionHint {
+    pub session_id: String,
+    pub pane_id: String,
+    pub file: String,
+    pub pid: u32,
+    pub window_id: String,
+    pub cwd: String,
+    pub supervisor_instance_id: String,
+}
+
+pub fn load_actor_record(
+    project_root: &Path,
+    document_id: &str,
+) -> Result<Option<state_store::ActorRecord>> {
+    Ok(
+        agent_doc_session_actor_io::load_all_records_in(project_root)?
+            .get(document_id)
+            .cloned(),
+    )
+}
+
+pub fn project_sessions_projection_for_actor(project_root: &Path, document_id: &str) -> Result<()> {
+    project_sessions_projection_for_actor_with_hint(project_root, document_id, None)
+}
+
+pub fn project_sessions_projection_for_actor_with_hint(
+    project_root: &Path,
+    document_id: &str,
+    hint: Option<&SessionsProjectionHint>,
+) -> Result<()> {
+    let store = agent_doc_session_actor_io::load_all_records_in(project_root)?;
+    let Some(record) = store.get(document_id) else {
+        return Ok(());
+    };
+    emit_sessions_projection(project_root, &store, record, hint)
+}
+
+fn emit_sessions_projection(
+    project_root: &Path,
+    store: &std::collections::BTreeMap<String, state_store::ActorRecord>,
+    focused_record: &state_store::ActorRecord,
+    hint: Option<&SessionsProjectionHint>,
+) -> Result<()> {
+    let conn = open_state_db(project_root)?;
+    let mut registry = match session_registry_io::load_in(project_root) {
+        Ok(registry) => registry,
+        Err(err) => {
+            record_projection_diagnostic_with_metadata(
+                project_root,
+                "sessions.json",
+                &focused_record.document_id,
+                Some(focused_record.generation),
+                None,
+                "retry_pending",
+                &format!("failed to load projection: {err}"),
+            );
+            tmux_router::Registry::new()
+        }
+    };
+    let live_actor_panes: BTreeSet<String> = store
+        .values()
+        .filter(|record| {
+            record.state != state_store::ActorState::Closed && !record.pane_id.is_empty()
+        })
+        .map(|record| record.pane_id.clone())
+        .collect();
+    registry
+        .retain(|key, entry| store.contains_key(key) || !live_actor_panes.contains(&entry.pane));
+
+    let project_root_default = project_root.to_string_lossy().to_string();
+    for record in store.values() {
+        if record.state == state_store::ActorState::Closed || record.pane_id.is_empty() {
+            registry.remove(&record.document_id);
+            continue;
+        }
+        let projected_hint = hint.filter(|hint| {
+            tmux_router::registry::canonical_registry_key_in(project_root, &hint.file)
+                == record.document_id
+        });
+        let prior = registry.get(&record.document_id);
+        let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
+        let default_started_storage;
+        let default_started = if prior
+            .map(|entry| !entry.started.is_empty())
+            .unwrap_or(false)
+        {
+            ""
+        } else {
+            default_started_storage = state_store::timestamp_secs().to_string();
+            default_started_storage.as_str()
+        };
+        let selected =
+            status::select_sessions_projection_entry(status::SessionsProjectionEntryFacts {
+                project_root: project_root_default.as_str(),
+                record: status::SessionsProjectionRecordFacts {
+                    document_id: record.document_id.as_str(),
+                    session_id: record.session_id.as_str(),
+                    pane_id: record.pane_id.as_str(),
+                    window_id: record.window_id.as_str(),
+                },
+                prior: prior.map(|entry| status::SessionsProjectionPriorFacts {
+                    pid: entry.pid,
+                    cwd: entry.cwd.as_str(),
+                    started: entry.started.as_str(),
+                    file: entry.file.as_str(),
+                    supervisor_instance_id: entry.supervisor_instance_id.as_str(),
+                }),
+                hint: projected_hint.map(|hint| status::SessionsProjectionHintFacts {
+                    pid: hint.pid,
+                    cwd: hint.cwd.as_str(),
+                    file: hint.file.as_str(),
+                    supervisor_instance_id: hint.supervisor_instance_id.as_str(),
+                }),
+                lease: lease.map(|lease| status::SessionsProjectionLeaseFacts {
+                    supervisor_pid: lease.supervisor_pid,
+                }),
+                default_started,
+            });
+        let entry = tmux_router::RegistryEntry {
+            pane: selected.pane,
+            pid: selected.pid,
+            cwd: selected.cwd,
+            started: selected.started,
+            session_id: selected.session_id,
+            file: selected.file,
+            window: selected.window,
+            supervisor_instance_id: selected.supervisor_instance_id,
+        };
+        registry.insert(record.document_id.clone(), entry);
+    }
+
+    let intended_hash = serde_json::to_string_pretty(&registry)
+        .ok()
+        .map(|content| agent_doc_hash::content_hash(&content));
+    if let Err(err) = session_registry_io::save_in(project_root, &registry) {
+        record_projection_diagnostic_with_metadata(
+            project_root,
+            "sessions.json",
+            &focused_record.document_id,
+            Some(focused_record.generation),
+            intended_hash.as_deref(),
+            "retry_pending",
+            &format!("failed to write projection: {err}"),
+        );
+        return Ok(());
+    }
+    let projected = match session_registry_io::load_in(project_root) {
+        Ok(registry) => registry,
+        Err(err) => {
+            record_projection_diagnostic_with_metadata(
+                project_root,
+                "sessions.json",
+                &focused_record.document_id,
+                Some(focused_record.generation),
+                intended_hash.as_deref(),
+                "retry_pending",
+                &format!("failed to reload projection: {err}"),
+            );
+            return Ok(());
+        }
+    };
+    if focused_record.state == state_store::ActorState::Closed || focused_record.pane_id.is_empty()
+    {
+        if projected.contains_key(&focused_record.document_id) {
+            record_projection_diagnostic_with_metadata(
+                project_root,
+                "sessions.json",
+                &focused_record.document_id,
+                Some(focused_record.generation),
+                intended_hash.as_deref(),
+                "retry_pending",
+                "sessions projection kept a closed controller actor binding",
+            );
+        }
+    } else if projected
+        .get(&focused_record.document_id)
+        .is_none_or(|entry| {
+            entry.session_id != focused_record.session_id
+                || entry.pane != focused_record.pane_id
+                || entry.window != focused_record.window_id
+        })
+    {
+        record_projection_diagnostic_with_metadata(
+            project_root,
+            "sessions.json",
+            &focused_record.document_id,
+            Some(focused_record.generation),
+            intended_hash.as_deref(),
+            "retry_pending",
+            "sessions projection drifted from controller actor state",
+        );
+    }
+    Ok(())
+}
+
+fn record_projection_diagnostic_with_metadata(
+    project_root: &Path,
+    projection: &str,
+    document_id: &str,
+    source_generation: Option<u64>,
+    intended_hash: Option<&str>,
+    retry_status: &str,
+    message: &str,
+) {
+    eprintln!(
+        "[controller] projection drift projection={} document={} message={}",
+        projection, document_id, message
+    );
+    if let Ok(conn) = open_state_db(project_root) {
+        let _ = insert_projection_diagnostic_with_metadata(
+            &conn,
+            &ProjectionDiagnosticInsert {
+                projection,
+                document_id,
+                message,
+                source_generation,
+                intended_hash,
+                retry_status,
+            },
         );
     }
 }
@@ -528,26 +757,120 @@ fn log_session_rebind(
     new_window: &str,
     transition_caller: &str,
     transition_reason: &str,
-    generations: agent_doc_supervisor::OwnershipGeneration,
+    generations: OwnershipGeneration,
 ) {
-    if let Err(err) = agent_doc_supervisor_io::startup_miss::append_registry_rebind_session_log(
-        agent_doc_supervisor_io::startup_miss::RegistryRebindSessionLog {
-            base_dir,
-            session_id,
-            previous_file: &previous.file,
-            previous_pane: &previous.pane,
-            previous_window: &previous.window,
-            new_pane,
-            new_window,
-            transition_caller,
-            transition_reason,
-            generations,
-        },
-    ) {
+    if let Err(err) = append_registry_rebind_session_log(RegistryRebindSessionLog {
+        base_dir,
+        session_id,
+        previous_file: &previous.file,
+        previous_pane: &previous.pane,
+        previous_window: &previous.window,
+        new_pane,
+        new_window,
+        transition_caller,
+        transition_reason,
+        generations,
+    }) {
         eprintln!(
             "[registry] warning: failed to append registry-rebind session log for {}: {}",
             session_id, err
         );
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RegistryRebindSessionLog<'a> {
+    base_dir: &'a Path,
+    session_id: &'a str,
+    previous_file: &'a str,
+    previous_pane: &'a str,
+    previous_window: &'a str,
+    new_pane: &'a str,
+    new_window: &'a str,
+    transition_caller: &'a str,
+    transition_reason: &'a str,
+    generations: OwnershipGeneration,
+}
+
+fn append_registry_rebind_session_log(event: RegistryRebindSessionLog<'_>) -> Result<bool> {
+    if event.previous_pane == event.new_pane {
+        return Ok(false);
+    }
+
+    let log_file = resolve_relative_file(event.base_dir, event.previous_file);
+    let old_window = if event.previous_window.is_empty() {
+        "unknown"
+    } else {
+        event.previous_window
+    };
+    let new_window = if event.new_window.is_empty() {
+        "unknown"
+    } else {
+        event.new_window
+    };
+
+    let transition = format_transition_event(OwnershipTransitionEvent {
+        caller: event.transition_caller,
+        reason: event.transition_reason,
+        prior_generation: event.generations.prior_generation,
+        new_generation: event.generations.new_generation,
+        old_pane: Some(event.previous_pane),
+        new_pane: event.new_pane,
+        old_window: Some(old_window),
+        new_window: Some(new_window),
+    });
+    append_session_log_event(&log_file, event.session_id, &transition)?;
+
+    let superseded = format!(
+        "session_superseded old_pane={} new_pane={} old_window={} new_window={} prior_generation={} new_generation={}",
+        event.previous_pane,
+        event.new_pane,
+        old_window,
+        new_window,
+        event.generations.prior_generation,
+        event.generations.new_generation
+    );
+    append_session_log_event(&log_file, event.session_id, &superseded)?;
+
+    append_session_log_event(
+        &log_file,
+        event.session_id,
+        &format!(
+            "session_end origin=registry_rebind pane={} next_pane={} generation={} next_generation={}",
+            event.previous_pane,
+            event.new_pane,
+            event.generations.prior_generation,
+            event.generations.new_generation
+        ),
+    )?;
+    Ok(true)
+}
+
+fn append_session_log_event(file: &Path, session_id: &str, event: &str) -> Result<bool> {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(false);
+    };
+    let path = root
+        .join(".agent-doc/logs")
+        .join(format!("{session_id}.log"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    let timestamp = agent_doc_log_time::format_log_timestamp(state_store::timestamp_secs());
+    writeln!(log, "[{timestamp}] {event}")?;
+    Ok(true)
+}
+
+fn resolve_relative_file(base_dir: &Path, file: &str) -> std::path::PathBuf {
+    let file_path = Path::new(file);
+    if file_path.is_absolute() {
+        file_path.to_path_buf()
+    } else {
+        base_dir.join(file_path)
     }
 }
 

@@ -358,7 +358,7 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
             window_id: window.clone(),
         },
     )?;
-    agent_doc_orchestration::sessions::attach_projection_only_in(
+    agent_doc_session_registry_io::registration::attach_projection_only_in(
         &ctx.base_dir,
         &ctx.session_id,
         &pane_id,
@@ -4660,8 +4660,12 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             .unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let pane_window = iso.pane_window(&pane).unwrap();
-        agent_doc_orchestration::sessions::register("session-clear", &pane, &doc.to_string_lossy())
-            .unwrap();
+        agent_doc_session_registry_io::registration::register(
+            "session-clear",
+            &pane,
+            &doc.to_string_lossy(),
+        )
+        .unwrap();
         agent_doc_session_actor_io::record_session_start(
             &doc,
             "session-clear",

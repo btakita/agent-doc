@@ -241,7 +241,8 @@ use agent_doc_turn::closeout_recovery::{
 use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 use tmux_router::Tmux;
 
-use crate::{resync, sessions, sync};
+use crate::{resync, sync};
+use agent_doc_session_registry_io::registration as sessions;
 use std::cell::Cell;
 
 thread_local! {

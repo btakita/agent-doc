@@ -1,8 +1,8 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use crate::sessions;
 use agent_doc_controller::status::LaunchMode;
+use agent_doc_session_registry_io::registration as sessions;
 use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
     lifecycle::{BootResumeAction, boot_resume_action, start_session_retryable_during_recycle},

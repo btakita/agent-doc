@@ -223,7 +223,8 @@ use tmux_router::{PaneMoveOp, Tmux};
 
 use agent_doc_frontmatter::frontmatter;
 
-use crate::{resync, route, sessions};
+use crate::{resync, route};
+use agent_doc_session_registry_io::registration as sessions;
 
 use tmux_router::FileResolution;
 

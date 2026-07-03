@@ -11,6 +11,7 @@ use tmux_router::registry::normalize_registry;
 use tmux_router::{Registry, RegistryEntry, RegistryLock};
 
 pub mod dispatch_registry;
+pub mod registration;
 
 pub const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
 

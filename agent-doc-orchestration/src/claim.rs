@@ -112,8 +112,9 @@ use agent_doc_supervisor::claim_binding::{
     registry_entry_matches_claimed_document,
 };
 
-use crate::{resync, route, sessions};
+use crate::{resync, route};
 use agent_doc_project_config_io as project_config_io;
+use agent_doc_session_registry_io::registration as sessions;
 
 fn enforce_cross_session_claim(
     file: &Path,

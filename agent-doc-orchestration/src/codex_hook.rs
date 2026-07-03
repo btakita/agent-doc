@@ -209,8 +209,8 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         return Ok(StopResponse::Continue { continue_: true });
     }
 
-    match crate::session_check::inspect(&file)? {
-        crate::session_check::SessionCheckStatus::Ok(_) => {
+    match agent_doc_session_check_io::inspect(&file, &crate::session_check_effects())? {
+        agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {
             if let Some(response) = auto_queue_continuation_response(
                 &file,
                 &cleanup_roots,
@@ -227,7 +227,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
             Ok(StopResponse::Continue { continue_: true })
         }
-        crate::session_check::SessionCheckStatus::Interrupted(reason) => {
+        agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
             if is_editor_convergence_required_interruption(&reason) {
                 agent_doc_ops_log_io::log_op(
                     &file,
@@ -1823,8 +1823,8 @@ agent-doc {}\n",
         );
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Final assistant response."));
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
             other => panic!("expected committed session-check status, got {other:?}"),
@@ -1870,8 +1870,8 @@ agent-doc {}\n",
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Why was startup missed?"));
         assert!(content.contains("Recovered through Stop."));
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
             other => panic!("expected committed session-check status, got {other:?}"),
@@ -2150,8 +2150,8 @@ agent-doc {}\n",
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Recovered from visible response."));
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
             other => panic!("expected committed session-check status, got {other:?}"),
@@ -2208,8 +2208,8 @@ agent-doc {}\n",
             !content.contains("Reviewing the current plan and repo conventions"),
             "leading commentary should be stripped from the replayed closeout"
         );
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
             other => panic!("expected committed session-check status, got {other:?}"),
@@ -2260,8 +2260,8 @@ agent-doc {}\n",
                 .exists(),
             "guard-prefixed patch payload should not be captured as blocked"
         );
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
             other => panic!("expected committed session-check status, got {other:?}"),
@@ -2327,8 +2327,8 @@ agent-doc {}\n",
             !capture.response_body.contains("<!-- patch:backlog -->"),
             "captured response should be stripped of backlog patches after normalization"
         );
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
             other => panic!("expected committed session-check status, got {other:?}"),
@@ -2360,8 +2360,8 @@ agent-doc {}\n",
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
 
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Interrupted(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("active harness session changed this document"));
             }
             other => panic!("expected interrupted session-check status, got {other:?}"),
@@ -2387,8 +2387,8 @@ agent-doc {}\n",
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Post-closeout active-session drift."));
         assert!(content.contains("Recovered post-closeout drift."));
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
             other => panic!("expected committed session-check status, got {other:?}"),
@@ -2435,8 +2435,8 @@ agent-doc {}\n",
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Recovered from nested root drift."));
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
             other => panic!("expected committed session-check status, got {other:?}"),
@@ -2486,8 +2486,8 @@ agent-doc {}\n",
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
 
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Interrupted(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("active harness session changed this document"));
             }
             other => panic!("expected interrupted session-check status, got {other:?}"),
@@ -2514,8 +2514,8 @@ agent-doc {}\n",
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Visible drift after committed closeout."));
         assert!(content.contains("Recovered after preamble prompt tracking."));
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
             other => panic!("expected committed session-check status, got {other:?}"),
@@ -3530,8 +3530,8 @@ agent-doc {}\n",
         .unwrap();
         track_doc(&dir, &doc, "turn-1");
 
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Interrupted(message) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("is `committed`"), "{message}");
                 assert!(
                     message.contains("no new agent-doc cycle started")

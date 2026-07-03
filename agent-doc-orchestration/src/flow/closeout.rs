@@ -151,8 +151,8 @@ mod tests {
             "HEAD must not strand the completed item:\n{head}"
         );
         matches!(
-            crate::session_check::inspect(&doc).unwrap(),
-            crate::session_check::SessionCheckStatus::Ok(_)
+            agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap(),
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_)
         )
         .then_some(())
         .expect("session-check must accept the atomic-reap closeout");

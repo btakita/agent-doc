@@ -1,16 +1,17 @@
 //! # Module: session_check
 //!
-//! Orchestration adapter for the session-check command graph. Production
-//! inspection/closeout logic lives in `agent-doc-session-check-io`; this module
-//! supplies the remaining orchestration effects and keeps the historical tests at
-//! the orchestration boundary.
+//! Test-only session-check boundary shim.
+//!
+//! Production inspection/closeout logic lives in `agent-doc-session-check-io`.
+//! Orchestration supplies the remaining effects through
+//! [`crate::session_check_effects`]; this module keeps historical orchestration
+//! boundary tests available without compiling a production facade.
 
 use anyhow::Result;
 use std::path::Path;
 
 pub use agent_doc_session_check_io::{
-    SessionCheckReport, SessionCheckStatus, detect_unstarted_prompt_bearing_diff,
-    first_unstarted_prompt_bearing_change,
+    SessionCheckReport, SessionCheckStatus, first_unstarted_prompt_bearing_change,
 };
 #[cfg(test)]
 use agent_doc_session_check_io::{
@@ -22,52 +23,8 @@ use agent_doc_turn::op_log::PREFLIGHT_START_EVENT;
 #[cfg(test)]
 use agent_doc_workflow::session_check::GuardResult;
 
-struct OrchestrationSessionCheckEffects;
-
-fn session_check_effects() -> OrchestrationSessionCheckEffects {
-    OrchestrationSessionCheckEffects
-}
-
-impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionCheckEffects {
-    fn closeout_recovery_hint(&self, file: &Path) -> String {
-        closeout_recovery_hint(file)
-    }
-
-    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        crate::write::atomic_write_pub(file, content)
-    }
-
-    fn repair_committed_historical_snapshot_drift(
-        &self,
-        file: &Path,
-    ) -> Result<Option<&'static str>> {
-        crate::git::repair_committed_historical_snapshot_drift(file)
-    }
-
-    fn recover_missing_commit_boundary(
-        &self,
-        file: &Path,
-        event: &str,
-    ) -> Result<Option<&'static str>> {
-        crate::repair::recover_missing_commit_boundary(file, event)
-    }
-}
-
 fn closeout_recovery_hint(file: &Path) -> String {
-    // `#closeout-repair-churn`: render one typed recovery instruction for the
-    // classified state instead of a single static "try write --commit" line.
-    let state = agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
-        file,
-        &crate::flow::closeout_effects(),
-    );
-    match agent_doc_flow_io::closeout::closeout_recovery_command_for_file(file, state) {
-        Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
-        None => format!(
-            "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",
-            file.display(),
-            file.display()
-        ),
-    }
+    crate::closeout_recovery_hint(file)
 }
 
 #[cfg(test)]
@@ -91,41 +48,25 @@ fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
     );
 }
 
-/// CLI entry: check the end-of-cycle write invariant for `file`.
-pub fn run(file: &Path) -> Result<()> {
-    agent_doc_session_check_io::run(file, &session_check_effects())
-}
-
 /// `session-check` with the optional Codex final-gate.
 pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
-    agent_doc_session_check_io::run_with_options(file, codex_final_gate, &session_check_effects())
+    agent_doc_session_check_io::run_with_options(
+        file,
+        codex_final_gate,
+        &crate::session_check_effects(),
+    )
 }
 
 pub fn inspect(file: &Path) -> Result<SessionCheckStatus> {
-    agent_doc_session_check_io::inspect(file, &session_check_effects())
+    agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
 }
 
 pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
-    agent_doc_session_check_io::inspect_with_warnings(file, &session_check_effects())
+    agent_doc_session_check_io::inspect_with_warnings(file, &crate::session_check_effects())
 }
 
 pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
-    agent_doc_session_check_io::enforce_clean_closeout(file, &session_check_effects())
-}
-
-pub fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> {
-    agent_doc_session_check_io::detect_uncommitted_closeout_drift(file, &session_check_effects())
-}
-
-pub fn detect_uncommitted_closeout_drift_with_context(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<Option<String>> {
-    agent_doc_session_check_io::detect_uncommitted_closeout_drift_with_context(
-        file,
-        rc,
-        &session_check_effects(),
-    )
+    agent_doc_session_check_io::enforce_clean_closeout(file, &crate::session_check_effects())
 }
 
 #[cfg(test)]

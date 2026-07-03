@@ -1118,7 +1118,6 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-route-io/src/restart_handoff.rs",
         "agent-doc-route-io/src/supervisor_runtime.rs",
         "agent-doc-route-io/src/cycle_ack.rs",
-        "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-session-check-io/src/partial_staging.rs",
         "agent-doc-session-check-io/src/pending_guards.rs",
         "agent-doc-session-check-io/src/closeout_guards.rs",
@@ -1364,106 +1363,6 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // shell) at send time, instead of typing into a not-yet-submit-ready composer.
         ("agent-doc-route-io/src/startup_ready.rs", "reason=") => 2,
         ("agent-doc-route-io/src/busy_pane.rs", "reason=") => 1,
-        // +8 for the audited `#do-id-closeout-open-backlog` guard:
-        // `expect_done_or_gate_guard_fired` ops_log diagnostic plus seven
-        // `expect_done_or_gate_guard_*` test names. +1 for the audited
-        // `#queue-user-edit-overwrite` `dropped_queue_prompt_guard_failed`
-        // ops_log diagnostic. +4 for the audited
-        // `#jb-run-agent-doc-response-queue-contamination` guard:
-        // `queue_response_contamination_guard_failed` ops_log diagnostic plus
-        // three `queue_contamination_guard_*` test names. All follow the same
-        // ops_log pattern as the sibling session-check pending guards.
-        // +9 for the audited `#blocked-closeout-followup-capture` guard:
-        // the `resolve_pending_done_guard_mode` reuse in
-        // `check_blocked_closeout_followup_guard`, the
-        // `blocked_closeout_followup_guard_fired` ops_log diagnostic, and seven
-        // `blocked_closeout_followup_guard_*` test names. Same ops_log pattern
-        // as the sibling `expect_done_or_gate` / partial-closeout guards.
-        // +2 for the audited no-op-commit exemption of the
-        // `committed_without_response_body` guard (tsift.md deadlock): the
-        // `committed_without_response_body_guard_skipped_noop_commit` ops_log
-        // diagnostic plus its `..._guard_skips_noop_commit_reap_only_cycle`
-        // regression test name. A no-op commit (`commit_already_current`)
-        // committed no binary-owned work, so the guard skips it instead of
-        // looping the cycle forever.
-        // +6 (#gated-followup-split-enforcement): one `gated_phase_split_guard_fired`
-        // ops event for the warn-first multi-phase split advisory, plus its five
-        // `check_gated_phase_split_guard` regression test-fn names.
-        // +6 (#queue-audit-partial-completion): one `queue_audit_partial_completion_guard_fired`
-        // ops event for the warn-first queue-audit collapse advisory, plus its
-        // five `queue_audit_guard_*` regression test-fn names.
-        // +5 (#lr-config-3): three `_with_context` guard resolution variants
-        // (pending_capture, pending_done, review_done) mirroring the originals
-        // for RunContext-backed project config access, plus 2 additional
-        // guard-mode resolution call sites in queue-head removal logic.
-        // +4 (#queue-clear-unrun-items): the four `queue_head_removal_guard_*`
-        // regression test-fn names for `check_queue_head_removal_guard` (its
-        // `resolve_pending_done_guard_mode` reuse + `queue_head_removal_guard_fired`
-        // ops diagnostic are already counted in the #lr-config-3 line above).
-        // +3 (#lr-content-6): the Phase 6 regression that proves the guard-mode
-        // resolvers read from the cached `FrontmatterSlot` — the
-        // `phase6_guard_mode_resolves_from_frontmatter_slot_not_file` test-fn name
-        // plus its two `resolve_pending_done_guard_mode_with_context` call sites.
-        // The guard sweep converting `check_pending_*` / `check_expect_*` /
-        // `check_blocked_*` / `check_queue_head_removal_guard` over to the
-        // `_with_context` resolvers is a 1:1 token-for-token swap (no net change).
-        // +1 (#nochange-after-stall-breadth): the no-response active-queue-head
-        // closeout check reuses pending_done_guard mode for strict/warn/off policy.
-        // +2 (#codex-queue-drain-no-response-body): two new test fn names
-        // `committed_without_response_body_guard_{fires,passes}_…` contain the
-        // `guard_` substring (test identifiers, not new flow guards).
-        // +1 (#lazily-missing-response-recovery): one regression test name
-        // proves recovered committed exchange bodies clear the same guard even
-        // after stale cycle capture metadata was lost.
-        // +4 (#partial-staging-closeout-guard): one session-check guard call
-        // site, one guard function, one ops-log diagnostic, and one regression
-        // test name for dirty companion source/test changes with overlapping
-        // changed string literals after a partial manual commit.
-        // +2 (#lr-queue-patchback-miss): two regression test names for free-text
-        // queue-head provenance after binary consume without exchange history.
-        // +1 (#compact-reap-no-response-record): the
-        // `resolve_pending_done_guard_mode_with_context` reuse in
-        // `check_reaped_queue_head_without_response` (substring `guard_` in
-        // `..._guard_mode_...`). The guard fails closed when a no-response reap-only
-        // closeout reaped a `do`-directive head whose `### Re:` never landed in the
-        // exchange or a HEAD compact archive; it reuses the same guard-mode
-        // resolution as the sibling no-response-active-head guard. Its own ops_log
-        // diagnostic (`reaped_queue_head_without_response_fired`) carries no
-        // `guard_` substring.
-        // +2 (#queue-contamination-guard-false-positive): two new
-        // `queue_contamination_guard_*` regression test-fn names
-        // (`..._skips_user_prompt_mentioning_slash_command` and
-        // `..._still_flags_prose_without_slash_command`) for the slash-command
-        // skip that stops the contamination guard from flagging legit user
-        // prompts that mention `/agent-doc`/`/clear`. The skip itself now lives
-        // in `agent_doc_queue::queue_command` and carries no `guard_` substring.
-        // +1 (#partial-staging-guard-cross-doc-noise): the
-        // `partial_staging_closeout_guard_ignores_cross_document_markdown_noise`
-        // regression test-fn name (substring `guard_`). The fix itself drops `md`
-        // from `is_partial_staging_relevant_path` and adds no `guard_` token.
-        // +2 (#eqrecovery): the
-        // `committed_without_response_body_guard_skips_noop_queue_recovery`
-        // regression test-fn name plus direct guard/log assertions. It proves a
-        // drained queue/backlog recovery carrying queue-turn evidence remains
-        // terminal when the commit event is `commit_already_current`.
-        // 96 -> 31: the `#[cfg(test)] mod tests` was extracted into
-        // `session_check/tests.rs` (large-module split). The 65 removed `guard_`
-        // occurrences were test-assertion literals, not production hot-path
-        // guards; only production `guard_` tokens are budgeted here now.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 65,
-        // +1 (#qpausemix-verify / #j9ja): when `queue_continuation_required` is
-        // emitted on a controller-paused queue, session-check now drops a
-        // distinctive `queue_paused_continuation_guidance_emitted pause_reason={..}`
-        // SUCCESS marker into ops.log so an operator live test of the pause-aware
-        // guidance is provable/disprovable from the log (auto-verify keys on
-        // `ops_log:queue_paused_continuation_guidance_emitted`). The recorded
-        // `pause_reason=` is the controller pause text, not a new flow boundary.
-        // 3 -> 2 (#session-check-workflow-extract): the canonical
-        // blocked-closeout message formatter moved to
-        // `agent_doc_workflow::session_check`, leaving orchestration with only
-        // the pause-guidance proof log and focused `reason=no_ack` regression
-        // assertion. The moved formatter is budgeted on the workflow owner below.
-        ("agent-doc-orchestration/src/session_check.rs", "reason=") => 2,
         // #session-check-workflow-extract: focused workflow policy now owns the
         // canonical blocked-closeout diagnostic text, including its audited
         // `reason={}` field.
@@ -10178,6 +10077,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split durable fact readers from guard-result assembly",
         ),
         (
+            "Session-check production facade demotion",
+            "agent-doc-orchestration/src/session_check.rs",
+            "agent-doc-session-check-io",
+            "Move the test-only session-check boundary tests into `agent-doc-session-check-io`",
+        ),
+        (
             "Focus command host IO",
             "agent-doc-orchestration/src/focus.rs",
             "agent-doc-focus-io/src/lib.rs",
@@ -10278,6 +10183,36 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     let session_check =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
             .unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod session_check;")
+            && orchestration_lib.contains("#[cfg(test)]")
+            && orchestration_lib.contains("mod session_check;")
+            && orchestration_lib.contains("pub fn session_check_effects()")
+            && orchestration_lib.contains(
+                "impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionCheckEffects"
+            ),
+        "orchestration must keep session_check as a test-only shim and expose only the focused SessionCheckEffects port"
+    );
+    for production_source in [
+        "src/main.rs",
+        "src/mcp.rs",
+        "agent-doc-orchestration/src/codex_hook.rs",
+        "agent-doc-orchestration/src/flow/mod.rs",
+        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-orchestration/src/preflight/run.rs",
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/write.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();
+        assert!(
+            !source.contains("crate::session_check::")
+                && !source.contains("agent_doc_orchestration::session_check::"),
+            "{production_source} must call agent-doc-session-check-io directly instead of the orchestration session_check facade"
+        );
+    }
     for forbidden in [
         "mod backlog_guards;",
         "mod partial_staging;",

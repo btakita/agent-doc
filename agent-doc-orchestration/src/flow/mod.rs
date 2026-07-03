@@ -42,7 +42,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffec
     }
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
-        crate::session_check::enforce_clean_closeout(file)
+        agent_doc_session_check_io::enforce_clean_closeout(file, &crate::session_check_effects())
     }
 
     fn cancel_preflight_cycle(&self, file: &Path) -> Result<()> {

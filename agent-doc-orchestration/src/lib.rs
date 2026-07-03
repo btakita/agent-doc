@@ -45,9 +45,11 @@ pub use agent_doc_queue_io::queue_continuation;
 pub mod repair;
 pub mod route;
 pub mod run;
-pub mod session_check;
 pub mod start;
 pub mod write;
+
+#[cfg(test)]
+mod session_check;
 
 pub(crate) struct BacklogCommandEffects;
 
@@ -155,6 +157,52 @@ pub(crate) fn post_response_hook_effects() -> impl agent_doc_hooks_io::PostRespo
         reap_local_model_leases_for_hooks,
         reap_stale_editor_consumers_for_hooks,
     )
+}
+
+pub struct OrchestrationSessionCheckEffects;
+
+pub fn session_check_effects() -> OrchestrationSessionCheckEffects {
+    OrchestrationSessionCheckEffects
+}
+
+impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionCheckEffects {
+    fn closeout_recovery_hint(&self, file: &std::path::Path) -> String {
+        closeout_recovery_hint(file)
+    }
+
+    fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
+        crate::write::atomic_write_pub(file, content)
+    }
+
+    fn repair_committed_historical_snapshot_drift(
+        &self,
+        file: &std::path::Path,
+    ) -> anyhow::Result<Option<&'static str>> {
+        crate::git::repair_committed_historical_snapshot_drift(file)
+    }
+
+    fn recover_missing_commit_boundary(
+        &self,
+        file: &std::path::Path,
+        event: &str,
+    ) -> anyhow::Result<Option<&'static str>> {
+        crate::repair::recover_missing_commit_boundary(file, event)
+    }
+}
+
+pub fn closeout_recovery_hint(file: &std::path::Path) -> String {
+    let state = agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
+        file,
+        &crate::flow::closeout_effects(),
+    );
+    match agent_doc_flow_io::closeout::closeout_recovery_command_for_file(file, state) {
+        Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
+        None => format!(
+            "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",
+            file.display(),
+            file.display()
+        ),
+    }
 }
 
 #[cfg(test)]

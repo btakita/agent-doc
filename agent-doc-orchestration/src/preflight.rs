@@ -1036,15 +1036,15 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             }
         };
 
-        match crate::session_check::inspect(file)? {
-            crate::session_check::SessionCheckStatus::Ok(_) => {
+        match agent_doc_session_check_io::inspect(file, &crate::session_check_effects())? {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!("resume_commit_success file={}", file.display()),
                 );
                 return Ok((recovered, committed));
             }
-            crate::session_check::SessionCheckStatus::Interrupted(reason) => {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
                 let reason = reason.replace('\n', " ");
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -1359,7 +1359,11 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
         return Ok(());
     }
     if let Some(message) =
-        crate::session_check::detect_uncommitted_closeout_drift_with_context(file, rc)?
+        agent_doc_session_check_io::detect_uncommitted_closeout_drift_with_context(
+            file,
+            rc,
+            &crate::session_check_effects(),
+        )?
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1396,7 +1400,7 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
         return Ok(false);
     }
     // An unstarted prompt-bearing diff has its own normal handling — don't interfere.
-    if crate::session_check::detect_unstarted_prompt_bearing_diff(file)?.is_some() {
+    if agent_doc_session_check_io::detect_unstarted_prompt_bearing_diff(file)?.is_some() {
         return Ok(false);
     }
     // HEAD is the baseline we reset the snapshot to; without it we cannot recover.

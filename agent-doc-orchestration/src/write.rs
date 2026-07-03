@@ -1574,15 +1574,18 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // boundary above (#bare-write-captured-uncommitted), so reaching here with
     // CommitMode::None means the write placed no response body. Any open cycle now is
     // a pre-existing interrupted closeout, not content this write stranded.
-    let bare_session_write_result =
-        if write_result.is_ok() && commit_mode == CommitMode::None && is_session_document(file)? {
-            crate::session_check::enforce_clean_closeout(file).context(
+    let bare_session_write_result = if write_result.is_ok()
+        && commit_mode == CommitMode::None
+        && is_session_document(file)?
+    {
+        agent_doc_session_check_io::enforce_clean_closeout(file, &crate::session_check_effects())
+            .context(
                 "bare `agent-doc write` did not place a response body, but the session \
              document still has an open cycle outside the commit boundary",
             )
-        } else {
-            Ok(())
-        };
+    } else {
+        Ok(())
+    };
 
     match (write_result, commit_result, bare_session_write_result) {
         (Ok(()), Ok(()), Ok(())) => Ok(()),
@@ -1645,7 +1648,10 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                         }
                     }
                 }
-                crate::session_check::enforce_clean_closeout(file)?;
+                agent_doc_session_check_io::enforce_clean_closeout(
+                    file,
+                    &crate::session_check_effects(),
+                )?;
             } else {
                 eprintln!("[commit] skipped (not in git repo)");
             }

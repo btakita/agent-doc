@@ -193,7 +193,10 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
     }
 
     fn detect_uncommitted_closeout_drift(&self, file: &Path) -> anyhow::Result<Option<String>> {
-        agent_doc_orchestration::session_check::detect_uncommitted_closeout_drift(file)
+        agent_doc_session_check_io::detect_uncommitted_closeout_drift(
+            file,
+            &agent_doc_orchestration::session_check_effects(),
+        )
     }
 
     fn repair(&self, file: &Path) -> anyhow::Result<agent_doc_turn::repair::RepairOutcome> {
@@ -215,11 +218,14 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_sync_io::SyncSessionCheckStatus> {
-        match agent_doc_orchestration::session_check::inspect(file)? {
-            agent_doc_orchestration::session_check::SessionCheckStatus::Ok(message) => {
+        match agent_doc_session_check_io::inspect(
+            file,
+            &agent_doc_orchestration::session_check_effects(),
+        )? {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 Ok(agent_doc_sync_io::SyncSessionCheckStatus::Ok(message))
             }
-            agent_doc_orchestration::session_check::SessionCheckStatus::Interrupted(message) => Ok(
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => Ok(
                 agent_doc_sync_io::SyncSessionCheckStatus::Interrupted(message),
             ),
         }
@@ -321,9 +327,12 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
         &mut self,
         file: &Path,
     ) -> anyhow::Result<Option<agent_doc_workflow_io::doctor::LiveSessionCheckFacts>> {
-        let report = agent_doc_orchestration::session_check::inspect_with_warnings(file)?;
+        let report = agent_doc_session_check_io::inspect_with_warnings(
+            file,
+            &agent_doc_orchestration::session_check_effects(),
+        )?;
         let facts = match report.status {
-            agent_doc_orchestration::session_check::SessionCheckStatus::Ok(message) => {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 agent_doc_workflow_io::doctor::LiveSessionCheckFacts {
                     ok: Some(true),
                     status: Some("ok".to_string()),
@@ -331,7 +340,7 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
                     warnings: report.warnings,
                 }
             }
-            agent_doc_orchestration::session_check::SessionCheckStatus::Interrupted(message) => {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
                 agent_doc_workflow_io::doctor::LiveSessionCheckFacts {
                     ok: Some(false),
                     status: Some("interrupted".to_string()),
@@ -4014,7 +4023,11 @@ fn main() -> anyhow::Result<()> {
         Commands::SessionCheck {
             file,
             codex_final_gate,
-        } => agent_doc_orchestration::session_check::run_with_options(&file, codex_final_gate),
+        } => agent_doc_session_check_io::run_with_options(
+            &file,
+            codex_final_gate,
+            &agent_doc_orchestration::session_check_effects(),
+        ),
         Commands::Mcp { action } => match action {
             McpAction::Serve { project_root } => mcp::serve(project_root.as_deref()),
         },

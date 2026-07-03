@@ -990,22 +990,24 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
         }
 
         let block_reason = match crate::repair::repair(file) {
-            Ok(outcome) => match crate::session_check::inspect(file)? {
-                crate::session_check::SessionCheckStatus::Ok(_) => {
-                    let label = format!("{outcome:?}");
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "route_dispatch_drain_closeout_recovered file={} cycle_id={} outcome={}",
-                            file.display(),
-                            state.cycle_id,
-                            label
-                        ),
-                    );
-                    return Ok(RouteCloseoutDrainOutcome::Recovered(label));
+            Ok(outcome) => {
+                match agent_doc_session_check_io::inspect(file, &crate::session_check_effects())? {
+                    agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {
+                        let label = format!("{outcome:?}");
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_dispatch_drain_closeout_recovered file={} cycle_id={} outcome={}",
+                                file.display(),
+                                state.cycle_id,
+                                label
+                            ),
+                        );
+                        return Ok(RouteCloseoutDrainOutcome::Recovered(label));
+                    }
+                    agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => reason,
                 }
-                crate::session_check::SessionCheckStatus::Interrupted(reason) => reason,
-            },
+            }
             Err(err) => err.to_string(),
         };
 

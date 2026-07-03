@@ -131,7 +131,8 @@ pub fn run(file: &Path) -> Result<()> {
 }
 
 fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) {
-    let Ok(crate::session_check::SessionCheckStatus::Ok(_)) = crate::session_check::inspect(file)
+    let Ok(agent_doc_session_check_io::SessionCheckStatus::Ok(_)) =
+        agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
     else {
         return;
     };
@@ -314,7 +315,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         .unwrap_or(false);
     if !options.probe
         && !open_cycle
-        && crate::session_check::detect_unstarted_prompt_bearing_diff(file)?.is_none()
+        && agent_doc_session_check_io::detect_unstarted_prompt_bearing_diff(file)?.is_none()
     {
         enforce_no_uncommitted_closeout_drift(file, &rc)?;
     }
@@ -2987,8 +2988,8 @@ mod tests {
             "template queue scaffold should stay balanced:\n{content}"
         );
         assert!(matches!(
-            crate::session_check::inspect(&doc).unwrap(),
-            crate::session_check::SessionCheckStatus::Ok(_)
+            agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap(),
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_)
         ));
 
         let refreshed = agent_doc_capture_io::load_by_id(&doc, &capture.capture_id)
@@ -4734,8 +4735,8 @@ mod tests {
             !log.contains("preflight_diff_start file="),
             "boundary-artifact-only diff must not log preflight_diff_start:\n{log}"
         );
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(_) => {}
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {}
             status => {
                 panic!(
                     "expected clean closeout after boundary-artifact-only preflight, got {status:?}"

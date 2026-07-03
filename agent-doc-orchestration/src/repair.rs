@@ -324,7 +324,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
     let cycle_capture_exists = agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some();
     let age_secs = stale_preflight_cycle_age_secs(state.started_at, state.updated_at, now_secs());
     if !cycle_capture_exists
-        && let Some(change) = crate::session_check::first_unstarted_prompt_bearing_change(file)?
+        && let Some(change) =
+            agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?
         && !prompt_change_is_orchestration_handoff_marker(&change.text)
     {
         let preview = change
@@ -869,7 +870,7 @@ fn repair_answered_stale_boundary_if_safe(
     let tail_after_boundary = &exchange_body[marker_idx + marker.len()..];
     if tail_after_boundary.trim().is_empty()
         || !agent_doc_diff::prompt_change_is_already_answered(tail_after_boundary)
-        || crate::session_check::first_unstarted_prompt_bearing_change(file)?.is_some()
+        || agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?.is_some()
     {
         return Ok(None);
     }
@@ -1138,7 +1139,7 @@ pub(crate) fn run_with_queue_completion_ids(
             return Ok(RepairOutcome::TemplateNormalized);
         }
         let has_live_prompt =
-            crate::session_check::first_unstarted_prompt_bearing_change(file)?.is_some();
+            agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?.is_some();
         if !has_live_prompt {
             let repaired_doc = repair_template_doc_if_needed(file, &doc_content, None)?;
             if repaired_doc != doc_content {
@@ -1524,8 +1525,8 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
     {
         crate::write::complete_required_closeout(file)?;
     } else if !outcome.repaired()
-        && let crate::session_check::SessionCheckStatus::Interrupted(message) =
-            crate::session_check::inspect(file)?
+        && let agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) =
+            agent_doc_session_check_io::inspect(file, &crate::session_check_effects())?
     {
         agent_doc_flow_io::closeout::log_closeout_guard_event(
             file,
@@ -1934,8 +1935,8 @@ mod tests {
         let outcome = repair(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::CompletedBacklogReaped);
 
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(_) => {}
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {}
             other => panic!("expected clean closeout after repair, got {other:?}"),
         }
 
@@ -2588,9 +2589,9 @@ mod tests {
         );
 
         // Session-check accepts the recovered state (no open cycle, no drift).
-        match crate::session_check::inspect(&doc).unwrap() {
-            crate::session_check::SessionCheckStatus::Ok(_) => {}
-            crate::session_check::SessionCheckStatus::Interrupted(msg) => {
+        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {}
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(msg) => {
                 panic!("session-check must accept the retired-capture recovery: {msg}")
             }
         }

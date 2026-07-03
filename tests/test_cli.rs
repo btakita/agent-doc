@@ -9637,7 +9637,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 41,
+        ledger_rows.len() >= 42,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -14588,8 +14588,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .join("agent-doc-orchestration/src/route/busy_pane.rs")
             .exists()
             && !route_source.contains("mod busy_pane;")
-            && route_source.contains("agent_doc_route_io::busy_pane::{"),
-        "orchestration must not keep a busy-pane route module after the graph moves to agent-doc-route-io"
+            && !route_source.contains("pub(crate) use agent_doc_route_io::busy_pane::{")
+            && route_pane_resolution_source.contains("agent_doc_route_io::busy_pane::{")
+            && route_busy_pane_source.contains("pub fn ensure_existing_pane_ready_for_dispatch("),
+        "orchestration must not keep or re-export a busy-pane route module after the graph moves to agent-doc-route-io"
     );
     assert!(
         !route_busy_pane_source.contains("fn busy_existing_pane_auto_fix_outcome(")
@@ -14610,6 +14612,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
                 .contains("fn recover_dispatch_only_authoritative_waiting_input(")
             && !route_pane_resolution_source.contains("fn rescue_from_stash(")
             && !route_pane_resolution_source.contains("fn optimistic_busy_pane_dispatch(")
+            && !route_pane_resolution_source.contains("fn retry_route_after_busy_pane_auto_fix(")
             && route_supervisor_runtime_source.contains("pub fn query_supervisor_runtime(")
             && route_supervisor_runtime_source.contains("pub fn restart_via_supervisor(")
             && route_pane_provenance_source.contains("pub fn pane_route_provenance(")
@@ -14632,6 +14635,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_pane_resolution_io_source.contains("DispatchOnlyRouteEffects")
             && route_pane_resolution_io_source.contains("dispatch_only_send_reopen(")
             && route_pane_resolution_io_source.contains("pub fn optimistic_busy_pane_dispatch(")
+            && route_pane_resolution_io_source.contains("pub struct RouteBusyPaneRetryEffects")
+            && route_pane_resolution_io_source
+                .contains("pub fn retry_route_after_busy_pane_auto_fix(")
+            && route_pane_resolution_io_source.contains("attempt_busy_existing_pane_auto_fix(")
+            && route_pane_resolution_io_source
+                .contains("attempt_busy_existing_pane_interrupt_recovery(")
             && route_pane_resolution_io_source.contains("RouteDispatchEffects")
             && route_pane_resolution_io_source.contains("RouteCycleAckEffects")
             && route_pane_resolution_io_source.contains("require_routed_cycle_ack("),
@@ -14845,7 +14854,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         !route_busy_pane_source.contains("fn format_busy_existing_pane_error(")
             && route_dispatch_only_source
                 .contains("agent_doc_controller::dispatch::format_busy_existing_pane_error(")
-            && route_pane_resolution_source
+            && route_pane_resolution_io_source
                 .contains("agent_doc_controller::dispatch::format_busy_existing_pane_error("),
         "busy-pane user-facing error formatting should live in controller dispatch and route callers should use it directly"
     );

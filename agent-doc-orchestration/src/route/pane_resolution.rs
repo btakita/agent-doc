@@ -1,7 +1,12 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_route_io::pane_resolution::{optimistic_busy_pane_dispatch, rescue_from_stash};
+use agent_doc_route_io::busy_pane::{
+    ExistingPaneDispatchReadiness, ensure_existing_pane_ready_for_dispatch,
+};
+use agent_doc_route_io::pane_resolution::{
+    rescue_from_stash, retry_route_after_busy_pane_auto_fix,
+};
 use agent_doc_route_io::session_resolution::{ensure_auto_start_target_session, find_target_pane};
 use agent_doc_session_registry_io::dispatch_registry::{
     deregister_dispatch_registration, load_dispatch_registry, lookup_dispatch_registration,
@@ -786,13 +791,9 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                         return retry_route_after_busy_pane_auto_fix(
                             tmux,
                             file,
-                            pane,
-                            col_args,
                             session_id,
                             file_path,
-                            target_session,
                             harness,
-                            created_panes,
                             cycle_baseline.as_ref(),
                             pending_prompt_context
                                 .as_ref()
@@ -803,6 +804,25 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                             &registered_pane,
                             &provenance,
                             blocker_reason.as_deref(),
+                            |next_allow_auto_fix_retry,
+                             next_allow_busy_interrupt_retry,
+                             next_auto_fix_attempted| {
+                                resolve_or_create_pane_with_auto_fix_retry(
+                                    tmux,
+                                    file,
+                                    pane,
+                                    col_args,
+                                    session_id,
+                                    file_path,
+                                    target_session,
+                                    harness,
+                                    created_panes,
+                                    next_allow_auto_fix_retry,
+                                    next_allow_busy_interrupt_retry,
+                                    next_auto_fix_attempted,
+                                )
+                            },
+                            route_busy_pane_retry_effects(),
                         );
                     }
                 }
@@ -911,13 +931,9 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 return retry_route_after_busy_pane_auto_fix(
                     tmux,
                     file,
-                    pane,
-                    col_args,
                     session_id,
                     file_path,
-                    target_session,
                     harness,
-                    created_panes,
                     cycle_baseline.as_ref(),
                     pending_prompt_context
                         .as_ref()
@@ -928,6 +944,25 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                     &new_pane,
                     &provenance,
                     blocker_reason.as_deref(),
+                    |next_allow_auto_fix_retry,
+                     next_allow_busy_interrupt_retry,
+                     next_auto_fix_attempted| {
+                        resolve_or_create_pane_with_auto_fix_retry(
+                            tmux,
+                            file,
+                            pane,
+                            col_args,
+                            session_id,
+                            file_path,
+                            target_session,
+                            harness,
+                            created_panes,
+                            next_allow_auto_fix_retry,
+                            next_allow_busy_interrupt_retry,
+                            next_auto_fix_attempted,
+                        )
+                    },
+                    route_busy_pane_retry_effects(),
                 );
             }
         }
@@ -1026,224 +1061,6 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         false,
         route_startup_effects(),
     )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn retry_route_after_busy_pane_auto_fix(
-    tmux: &Tmux,
-    file: &Path,
-    pane: Option<&str>,
-    col_args: &[String],
-    session_id: &str,
-    file_path: &str,
-    target_session: &str,
-    harness: &HarnessConfig,
-    created_panes: &mut Vec<String>,
-    cycle_baseline: Option<&agent_doc_cycle_state_io::CycleState>,
-    prompt_bearing_marker: Option<&str>,
-    allow_auto_fix_retry: bool,
-    allow_busy_interrupt_retry: bool,
-    auto_fix_attempted: bool,
-    busy_pane: &str,
-    provenance: &str,
-    blocker_reason: Option<&str>,
-) -> Result<String> {
-    let fallback_detail = blocker_reason.map(|reason| format!("still shows {reason}"));
-    if allow_auto_fix_retry {
-        match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
-            BusyPaneAutoFixOutcome::RetryRoute => {
-                return resolve_or_create_pane_with_auto_fix_retry(
-                    tmux,
-                    file,
-                    pane,
-                    col_args,
-                    session_id,
-                    file_path,
-                    target_session,
-                    harness,
-                    created_panes,
-                    false,
-                    allow_busy_interrupt_retry,
-                    true,
-                );
-            }
-            BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart => {
-                wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
-                return resolve_or_create_pane_with_auto_fix_retry(
-                    tmux,
-                    file,
-                    pane,
-                    col_args,
-                    session_id,
-                    file_path,
-                    target_session,
-                    harness,
-                    created_panes,
-                    false,
-                    allow_busy_interrupt_retry,
-                    true,
-                );
-            }
-            BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "route_existing_pane_retry_route_after_fresh_restart file={} pane={} harness={}",
-                        file.display(),
-                        busy_pane,
-                        harness.binary
-                    ),
-                );
-                eprintln!(
-                    "[route] scoped fix left pane {} authoritative for {} with a healthy supervisor — restarting the live {} session fresh once before one final reroute",
-                    busy_pane,
-                    file.display(),
-                    harness.binary
-                );
-                if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
-                    emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
-                    anyhow::bail!(
-                        agent_doc_controller::dispatch::format_busy_existing_pane_error(
-                            file.display(),
-                            busy_pane,
-                            &harness.binary,
-                            provenance,
-                            fallback_detail.as_deref(),
-                            true
-                        )
-                    );
-                }
-                wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
-                return resolve_or_create_pane_with_auto_fix_retry(
-                    tmux,
-                    file,
-                    pane,
-                    col_args,
-                    session_id,
-                    file_path,
-                    target_session,
-                    harness,
-                    created_panes,
-                    false,
-                    allow_busy_interrupt_retry,
-                    true,
-                );
-            }
-            BusyPaneAutoFixOutcome::FailClosed => {}
-        }
-    }
-    if allow_busy_interrupt_retry {
-        match attempt_busy_existing_pane_interrupt_recovery(
-            tmux,
-            file,
-            busy_pane,
-            harness,
-            blocker_reason,
-        )? {
-            BusyPaneInterruptRecoveryOutcome::Recovered => {
-                return resolve_or_create_pane_with_auto_fix_retry(
-                    tmux,
-                    file,
-                    pane,
-                    col_args,
-                    session_id,
-                    file_path,
-                    target_session,
-                    harness,
-                    created_panes,
-                    false,
-                    false,
-                    true,
-                );
-            }
-            BusyPaneInterruptRecoveryOutcome::Blocked { reason } => {
-                emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
-                let detail = format!("bounded interrupt recovery still shows {reason}");
-                if harness.binary == "codex" && tmux.pane_alive(busy_pane) {
-                    return optimistic_busy_pane_dispatch(
-                        tmux,
-                        file,
-                        session_id,
-                        busy_pane,
-                        file_path,
-                        harness,
-                        cycle_baseline,
-                        prompt_bearing_marker,
-                        detail.as_str(),
-                        route_dispatch_effects(),
-                        route_cycle_ack_effects(),
-                    );
-                }
-                anyhow::bail!(
-                    agent_doc_controller::dispatch::format_busy_existing_pane_error(
-                        file.display(),
-                        busy_pane,
-                        &harness.binary,
-                        provenance,
-                        Some(detail.as_str()),
-                        auto_fix_attempted || allow_auto_fix_retry
-                    )
-                );
-            }
-            BusyPaneInterruptRecoveryOutcome::TimedOut => {
-                emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
-                if harness.binary == "codex" && tmux.pane_alive(busy_pane) {
-                    return optimistic_busy_pane_dispatch(
-                        tmux,
-                        file,
-                        session_id,
-                        busy_pane,
-                        file_path,
-                        harness,
-                        cycle_baseline,
-                        prompt_bearing_marker,
-                        "bounded interrupt recovery never restored a dispatch-ready prompt",
-                        route_dispatch_effects(),
-                        route_cycle_ack_effects(),
-                    );
-                }
-                anyhow::bail!(
-                    agent_doc_controller::dispatch::format_busy_existing_pane_error(
-                        file.display(),
-                        busy_pane,
-                        &harness.binary,
-                        provenance,
-                        Some("bounded interrupt recovery never restored a dispatch-ready prompt"),
-                        auto_fix_attempted || allow_auto_fix_retry
-                    )
-                );
-            }
-            BusyPaneInterruptRecoveryOutcome::Skipped => {}
-        }
-    }
-    if harness.binary == "codex" && tmux.pane_alive(busy_pane) {
-        emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
-        return optimistic_busy_pane_dispatch(
-            tmux,
-            file,
-            session_id,
-            busy_pane,
-            file_path,
-            harness,
-            cycle_baseline,
-            prompt_bearing_marker,
-            fallback_detail
-                .as_deref()
-                .unwrap_or("still not showing an idle prompt"),
-            route_dispatch_effects(),
-            route_cycle_ack_effects(),
-        );
-    }
-    anyhow::bail!(
-        agent_doc_controller::dispatch::format_busy_existing_pane_error(
-            file.display(),
-            busy_pane,
-            &harness.binary,
-            provenance,
-            fallback_detail.as_deref(),
-            auto_fix_attempted || allow_auto_fix_retry
-        )
-    );
 }
 
 #[cfg(test)]

@@ -3,6 +3,10 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+use crate::busy_pane::{
+    BusyPaneInterruptRecoveryOutcome, attempt_busy_existing_pane_auto_fix,
+    attempt_busy_existing_pane_interrupt_recovery,
+};
 use crate::cycle_ack::{RouteCycleAckEffects, require_routed_cycle_ack};
 use crate::dispatch::{RouteDispatchEffects, dispatch_existing_managed_reopen};
 use crate::dispatch_only::{
@@ -13,10 +17,11 @@ use crate::dispatch_recovery::{
 };
 use crate::dispatch_target::register_dispatch_target;
 use crate::pane_provenance::pane_route_provenance;
+use crate::restart_handoff::wait_for_busy_restart_handoff;
 use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
-    DispatchActorState, DispatchOnlyReopenDelivery, DispatchRuntimeHealth, StartupMissRouteFacts,
-    is_stash_window_name,
+    BusyPaneAutoFixOutcome, DispatchActorState, DispatchOnlyReopenDelivery, DispatchRuntimeHealth,
+    StartupMissRouteFacts, is_stash_window_name,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::route_runtime::SupervisorHealth;
@@ -409,6 +414,178 @@ pub fn optimistic_busy_pane_dispatch(
         route_cycle_ack_effects,
     )?;
     Ok(ack_pane.unwrap_or_else(|| pane.to_string()))
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RouteBusyPaneRetryEffects {
+    pub route_dispatch_effects: RouteDispatchEffects,
+    pub route_cycle_ack_effects: RouteCycleAckEffects,
+    pub emit_busy_route_diagnostic: fn(&Tmux, &str, &Path, &HarnessConfig),
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn retry_route_after_busy_pane_auto_fix(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    cycle_baseline: Option<&agent_doc_cycle_state_io::CycleState>,
+    prompt_bearing_marker: Option<&str>,
+    allow_auto_fix_retry: bool,
+    allow_busy_interrupt_retry: bool,
+    auto_fix_attempted: bool,
+    busy_pane: &str,
+    provenance: &str,
+    blocker_reason: Option<&str>,
+    mut retry_route: impl FnMut(bool, bool, bool) -> Result<String>,
+    effects: RouteBusyPaneRetryEffects,
+) -> Result<String> {
+    let fallback_detail = blocker_reason.map(|reason| format!("still shows {reason}"));
+    if allow_auto_fix_retry {
+        match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
+            BusyPaneAutoFixOutcome::RetryRoute => {
+                return retry_route(false, allow_busy_interrupt_retry, true);
+            }
+            BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart => {
+                wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
+                return retry_route(false, allow_busy_interrupt_retry, true);
+            }
+            BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_existing_pane_retry_route_after_fresh_restart file={} pane={} harness={}",
+                        file.display(),
+                        busy_pane,
+                        harness.binary
+                    ),
+                );
+                eprintln!(
+                    "[route] scoped fix left pane {} authoritative for {} with a healthy supervisor — restarting the live {} session fresh once before one final reroute",
+                    busy_pane,
+                    file.display(),
+                    harness.binary
+                );
+                if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
+                    (effects.emit_busy_route_diagnostic)(tmux, busy_pane, file, harness);
+                    anyhow::bail!(
+                        agent_doc_controller::dispatch::format_busy_existing_pane_error(
+                            file.display(),
+                            busy_pane,
+                            &harness.binary,
+                            provenance,
+                            fallback_detail.as_deref(),
+                            true
+                        )
+                    );
+                }
+                wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
+                return retry_route(false, allow_busy_interrupt_retry, true);
+            }
+            BusyPaneAutoFixOutcome::FailClosed => {}
+        }
+    }
+    if allow_busy_interrupt_retry {
+        match attempt_busy_existing_pane_interrupt_recovery(
+            tmux,
+            file,
+            busy_pane,
+            harness,
+            blocker_reason,
+        )? {
+            BusyPaneInterruptRecoveryOutcome::Recovered => {
+                return retry_route(false, false, true);
+            }
+            BusyPaneInterruptRecoveryOutcome::Blocked { reason } => {
+                (effects.emit_busy_route_diagnostic)(tmux, busy_pane, file, harness);
+                let detail = format!("bounded interrupt recovery still shows {reason}");
+                if harness.binary == "codex" && tmux.pane_alive(busy_pane) {
+                    return optimistic_busy_pane_dispatch(
+                        tmux,
+                        file,
+                        session_id,
+                        busy_pane,
+                        file_path,
+                        harness,
+                        cycle_baseline,
+                        prompt_bearing_marker,
+                        detail.as_str(),
+                        effects.route_dispatch_effects,
+                        effects.route_cycle_ack_effects,
+                    );
+                }
+                anyhow::bail!(
+                    agent_doc_controller::dispatch::format_busy_existing_pane_error(
+                        file.display(),
+                        busy_pane,
+                        &harness.binary,
+                        provenance,
+                        Some(detail.as_str()),
+                        auto_fix_attempted || allow_auto_fix_retry
+                    )
+                );
+            }
+            BusyPaneInterruptRecoveryOutcome::TimedOut => {
+                (effects.emit_busy_route_diagnostic)(tmux, busy_pane, file, harness);
+                if harness.binary == "codex" && tmux.pane_alive(busy_pane) {
+                    return optimistic_busy_pane_dispatch(
+                        tmux,
+                        file,
+                        session_id,
+                        busy_pane,
+                        file_path,
+                        harness,
+                        cycle_baseline,
+                        prompt_bearing_marker,
+                        "bounded interrupt recovery never restored a dispatch-ready prompt",
+                        effects.route_dispatch_effects,
+                        effects.route_cycle_ack_effects,
+                    );
+                }
+                anyhow::bail!(
+                    agent_doc_controller::dispatch::format_busy_existing_pane_error(
+                        file.display(),
+                        busy_pane,
+                        &harness.binary,
+                        provenance,
+                        Some("bounded interrupt recovery never restored a dispatch-ready prompt"),
+                        auto_fix_attempted || allow_auto_fix_retry
+                    )
+                );
+            }
+            BusyPaneInterruptRecoveryOutcome::Skipped => {}
+        }
+    }
+    if harness.binary == "codex" && tmux.pane_alive(busy_pane) {
+        (effects.emit_busy_route_diagnostic)(tmux, busy_pane, file, harness);
+        return optimistic_busy_pane_dispatch(
+            tmux,
+            file,
+            session_id,
+            busy_pane,
+            file_path,
+            harness,
+            cycle_baseline,
+            prompt_bearing_marker,
+            fallback_detail
+                .as_deref()
+                .unwrap_or("pane remained busy after scoped recovery"),
+            effects.route_dispatch_effects,
+            effects.route_cycle_ack_effects,
+        );
+    }
+    (effects.emit_busy_route_diagnostic)(tmux, busy_pane, file, harness);
+    anyhow::bail!(
+        agent_doc_controller::dispatch::format_busy_existing_pane_error(
+            file.display(),
+            busy_pane,
+            &harness.binary,
+            provenance,
+            fallback_detail.as_deref(),
+            auto_fix_attempted || allow_auto_fix_retry
+        )
+    );
 }
 
 pub fn controller_dispatch_actor_state(

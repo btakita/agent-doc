@@ -161,7 +161,7 @@ use std::time::{Duration, Instant};
 
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
-    AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixOutcome, CloseoutBlockDispatchDecision,
+    AuthoritativePromptReadyBarrierFacts, CloseoutBlockDispatchDecision,
     CloseoutBlockDispatchFacts, DegradedAuthoritativeActorDirectSubmit, DispatchDrainRetryDecision,
     DispatchOnlyBusyRefusalFacts, DispatchOnlyReopenDelivery, PromptReadyBarrierDecision,
     ReopenMode, RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
@@ -192,7 +192,7 @@ use agent_doc_controller::dispatch::{
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
-    BusyPaneAutoFixFacts,
+    BusyPaneAutoFixFacts, BusyPaneAutoFixOutcome,
     busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
 };
 use agent_doc_controller_io::starting_actor_timeout::{
@@ -218,11 +218,6 @@ use agent_doc_route_io::authoritative_actor::{
     authoritative_actor_start_wait_terminal_state, managed_capability_proof_status,
     tracked_harness_clear_requires_fresh_restart,
 };
-pub(crate) use agent_doc_route_io::busy_pane::{
-    BusyPaneInterruptRecoveryOutcome, ExistingPaneDispatchReadiness,
-    attempt_busy_existing_pane_auto_fix, attempt_busy_existing_pane_interrupt_recovery,
-    ensure_existing_pane_ready_for_dispatch,
-};
 pub(crate) use agent_doc_route_io::cycle_ack::{
     RouteCycleAckEffects, pending_prompt_bearing_context_for_route, require_routed_cycle_ack,
 };
@@ -245,18 +240,16 @@ use agent_doc_route_io::pane_provenance::pane_route_provenance;
 #[cfg(test)]
 use agent_doc_route_io::pane_resolution::should_preserve_failed_route_pane;
 use agent_doc_route_io::pane_resolution::{
-    cleanup_failed_route_panes, controller_dispatch_actor_state,
+    RouteBusyPaneRetryEffects, cleanup_failed_route_panes, controller_dispatch_actor_state,
     fail_if_recent_session_loss_window, is_agent_process,
     recover_dispatch_only_authoritative_waiting_input, rescue_from_stash, startup_miss_route_facts,
     startup_miss_route_provenance,
 };
-use agent_doc_route_io::restart_handoff::wait_for_busy_restart_handoff;
 use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup::RouteStartupEffects;
 use agent_doc_route_io::startup_debounce::await_idle;
 use agent_doc_route_io::supervisor_runtime::{
     query_supervisor_health, query_supervisor_runtime, restart_via_supervisor,
-    restart_via_supervisor_with_mode,
 };
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
@@ -403,6 +396,14 @@ fn route_cycle_ack_effects() -> RouteCycleAckEffects {
     RouteCycleAckEffects {
         route_dispatch_effects: route_dispatch_effects(),
         emit_startup_miss_diagnostic,
+        emit_busy_route_diagnostic,
+    }
+}
+
+fn route_busy_pane_retry_effects() -> RouteBusyPaneRetryEffects {
+    RouteBusyPaneRetryEffects {
+        route_dispatch_effects: route_dispatch_effects(),
+        route_cycle_ack_effects: route_cycle_ack_effects(),
         emit_busy_route_diagnostic,
     }
 }

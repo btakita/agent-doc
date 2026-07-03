@@ -99,7 +99,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `6ea5c5a8` | Queue consume writeback IO graph |
 | `78e75cd1` | Route session target resolution IO graph |
 | `ecd969f4` | Route startup helper IO batch |
-| `pending-current-round` | Route startup ready-wait and post-claim sync IO batch |
+| `6f15ffee` | Route startup ready-wait and post-claim sync IO batch |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

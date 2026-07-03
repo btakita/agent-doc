@@ -219,6 +219,7 @@ use agent_doc_controller_io::starting_actor_timeout::{
 };
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
+use agent_doc_route_io::session_resolution::resolve_target_session;
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
 use agent_doc_session_registry_io::dispatch_registry::{
@@ -3609,9 +3610,6 @@ mod busy_pane;
 pub(crate) use busy_pane::*;
 mod cycle_ack;
 pub(crate) use cycle_ack::*;
-
-mod session_resolution;
-pub use session_resolution::*;
 
 mod startup;
 pub use startup::*;

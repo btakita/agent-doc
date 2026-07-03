@@ -3442,7 +3442,7 @@ mod tests {
             "opencode should not be canonical codex"
         );
         assert!(
-            agent_doc_model_tier::canonical_harness_name(&active).is_some(),
+            agent_doc_model_tier::canonical_harness_name(active).is_some(),
             "opencode is a known harness"
         );
         let has_guard = agent_doc_model_tier::canonical_harness_name("codex").as_deref()

@@ -2,6 +2,12 @@
 
 use super::*;
 use agent_doc_controller::dispatch::{FreshStartAckOutcome, fresh_start_ack_outcome};
+#[cfg(test)]
+use agent_doc_route_io::session_resolution::evict_previous_stash_pane_entry;
+use agent_doc_route_io::session_resolution::{
+    ensure_auto_start_target_session, evict_previous_stash_pane, find_registered_pane_in_session,
+    resolve_target_session,
+};
 
 /// `#jbtsiftnosub`: bounded re-verify window for the auto-start cold-start gate.
 /// After `wait_for_agent_ready` reports ready, the pane should already show a

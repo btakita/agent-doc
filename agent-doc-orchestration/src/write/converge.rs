@@ -2040,7 +2040,7 @@ mod core_tests {
                 };
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if !path.extension().is_some_and(|e| e == "json") {
+                    if path.extension().is_none_or(|e| e != "json") {
                         continue;
                     }
                     let payload_text = fs::read_to_string(&path).unwrap();

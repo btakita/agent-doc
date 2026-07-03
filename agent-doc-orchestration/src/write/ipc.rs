@@ -2900,7 +2900,7 @@ fn stale_supervisor_content_ours_adoption_warning(file: &Path) -> Option<String>
     #[cfg(test)]
     {
         let _ = file;
-        return None;
+        None
     }
 
     #[cfg(not(test))]
@@ -6187,7 +6187,7 @@ mod core_tests {
                 if let Ok(entries) = fs::read_dir(&watcher_dir) {
                     for entry in entries.flatten() {
                         let path = entry.path();
-                        if !path.extension().is_some_and(|e| e == "json") {
+                        if path.extension().is_none_or(|e| e != "json") {
                             continue;
                         }
                         let payload_text = fs::read_to_string(&path).unwrap();

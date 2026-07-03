@@ -2223,10 +2223,10 @@ Body\n\
 
         let changes = agent_doc_diff::classify_prompt_bearing_changes(
             &agent_doc_diff::unified_diff_from_contents(
-                &agent_doc_frontmatter::frontmatter::parse(snapshot)
+                agent_doc_frontmatter::frontmatter::parse(snapshot)
                     .unwrap()
                     .1,
-                &agent_doc_frontmatter::frontmatter::parse(&fs::read_to_string(&doc).unwrap())
+                agent_doc_frontmatter::frontmatter::parse(&fs::read_to_string(&doc).unwrap())
                     .unwrap()
                     .1,
             )

@@ -87,6 +87,7 @@ members = [
     "agent-doc-element-unknown",
     "agent-doc-queue",
     "agent-doc-queue-io",
+    "agent-doc-route-io",
     "agent-doc-sqlite",
     "agent-doc-sync",
     "agent-doc-sync-io",

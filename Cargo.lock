@@ -1049,6 +1049,7 @@ dependencies = [
  "agent-doc-repair-io",
  "agent-doc-response-replay-io",
  "agent-doc-response-toc-io",
+ "agent-doc-route-io",
  "agent-doc-run-context-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
@@ -1353,6 +1354,22 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-route-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-controller",
+ "agent-doc-harness",
+ "agent-doc-project-config-io",
+ "agent-doc-session-registry-io",
+ "agent-doc-sync",
+ "agent-doc-sync-io",
+ "agent-doc-tmux-io",
+ "anyhow",
+ "tempfile",
+ "tmux-router",
 ]
 
 [[package]]

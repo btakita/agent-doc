@@ -1106,7 +1106,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/route/authoritative_actor.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
         "agent-doc-orchestration/src/route/dispatch.rs",
-        "agent-doc-orchestration/src/route/session_resolution.rs",
+        "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-orchestration/src/route/cycle_ack.rs",
         "agent-doc-orchestration/src/route/busy_pane.rs",
         "agent-doc-orchestration/src/route/startup.rs",
@@ -11518,7 +11518,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-claim-io/src/lib.rs",
         "agent-doc-orchestration/src/route.rs",
-        "agent-doc-orchestration/src/route/session_resolution.rs",
+        "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-sync-io/src/resync.rs",
         "agent-doc-sync-io/src/sync.rs",
         "agent-doc-session-check-io/src/guard_modes.rs",
@@ -18741,7 +18741,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     for relative in [
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/dispatch.rs",
-        "agent-doc-orchestration/src/route/session_resolution.rs",
+        "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
         "agent-doc-orchestration/src/route/startup.rs",
     ] {
@@ -18761,10 +18761,9 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     }
     let resync_source =
         fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/resync.rs")).unwrap();
-    let route_session_resolution = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/route/session_resolution.rs"),
-    )
-    .unwrap();
+    let route_session_resolution =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/session_resolution.rs"))
+            .unwrap();
     let route_pane_resolution = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
     )
@@ -24552,6 +24551,16 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
 #[test]
 fn test_agent_doc_controller_owns_route_text_predicates() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-route-io")),
+        "agent-doc-route-io must stay a first-class workspace crate for route tmux/session resolution effects"
+    );
+
     let controller_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
     for required_snippet in [
@@ -24567,7 +24576,7 @@ fn test_agent_doc_controller_owns_route_text_predicates() {
 
     for relative_path in [
         "agent-doc-orchestration/src/route/busy_pane.rs",
-        "agent-doc-orchestration/src/route/session_resolution.rs",
+        "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-sync-io/src/sync.rs",
         "agent-doc-sync-io/src/resync.rs",
     ] {
@@ -24858,10 +24867,9 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             "agent-doc-sync-io/src/sync.rs",
         ],
     );
-    let route_session_resolution = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/route/session_resolution.rs"),
-    )
-    .unwrap();
+    let route_session_resolution =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/session_resolution.rs"))
+            .unwrap();
     let resync_source =
         fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/resync.rs")).unwrap();
     let resync_prune =

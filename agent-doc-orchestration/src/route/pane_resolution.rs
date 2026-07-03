@@ -2,6 +2,7 @@
 
 use super::*;
 use agent_doc_controller::dispatch::is_stash_window_name;
+use agent_doc_route_io::session_resolution::{ensure_auto_start_target_session, find_target_pane};
 use agent_doc_session_registry_io::dispatch_registry::{
     deregister_dispatch_registration, load_dispatch_registry, lookup_dispatch_registration,
     registry_base_dir_for_dispatch,

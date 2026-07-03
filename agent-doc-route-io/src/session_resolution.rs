@@ -1,10 +1,13 @@
-//! Extracted from `write.rs` (large-module split). See parent module for context.
+//! Route target session and pane resolution.
 
-use super::*;
 use agent_doc_controller::dispatch::{is_stash_window_name, normalize_context_session};
+use agent_doc_harness::HarnessConfig;
+use anyhow::Result;
+use std::path::Path;
+use tmux_router::Tmux;
 
 /// Get the tmux session that owns the caller pane.
-pub(crate) fn current_tmux_session(tmux: &Tmux) -> Option<String> {
+pub fn current_tmux_session(tmux: &Tmux) -> Option<String> {
     tmux.current_session()
 }
 
@@ -64,7 +67,7 @@ pub(crate) fn resolve_preferred_session_for_layout(
 ///
 /// Session config is never auto-written. Only `agent-doc session set <name>` pins a session.
 /// `agent-doc session clear` returns to auto-detect mode.
-pub(crate) fn resolve_target_session(
+pub fn resolve_target_session(
     tmux: &Tmux,
     context_session: Option<&str>,
     col_args: &[String],
@@ -75,7 +78,7 @@ pub(crate) fn resolve_target_session(
         .unwrap_or_else(|| harness.tmux_session_fallback.clone())
 }
 
-pub(crate) fn ensure_auto_start_target_session(
+pub fn ensure_auto_start_target_session(
     tmux: &Tmux,
     context_session: Option<&str>,
     session_name: &str,
@@ -114,7 +117,7 @@ pub(crate) fn ensure_auto_start_target_session(
 
 /// Find an explicit target pane for lazy claiming.
 /// Skips panes already claimed by another document in the session registry.
-pub(crate) fn find_target_pane(
+pub fn find_target_pane(
     tmux: &Tmux,
     explicit_pane: Option<&str>,
     _session_name: &str,
@@ -124,7 +127,7 @@ pub(crate) fn find_target_pane(
     target.filter(|p| tmux.pane_alive(p) && !claimed_panes.contains(p))
 }
 
-pub(crate) fn evict_previous_stash_pane(
+pub fn evict_previous_stash_pane(
     tmux: &Tmux,
     session_id: &str,
     replacement_pane: &str,
@@ -144,7 +147,7 @@ pub(crate) fn evict_previous_stash_pane(
     );
 }
 
-pub(crate) fn evict_previous_stash_pane_entry(
+pub fn evict_previous_stash_pane_entry(
     tmux: &Tmux,
     session_id: &str,
     previous: &tmux_router::RegistryEntry,
@@ -180,7 +183,7 @@ pub(crate) fn evict_previous_stash_pane_entry(
 
 /// Find a registered agent-doc pane in the target tmux session.
 /// Used by auto_start to join alongside an existing agent-doc pane (not any random pane).
-pub(crate) fn find_registered_pane_in_session(
+pub fn find_registered_pane_in_session(
     tmux: &Tmux,
     registry_base_dir: &Path,
     session_name: &str,
@@ -208,9 +211,26 @@ pub(crate) fn find_registered_pane_in_session(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
-    use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
-    use agent_doc_supervisor_io::ipc::SupervisorIpc;
+    use std::path::{Path, PathBuf};
+    use tmux_router::IsolatedTmux;
+
+    struct ScopedCurrentDir {
+        previous: PathBuf,
+    }
+
+    impl ScopedCurrentDir {
+        fn set(path: &Path) -> Self {
+            let previous = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self { previous }
+        }
+    }
+
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.previous).unwrap();
+        }
+    }
     #[test]
     fn unregistered_file_skips_lazy_claim() {
         // When registered is None, the lazy-claim step should be skipped.

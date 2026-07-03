@@ -4,6 +4,7 @@ use agent_doc_hash::content_hash;
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -9699,6 +9700,44 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         );
     }
 
+    let coverage_graphs: BTreeSet<String> = coverage_lines
+        .iter()
+        .flat_map(|line| {
+            let cells: Vec<_> = line.trim_matches('|').split('|').map(str::trim).collect();
+            assert_eq!(
+                cells.len(),
+                2,
+                "coarse extraction coverage rows must preserve commit/ledger columns: {line}"
+            );
+            assert!(
+                !cells[0].is_empty() && !cells[1].is_empty(),
+                "coarse extraction coverage rows must name commit(s) and ledger row(s): {line}"
+            );
+            cells[1]
+                .split(';')
+                .map(str::trim)
+                .filter(|graph| !graph.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let ledger_graphs: BTreeSet<String> = ledger_rows
+        .iter()
+        .map(|cells| cells[0].to_owned())
+        .collect();
+    for graph in &ledger_graphs {
+        assert!(
+            coverage_graphs.contains(graph),
+            "coarse extraction coverage must include a commit row for ledger graph {graph:?}"
+        );
+    }
+    for graph in &coverage_graphs {
+        assert!(
+            ledger_graphs.contains(graph),
+            "coarse extraction coverage graph {graph:?} must have a detailed ledger row"
+        );
+    }
+
     for (commit, graph) in [
         ("539eabb9", "Focused IO crate wave"),
         ("539eabb9", "Codex hook blocked-stop sidecar IO"),
@@ -9813,6 +9852,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("1c0abe65", "Queue continuation host IO"),
         ("35752f5c", "Tracked-work command and done-archive IO"),
         ("1e486e4f", "Session-check guard IO adapter batch"),
+        ("7fbe726a", "Focus command host IO"),
     ] {
         assert!(
             coverage_lines

@@ -9650,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 45,
+        ledger_rows.len() >= 46,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -11682,7 +11682,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-lint-io/src/lib.rs",
         "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-claim-io/src/lib.rs",
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-route-io/src/diagnostics.rs",
         "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-sync-io/src/resync.rs",
         "agent-doc-sync-io/src/sync.rs",
@@ -14104,6 +14104,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_ready.rs")).unwrap();
     let route_pane_resolution_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
+    let route_diagnostics_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/diagnostics.rs")).unwrap();
     let route_pane_resolution_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
     )
@@ -14744,15 +14746,15 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_cycle_ack_source.contains("should_require_routed_cycle_ack")
             && route_cycle_ack_source.contains("MissingCycleAckFacts")
             && route_cycle_ack_source.contains("should_optimistically_accept_missing_cycle_ack")
-            && route_source.contains("RouteStartupMissDiagnosticFacts")
-            && route_source.contains("route_startup_miss_diagnostic_message(")
-            && route_source.contains("RouteBusyDiagnosticFacts")
-            && route_source.contains("route_busy_diagnostic_message(")
-            && route_source.contains("RouteBusyQueuedDiagnosticFacts")
-            && route_source.contains("route_busy_queued_diagnostic_message(")
+            && route_diagnostics_source.contains("RouteStartupMissDiagnosticFacts")
+            && route_diagnostics_source.contains("route_startup_miss_diagnostic_message(")
+            && route_diagnostics_source.contains("RouteBusyDiagnosticFacts")
+            && route_diagnostics_source.contains("route_busy_diagnostic_message(")
+            && route_diagnostics_source.contains("RouteBusyQueuedDiagnosticFacts")
+            && route_diagnostics_source.contains("route_busy_queued_diagnostic_message(")
             && route_source.contains("failclosed_wait_context(")
-            && route_source.contains("RouteDispatchBugReportItemFacts")
-            && route_source.contains("route_dispatch_bug_report_item(")
+            && route_diagnostics_source.contains("RouteDispatchBugReportItemFacts")
+            && route_diagnostics_source.contains("route_dispatch_bug_report_item(")
             && route_source.contains("DispatchOnlyReopenDelivery")
             && route_dispatch_only_source.contains("dispatch_only_should_print_unproven_progress")
             && route_startup_source.contains("fresh_route_start_ack_timeout")
@@ -14766,6 +14768,39 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("dispatch_drain_retry_decision("),
         "route.rs should call focused controller dispatch policy directly"
     );
+    assert!(
+        route_diagnostics_source.contains("pub struct RouteDispatchBugReportEffects")
+            && route_diagnostics_source.contains("pub fn file_route_dispatch_bug_report(")
+            && route_diagnostics_source.contains("pub fn emit_startup_miss_diagnostic(")
+            && route_diagnostics_source.contains("pub fn emit_busy_route_diagnostic(")
+            && route_diagnostics_source.contains("pub fn emit_busy_route_queued_diagnostic(")
+            && route_diagnostics_source
+                .contains("pub fn emit_busy_route_queued_diagnostic_from_facts(")
+            && route_diagnostics_source.contains("fn route_current_actor_generation(")
+            && route_diagnostics_source.contains("fn route_ops_log_path(")
+            && route_source.contains("use agent_doc_route_io::diagnostics::{")
+            && route_source.contains("RouteDispatchBugReportEffects")
+            && route_source.contains("route_dispatch_bug_report_effects()")
+            && route_source.contains("file_route_dispatch_bug_report_with_effects("),
+        "route diagnostics and dispatch-bug filing should live in agent-doc-route-io with orchestration only injecting the backlog write callback"
+    );
+    for forbidden_snippet in [
+        "fn route_current_actor_generation(",
+        "fn route_ops_log_path(",
+        "fn emit_busy_route_queued_diagnostic_from_facts(",
+        "fn emit_startup_miss_diagnostic(",
+        "fn emit_busy_route_diagnostic(",
+        "fn emit_busy_route_queued_diagnostic(",
+        "route_startup_miss_diagnostic_message(",
+        "route_busy_diagnostic_message(",
+        "route_busy_queued_diagnostic_message(",
+        "route_dispatch_bug_report_item(RouteDispatchBugReportItemFacts",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own route diagnostic or dispatch-bug filing IO after it moves to agent-doc-route-io: {forbidden_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
         "struct DirectPaneAcceptancePollState",

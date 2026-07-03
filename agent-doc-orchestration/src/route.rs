@@ -164,21 +164,17 @@ use agent_doc_controller::dispatch::{
     AuthoritativePromptReadyBarrierFacts, CloseoutBlockDispatchDecision,
     CloseoutBlockDispatchFacts, DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts,
     DispatchOnlyReopenDelivery, PromptReadyBarrierDecision, ReopenMode, RetryBudget,
-    RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts, RouteCloseoutDrainOutcome,
-    RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts, RoutedReopenFacts,
-    RoutedReopenGuardReason, StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
-    actor_dispatch_blocker_reason, authoritative_actor_ready_retry_budget,
-    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
-    classify_authoritative_prompt_ready_barrier, classify_closeout_block_dispatch,
-    decide_authoritative_reopen, dispatch_drain_retry_decision,
+    RouteCloseoutDrainOutcome, RoutedReopenFacts, RoutedReopenGuardReason,
+    StartingTimeoutActorFacts, actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
+    authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
+    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
+    classify_closeout_block_dispatch, decide_authoritative_reopen, dispatch_drain_retry_decision,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_timeout_for_binary, failclosed_wait_context,
-    prompt_ready_barrier_failed_event, route_busy_diagnostic_message,
-    route_busy_queued_diagnostic_message, route_closeout_user_outcome_fields,
-    route_dispatch_bug_report_item, route_startup_miss_diagnostic_message,
+    prompt_ready_barrier_failed_event, route_closeout_user_outcome_fields,
     starting_actor_ready_log_line, starting_actor_terminal_log_line,
     starting_actor_timeout_coalesced_log_line,
 };
@@ -225,14 +221,19 @@ use agent_doc_route_io::authoritative_actor::{
 #[cfg(test)]
 use agent_doc_route_io::cycle_ack::pending_prompt_bearing_context_for_route;
 pub(crate) use agent_doc_route_io::cycle_ack::{RouteCycleAckEffects, require_routed_cycle_ack};
+use agent_doc_route_io::diagnostics::{
+    RouteDispatchBugReportEffects, emit_busy_route_diagnostic, emit_busy_route_queued_diagnostic,
+    emit_busy_route_queued_diagnostic_from_facts, emit_startup_miss_diagnostic,
+    file_route_dispatch_bug_report as file_route_dispatch_bug_report_with_effects,
+};
+#[cfg(test)]
 use agent_doc_route_io::direct_pane_dispatch::editor_route_attempt_id;
 #[cfg(test)]
 use agent_doc_route_io::dispatch::dispatch_existing_managed_reopen;
 #[cfg(test)]
 use agent_doc_route_io::dispatch::send_command_checked;
 use agent_doc_route_io::dispatch::{
-    BusyRouteQueuedDiagnosticFacts, RouteDispatchBugReportFacts, RouteDispatchEffects,
-    dispatch_via_supervisor_ipc,
+    RouteDispatchBugReportFacts, RouteDispatchEffects, dispatch_via_supervisor_ipc,
 };
 #[cfg(test)]
 use agent_doc_route_io::dispatch_only::dispatch_only_reopen_existing_pane;
@@ -385,21 +386,6 @@ struct RouteQueueEnqueueOutcome {
     activated: bool,
 }
 
-fn route_current_actor_generation(file: &Path) -> Option<u64> {
-    let canonical = file.canonicalize().ok()?;
-    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
-    agent_doc_session_actor_io::load_record_in(&root, canonical.to_string_lossy().as_ref())
-        .ok()
-        .flatten()
-        .map(|record| record.generation)
-}
-
-fn route_ops_log_path(file: &Path) -> Option<PathBuf> {
-    let canonical = file.canonicalize().ok()?;
-    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
-    Some(root.join(".agent-doc/logs/ops.log"))
-}
-
 fn route_dispatch_effects() -> RouteDispatchEffects {
     RouteDispatchEffects {
         file_route_dispatch_bug_report,
@@ -466,177 +452,35 @@ fn enqueue_route_dispatch_prompt_for_dispatch_only(
     })
 }
 
-fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
-    let document_display = facts.file.display().to_string();
-    let document_id = agent_doc_hash::document_id_for_path(facts.file);
-    let editor_attempt_id = editor_route_attempt_id();
-    let dispatch_proof_state = facts.proof.map(|proof| proof.dispatch_stage_label());
-    let diagnostic_path = facts.diagnostic_path.map(|path| path.display().to_string());
-    let ops_log_path = route_ops_log_path(facts.file).map(|path| path.display().to_string());
-    let item = match route_dispatch_bug_report_item(RouteDispatchBugReportItemFacts {
-        document_display: &document_display,
-        document_id: &document_id,
-        pane: facts.pane,
-        phase: facts.phase,
-        issue: facts.issue,
-        result: facts.result,
-        elapsed_ms: facts.elapsed.as_millis(),
-        actor_generation: route_current_actor_generation(facts.file),
-        editor_attempt_id: editor_attempt_id.as_deref(),
-        dispatch_proof_state,
-        diagnostic_path: diagnostic_path.as_deref(),
-        ops_log_path: ops_log_path.as_deref(),
-    }) {
-        Ok(item) => item,
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                facts.file,
-                &format!(
-                    "route_dispatch_bug_backlog_item_failed file={} pane={} harness={} phase={} issue={} error={}",
-                    facts.file.display(),
-                    facts.pane,
-                    facts.harness.binary,
-                    facts.phase,
-                    facts.issue,
-                    agent_doc_secret_redact::redact(&err).replace(char::is_whitespace, "_")
-                ),
-            );
-            return;
-        }
-    };
-    let target_file = match agent_doc_project_config_io::agent_doc_bug_target_document_for_doc(
-        facts.file,
-    ) {
-        Ok(Some(target)) => target,
-        Ok(None) => facts.file.to_path_buf(),
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                facts.file,
-                &format!(
-                    "route_dispatch_bug_target_resolve_failed file={} pane={} harness={} phase={} issue={} error={}",
-                    facts.file.display(),
-                    facts.pane,
-                    facts.harness.binary,
-                    facts.phase,
-                    facts.issue,
-                    agent_doc_secret_redact::redact(&err.to_string())
-                        .replace(char::is_whitespace, "_")
-                ),
-            );
-            facts.file.to_path_buf()
-        }
-    };
-    let items = [item];
-    match agent_doc_element_backlog_io::with_backlog_command_effects(
+fn route_dispatch_bug_force_disk_pending_writes() -> bool {
+    FORCE_DISK_ROUTE_WRITES.with(Cell::get)
+}
+
+fn add_route_dispatch_bug_backlog_items(
+    target_file: &Path,
+    items: &[String],
+    force_disk: bool,
+) -> Result<Vec<String>> {
+    agent_doc_element_backlog_io::with_backlog_command_effects(
         &crate::BACKLOG_COMMAND_EFFECTS,
         || {
             agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
-                FORCE_DISK_ROUTE_WRITES.with(Cell::get),
-                || agent_doc_element_backlog_io::backlog_cmd::add_many(&target_file, &items, false),
+                force_disk,
+                || agent_doc_element_backlog_io::backlog_cmd::add_many(target_file, items, false),
             )
         },
-    ) {
-        Ok(ids) => {
-            let id = ids
-                .first()
-                .map(|id| id.as_str())
-                .unwrap_or("deduped_existing");
-            agent_doc_ops_log_io::log_op(
-                facts.file,
-                &format!(
-                    "route_dispatch_bug_backlog_filed file={} target_file={} pane={} harness={} phase={} issue={} id={} inserted={}",
-                    facts.file.display(),
-                    target_file.display(),
-                    facts.pane,
-                    facts.harness.binary,
-                    facts.phase,
-                    facts.issue,
-                    id,
-                    !ids.is_empty()
-                ),
-            );
-        }
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                facts.file,
-                &format!(
-                    "route_dispatch_bug_backlog_file_failed file={} target_file={} pane={} harness={} phase={} issue={} error={}",
-                    facts.file.display(),
-                    target_file.display(),
-                    facts.pane,
-                    facts.harness.binary,
-                    facts.phase,
-                    facts.issue,
-                    agent_doc_secret_redact::redact(&err.to_string())
-                        .replace(char::is_whitespace, "_")
-                ),
-            );
-        }
+    )
+}
+
+fn route_dispatch_bug_report_effects() -> RouteDispatchBugReportEffects {
+    RouteDispatchBugReportEffects {
+        force_disk_pending_writes: route_dispatch_bug_force_disk_pending_writes,
+        add_backlog_items: add_route_dispatch_bug_backlog_items,
     }
 }
 
-fn emit_busy_route_queued_diagnostic_from_facts(facts: BusyRouteQueuedDiagnosticFacts<'_>) {
-    emit_busy_route_queued_diagnostic(facts.tmux, facts.pane, facts.file, facts.harness);
-}
-
-const STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
-const BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
-
-fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason: &str) {
-    let file_display = file.display().to_string();
-    let msg = route_startup_miss_diagnostic_message(RouteStartupMissDiagnosticFacts {
-        file_display: &file_display,
-        reason,
-    });
-    if let Err(e) =
-        agent_doc_tmux_io::show_message(tmux, pane_id, STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS, &msg)
-    {
-        eprintln!(
-            "[route] warning: failed to emit startup-miss diagnostic to pane {}: {}",
-            pane_id, e
-        );
-    }
-}
-
-fn emit_busy_route_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, harness: &HarnessConfig) {
-    let file_display = file.display().to_string();
-    let msg = route_busy_diagnostic_message(RouteBusyDiagnosticFacts {
-        file_display: &file_display,
-        harness_binary: &harness.binary,
-    });
-    if let Err(e) =
-        agent_doc_tmux_io::show_message(tmux, pane_id, BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS, &msg)
-    {
-        eprintln!(
-            "[route] warning: failed to emit busy-route diagnostic to pane {}: {}",
-            pane_id, e
-        );
-    }
-}
-
-fn emit_busy_route_queued_diagnostic(
-    tmux: &Tmux,
-    pane_id: &str,
-    file: &Path,
-    harness: &HarnessConfig,
-) {
-    let file_display = file.display().to_string();
-    let user_outcome = agent_doc_flow::outcome::user_outcome_fields(
-        agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner,
-    );
-    let msg = route_busy_queued_diagnostic_message(RouteBusyQueuedDiagnosticFacts {
-        file_display: &file_display,
-        harness_binary: &harness.binary,
-        user_outcome_fields: &user_outcome,
-    });
-    if let Err(e) =
-        agent_doc_tmux_io::show_message(tmux, pane_id, BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS, &msg)
-    {
-        eprintln!(
-            "[route] warning: failed to emit busy-route queued diagnostic to pane {}: {}",
-            pane_id, e
-        );
-    }
+fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
+    file_route_dispatch_bug_report_with_effects(facts, route_dispatch_bug_report_effects());
 }
 
 pub fn run(

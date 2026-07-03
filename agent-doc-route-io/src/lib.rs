@@ -7,6 +7,7 @@
 pub mod authoritative_actor;
 pub mod busy_pane;
 pub mod cycle_ack;
+pub mod diagnostics;
 pub mod direct_pane_dispatch;
 pub mod dispatch;
 pub mod dispatch_only;

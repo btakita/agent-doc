@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_template_io::enforce_imperative_response_contract_for_diff;
 use agent_doc_turn_executor::claude_launch::structural_base_args as claude_structural_base_args;
 use agent_doc_turn_executor::codex_launch::{
     CODEX_SANDBOX_NETWORK_DISABLED_ENV, apply_codex_network_access_env_overrides,
@@ -224,7 +225,7 @@ pub(crate) fn run_ordered_task_step(
         agent_doc_turn::response_text::strip_assistant_heading(&finalize_response)
     };
 
-    write::enforce_imperative_response_contract_for_diff(file, &injected_diff, &response_text)?;
+    enforce_imperative_response_contract_for_diff(file, &injected_diff, &response_text)?;
 
     let finalize_text = if let Some(worker_result_line) =
         options.graph_evidence.and_then(|evidence| {

@@ -19,9 +19,19 @@ use agent_doc_template::{
 };
 
 pub mod backlog_normalization;
+pub mod response_materialization_io;
+pub mod write_normalize;
 pub use backlog_normalization::{
     NormalizedTemplateResponse, canonicalize_response_for_capture, enforce_no_replace_pending,
     normalize_backlog_patch_response, pending_replace_escape_hatch_enabled,
+};
+pub use response_materialization_io::{
+    ipc_response_materialized_or_fallback_with_recycle, log_ipc_proof_failure,
+    log_ipc_proof_failure_with_recycle, log_partial_response_materialization_for_retry,
+};
+pub use write_normalize::{
+    enforce_imperative_response_contract, enforce_imperative_response_contract_for_diff,
+    normalize_user_prompts_in_exchange_safe, template_mode_overrides_for_current_doc,
 };
 
 /// Parse a model response for template patchback blocks and log parse decisions

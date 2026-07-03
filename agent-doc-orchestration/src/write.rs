@@ -251,6 +251,7 @@ use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
 };
 use agent_doc_queue_io::queue_consume::{self, QueueConsumeWriteEffects, QueueConsumptionOutcome};
+use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 use agent_doc_workflow::session_cycle::{
     FinalizeRerunCommand, compact_command_hint, finalize_rerun_command_base,
     group_pending_add_targets, parse_id_order, parse_tracked_work_edits,
@@ -1745,15 +1746,55 @@ fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
 mod pending_checks;
 pub(crate) use pending_checks::*;
 
-mod materialize;
-pub(crate) use materialize::*;
+fn ipc_response_materialized_or_fallback(
+    file: &Path,
+    source: &str,
+    response: &str,
+    content: &str,
+) -> bool {
+    agent_doc_template_io::ipc_response_materialized_or_fallback_with_recycle(
+        file,
+        source,
+        response,
+        content,
+        |file, source| {
+            let _ = converge::schedule_stale_supervisor_pcp_recycle(file, source);
+        },
+    )
+}
+
+fn log_ipc_proof_failure(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    invariant: &str,
+    recovery: &str,
+    detail: &str,
+) {
+    agent_doc_template_io::log_ipc_proof_failure_with_recycle(
+        file,
+        source,
+        patch_id,
+        invariant,
+        recovery,
+        detail,
+        |file, source| {
+            let _ = converge::schedule_stale_supervisor_pcp_recycle(file, source);
+        },
+    );
+}
+
+fn log_partial_response_materialization_for_retry(
+    file: &Path,
+    source: &str,
+    response: &str,
+) -> Result<()> {
+    agent_doc_template_io::log_partial_response_materialization_for_retry(file, source, response)
+}
 
 pub(crate) fn ipc_direct_disk_degraded_for_file(project_root: &Path, file: &Path) -> Result<bool> {
     ipc::ipc_direct_disk_degraded(project_root, file)
 }
-
-mod normalize;
-pub use normalize::*;
 
 pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) -> String {
     match lift_pending_from_exchange(content) {

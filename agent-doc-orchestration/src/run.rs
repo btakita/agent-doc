@@ -135,7 +135,10 @@ use agent_doc_prompt_cache::{
 };
 use agent_doc_queue_io::queue_consume;
 use agent_doc_template as template;
-use agent_doc_template_io::{enforce_no_replace_pending, normalize_backlog_patch_response};
+use agent_doc_template_io::{
+    enforce_imperative_response_contract_for_diff, enforce_no_replace_pending,
+    normalize_backlog_patch_response, normalize_user_prompts_in_exchange_safe,
+};
 use agent_doc_turn::no_change::{
     NoChangeCycleStateInput, NoChangeVerdict, classify_no_change_cycle_state,
 };
@@ -820,7 +823,7 @@ fn run_once(
         RunMode::Append => agent_doc_turn::response_text::strip_assistant_heading(&response.text),
         RunMode::Template => response.text.clone(),
     };
-    write::enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;
+    enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;
     record_run_progress(file, "response_capture", agent_name, None);
     crate::repair::save_pending(file, &response_text)?;
 
@@ -1857,7 +1860,7 @@ fn normalize_direct_run_prompt_prefixes(
         return Ok(content.to_string());
     };
     let boundary_normalized = template::reposition_boundary_to_end_clean(content);
-    let normalized = write::normalize_user_prompts_in_exchange_safe(
+    let normalized = normalize_user_prompts_in_exchange_safe(
         &boundary_normalized,
         &boundary_normalized,
         &snapshot_doc,
@@ -1878,7 +1881,7 @@ fn normalize_direct_run_template_content(
     content: &str,
 ) -> Result<String> {
     let normalized = if let Some(snapshot_doc) = snapshot {
-        write::normalize_user_prompts_in_exchange_safe(content, baseline, snapshot_doc, file)
+        normalize_user_prompts_in_exchange_safe(content, baseline, snapshot_doc, file)
     } else {
         content.to_string()
     };

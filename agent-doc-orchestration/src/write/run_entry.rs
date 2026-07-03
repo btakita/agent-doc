@@ -12,6 +12,10 @@ use agent_doc_queue_io::queue_consumption_proof::QueueConsumptionProofStage;
 use agent_doc_template::response_materialization::sanitize_template_patchback_response;
 use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;
 use agent_doc_template_io as template_io;
+use agent_doc_template_io::{
+    enforce_imperative_response_contract, normalize_user_prompts_in_exchange_safe,
+    template_mode_overrides_for_current_doc,
+};
 
 // Deeper root cause A superseded the interim `#qftlossdelta` recovery-sidecar
 // safety net (`preserve_dropped_operator_buffer_if_needed`): the committed

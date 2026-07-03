@@ -1132,10 +1132,10 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
-        "agent-doc-orchestration/src/write/normalize.rs",
+        "agent-doc-template-io/src/write_normalize.rs",
         "agent-doc-orchestration/src/write/converge.rs",
         "agent-doc-orchestration/src/write/pending_checks.rs",
-        "agent-doc-orchestration/src/write/materialize.rs",
+        "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
     ];
     let tokens = [
@@ -1614,7 +1614,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the write adapter with that focused policy. The later
         // `agent_doc_turn::response_replay` ownership move removed the duplicate
         // materialization-policy copy and its final guard-marker token.
-        ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 1,
+        ("agent-doc-template-io/src/response_materialization_io.rs", "guard_") => 1,
         // -2 `guard_`, -1 `reason=` (#nodiskipc): active IPC timeout/no-proof
         // paths no longer enter the direct document-write fallback, so the removed
         // visible-write guard/reason tokens are retired rather than rerouted.
@@ -5738,9 +5738,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         ),
         "write/ipc should call focused response exchange materialization policy directly"
     );
-    let write_materialize =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
-            .unwrap();
+    let write_materialize = fs::read_to_string(
+        manifest_dir.join("agent-doc-template-io/src/response_materialization_io.rs"),
+    )
+    .unwrap();
     for forbidden in [
         "pub fn response_materialized_in_content",
         "pub(crate) fn response_materialized_in_content",
@@ -5851,7 +5852,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     let write_normalize =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/normalize.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/write_normalize.rs"))
             .unwrap();
     for forbidden in [
         "const IMPERATIVE_STATUS_ONLY_SIGNALS",
@@ -6560,7 +6561,7 @@ fn test_agent_doc_turn_owns_pending_capture_heuristics() {
     );
 
     let write_normalize =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/normalize.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/write_normalize.rs"))
             .unwrap();
     for forbidden in [
         "pub fn check_future_work_signals",
@@ -21789,7 +21790,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-session-check-io/src/closeout_guards.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/converge.rs",
-        "agent-doc-orchestration/src/write/materialize.rs",
+        "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-orchestration/src/flow/closeout.rs",
@@ -22693,7 +22694,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     );
 
     let write_normalize =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/normalize.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/write_normalize.rs"))
             .unwrap();
     assert!(
         write_normalize.contains("use agent_doc_element_exchange::{"),
@@ -22779,7 +22780,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
 
     let orchestration_policy_sources = [
         ("write.rs", write_main),
-        ("write/normalize.rs", write_normalize),
+        ("write_normalize.rs", write_normalize),
         ("write/run_entry.rs", write_run_entry),
         ("write/ipc.rs", write_ipc),
         ("write/ipc/transport.rs", write_ipc_transport),
@@ -24004,7 +24005,7 @@ fn test_patch_pending_compatibility_strings_do_not_remain_in_production_code() {
         "agent-doc-template/src/template.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
-        "agent-doc-orchestration/src/write/materialize.rs",
+        "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-template-io/src/backlog_normalization.rs",
     ];
     let forbidden_snippets = [
@@ -24118,13 +24119,14 @@ fn test_agent_doc_template_owns_patchback_policy() {
             .exists(),
         "orchestration must not keep a document-mutation flow facade"
     );
-    let write_materialize =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
-            .unwrap();
+    let write_materialize = fs::read_to_string(
+        manifest_dir.join("agent-doc-template-io/src/response_materialization_io.rs"),
+    )
+    .unwrap();
     let orchestration_sources = [
         ("agent-doc-flow/src/types.rs", flow_types.as_str()),
         (
-            "agent-doc-orchestration/src/write/materialize.rs",
+            "agent-doc-template-io/src/response_materialization_io.rs",
             write_materialize.as_str(),
         ),
     ];
@@ -24298,9 +24300,10 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "agent-doc-template-io backlog normalization must stay free of orchestration/tmux facades"
     );
 
-    let write_materialize =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
-            .unwrap();
+    let write_materialize = fs::read_to_string(
+        manifest_dir.join("agent-doc-template-io/src/response_materialization_io.rs"),
+    )
+    .unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     for forbidden_snippet in [
@@ -24384,8 +24387,8 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
-        "agent-doc-orchestration/src/write/materialize.rs",
-        "agent-doc-orchestration/src/write/normalize.rs",
+        "agent-doc-template-io/src/response_materialization_io.rs",
+        "agent-doc-template-io/src/write_normalize.rs",
     ];
     for relative_path in focused_callers {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
@@ -24523,9 +24526,10 @@ fn test_agent_doc_template_owns_strict_response_heading_policy() {
         );
     }
 
-    let write_materialize =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
-            .unwrap();
+    let write_materialize = fs::read_to_string(
+        manifest_dir.join("agent-doc-template-io/src/response_materialization_io.rs"),
+    )
+    .unwrap();
     for forbidden_snippet in [
         "pub use agent_doc_template::response_materialization",
         "pub fn ensure_strict_template_response_heading",
@@ -24537,13 +24541,13 @@ fn test_agent_doc_template_owns_strict_response_heading_policy() {
     ] {
         assert!(
             !write_materialize.contains(forbidden_snippet),
-            "write/materialize.rs must not facade or re-own strict heading policy: {forbidden_snippet}"
+            "response_materialization_io.rs must not facade or re-own strict heading policy: {forbidden_snippet}"
         );
     }
 
     for relative_path in [
         "agent-doc-orchestration/src/write/run_entry.rs",
-        "agent-doc-orchestration/src/write/normalize.rs",
+        "agent-doc-template-io/src/write_normalize.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
@@ -25636,9 +25640,10 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
     let write_run_entry =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
             .unwrap();
-    let write_materialize =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
-            .unwrap();
+    let write_materialize = fs::read_to_string(
+        manifest_dir.join("agent-doc-template-io/src/response_materialization_io.rs"),
+    )
+    .unwrap();
     let template_io_backlog =
         fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/backlog_normalization.rs"))
             .unwrap();
@@ -25670,7 +25675,7 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
             "agent_doc_template::response_materialization::strip_partial_response_materialization_from_exchange"
         ) && !write_materialize.contains("agent_doc_template::sanitize")
             && !write_materialize.contains("template::sanitize"),
-        "write/materialize.rs should stay limited to response materialization helpers"
+        "response_materialization_io.rs should stay limited to response materialization helpers"
     );
 }
 

@@ -109,6 +109,7 @@ use agent_doc_frontmatter::frontmatter;
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
+use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 
 use crate::{git, repair};
 use agent_doc_document::write_normalization::editor_buffer_preserved_head_exchange;
@@ -457,12 +458,8 @@ fn relocate_out_of_exchange_prompt_before_diff(
     };
 
     if let Some(snapshot_content) = agent_doc_snapshot_io::load(file)? {
-        repaired = crate::write::normalize_user_prompts_in_exchange_safe(
-            &repaired,
-            &repaired,
-            &snapshot_content,
-            file,
-        );
+        repaired =
+            normalize_user_prompts_in_exchange_safe(&repaired, &repaired, &snapshot_content, file);
         repaired = crate::write::normalize_template_structure_or_fail(&repaired, file)?;
     }
 

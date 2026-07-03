@@ -1,6 +1,10 @@
-//! Extracted from `write.rs` (large-module split). See parent module for context.
+//! Write normalization and response-contract IO adapters.
 
-use super::*;
+use anyhow::Result;
+use std::path::Path;
+
+#[cfg(test)]
+use agent_doc_document::write_normalization::lift_pending_from_exchange;
 #[cfg(test)]
 use agent_doc_element_exchange::normalize_user_prompts_in_exchange;
 #[cfg(test)]
@@ -54,7 +58,7 @@ pub fn enforce_imperative_response_contract_for_diff(
     );
 }
 
-pub(crate) fn template_mode_overrides_for_current_doc(
+pub fn template_mode_overrides_for_current_doc(
     file: &Path,
     baseline: Option<&str>,
     current_content: &str,
@@ -534,11 +538,8 @@ mod verify_sidecar_normalization_tests {
 mod core_tests {
     #![allow(unused_imports)]
     use super::*;
-    use fs2::FileExt;
     use std::fs;
-    use std::fs::OpenOptions;
     use std::time::Duration;
-    use tempfile::TempDir;
 
     #[test]
     fn normalize_user_prompts_new_line_gets_prefix() {

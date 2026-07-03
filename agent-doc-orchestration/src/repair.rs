@@ -82,6 +82,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 use agent_doc_workflow::capture::{
     RepairTemplateChangeKind, RepairTemplateChanges, StaleCaptureRetirementDecision,
     StaleCaptureRetirementEvidence, capture_state_is_repairable, decide_stale_capture_retirement,
@@ -647,12 +648,8 @@ fn repair_template_doc_if_needed(
     if fm.resolve_mode().is_template()
         && let Some(snapshot_content) = agent_doc_snapshot_io::load(file)?
     {
-        repaired = write::normalize_user_prompts_in_exchange_safe(
-            &repaired,
-            &repaired,
-            &snapshot_content,
-            file,
-        );
+        repaired =
+            normalize_user_prompts_in_exchange_safe(&repaired, &repaired, &snapshot_content, file);
         if let Some(stripped) = strip_prompt_prefix_from_response_body_first_lines(&repaired) {
             agent_doc_ops_log_io::log_op(
                 file,

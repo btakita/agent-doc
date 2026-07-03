@@ -1,13 +1,17 @@
-//! Extracted from `write.rs` (large-module split). See parent module for context.
+//! Response materialization IO diagnostics for write/IPC paths.
 
-use super::*;
+use anyhow::Result;
+use std::path::Path;
+
 use agent_doc_template::response_materialization::strip_partial_response_materialization_from_exchange;
+use agent_doc_turn::response_replay::response_materialized_in_content;
 
-pub(crate) fn ipc_response_materialized_or_fallback(
+pub fn ipc_response_materialized_or_fallback_with_recycle(
     file: &Path,
     source: &str,
     response: &str,
     content: &str,
+    schedule_stale_supervisor_recycle: impl FnOnce(&Path, &str),
 ) -> bool {
     if response_materialized_in_content(response, content) {
         return true;
@@ -30,7 +34,7 @@ pub(crate) fn ipc_response_materialized_or_fallback(
             content_hash
         ),
     );
-    log_ipc_proof_failure(
+    log_ipc_proof_failure_with_recycle(
         file,
         source,
         None,
@@ -42,17 +46,38 @@ pub(crate) fn ipc_response_materialized_or_fallback(
             content.len(),
             content_hash
         ),
+        schedule_stale_supervisor_recycle,
     );
     false
 }
 
-pub(crate) fn log_ipc_proof_failure(
+pub fn log_ipc_proof_failure(
     file: &Path,
     source: &str,
     patch_id: Option<&str>,
     invariant: &str,
     recovery: &str,
     detail: &str,
+) {
+    log_ipc_proof_failure_with_recycle(
+        file,
+        source,
+        patch_id,
+        invariant,
+        recovery,
+        detail,
+        |_, _| {},
+    );
+}
+
+pub fn log_ipc_proof_failure_with_recycle(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    invariant: &str,
+    recovery: &str,
+    detail: &str,
+    schedule_stale_supervisor_recycle: impl FnOnce(&Path, &str),
 ) {
     eprintln!(
         "[write] IPC proof insufficient for {}: source={} patch_id={} invariant={} recovery={}{}{}",
@@ -83,11 +108,11 @@ pub(crate) fn log_ipc_proof_failure(
     // caller keep thrashing the buffer. Only the retry-without-disk recovery class is a
     // candidate; genuine disk-fallback failures are not stale-supervisor drift.
     if recovery.contains("retry_without_disk_write") {
-        super::converge::schedule_stale_supervisor_pcp_recycle(file, source);
+        schedule_stale_supervisor_recycle(file, source);
     }
 }
 
-pub(crate) fn log_partial_response_materialization_for_retry(
+pub fn log_partial_response_materialization_for_retry(
     file: &Path,
     source: &str,
     response: &str,

@@ -9627,7 +9627,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         })
         .collect();
     assert!(
-        coverage_lines.len() >= 30,
+        coverage_lines.len() >= 31,
         "coarse extraction commit coverage should include prior large-chunk rounds and current rounds; found {} rows",
         coverage_lines.len()
     );
@@ -9651,7 +9651,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 34,
+        ledger_rows.len() >= 35,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -9853,6 +9853,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("35752f5c", "Tracked-work command and done-archive IO"),
         ("1e486e4f", "Session-check guard IO adapter batch"),
         ("7fbe726a", "Focus command host IO"),
+        ("369280b0", "Session actor store and mailbox IO"),
     ] {
         assert!(
             coverage_lines
@@ -10066,6 +10067,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/focus.rs",
             "agent-doc-focus-io/src/lib.rs",
             "Split stash-window promotion and live-owner lookup out of `sync.rs`",
+        ),
+        (
+            "Session actor store and mailbox IO",
+            "agent-doc-orchestration/src/session_actor.rs",
+            "agent-doc-session-actor-io/src/lib.rs",
+            "Split SQLite actor-store migration/projection emission from in-process mailbox runtime",
         ),
     ] {
         let row_text = ledger_rows

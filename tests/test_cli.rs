@@ -9635,10 +9635,22 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split schema/pathing/atomic writes from higher-level lifecycle bookkeeping",
         ),
         (
+            "Operation-log facade deletion",
+            "agent-doc-orchestration/src/ops_log.rs",
+            "agent-doc-ops-log-io/src/lib.rs",
+            "never reintroduce an orchestration ops-log facade",
+        ),
+        (
             "Realtime admission cycle opener",
             "agent-doc-orchestration/src/admit.rs",
             "agent-doc-cycle-state-io/src/lib.rs",
             "extract current-document authority from `agent-doc-orchestration::realtime_model`",
+        ),
+        (
+            "Workflow doctor/autofix IO",
+            "agent-doc-orchestration/src/{doctor.rs,autofix.rs}",
+            "agent-doc-workflow-io/src/{doctor.rs,autofix.rs}",
+            "move controller inspection and realtime buffer divergence into focused IO crates",
         ),
         (
             "Session accretion IO adapter",
@@ -9881,8 +9893,14 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             "agent-doc-workflow must own workflow doctor JSON projection policy: {required}"
         );
     }
-    let orchestration_doctor =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/doctor.rs")).unwrap();
+    let workflow_io_doctor =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/doctor.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/doctor.rs")
+            .exists(),
+        "workflow doctor IO must not remain in orchestration"
+    );
     for forbidden in [
         "WORKFLOW_DOCTOR_SCHEMA_VERSION",
         "pub enum WorkflowDoctorOutcome",
@@ -9923,25 +9941,33 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub(crate) use agent_doc_workflow::doctor",
     ] {
         assert!(
-            !orchestration_doctor.contains(forbidden),
-            "orchestration doctor must gather facts, not re-own or facade workflow doctor policy: {forbidden}"
+            !workflow_io_doctor.contains(forbidden),
+            "workflow IO doctor must gather facts, not re-own workflow doctor policy: {forbidden}"
         );
     }
     assert!(
-        orchestration_doctor.contains("use agent_doc_workflow::doctor::{")
-            && orchestration_doctor.contains("evaluate_catalog")
-            && orchestration_doctor.contains("format_text_report")
-            && orchestration_doctor.contains("ops_log_facts_from_content"),
-        "orchestration doctor should call the focused doctor policy directly"
+        workflow_io_doctor.contains("use agent_doc_workflow::doctor::{")
+            && workflow_io_doctor.contains("evaluate_catalog")
+            && workflow_io_doctor.contains("format_text_report")
+            && workflow_io_doctor.contains("ops_log_facts_from_content")
+            && workflow_io_doctor.contains("pub trait WorkflowDoctorEffects")
+            && workflow_io_doctor.contains("agent_doc_cycle_state_io::load(file)"),
+        "workflow IO doctor should own fact IO and call focused doctor policy through injected live effects"
     );
     assert!(
-        orchestration_doctor.contains("use agent_doc_workflow::doctor_json::{")
-            && orchestration_doctor.contains("project_preflight_facts")
-            && orchestration_doctor.contains("project_session_check_facts"),
-        "orchestration doctor should call focused doctor JSON projection directly"
+        workflow_io_doctor.contains("use agent_doc_workflow::doctor_json::{")
+            && workflow_io_doctor.contains("project_preflight_facts")
+            && workflow_io_doctor.contains("project_session_check_facts"),
+        "workflow IO doctor should call focused doctor JSON projection directly"
     );
-    let orchestration_autofix =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/autofix.rs")).unwrap();
+    let workflow_io_autofix =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/autofix.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/autofix.rs")
+            .exists(),
+        "workflow autofix IO must not remain in orchestration"
+    );
     let workflow_autofix =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/autofix.rs")).unwrap();
     for required in [
@@ -9961,18 +9987,18 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         );
     }
     assert!(
-        orchestration_autofix.contains("use agent_doc_workflow::autofix::{")
-            && orchestration_autofix.contains("WorkflowAutofixReport")
-            && orchestration_autofix.contains("WorkflowAutofixStep")
-            && orchestration_autofix.contains("WorkflowAutofixStepStatus")
-            && orchestration_autofix.contains("plan_autofix_steps"),
-        "orchestration autofix should consume focused workflow autofix planning directly"
+        workflow_io_autofix.contains("use agent_doc_workflow::autofix::{")
+            && workflow_io_autofix.contains("WorkflowAutofixReport")
+            && workflow_io_autofix.contains("WorkflowAutofixStep")
+            && workflow_io_autofix.contains("WorkflowAutofixStepStatus")
+            && workflow_io_autofix.contains("plan_autofix_steps"),
+        "workflow IO autofix should consume focused workflow autofix planning directly"
     );
     assert!(
-        orchestration_autofix.contains("use agent_doc_workflow_io::proof_ledger::{")
-            && orchestration_autofix.contains("append_operation_proof")
-            && orchestration_autofix.contains("read_operation_proofs"),
-        "orchestration autofix should consume focused workflow proof ledger IO directly"
+        workflow_io_autofix.contains("use crate::proof_ledger::{")
+            && workflow_io_autofix.contains("append_operation_proof")
+            && workflow_io_autofix.contains("read_operation_proofs"),
+        "workflow IO autofix should consume focused workflow proof ledger IO directly"
     );
     for forbidden in [
         "fn is_whitelisted_autofix(",
@@ -9988,8 +10014,8 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "RemediationAction::FinalizeOrWriteCommit =>",
     ] {
         assert!(
-            !orchestration_autofix.contains(forbidden),
-            "orchestration autofix must not re-own workflow remediation action policy: {forbidden}"
+            !workflow_io_autofix.contains(forbidden),
+            "workflow IO autofix must not re-own workflow remediation action policy: {forbidden}"
         );
     }
 
@@ -10051,7 +10077,9 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/lib.rs")).unwrap();
     assert!(
         workflow_io_lib.contains("pub mod convergence_playback;")
-            && workflow_io_lib.contains("pub mod proof_ledger;"),
+            && workflow_io_lib.contains("pub mod proof_ledger;")
+            && workflow_io_lib.contains("pub mod doctor;")
+            && workflow_io_lib.contains("pub mod autofix;"),
         "agent-doc-workflow-io must expose workflow storage modules through their owning modules"
     );
     let workflow_proof_ledger =
@@ -10236,8 +10264,8 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "prompt-context IO should call focused prompt-target extraction directly"
     );
     for relative_path in [
-        "agent-doc-orchestration/src/doctor.rs",
-        "agent-doc-orchestration/src/autofix.rs",
+        "agent-doc-workflow-io/src/doctor.rs",
+        "agent-doc-workflow-io/src/autofix.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
@@ -19368,7 +19396,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "route startup should call focused project-root IO instead of owning registry base fallback discovery"
     );
     let workflow_doctor_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/doctor.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/doctor.rs")).unwrap();
     assert!(
         !workflow_doctor_source.contains("agent_doc_fs::find_project_root(")
             && workflow_doctor_source
@@ -19376,7 +19404,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "workflow doctor should call focused project-root IO instead of owning .agent-doc root discovery"
     );
     let workflow_autofix_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/autofix.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/autofix.rs")).unwrap();
     assert!(
         !workflow_autofix_source.contains("agent_doc_fs::find_project_root(")
             && workflow_autofix_source
@@ -21164,7 +21192,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "orchestration git adapter should import git directory/path helpers directly"
     );
     let doctor_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/doctor.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/doctor.rs")).unwrap();
     let closeout_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
             .unwrap();

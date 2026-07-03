@@ -38,8 +38,54 @@ impl Default for WorkflowDoctorOptions {
     }
 }
 
-pub fn run(file: &Path, options: WorkflowDoctorOptions) -> Result<()> {
-    let report = diagnose(file, &options)?;
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LiveSessionCheckFacts {
+    pub ok: Option<bool>,
+    pub status: Option<String>,
+    pub message: Option<String>,
+    pub warnings: Vec<String>,
+}
+
+pub trait WorkflowDoctorEffects {
+    fn inspect_session_check(&mut self, file: &Path) -> Result<Option<LiveSessionCheckFacts>>;
+
+    fn inspect_actor(&mut self, project_root: &Path, file: &Path) -> Result<ActorDoctorFacts>;
+
+    fn live_buffer_diverges(
+        &mut self,
+        file: &Path,
+        disk_content: &str,
+        project_root: &Path,
+    ) -> Result<Option<bool>>;
+}
+
+pub struct NoopWorkflowDoctorEffects;
+
+impl WorkflowDoctorEffects for NoopWorkflowDoctorEffects {
+    fn inspect_session_check(&mut self, _file: &Path) -> Result<Option<LiveSessionCheckFacts>> {
+        Ok(None)
+    }
+
+    fn inspect_actor(&mut self, _project_root: &Path, _file: &Path) -> Result<ActorDoctorFacts> {
+        Ok(ActorDoctorFacts::default())
+    }
+
+    fn live_buffer_diverges(
+        &mut self,
+        _file: &Path,
+        _disk_content: &str,
+        _project_root: &Path,
+    ) -> Result<Option<bool>> {
+        Ok(None)
+    }
+}
+
+pub fn run(
+    file: &Path,
+    options: WorkflowDoctorOptions,
+    effects: &mut impl WorkflowDoctorEffects,
+) -> Result<()> {
+    let report = diagnose(file, &options, effects)?;
     if options.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -48,15 +94,20 @@ pub fn run(file: &Path, options: WorkflowDoctorOptions) -> Result<()> {
     Ok(())
 }
 
-pub fn diagnose(file: &Path, options: &WorkflowDoctorOptions) -> Result<WorkflowDoctorReport> {
+pub fn diagnose(
+    file: &Path,
+    options: &WorkflowDoctorOptions,
+    effects: &mut impl WorkflowDoctorEffects,
+) -> Result<WorkflowDoctorReport> {
     let catalog = workflow_invariant_catalog();
-    let (facts, warnings) = gather_facts(file, options)?;
+    let (facts, warnings) = gather_facts(file, options, effects)?;
     Ok(evaluate_catalog(file, catalog, facts, warnings))
 }
 
 fn gather_facts(
     file: &Path,
     options: &WorkflowDoctorOptions,
+    effects: &mut impl WorkflowDoctorEffects,
 ) -> Result<(WorkflowDoctorFacts, Vec<String>)> {
     let mut warnings = Vec::new();
     let canonical = file
@@ -66,12 +117,12 @@ fn gather_facts(
     let document_hash = agent_doc_fs::document_state_hash(&canonical).ok();
     let preflight = read_preflight_facts(options.preflight_json.as_deref())?;
     let mut session_check = read_session_check_json_facts(options.session_check_json.as_deref())?;
-    merge_live_session_check(file, &mut session_check, &mut warnings);
+    merge_live_session_check(effects, file, &mut session_check, &mut warnings);
     let cycle_state = read_cycle_state(file, &mut warnings);
     let ops_log = read_ops_log(project_root.as_deref(), options.ops_limit, &mut warnings);
-    let actor = read_actor_facts(file, project_root.as_deref(), &mut warnings);
+    let actor = read_actor_facts(effects, file, project_root.as_deref(), &mut warnings);
     let git = read_git_facts(file, &mut warnings);
-    let editor = read_editor_facts(file, project_root.as_deref(), &mut warnings);
+    let editor = read_editor_facts(effects, file, project_root.as_deref(), &mut warnings);
     Ok((
         WorkflowDoctorFacts {
             project_root: project_root.map(|root| root.display().to_string()),
@@ -115,32 +166,33 @@ fn read_session_check_json_facts(path: Option<&Path>) -> Result<SessionCheckDoct
 }
 
 fn merge_live_session_check(
+    effects: &mut impl WorkflowDoctorEffects,
     file: &Path,
     facts: &mut SessionCheckDoctorFacts,
     warnings: &mut Vec<String>,
 ) {
-    match crate::session_check::inspect_with_warnings(file) {
-        Ok(report) => {
-            match report.status {
-                crate::session_check::SessionCheckStatus::Ok(message) => {
-                    if facts.ok.is_none() {
-                        facts.ok = Some(true);
-                    }
-                    if facts.status.is_none() {
-                        facts.status = Some("ok".to_string());
-                    }
-                    if facts.message.is_none() {
-                        facts.message = Some(message);
-                    }
+    match effects.inspect_session_check(file) {
+        Ok(Some(live)) => {
+            let interrupted =
+                live.ok == Some(false) || live.status.as_deref() == Some("interrupted");
+            if interrupted {
+                facts.ok = live.ok.or(Some(false));
+                facts.status = live.status.or_else(|| Some("interrupted".to_string()));
+                facts.message = live.message;
+            } else {
+                if facts.ok.is_none() {
+                    facts.ok = live.ok;
                 }
-                crate::session_check::SessionCheckStatus::Interrupted(message) => {
-                    facts.ok = Some(false);
-                    facts.status = Some("interrupted".to_string());
-                    facts.message = Some(message);
+                if facts.status.is_none() {
+                    facts.status = live.status;
+                }
+                if facts.message.is_none() {
+                    facts.message = live.message;
                 }
             }
-            facts.warnings.extend(report.warnings);
+            facts.warnings.extend(live.warnings);
         }
+        Ok(None) => {}
         Err(err) => warnings.push(format!("session-check inspection unavailable: {err}")),
     }
 }
@@ -195,6 +247,7 @@ fn read_ops_log(
 }
 
 fn read_actor_facts(
+    effects: &mut impl WorkflowDoctorEffects,
     file: &Path,
     project_root: Option<&Path>,
     warnings: &mut Vec<String>,
@@ -202,40 +255,13 @@ fn read_actor_facts(
     let Some(root) = project_root else {
         return ActorDoctorFacts::default();
     };
-    let inspection = match crate::project_controller::inspect_actor(root, Some(file), None, None) {
-        Ok(inspection) => inspection,
+    match effects.inspect_actor(root, file) {
+        Ok(facts) => facts,
         Err(err) => {
             warnings.push(format!("controller actor inspection unavailable: {err}"));
-            return ActorDoctorFacts::default();
+            ActorDoctorFacts::default()
         }
-    };
-    let mut facts = ActorDoctorFacts {
-        inspection_available: true,
-        state: None,
-        generation: None,
-        pane: None,
-        supervisor_pid: None,
-        controller_fresh: None,
-        supervisor_fresh: None,
-        guidance: None,
-    };
-    if let Some(record) = inspection.record {
-        facts.state = Some(record.state.as_str().to_string());
-        facts.generation = Some(record.generation);
-        facts.pane = Some(record.pane_id);
     }
-    if let Some(lease) = inspection.supervisor_lease {
-        facts.supervisor_pid = lease.supervisor_pid;
-    }
-    if let Some(freshness) = inspection.freshness {
-        facts.controller_fresh = freshness.controller.matches_installed;
-        facts.supervisor_fresh = freshness
-            .route_owned_supervisor
-            .as_ref()
-            .and_then(|process| process.matches_installed);
-        facts.guidance = Some(freshness.guidance);
-    }
-    facts
 }
 
 fn read_git_facts(file: &Path, warnings: &mut Vec<String>) -> GitDoctorFacts {
@@ -278,6 +304,7 @@ fn read_git_facts(file: &Path, warnings: &mut Vec<String>) -> GitDoctorFacts {
 }
 
 fn read_editor_facts(
+    effects: &mut impl WorkflowDoctorEffects,
     file: &Path,
     project_root: Option<&Path>,
     warnings: &mut Vec<String>,
@@ -295,7 +322,13 @@ fn read_editor_facts(
     let live_buffer_diverges = if disk.is_empty() {
         None
     } else {
-        Some(crate::realtime_model::durable_buffer_state(file, &disk).is_some())
+        match effects.live_buffer_diverges(file, &disk, root) {
+            Ok(value) => value,
+            Err(err) => {
+                warnings.push(format!("editor live-buffer check unavailable: {err}"));
+                None
+            }
+        }
     };
     EditorDoctorFacts {
         patches_dir_present: root.join(".agent-doc/patches").is_dir(),

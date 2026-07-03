@@ -116,6 +116,88 @@ pub enum PatchMode {
     Prepend,
 }
 
+struct CliWorkflowDoctorEffects;
+
+impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorEffects {
+    fn inspect_session_check(
+        &mut self,
+        file: &Path,
+    ) -> anyhow::Result<Option<agent_doc_workflow_io::doctor::LiveSessionCheckFacts>> {
+        let report = agent_doc_orchestration::session_check::inspect_with_warnings(file)?;
+        let facts = match report.status {
+            agent_doc_orchestration::session_check::SessionCheckStatus::Ok(message) => {
+                agent_doc_workflow_io::doctor::LiveSessionCheckFacts {
+                    ok: Some(true),
+                    status: Some("ok".to_string()),
+                    message: Some(message),
+                    warnings: report.warnings,
+                }
+            }
+            agent_doc_orchestration::session_check::SessionCheckStatus::Interrupted(message) => {
+                agent_doc_workflow_io::doctor::LiveSessionCheckFacts {
+                    ok: Some(false),
+                    status: Some("interrupted".to_string()),
+                    message: Some(message),
+                    warnings: report.warnings,
+                }
+            }
+        };
+        Ok(Some(facts))
+    }
+
+    fn inspect_actor(
+        &mut self,
+        project_root: &Path,
+        file: &Path,
+    ) -> anyhow::Result<agent_doc_workflow::doctor::ActorDoctorFacts> {
+        let inspection = agent_doc_orchestration::project_controller::inspect_actor(
+            project_root,
+            Some(file),
+            None,
+            None,
+        )?;
+        let mut facts = agent_doc_workflow::doctor::ActorDoctorFacts {
+            inspection_available: true,
+            state: None,
+            generation: None,
+            pane: None,
+            supervisor_pid: None,
+            controller_fresh: None,
+            supervisor_fresh: None,
+            guidance: None,
+        };
+        if let Some(record) = inspection.record {
+            facts.state = Some(record.state.as_str().to_string());
+            facts.generation = Some(record.generation);
+            facts.pane = Some(record.pane_id);
+        }
+        if let Some(lease) = inspection.supervisor_lease {
+            facts.supervisor_pid = lease.supervisor_pid;
+        }
+        if let Some(freshness) = inspection.freshness {
+            facts.controller_fresh = freshness.controller.matches_installed;
+            facts.supervisor_fresh = freshness
+                .route_owned_supervisor
+                .as_ref()
+                .and_then(|process| process.matches_installed);
+            facts.guidance = Some(freshness.guidance);
+        }
+        Ok(facts)
+    }
+
+    fn live_buffer_diverges(
+        &mut self,
+        file: &Path,
+        disk_content: &str,
+        _project_root: &Path,
+    ) -> anyhow::Result<Option<bool>> {
+        Ok(Some(
+            agent_doc_orchestration::realtime_model::durable_buffer_state(file, disk_content)
+                .is_some(),
+        ))
+    }
+}
+
 /// Turn lifecycle actions for `agent-doc turn-status`
 /// (#claude-busy-status-during-active-turn).
 #[derive(Subcommand)]
@@ -2912,15 +2994,19 @@ fn main() -> anyhow::Result<()> {
             session_check_json,
             limit,
             json,
-        } => agent_doc_orchestration::doctor::run(
-            &file,
-            agent_doc_orchestration::doctor::WorkflowDoctorOptions {
-                preflight_json,
-                session_check_json,
-                ops_limit: limit,
-                json,
-            },
-        ),
+        } => {
+            let mut effects = CliWorkflowDoctorEffects;
+            agent_doc_workflow_io::doctor::run(
+                &file,
+                agent_doc_workflow_io::doctor::WorkflowDoctorOptions {
+                    preflight_json,
+                    session_check_json,
+                    ops_limit: limit,
+                    json,
+                },
+                &mut effects,
+            )
+        }
         Commands::Autofix {
             file,
             preflight_json,
@@ -2929,17 +3015,21 @@ fn main() -> anyhow::Result<()> {
             apply,
             dry_run,
             json,
-        } => agent_doc_orchestration::autofix::run(
-            &file,
-            agent_doc_orchestration::autofix::WorkflowAutofixOptions {
-                preflight_json,
-                session_check_json,
-                ops_limit: limit,
-                apply,
-                dry_run,
-                json,
-            },
-        ),
+        } => {
+            let mut effects = CliWorkflowDoctorEffects;
+            agent_doc_workflow_io::autofix::run(
+                &file,
+                agent_doc_workflow_io::autofix::WorkflowAutofixOptions {
+                    preflight_json,
+                    session_check_json,
+                    ops_limit: limit,
+                    apply,
+                    dry_run,
+                    json,
+                },
+                &mut effects,
+            )
+        }
         Commands::Plan { file } => plan::run(&file),
         Commands::Jobs { action } => match action {
             JobsAction::Create {

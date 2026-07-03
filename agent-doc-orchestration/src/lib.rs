@@ -36,13 +36,11 @@
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod admin;
-pub mod autofix;
 pub mod backlog_cmd;
 pub mod claim;
 pub mod codex_hook;
 pub mod compact;
 pub use agent_doc_crdt_relay_io as crdt_relay_host;
-pub mod doctor;
 pub mod flow;
 pub mod focus;
 pub mod gc;

@@ -11,16 +11,16 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::doctor::{WorkflowDoctorOptions, diagnose};
+use crate::doctor::{WorkflowDoctorEffects, WorkflowDoctorOptions, diagnose};
+use crate::proof_ledger::{
+    OperationProofInput, OperationProofRecord, ProofEvidenceKind, ProofOperationKind, ProofOutcome,
+    append_operation_proof, proof_ledger_path, read_operation_proofs,
+};
 use agent_doc_workflow::autofix::{
     WORKFLOW_AUTOFIX_SCHEMA_VERSION, WorkflowAutofixReport, WorkflowAutofixStep,
     WorkflowAutofixStepStatus, plan_autofix_steps,
 };
 use agent_doc_workflow::invariants::workflow_invariant_catalog;
-use agent_doc_workflow_io::proof_ledger::{
-    OperationProofInput, OperationProofRecord, ProofEvidenceKind, ProofOperationKind, ProofOutcome,
-    append_operation_proof, proof_ledger_path, read_operation_proofs,
-};
 
 const DEFAULT_OPS_LIMIT: usize = 200;
 
@@ -47,8 +47,12 @@ impl Default for WorkflowAutofixOptions {
     }
 }
 
-pub fn run(file: &Path, options: WorkflowAutofixOptions) -> Result<()> {
-    let report = autofix(file, &options)?;
+pub fn run(
+    file: &Path,
+    options: WorkflowAutofixOptions,
+    effects: &mut impl WorkflowDoctorEffects,
+) -> Result<()> {
+    let report = autofix(file, &options, effects)?;
     if options.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -57,14 +61,18 @@ pub fn run(file: &Path, options: WorkflowAutofixOptions) -> Result<()> {
     Ok(())
 }
 
-pub fn autofix(file: &Path, options: &WorkflowAutofixOptions) -> Result<WorkflowAutofixReport> {
+pub fn autofix(
+    file: &Path,
+    options: &WorkflowAutofixOptions,
+    effects: &mut impl WorkflowDoctorEffects,
+) -> Result<WorkflowAutofixReport> {
     let doctor_options = WorkflowDoctorOptions {
         preflight_json: options.preflight_json.clone(),
         session_check_json: options.session_check_json.clone(),
         ops_limit: options.ops_limit,
         json: false,
     };
-    let doctor = diagnose(file, &doctor_options)?;
+    let doctor = diagnose(file, &doctor_options, effects)?;
     let catalog = workflow_invariant_catalog();
     let canonical = file
         .canonicalize()

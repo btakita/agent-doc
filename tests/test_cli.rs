@@ -1120,7 +1120,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/session_check/detect.rs",
         "agent-doc-workflow/src/session_check.rs",
         "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/write/queue_consume.rs",
+        "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-orchestration/src/write/normalize.rs",
@@ -1616,16 +1616,16 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/write/run_entry.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/write/run_entry.rs", "reason=") => 2,
         // queue-prompt consumption, IPC transport/repair, and live-prompt-drift
-        // convergence extracted into write/queue_consume.rs, write/ipc.rs, and
-        // write/converge.rs (#splitmods3 large-module split). The moved
+        // convergence extracted into agent-doc-queue-io/src/queue_consume.rs,
+        // write/ipc.rs, and write/converge.rs (#splitmods3 large-module split). The moved
         // `guard_`/`reason=` tokens are tracked against the new submodules,
         // not added anew.
-        ("agent-doc-orchestration/src/write/queue_consume.rs", "guard_") => 0,
+        ("agent-doc-queue-io/src/queue_consume.rs", "guard_") => 0,
         // +3 (#freshqueueauth): direct queue-head removals now log explicit
         // proof fields for prune/orphan/acknowledgement paths, and the new
         // acknowledgement regression asserts that proof marker. The operations
         // stay routed through the existing queue-consume/converge write boundary.
-        ("agent-doc-orchestration/src/write/queue_consume.rs", "proof=") => 3,
+        ("agent-doc-queue-io/src/queue_consume.rs", "proof=") => 3,
         // 1 -> 4 (#editorbufwin Fix A): the queue-consume head-equality check now
         // reconciles a benign live-buffer head divergence instead of hard-bailing,
         // mirroring the existing remaining-queue `reason=crdt_merge_authoritative`
@@ -1635,7 +1635,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // (no evidence still bails, preserving the corruption guard).
         // 4 -> 5 (#typed-stop-fence): post-consume next-head projection records
         // typed stop-fence deferral as `QueueHeadDeferred` with the owning reason.
-        ("agent-doc-orchestration/src/write/queue_consume.rs", "reason=") => 4,
+        ("agent-doc-queue-io/src/queue_consume.rs", "reason=") => 4,
         // +4 `guard_` (#dupcontent: two `guard_adopts/refuses_*` adoption tests
         // + two `guard_ipc_snapshot_adoption_against_live_prompt_drift` calls in
         // those tests) and +2 `reason=` (the two `content_ours_adoption_refused_structural`
@@ -4065,7 +4065,7 @@ fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
     }
 
     for relative in [
-        "agent-doc-orchestration/src/write/queue_consume.rs",
+        "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
         "agent-doc-orchestration/src/write.rs",
@@ -4142,9 +4142,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         );
     }
 
-    let orchestration_queue_consume =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
-            .unwrap();
+    let queue_io_consume =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
     let orchestration_preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let orchestration_preflight_maintenance = fs::read_to_string(
@@ -4173,8 +4172,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "pub(crate) fn next_queue_head_selection(",
     ] {
         assert!(
-            !orchestration_queue_consume.contains(forbidden),
-            "write/queue_consume.rs must not re-own queue consumption entry policy: {forbidden}"
+            !queue_io_consume.contains(forbidden),
+            "agent-doc-queue-io queue_consume.rs must not re-own queue consumption entry policy: {forbidden}"
         );
     }
     assert!(
@@ -4182,10 +4181,10 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "preflight.rs must not re-own resolved-id queue strike policy"
     );
     assert!(
-        orchestration_queue_consume.contains("queue_consume::{")
-            && orchestration_queue_consume.contains("annotate_newly_struck_free_text_heads")
-            && orchestration_queue_consume.contains("cycle_answered_foreign_exchange_prompt"),
-        "write/queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
+        queue_io_consume.contains("queue_consume::{")
+            && queue_io_consume.contains("annotate_newly_struck_free_text_heads")
+            && queue_io_consume.contains("cycle_answered_foreign_exchange_prompt"),
+        "agent-doc-queue-io queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
     );
     let orchestration_write_run_entry =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
@@ -4271,7 +4270,7 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
     }
 
     for relative in [
-        "agent-doc-orchestration/src/write/queue_consume.rs",
+        "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
     ] {
@@ -4303,15 +4302,14 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
         "agent-doc-queue::queue_consume should call focused free-text queue response proof policy directly"
     );
 
-    let orchestration_queue_consume =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
-            .unwrap();
+    let queue_io_consume =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
     assert!(
-        !orchestration_queue_consume.contains("free_text_head_present_in_baseline")
-            && !orchestration_queue_consume.contains("head_carries_in_progress_marker")
-            && !orchestration_queue_consume.contains("free_text_head_match_prose")
-            && !orchestration_queue_consume.contains("normalize_for_answer_match"),
-        "orchestration write/queue_consume.rs should not re-own free-text response proof policy"
+        !queue_io_consume.contains("free_text_head_present_in_baseline")
+            && !queue_io_consume.contains("head_carries_in_progress_marker")
+            && !queue_io_consume.contains("free_text_head_match_prose")
+            && !queue_io_consume.contains("normalize_for_answer_match"),
+        "agent-doc-queue-io queue_consume.rs should not re-own free-text response proof policy"
     );
 }
 
@@ -4405,8 +4403,7 @@ fn test_agent_doc_queue_owns_queue_prompt_echo_policy() {
     }
 
     let queue_consume =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
     for forbidden in [
         "pub(crate) fn first_nonempty_line",
         "pub(crate) fn format_consumed_prompt_echo",
@@ -4419,7 +4416,7 @@ fn test_agent_doc_queue_owns_queue_prompt_echo_policy() {
     ] {
         assert!(
             !queue_consume.contains(forbidden),
-            "write/queue_consume.rs must not re-own queue prompt echo/embedding policy: {forbidden}"
+            "agent-doc-queue-io queue_consume.rs must not re-own queue prompt echo/embedding policy: {forbidden}"
         );
     }
     assert!(
@@ -6483,7 +6480,7 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
     }
     for relative_path in [
         "agent-doc-orchestration/src/run.rs",
-        "agent-doc-orchestration/src/write/queue_consume.rs",
+        "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
@@ -24021,8 +24018,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
     }
 
     let queue_consume =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
     for forbidden_snippet in [
         "pub(crate) use agent_doc_queue::queue_response",
         "pub fn queue_head_is_free_text_prompt",
@@ -24044,7 +24040,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
     ] {
         assert!(
             !queue_consume.contains(forbidden_snippet),
-            "write/queue_consume.rs must not re-own or facade queue-head classification: {forbidden_snippet}"
+            "agent-doc-queue-io queue_consume.rs must not re-own or facade queue-head classification: {forbidden_snippet}"
         );
     }
     for required_snippet in [
@@ -24053,7 +24049,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
     ] {
         assert!(
             queue_consume.contains(required_snippet),
-            "write/queue_consume.rs should call focused queue consumption helpers directly: {required_snippet}"
+            "agent-doc-queue-io queue_consume.rs should call focused queue consumption helpers directly: {required_snippet}"
         );
     }
 
@@ -24172,8 +24168,7 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     );
 
     let queue_consume =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
     for forbidden_snippet in [
         "pub(crate) fn active_queue_head_text(",
         "pub(crate) fn queue_skip_diagnostic_for_content(",

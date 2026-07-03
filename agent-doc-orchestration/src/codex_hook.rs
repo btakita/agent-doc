@@ -43,7 +43,8 @@ use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_model_tier::context_transcript_io::{
     latest_codex_transcript, transcript_context_pct,
 };
-use agent_doc_model_tier::context_usage::{Harness, clear_decision};
+use agent_doc_model_tier::context_usage::{clear_decision, Harness};
+use agent_doc_queue_io::queue_consume;
 use agent_doc_turn::codex_stop_continuation::{
     render_prompt_continuation_instruction, render_slash_command_continuation_instruction,
 };
@@ -601,7 +602,7 @@ fn wrap_repeated_queue_response_patch(prompt: &str, response: &str) -> String {
 fn consume_recovered_queue_head(
     file: &Path,
     queue_completion_ids: &[String],
-) -> Result<Option<crate::write::QueueConsumptionOutcome>> {
+) -> Result<Option<queue_consume::QueueConsumptionOutcome>> {
     let force_disk_without_listener = file
         .canonicalize()
         .ok()
@@ -610,10 +611,11 @@ fn consume_recovered_queue_head(
             !agent_doc_ipc_io::is_listener_active(&project_root)
         })
         .unwrap_or(false);
-    crate::write::consume_queue_prompts_with_outcome(
+    queue_consume::consume_queue_prompts_with_outcome(
         file,
         queue_completion_ids,
         force_disk_without_listener,
+        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
     )
 }
 
@@ -622,7 +624,7 @@ fn repeated_queue_response_for_write(
     prompt: &str,
     response: &str,
 ) -> Result<std::result::Result<String, String>> {
-    if crate::write::response_explicitly_targets_active_queue_head(file, response)? {
+    if queue_consume::response_explicitly_targets_active_queue_head(file, response)? {
         return Ok(Ok(response.to_string()));
     }
     if response_has_patch_markers(response) || response_has_response_heading(response) {
@@ -1137,7 +1139,7 @@ fn attempt_stop_closeout(
     let captured_response_targets_queue_head = if queue_synthetic_cycle {
         match &payload {
             agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-                crate::write::response_explicitly_targets_active_queue_head(
+                queue_consume::response_explicitly_targets_active_queue_head(
                     file,
                     response.as_ref(),
                 )?

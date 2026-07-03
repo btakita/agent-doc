@@ -5635,9 +5635,12 @@ mod tests {
         );
 
         let done_ids = vec!["newhead".to_string()];
-        let outcome = crate::write::consume_queue_prompts_for_done_ids_force_disk_with_outcome(
-            &doc, &done_ids,
-        )
+        let outcome =
+            agent_doc_queue_io::queue_consume::consume_queue_prompts_for_done_ids_force_disk_with_outcome(
+                &doc,
+                &done_ids,
+                &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            )
         .unwrap()
         .expect("newly activated queue head should be consumable");
         assert_eq!(outcome.consumed_count, 1);

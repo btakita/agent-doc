@@ -133,6 +133,7 @@ use agent_doc_prompt_cache::{PROMPT_CACHE_BOUNDARY, PROMPT_CACHE_CONTROL};
 use agent_doc_prompt_cache::{
     PromptCacheBlocks, PromptCacheSessionCostSample, render_cache_miss_ranking,
 };
+use agent_doc_queue_io::queue_consume;
 use agent_doc_template as template;
 use agent_doc_turn::no_change::{
     NoChangeCycleStateInput, NoChangeVerdict, classify_no_change_cycle_state,
@@ -300,7 +301,7 @@ impl RunMode {
 struct RunCycleOutcome {
     dispatched: bool,
     queue_synthetic_diff: bool,
-    queue_consumption: Option<write::QueueConsumptionOutcome>,
+    queue_consumption: Option<queue_consume::QueueConsumptionOutcome>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -846,19 +847,28 @@ fn run_once(
     if !no_git {
         let _heartbeat = RunHeartbeat::start(file, "commit_closeout", agent_name, None);
         if queue_synthetic_diff
-            || write::should_consume_queue_prompt_for_diff(file, Some(&the_diff))?
+            || queue_consume::should_consume_queue_prompt_for_diff(file, Some(&the_diff))?
         {
             let queue_completion_ids = queue_diff_completion_id
                 .clone()
                 .into_iter()
                 .collect::<Vec<_>>();
             queue_consumption = if force_disk {
-                write::consume_queue_prompts_with_outcome(file, &queue_completion_ids, true)?
+                queue_consume::consume_queue_prompts_with_outcome(
+                    file,
+                    &queue_completion_ids,
+                    true,
+                    &write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                )?
             } else {
-                write::consume_queue_prompts_for_done_ids_with_outcome(file, &queue_completion_ids)?
+                queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
+                    file,
+                    &queue_completion_ids,
+                    &write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                )?
             };
         } else {
-            eprintln!("{}", write::queue_skip_diagnostic_for_file(file)?);
+            eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?);
         }
         write::complete_required_closeout(file)?;
     }
@@ -2139,7 +2149,7 @@ mod tests {
         let outcome = RunCycleOutcome {
             dispatched: true,
             queue_synthetic_diff: true,
-            queue_consumption: Some(crate::write::QueueConsumptionOutcome {
+            queue_consumption: Some(queue_consume::QueueConsumptionOutcome {
                 consumed_text: "do [#prior]".to_string(),
                 consumed_count: 1,
                 node_ops: Vec::new(),

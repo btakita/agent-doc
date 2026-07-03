@@ -136,6 +136,7 @@ use agent_doc_queue::queue::{
     IdleQueueContextResetDecision, IdleQueueDrainDecision, clean_session_head_forces_context_reset,
     idle_queue_context_reset_decision, idle_queue_drain_decision,
 };
+use agent_doc_queue_io::queue_consume;
 use agent_doc_supervisor::auto_trigger::{
     AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction, AutoTriggerOutcome,
     AutoTriggerStopOutcome, CapabilityProofGate, auto_trigger_clear_cooldown_action,
@@ -350,7 +351,10 @@ fn complete_idle_queue_slash_command_head(
     command: &str,
     session_log: &mut Option<std::fs::File>,
 ) -> bool {
-    match crate::write::consume_queue_prompt_force_disk(file) {
+    match queue_consume::consume_queue_prompt_force_disk(
+        file,
+        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+    ) {
         Ok(Some(outcome)) => {
             if outcome.consumed_text.trim() != expected_head.trim() {
                 log_event(

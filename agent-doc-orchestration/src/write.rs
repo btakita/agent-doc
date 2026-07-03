@@ -246,6 +246,7 @@ use agent_doc_queue::queue_consume::{
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
 };
+use agent_doc_queue_io::queue_consume::{self, QueueConsumeWriteEffects, QueueConsumptionOutcome};
 use agent_doc_workflow::session_cycle::{
     FinalizeRerunCommand, compact_command_hint, finalize_rerun_command_base,
     group_pending_add_targets, parse_id_order, parse_tracked_work_edits,
@@ -779,9 +780,39 @@ fn consume_queue_prompts_for_done_ids_closeout(
     force_disk: bool,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     if force_disk {
-        consume_queue_prompts_with_outcome(file, done_ids, true)
+        queue_consume::consume_queue_prompts_with_outcome(
+            file,
+            done_ids,
+            true,
+            &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+        )
     } else {
-        consume_queue_prompts_for_done_ids_with_outcome(file, done_ids)
+        queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
+            file,
+            done_ids,
+            &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+        )
+    }
+}
+
+pub(crate) struct QueueConsumeWritebackEffects;
+
+pub(crate) static QUEUE_CONSUME_WRITEBACK_EFFECTS: QueueConsumeWritebackEffects =
+    QueueConsumeWritebackEffects;
+
+impl QueueConsumeWriteEffects for QueueConsumeWritebackEffects {
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        atomic_write(file, content)
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        converge_document_or_disk(file, target_content, source_content, reason)
     }
 }
 
@@ -1406,20 +1437,24 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                     ) {
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
-                    if let Err(e) = mark_completed_queue_prompts_for_done_ids(
+                    if let Err(e) = queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
+                        &QUEUE_CONSUME_WRITEBACK_EFFECTS,
                     ) {
                         eprintln!("[queue] warning: done-id marking failed: {}", e);
                     }
                 } else {
-                    match mark_completed_queue_prompts_for_done_ids(
+                    match queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
+                        &QUEUE_CONSUME_WRITEBACK_EFFECTS,
                     ) {
-                        Ok(0) => eprintln!("{}", queue_skip_diagnostic_for_file(file)?),
+                        Ok(0) => {
+                            eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?)
+                        }
                         Ok(_) => {}
                         Err(e) => eprintln!("[queue] warning: done-id marking failed: {}", e),
                     }
@@ -1432,19 +1467,21 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                         &queue_completion_ids,
                         options.force_disk,
                     )?;
-                    mark_completed_queue_prompts_for_done_ids(
+                    queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
+                        &QUEUE_CONSUME_WRITEBACK_EFFECTS,
                     )?;
                 } else {
-                    let marked = mark_completed_queue_prompts_for_done_ids(
+                    let marked = queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
+                        &QUEUE_CONSUME_WRITEBACK_EFFECTS,
                     )?;
                     if marked == 0 {
-                        eprintln!("{}", queue_skip_diagnostic_for_file(file)?);
+                        eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?);
                     }
                 }
             }
@@ -1460,7 +1497,12 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         // `queue_consumption_allowed` (which governs the leading head only) and is
         // best-effort: a missed strike must never fail an otherwise-clean closeout.
         if commit_mode != CommitMode::None {
-            match strike_answered_free_text_queue_heads(file, &response_body, options.force_disk) {
+            match queue_consume::strike_answered_free_text_queue_heads(
+                file,
+                &response_body,
+                options.force_disk,
+                &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            ) {
                 Ok(0) => {}
                 Ok(n) => eprintln!("[queue] struck {n} answered free-text head(s) (#ftstrike)"),
                 Err(e) => eprintln!("[queue] warning: free-text head strike failed: {e}"),
@@ -1708,9 +1750,6 @@ pub use pending_checks::*;
 /// this is a no-op. On consumption, the first prompt is removed from both
 /// the file and the snapshot. When the queue drains to empty, `auto` is
 /// stripped and `queue_active` is cleared.
-mod queue_consume;
-pub use queue_consume::*;
-
 /// Enforcement: reject full-replacement blocks targeting the `pending` component
 /// unless the caller explicitly opts in.
 ///

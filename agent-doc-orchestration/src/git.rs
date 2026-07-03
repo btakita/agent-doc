@@ -107,6 +107,7 @@ use agent_doc_git::{
 use agent_doc_git_io::dirs::{
     commit_lock_path_for_git_root, commit_lock_scope_path, narrow_to_submodule, resolve_to_git_root,
 };
+use agent_doc_queue_io::queue_consume;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitOutcome {
@@ -363,7 +364,7 @@ pub fn commit(file: &Path) -> Result<bool> {
 ///
 /// Sources the answered response from the durable capture ledger (the
 /// cycle-state sidecar records the `capture_id`; the capture holds the
-/// `response_body`) and runs the same [`crate::write::strike_answered_free_text_queue_heads`]
+/// `response_body`) and runs the same focused queue-consume free-text strike
 /// the finalize write path uses. This makes the strike a property of reaching
 /// `committed` regardless of which path committed, so a recovery-path closeout
 /// (`agent-doc commit` / `reset --from-current` then commit / `--force-disk`) no
@@ -380,7 +381,12 @@ fn strike_answered_free_text_heads_at_commit_seam(file: &Path) {
     // before staging under the commit lock; use the force-disk strike branch so
     // recovery commits do not silently leave answered free-text heads live when
     // no editor listener is attached.
-    match crate::write::strike_answered_free_text_queue_heads(file, &response_body, true) {
+    match queue_consume::strike_answered_free_text_queue_heads(
+        file,
+        &response_body,
+        true,
+        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+    ) {
         Ok(0) => {}
         Ok(n) => agent_doc_ops_log_io::log_op(
             file,

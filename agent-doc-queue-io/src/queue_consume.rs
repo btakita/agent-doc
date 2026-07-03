@@ -1,7 +1,17 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
-use super::*;
+use anyhow::{Context, Result};
+use fs2::FileExt;
+use std::fs::OpenOptions;
+use std::path::Path;
+
+use crate::queue_consumption_proof::{
+    QueueConsumptionProofEffects, QueueConsumptionProofStage,
+    record_queue_consumption_proofs as record_queue_consumption_proofs_with_effects,
+};
 use agent_doc_document::queue_projection::strip_priority_markers;
+use agent_doc_element::element;
+use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
     queue_consume::{
         IpcNodeOp, QueueConsumptionPlan, annotate_newly_struck_free_text_heads,
@@ -19,10 +29,34 @@ use agent_doc_queue::{
         queue_prompt_text_is_free_text, response_explicitly_targets_queue_head,
     },
 };
-use agent_doc_queue_io::queue_consumption_proof::{
-    QueueConsumptionProofEffects, QueueConsumptionProofStage,
-    record_queue_consumption_proofs as record_queue_consumption_proofs_with_effects,
-};
+
+pub trait QueueConsumeWriteEffects {
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()>;
+}
+
+fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
+    let lock_path = agent_doc_fs::state_lock_path_for(path)?;
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open doc lock {}", lock_path.display()))?;
+    file.lock_exclusive()
+        .with_context(|| format!("failed to acquire doc lock on {}", lock_path.display()))?;
+    Ok(file)
+}
 
 #[cfg(test)]
 use agent_doc_queue::{
@@ -44,26 +78,31 @@ pub struct QueueConsumptionOutcome {
 }
 
 #[allow(dead_code)]
-pub fn consume_queue_prompt(file: &Path) -> Result<bool> {
-    Ok(consume_queue_prompt_with_outcome(file)?.is_some())
+pub fn consume_queue_prompt(file: &Path, effects: &dyn QueueConsumeWriteEffects) -> Result<bool> {
+    Ok(consume_queue_prompt_with_outcome(file, effects)?.is_some())
 }
 
-pub fn consume_queue_prompt_with_outcome(file: &Path) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, &[], false)
+pub fn consume_queue_prompt_with_outcome(
+    file: &Path,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_outcome(file, &[], false, effects)
 }
 
 pub fn consume_queue_prompts_for_done_ids_with_outcome(
     file: &Path,
     done_ids: &[String],
+    effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, done_ids, false)
+    consume_queue_prompts_with_outcome(file, done_ids, false, effects)
 }
 
 pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
     file: &Path,
     done_ids: &[String],
+    effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, done_ids, true)
+    consume_queue_prompts_with_outcome(file, done_ids, true, effects)
 }
 
 /// Strike the active queue head, **skipping the visible-write idle guard**, for
@@ -73,14 +112,18 @@ pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
 /// would block the strike and leave the answered free-text head live for
 /// preflight to re-present. Callers must scope this to heads the recovered
 /// response actually answered.
-pub fn consume_queue_prompt_force_disk(file: &Path) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, &[], true)
+pub fn consume_queue_prompt_force_disk(
+    file: &Path,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_outcome(file, &[], true, effects)
 }
 
-pub(crate) fn consume_queue_prompts_with_outcome(
+pub fn consume_queue_prompts_with_outcome(
     file: &Path,
     done_ids: &[String],
     skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     // Hold the document lock for the entire read-parse-write cycle to prevent
     // concurrent edits from invalidating parsed offsets (TOCTOU fix).
@@ -98,10 +141,12 @@ pub(crate) fn consume_queue_prompts_with_outcome(
     // guarded disk write otherwise. The force-disk repair path keeps its raw
     // bypass — it deliberately skips IPC/IDE and the visible-write guard.
     if skip_visible_guard {
-        atomic_write(file, &plan.new_document)
+        effects
+            .atomic_write(file, &plan.new_document)
             .context("queue consume: failed to write document")?;
     } else {
-        converge_document_or_disk(file, &plan.new_document, &content, "queue_consume")
+        effects
+            .converge_document_or_disk(file, &plan.new_document, &content, "queue_consume")
             .context("queue consume: failed to write document")?;
     }
     if plan.save_snapshot {
@@ -176,7 +221,7 @@ impl QueueConsumptionProofEffects for QueueConsumptionProofRuntimeEffects {
 const QUEUE_CONSUMPTION_PROOF_EFFECTS: QueueConsumptionProofRuntimeEffects =
     QueueConsumptionProofRuntimeEffects;
 
-pub(crate) fn record_queue_consumption_proofs(
+pub fn record_queue_consumption_proofs(
     file: &Path,
     plan: &QueueConsumptionPlan,
     stage: QueueConsumptionProofStage,
@@ -202,7 +247,7 @@ pub fn should_consume_queue_prompt_for_diff(file: &Path, diff_text: Option<&str>
     should_consume_queue_prompt_for_diff_content(file, &content, diff_text)
 }
 
-pub(crate) fn queue_skip_diagnostic_for_file(file: &Path) -> Result<String> {
+pub fn queue_skip_diagnostic_for_file(file: &Path) -> Result<String> {
     let content =
         std::fs::read_to_string(file).context("queue skip diagnostic: failed to read document")?;
     agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content(&content)
@@ -232,6 +277,7 @@ pub fn strike_answered_free_text_queue_heads(
     file: &Path,
     response_body: &str,
     skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
     if response_body.trim().is_empty() {
         return Ok(0);
@@ -284,9 +330,12 @@ pub fn strike_answered_free_text_queue_heads(
     };
 
     if skip_visible_guard {
-        atomic_write(file, &new_document).context("free-text strike: failed to write document")?;
+        effects
+            .atomic_write(file, &new_document)
+            .context("free-text strike: failed to write document")?;
     } else {
-        converge_document_or_disk(file, &new_document, &content, "free_text_strike")
+        effects
+            .converge_document_or_disk(file, &new_document, &content, "free_text_strike")
             .context("free-text strike: failed to write document")?;
     }
     if let Some(snap) = new_snapshot {
@@ -351,7 +400,10 @@ pub fn strike_answered_free_text_queue_heads(
 ///      contain a fenced region, so `item_nodes` never enumerated them and they
 ///      accumulated forever. They are excised by exact byte range from the single
 ///      source of queue-head segmentation (`queue::parse_spans`).
-pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
+pub fn prune_noise_queue_heads(
+    file: &Path,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<usize> {
     let _lock = acquire_doc_lock(file)?;
     let content = std::fs::read_to_string(file).context("noise prune: failed to read document")?;
     let (fm, _) = frontmatter::parse(&content)?;
@@ -377,7 +429,8 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
         None => None,
     };
 
-    converge_document_or_disk(file, &new_document, &content, "noise_prune")
+    effects
+        .converge_document_or_disk(file, &new_document, &content, "noise_prune")
         .context("noise prune: failed to write document")?;
     if let Some(snap) = new_snapshot {
         agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
@@ -412,7 +465,11 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
 /// item — that is live work with a real `--done` / `--pending-gate` drain path, so
 /// the operator should use those instead. Returns `true` when a head was struck,
 /// `false` when nothing matched (already struck / drained).
-pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool> {
+pub fn strike_orphan_id_backed_queue_head(
+    file: &Path,
+    id: &str,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<bool> {
     let _lock = acquire_doc_lock(file)?;
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("orphan strike: failed to read {}", file.display()))?;
@@ -457,7 +514,8 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
         None => None,
     };
     let base_hash = agent_doc_hash::content_hash(&content);
-    converge_document_or_disk(file, &new_document, &content, "orphan_id_head_strike")
+    effects
+        .converge_document_or_disk(file, &new_document, &content, "orphan_id_head_strike")
         .context("orphan strike: failed to write document")?;
     if let Some(snap) = new_snapshot {
         agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
@@ -488,7 +546,11 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
 /// to remain open. The command still refuses prose that merely mentions `#id`;
 /// those are free-text heads and should be answered + consumed through the
 /// normal free-text path.
-pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bool> {
+pub fn acknowledge_open_id_backed_queue_head(
+    file: &Path,
+    id: &str,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<bool> {
     let _lock = acquire_doc_lock(file)?;
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("open-id ack: failed to read {}", file.display()))?;
@@ -532,7 +594,8 @@ pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bo
         None => None,
     };
     let base_hash = agent_doc_hash::content_hash(&content);
-    converge_document_or_disk(file, &new_document, &content, "open_id_head_ack")
+    effects
+        .converge_document_or_disk(file, &new_document, &content, "open_id_head_ack")
         .context("open-id ack: failed to write document")?;
     if let Some(snap) = new_snapshot {
         agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
@@ -554,10 +617,11 @@ pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bo
     Ok(true)
 }
 
-pub(crate) fn mark_completed_queue_prompts_for_done_ids(
+pub fn mark_completed_queue_prompts_for_done_ids(
     file: &Path,
     done_ids: &[String],
     skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
     if done_ids.is_empty() {
         return Ok(0);
@@ -617,10 +681,12 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
     // guarded disk write otherwise. The force-disk repair path keeps its raw
     // bypass — it deliberately skips IPC/IDE and the visible-write guard.
     if skip_visible_guard {
-        atomic_write(file, &new_document)
+        effects
+            .atomic_write(file, &new_document)
             .context("queue done-id mark: failed to write document")?;
     } else {
-        converge_document_or_disk(file, &new_document, &content, "queue_done_id_mark")
+        effects
+            .converge_document_or_disk(file, &new_document, &content, "queue_done_id_mark")
             .context("queue done-id mark: failed to write document")?;
     }
     if let Some(new_snapshot) = new_snapshot {
@@ -635,7 +701,7 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
     Ok(marked_texts.len())
 }
 
-pub(crate) fn plan_queue_prompt_consumption(
+pub fn plan_queue_prompt_consumption(
     file: &Path,
     content: &str,
     done_ids: &[String],
@@ -649,7 +715,7 @@ pub(crate) fn plan_queue_prompt_consumption(
     )
 }
 
-pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
+pub fn plan_queue_prompt_consumption_with_snapshot(
     file: &Path,
     content: &str,
     snapshot_content: Option<&str>,
@@ -1146,6 +1212,95 @@ mod core_tests {
     use std::time::Duration;
     use tempfile::TempDir;
 
+    struct TestQueueConsumeEffects;
+
+    static TEST_EFFECTS: TestQueueConsumeEffects = TestQueueConsumeEffects;
+
+    impl QueueConsumeWriteEffects for TestQueueConsumeEffects {
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            agent_doc_fs::write_atomic(file, content.as_bytes())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            reason: &str,
+        ) -> Result<()> {
+            agent_doc_fs::write_atomic(file, target_content.as_bytes()).with_context(|| {
+                format!("{reason}: failed detached disk write for {}", file.display())
+            })?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{reason}_writeback file={} transport=disk_detached reason={} len={} hash={}",
+                    file.display(),
+                    reason,
+                    target_content.len(),
+                    agent_doc_hash::content_hash(target_content)
+                ),
+            );
+            Ok(())
+        }
+    }
+
+    const HALT_QUEUE_DOC: &str = concat!(
+        "---\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#foo]\n",
+        "- do [#bar]\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    fn consume_queue_prompt_with_outcome(file: &Path) -> Result<Option<QueueConsumptionOutcome>> {
+        super::consume_queue_prompt_with_outcome(file, &TEST_EFFECTS)
+    }
+
+    fn consume_queue_prompt_force_disk(file: &Path) -> Result<Option<QueueConsumptionOutcome>> {
+        super::consume_queue_prompt_force_disk(file, &TEST_EFFECTS)
+    }
+
+    fn mark_completed_queue_prompts_for_done_ids(
+        file: &Path,
+        done_ids: &[String],
+        skip_visible_guard: bool,
+    ) -> Result<usize> {
+        super::mark_completed_queue_prompts_for_done_ids(
+            file,
+            done_ids,
+            skip_visible_guard,
+            &TEST_EFFECTS,
+        )
+    }
+
+    fn strike_answered_free_text_queue_heads(
+        file: &Path,
+        response_body: &str,
+        skip_visible_guard: bool,
+    ) -> Result<usize> {
+        super::strike_answered_free_text_queue_heads(
+            file,
+            response_body,
+            skip_visible_guard,
+            &TEST_EFFECTS,
+        )
+    }
+
+    fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
+        super::prune_noise_queue_heads(file, &TEST_EFFECTS)
+    }
+
+    fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool> {
+        super::strike_orphan_id_backed_queue_head(file, id, &TEST_EFFECTS)
+    }
+
+    fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bool> {
+        super::acknowledge_open_id_backed_queue_head(file, id, &TEST_EFFECTS)
+    }
+
     #[test]
     fn consume_queue_nodes_by_key_strips_in_progress_marker_before_strike_text() {
         let content = concat!(
@@ -1399,7 +1554,7 @@ mod core_tests {
             "a no-#id queue head is free text and consumable by being answered"
         );
         // A bare do[#id] head is NOT free text (needs an explicit completion flag).
-        assert!(!queue_head_is_free_text_prompt(crate::test_support::HALT_QUEUE_DOC).unwrap());
+        assert!(!queue_head_is_free_text_prompt(HALT_QUEUE_DOC).unwrap());
         let pinned_do = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue auto -->\n",
@@ -1692,8 +1847,7 @@ mod core_tests {
             "second queue state event should complete the consumed head: {queue_events:#?}"
         );
 
-        let document_hash =
-            agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(&canonical);
+        let document_hash = crate::queue_consumption_proof::queue_state_document_hash(&canonical);
         let projection = state_ledger
             .project_document(&document_hash)
             .expect("queue state events should project for document");
@@ -1756,9 +1910,8 @@ mod core_tests {
             .into_iter()
             .next()
             .expect("remaining head should have a node key");
-        let document_hash = agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(
-            &doc.canonicalize().unwrap(),
-        );
+        let document_hash =
+            crate::queue_consumption_proof::queue_state_document_hash(&doc.canonicalize().unwrap());
         let state_ledger =
             agent_doc_controller_io::project_controller::load_state_event_ledger(root)
                 .expect("queue state events should reload from sqlite");
@@ -1823,9 +1976,8 @@ mod core_tests {
             .into_iter()
             .next()
             .expect("remaining head should have a node key");
-        let document_hash = agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(
-            &doc.canonicalize().unwrap(),
-        );
+        let document_hash =
+            crate::queue_consumption_proof::queue_state_document_hash(&doc.canonicalize().unwrap());
         let state_ledger =
             agent_doc_controller_io::project_controller::load_state_event_ledger(root)
                 .expect("queue state events should reload from sqlite");

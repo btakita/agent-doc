@@ -62,6 +62,7 @@
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
 use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines;
+use agent_doc_queue_io::queue_consume;
 use agent_doc_turn::{
     closeout_recovery::{
         CloseoutRecoveryMutationReason, content_matches_ignoring_trailing_newlines,
@@ -1373,7 +1374,10 @@ fn strike_recovered_free_text_queue_head(file: &Path) {
     if !agent_doc_queue::queue_response::queue_head_is_free_text_prompt(&content).unwrap_or(false) {
         return;
     }
-    match crate::write::consume_queue_prompt_force_disk(file) {
+    match queue_consume::consume_queue_prompt_force_disk(
+        file,
+        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+    ) {
         Ok(Some(outcome)) => eprintln!(
             "[repair] struck consumed free-text queue head (remaining: {})",
             outcome.remaining

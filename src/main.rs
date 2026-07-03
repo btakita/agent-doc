@@ -143,7 +143,11 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         Option<agent_doc_controller_io::project_controller::ControllerQueueConsumptionOutcome>,
     > {
         Ok(
-            agent_doc_orchestration::write::consume_queue_prompt_force_disk(file)?.map(|outcome| {
+            agent_doc_queue_io::queue_consume::consume_queue_prompt_force_disk(
+                file,
+                &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            )?
+            .map(|outcome| {
                 agent_doc_controller_io::project_controller::ControllerQueueConsumptionOutcome {
                     consumed_text: outcome.consumed_text,
                     remaining: outcome.remaining,
@@ -697,6 +701,32 @@ pub(crate) struct CliStreamRuntimeEffects;
 
 pub(crate) static CLI_STREAM_RUNTIME_EFFECTS: CliStreamRuntimeEffects = CliStreamRuntimeEffects;
 
+pub(crate) struct CliQueueConsumeWriteEffects;
+
+pub(crate) static CLI_QUEUE_CONSUME_WRITE_EFFECTS: CliQueueConsumeWriteEffects =
+    CliQueueConsumeWriteEffects;
+
+impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for CliQueueConsumeWriteEffects {
+    fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
+        agent_doc_orchestration::write::atomic_write_pub(file, content)
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        agent_doc_orchestration::write::converge_document_or_disk(
+            file,
+            target_content,
+            source_content,
+            reason,
+        )
+    }
+}
+
 fn cli_stream_effects() -> Arc<dyn agent_doc_stream_io::StreamRuntimeEffects> {
     Arc::new(CliStreamRuntimeEffects)
 }
@@ -779,7 +809,7 @@ impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
 }
 
 fn queue_command_consume_outcome(
-    outcome: agent_doc_orchestration::write::QueueConsumptionOutcome,
+    outcome: agent_doc_queue_io::queue_consume::QueueConsumptionOutcome,
 ) -> agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
     agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
         consumed_text: outcome.consumed_text,
@@ -793,28 +823,45 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_orchestration::write::consume_queue_prompt_force_disk(file)
-            .map(|outcome| outcome.map(queue_command_consume_outcome))
+        agent_doc_queue_io::queue_consume::consume_queue_prompt_force_disk(
+            file,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
+        .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
     fn consume_queue_prompt_with_outcome(
         &self,
         file: &Path,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_orchestration::write::consume_queue_prompt_with_outcome(file)
-            .map(|outcome| outcome.map(queue_command_consume_outcome))
+        agent_doc_queue_io::queue_consume::consume_queue_prompt_with_outcome(
+            file,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
+        .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
     fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
-        agent_doc_orchestration::write::strike_orphan_id_backed_queue_head(file, id)
+        agent_doc_queue_io::queue_consume::strike_orphan_id_backed_queue_head(
+            file,
+            id,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
     }
 
     fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
-        agent_doc_orchestration::write::acknowledge_open_id_backed_queue_head(file, id)
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head(
+            file,
+            id,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
     }
 
     fn prune_noise_queue_heads(&self, file: &Path) -> anyhow::Result<usize> {
-        agent_doc_orchestration::write::prune_noise_queue_heads(file)
+        agent_doc_queue_io::queue_consume::prune_noise_queue_heads(
+            file,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
     }
 }
 

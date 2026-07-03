@@ -7,6 +7,7 @@ use agent_doc_document_realtime::write_policy::{
 };
 use agent_doc_element_exchange::extract_normalization_targets;
 use agent_doc_frontmatter::frontmatter::content_uses_crdt_write;
+use agent_doc_queue_io::queue_consume;
 use agent_doc_queue_io::queue_consumption_proof::QueueConsumptionProofStage;
 use agent_doc_template::response_materialization::sanitize_template_patchback_response;
 use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;
@@ -1119,7 +1120,7 @@ pub fn run_stream(
     let integrated_queue_plan = if flags.queue_completion_ids.is_empty() {
         None
     } else {
-        plan_queue_prompt_consumption_with_snapshot(
+        queue_consume::plan_queue_prompt_consumption_with_snapshot(
             file,
             &final_content,
             Some(&snapshot_content),
@@ -1127,7 +1128,11 @@ pub fn run_stream(
         )?
     };
     if let Some(plan) = integrated_queue_plan.as_ref() {
-        record_queue_consumption_proofs(file, plan, QueueConsumptionProofStage::BeforeMutation)?;
+        queue_consume::record_queue_consumption_proofs(
+            file,
+            plan,
+            QueueConsumptionProofStage::BeforeMutation,
+        )?;
         final_content = plan.new_document.clone();
         snapshot_content = plan.new_snapshot.clone();
     }
@@ -1155,7 +1160,11 @@ pub fn run_stream(
 
     atomic_write(file, &final_content)?;
     if let Some(plan) = integrated_queue_plan.as_ref() {
-        record_queue_consumption_proofs(file, plan, QueueConsumptionProofStage::AfterMutation)?;
+        queue_consume::record_queue_consumption_proofs(
+            file,
+            plan,
+            QueueConsumptionProofStage::AfterMutation,
+        )?;
         if plan.consumed_texts.len() == 1 {
             eprintln!(
                 "[queue] consumed: {:?} (remaining: {})",

@@ -254,14 +254,3 @@ pub(crate) fn queue_consume_convergence_target() -> String {
     )
     .to_string()
 }
-
-#[cfg(test)]
-pub(crate) const HALT_QUEUE_DOC: &str = concat!(
-    "---\n",
-    "queue_active: true\n",
-    "---\n\n",
-    "<!-- agent:queue auto -->\n",
-    "- do [#foo]\n",
-    "- do [#bar]\n",
-    "<!-- /agent:queue -->\n",
-);

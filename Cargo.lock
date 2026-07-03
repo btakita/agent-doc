@@ -1284,13 +1284,20 @@ dependencies = [
 name = "agent-doc-queue-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-capture-io",
+ "agent-doc-controller-io",
+ "agent-doc-cycle-state-io",
  "agent-doc-debounce",
+ "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-hash",
+ "agent-doc-markdown-ast",
  "agent-doc-ops-log-io",
+ "agent-doc-owner-pane-io",
  "agent-doc-queue",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
@@ -1300,6 +1307,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-workflow-io",
  "anyhow",
+ "fs2",
  "serde",
  "serde_json",
  "tempfile",

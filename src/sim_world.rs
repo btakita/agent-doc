@@ -6093,24 +6093,29 @@ fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
     // register as targeting the head (exact-topic match only).
     let halt = "### Re: do [#alpha] halt — opus-4-8\n\nBacklog left intact; not executing.\n";
     assert!(
-        !agent_doc_orchestration::write::response_explicitly_targets_active_queue_head(&doc, halt)
-            .unwrap(),
+        !agent_doc_queue_io::queue_consume::response_explicitly_targets_active_queue_head(
+            &doc, halt,
+        )
+        .unwrap(),
         "halt heading must not target the queue head"
     );
     // An exact-topic heading still registers, preserving the Codex auto-loop on a
     // clean completion that titles the response with the head prompt verbatim.
     let exact = "### Re: do [#alpha] — opus-4-8\n\nDone.\n";
     assert!(
-        agent_doc_orchestration::write::response_explicitly_targets_active_queue_head(&doc, exact)
-            .unwrap(),
+        agent_doc_queue_io::queue_consume::response_explicitly_targets_active_queue_head(
+            &doc, exact,
+        )
+        .unwrap(),
         "exact-topic heading should still target the queue head"
     );
 
     // An explicit --done strikes the head, leaving #beta as the next head.
     let outcome =
-        agent_doc_orchestration::write::consume_queue_prompts_for_done_ids_force_disk_with_outcome(
+        agent_doc_queue_io::queue_consume::consume_queue_prompts_for_done_ids_force_disk_with_outcome(
             &doc,
             &["alpha".to_string()],
+            &crate::CLI_QUEUE_CONSUME_WRITE_EFFECTS,
         )
         .unwrap()
         .expect("explicit --done should consume the queue head");

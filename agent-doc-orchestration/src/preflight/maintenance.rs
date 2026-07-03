@@ -2104,7 +2104,17 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             .iter()
             .map(|entry| match entry {
                 agent_doc_queue::document_queue::QueueEntry::Prompt(p)
-                    if queue_prompt_text_is_free_text(&current_content, &p.text)
+                    // `#qimpstrike`: a recurring-imperative command head (`deploy`,
+                    // `commit`, `push`, ...) is a standing executable directive that
+                    // stays valid every cycle. A prior `> **Queue prompt:**` echo does
+                    // NOT retire it, so it must be exempt here exactly as the
+                    // session-check residue guard
+                    // (`free_text_queue_head_is_completed_residue`) exempts it —
+                    // otherwise the preflight strike set and the session-check
+                    // INTERRUPT set disagree and a fresh `deploy` request gets struck
+                    // with no action taken.
+                    if !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
+                        && queue_prompt_text_is_free_text(&current_content, &p.text)
                         && free_text_head_answered_by_response(&exchange_text, &p.text)
                         && committed_free_text.contains(&gate_norm(&p.text)) =>
                 {
@@ -2220,7 +2230,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     .iter()
                     .map(|entry| match entry {
                         agent_doc_queue::document_queue::QueueEntry::Prompt(p)
-                            if queue_prompt_text_is_free_text(&current_content, &p.text)
+                            // `#qimpstrike`: a recurring-imperative command head is a
+                            // standing directive — a semantic match against a tracked
+                            // backlog/done item must never retire it, or a fresh
+                            // `deploy` request gets struck with no action taken.
+                            if !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
+                                && queue_prompt_text_is_free_text(&current_content, &p.text)
                                 && committed_free_text.contains(&gate_norm(&p.text)) =>
                         {
                             match by_norm.get(&gate_norm(&p.text)) {
@@ -7227,6 +7242,59 @@ mod tests {
         assert!(
             !updated.contains("auto-struck"),
             "no head should be struck when the exchange answers none of them:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_exempts_recurring_imperative_deploy_head() {
+        // #qimpstrike: a recurring-imperative command head (`deploy`) is a standing
+        // executable directive. A PRIOR cycle answered a `deploy` request and left a
+        // `> **Queue prompt:** deploy` echo in committed exchange; the operator then
+        // re-adds `deploy` to run it again. The preflight #qheadresidue catch-up
+        // strike must NOT retire that fresh directive — the head stays an active
+        // Prompt so the next dispatch executes it. This keeps the preflight strike
+        // set aligned with the session-check residue guard
+        // (`free_text_queue_head_is_completed_residue`), which already exempts it.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: deploy — opus-4-8\n\n",
+            "> **Queue prompt:** deploy\n\n",
+            "Deployed successfully.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- deploy\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let entries = read_queue_entries(&doc);
+        let active: Vec<String> = agent_doc_queue::document_queue::prompts(&entries)
+            .iter()
+            .map(|p| p.text.clone())
+            .collect();
+        // The head is now the active drain target, so it carries the `🚧`
+        // in-progress marker — it stays an active Prompt, which is the point.
+        assert!(
+            active.iter().any(|t| t.contains("deploy")),
+            "recurring-imperative `deploy` head must stay an active Prompt:\nactive={active:?}\n{updated}"
+        );
+        assert!(
+            !updated.contains("auto-struck"),
+            "recurring-imperative `deploy` head must not be struck as residue:\n{updated}"
         );
     }
 

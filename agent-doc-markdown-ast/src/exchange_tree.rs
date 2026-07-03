@@ -163,6 +163,140 @@ pub fn render_exchange_nodes(nodes: &[ExchangeNode]) -> String {
     nodes.iter().map(ExchangeNode::render).collect()
 }
 
+// ---------------------------------------------------------------------------
+// Structural operations (Phase 4 API) — the calls an agent/editor should use to
+// mutate the exchange instead of a raw text edit + snapshot re-baseline. All are
+// pure `inner -> inner` transforms over the node model, so they cannot bleed one
+// node's content into another.
+// ---------------------------------------------------------------------------
+
+/// A lightweight summary of one exchange node for listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExchangeNodeSummary {
+    pub node_id: String,
+    /// `"response"` or `"prompt"`.
+    pub kind: String,
+    /// The heading line (responses) or first non-empty line (prompts).
+    pub label: String,
+}
+
+/// List the exchange nodes with stable id, kind, and a short label.
+pub fn list_exchange_nodes(inner: &str) -> Vec<ExchangeNodeSummary> {
+    parse_exchange_nodes(inner)
+        .iter()
+        .map(|n| {
+            let (kind, label) = match &n.kind {
+                ExchangeNodeKind::Response { .. } => (
+                    "response",
+                    n.lines
+                        .first()
+                        .map(|l| l.trim().to_string())
+                        .unwrap_or_default(),
+                ),
+                ExchangeNodeKind::Prompt => (
+                    "prompt",
+                    n.lines
+                        .iter()
+                        .map(|l| l.trim())
+                        .find(|l| !l.is_empty())
+                        .unwrap_or("")
+                        .to_string(),
+                ),
+            };
+            ExchangeNodeSummary {
+                node_id: n.node_id(),
+                kind: kind.to_string(),
+                label,
+            }
+        })
+        .collect()
+}
+
+/// Collapse runs of 3+ consecutive newlines into a single blank line, so removing
+/// or moving a node does not leave a widening gap between neighbors.
+fn normalize_blank_runs(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut newlines = 0usize;
+    for ch in s.chars() {
+        if ch == '\n' {
+            newlines += 1;
+            if newlines <= 2 {
+                out.push(ch);
+            }
+        } else {
+            newlines = 0;
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Remove the node whose [`ExchangeNode::node_id`] equals `node_id`. Returns the
+/// new inner body, or `None` if no such node exists. This is the operation that
+/// should have removed the reitrades IPC-diagnostic blocks (instead of a raw edit).
+pub fn remove_exchange_node(inner: &str, node_id: &str) -> Option<String> {
+    let nodes = parse_exchange_nodes(inner);
+    if !nodes.iter().any(|n| n.node_id() == node_id) {
+        return None;
+    }
+    let kept: Vec<ExchangeNode> = nodes
+        .into_iter()
+        .filter(|n| n.node_id() != node_id)
+        .collect();
+    Some(normalize_blank_runs(&render_exchange_nodes(&kept)))
+}
+
+/// Append a text turn to the end of the exchange body with a blank-line separator.
+fn append_turn(inner: &str, turn: &str) -> String {
+    if inner.trim().is_empty() {
+        return turn.to_string();
+    }
+    let mut out = inner.trim_end_matches('\n').to_string();
+    out.push_str("\n\n");
+    out.push_str(turn);
+    out
+}
+
+/// Append a new agent response turn (`### Re: {header}` + `body`) at the end of the
+/// exchange. `body` is trimmed of trailing whitespace and terminated with a newline.
+pub fn add_response(inner: &str, header: &str, body: &str) -> String {
+    let turn = format!("### Re: {}\n\n{}\n", header.trim(), body.trim_end());
+    append_turn(inner, &turn)
+}
+
+/// Append a new user prompt turn at the end of the exchange. The text is caret-
+/// prefixed (`❯ …`) if it is not already, so it parses back as a distinct
+/// [`ExchangeNodeKind::Prompt`] node rather than being folded into a response.
+pub fn add_prompt(inner: &str, text: &str) -> String {
+    let t = text.trim();
+    let turn = if t.starts_with('❯') {
+        format!("{t}\n")
+    } else {
+        format!("❯ {t}\n")
+    };
+    append_turn(inner, &turn)
+}
+
+/// Move `node_id` to immediately before (`before = true`) or after the node
+/// `anchor_id`. Returns `None` if either id is missing.
+pub fn move_exchange_node(
+    inner: &str,
+    node_id: &str,
+    anchor_id: &str,
+    before: bool,
+) -> Option<String> {
+    let mut nodes = parse_exchange_nodes(inner);
+    let from = nodes.iter().position(|n| n.node_id() == node_id)?;
+    if !nodes.iter().any(|n| n.node_id() == anchor_id) {
+        return None;
+    }
+    let node = nodes.remove(from);
+    let anchor_pos = nodes.iter().position(|n| n.node_id() == anchor_id)?;
+    let insert_at = if before { anchor_pos } else { anchor_pos + 1 };
+    nodes.insert(insert_at, node);
+    Some(render_exchange_nodes(&nodes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +366,79 @@ mod tests {
     fn empty_exchange_yields_no_nodes() {
         assert!(parse_exchange_nodes("").is_empty());
         assert_eq!(render_exchange_nodes(&[]), "");
+    }
+
+    // --- Phase 4 structural operations ---
+
+    #[test]
+    fn list_reports_each_node_with_kind_and_label() {
+        let summaries = list_exchange_nodes(SAMPLE);
+        assert_eq!(summaries.iter().filter(|s| s.kind == "response").count(), 2);
+        assert_eq!(summaries.iter().filter(|s| s.kind == "prompt").count(), 2);
+        assert!(summaries.iter().any(|s| s.label.contains("Regenerated")));
+    }
+
+    #[test]
+    fn remove_drops_only_the_targeted_node() {
+        let nodes = parse_exchange_nodes(SAMPLE);
+        let target = nodes
+            .iter()
+            .find(|n| n.render().contains("Second answer."))
+            .unwrap()
+            .node_id();
+        let out = remove_exchange_node(SAMPLE, &target).unwrap();
+        assert!(!out.contains("Second answer."));
+        // Everything else survives.
+        assert!(out.contains("Here is the answer."));
+        assert!(out.contains("❯ Regenerate the response."));
+        assert!(out.contains("Leading user note."));
+    }
+
+    #[test]
+    fn remove_unknown_id_returns_none() {
+        assert!(remove_exchange_node(SAMPLE, "r:deadbeef").is_none());
+    }
+
+    #[test]
+    fn add_response_appends_a_distinct_parseable_turn() {
+        let out = add_response(SAMPLE, "New topic — opus", "Fresh answer.");
+        let nodes = parse_exchange_nodes(&out);
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|n| matches!(n.kind, ExchangeNodeKind::Response { .. }))
+                .count(),
+            3
+        );
+        assert!(out.contains("### Re: New topic — opus"));
+        assert!(out.contains("Fresh answer."));
+    }
+
+    #[test]
+    fn add_prompt_caret_prefixes_and_stays_a_prompt_node() {
+        let out = add_prompt(SAMPLE, "Please continue.");
+        assert!(out.contains("❯ Please continue."));
+        let added = parse_exchange_nodes(&out)
+            .into_iter()
+            .find(|n| n.render().contains("Please continue."))
+            .unwrap();
+        assert_eq!(added.kind, ExchangeNodeKind::Prompt);
+    }
+
+    #[test]
+    fn move_reorders_a_node_relative_to_an_anchor() {
+        let nodes = parse_exchange_nodes(SAMPLE);
+        let second = nodes
+            .iter()
+            .find(|n| n.render().contains("Second answer."))
+            .unwrap()
+            .node_id();
+        let first = nodes
+            .iter()
+            .find(|n| n.render().contains("Here is the answer."))
+            .unwrap()
+            .node_id();
+        let out = move_exchange_node(SAMPLE, &second, &first, true).unwrap();
+        assert!(out.find("Second answer.").unwrap() < out.find("Here is the answer.").unwrap());
     }
 }

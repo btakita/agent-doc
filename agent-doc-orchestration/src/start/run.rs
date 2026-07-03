@@ -1008,15 +1008,16 @@ pub fn run_with_reap_policy(
         log_event(&mut session_log, "route_owned_start enabled=true");
         Some(spawn_route_owned_completion_thread(
             shared.clone(),
-            RouteOwnedCompletionConfig {
-                file: canonical.clone(),
-                baseline: route_owned_cycle_baseline,
-                reap_policy: route_owned_reap_policy,
-                harness: harness.clone(),
-            },
+            RouteOwnedCompletionConfig::new(
+                canonical.clone(),
+                route_owned_cycle_baseline,
+                route_owned_reap_policy,
+                harness.clone(),
+            ),
             route_owned_completion.clone(),
             route_owned_completion_stop.clone(),
             session_log.as_ref().and_then(|f| f.try_clone().ok()),
+            log_event,
         ))
     } else {
         None

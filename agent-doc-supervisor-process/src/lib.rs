@@ -13,6 +13,7 @@ pub mod io_threads;
 pub mod output_state;
 pub mod pty;
 pub mod resize;
+pub mod route_owned_completion;
 pub mod screen;
 pub mod session_liveness;
 pub mod shared_writer;

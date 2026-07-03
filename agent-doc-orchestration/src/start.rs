@@ -151,16 +151,11 @@ use agent_doc_supervisor::crash_policy::{
     supervisor_clean_exit_before_prompt_seen, supervisor_clean_exit_resolution,
     supervisor_policy_exit_code, supervisor_resume_handoff_failed,
 };
-use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 use agent_doc_supervisor::input::{normalize_supervisor_inject_bytes, prompt_input_summary};
 use agent_doc_supervisor::ipc_protocol::{
     IpcMethod, IpcResponse, ipc_method_requires_capability_gate, submit_bytes,
 };
-use agent_doc_supervisor::route_owned::{
-    RouteOwnedCycleFacts, RouteOwnedCyclePhase, RouteOwnedLivenessReason, RouteOwnedReapDecision,
-    RouteOwnedReapPolicy, route_owned_cycle_committed_since_start,
-    route_owned_liveness_reason_for_content, route_owned_reap_decision,
-};
+use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
 use agent_doc_supervisor::session_owner::{
     ExistingPaneConflictFacts, ExistingSessionPaneAction,
     format_existing_pane_conflict_error as format_existing_pane_conflict_error_from_facts,
@@ -173,19 +168,13 @@ use agent_doc_supervisor_process::{
     in_process::{InProcessSupervisor, PtySupervisedChild, TickOutcome},
     output_state::SupervisorOutputState,
     pty::PtySpawnConfig,
+    route_owned_completion::{RouteOwnedCompletionConfig, spawn_route_owned_completion_thread},
     shared_writer::{SharedPtyWriter, StopSignal, lock_writer_interruptibly},
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;
 
 use agent_doc_project_config_io as project_config_io;
-
-struct RouteOwnedCompletionConfig {
-    file: PathBuf,
-    baseline: Option<agent_doc_cycle_state_io::CycleState>,
-    reap_policy: RouteOwnedReapPolicy,
-    harness: agent_doc_harness::HarnessConfig,
-}
 
 /// Open (or create) the session log file at `.agent-doc/logs/<session-uuid>.log`.
 /// Returns a writable file handle in append mode, or None if the directory can't be created.
@@ -270,10 +259,6 @@ const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(60);
 /// At `AUTO_TRIGGER_POLL_INTERVAL` (500ms) this is ~2s of proven idle pane
 /// evidence — long enough that a turn still spinning up is never cut short.
 const STALE_BUSY_RECONCILE_TICKS: u32 = 4;
-/// Consecutive idle-prompt polls the idle-queue watch must observe after a
-/// lingering *manual* clear cooldown before it auto-expires the cooldown and
-const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
-const ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS: u32 = STALE_BUSY_RECONCILE_TICKS;
 /// Fail-closed handler for an expired session-startup deadline: record a
 /// `startup_miss` marker against the owned pane and surface an actionable
 /// "session did not become dispatch-ready in Ns" diagnostic on stderr, so a hung
@@ -522,40 +507,6 @@ fn prompt_for_restart_or_quit(
     }
 }
 
-fn route_owned_facts_from_cycle_state(
-    state: &agent_doc_cycle_state_io::CycleState,
-) -> RouteOwnedCycleFacts {
-    let phase = if state.phase == agent_doc_turn::CyclePhase::Committed {
-        RouteOwnedCyclePhase::Committed
-    } else if state.is_open() {
-        RouteOwnedCyclePhase::Open
-    } else {
-        RouteOwnedCyclePhase::Closed
-    };
-    RouteOwnedCycleFacts {
-        cycle_id: state.cycle_id.clone(),
-        phase,
-        updated_at: state.updated_at,
-        last_event: state.last_event.clone(),
-        committed_file_hash: state.file_hash.clone(),
-    }
-}
-
-fn route_owned_liveness_reason_for_file(
-    file: &Path,
-    facts: &RouteOwnedCycleFacts,
-) -> Option<RouteOwnedLivenessReason> {
-    let content = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(err) => {
-            return Some(RouteOwnedLivenessReason::AdapterFailure(format!(
-                "read_failed:{err}"
-            )));
-        }
-    };
-    route_owned_liveness_reason_for_content(&content, facts.committed_file_hash.as_deref())
-}
-
 fn route_owned_live_pane_busy_reason(
     shared: &SupervisorShared,
     harness: &agent_doc_harness::HarnessConfig,
@@ -595,129 +546,32 @@ fn owned_pane_label(shared: &SupervisorShared) -> &str {
     })
 }
 
-fn spawn_route_owned_completion_thread(
-    shared: Arc<SupervisorShared>,
-    config: RouteOwnedCompletionConfig,
-    completed: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
-    mut session_log: Option<std::fs::File>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("route-owned-completion".into())
-        .spawn(move || {
-            let RouteOwnedCompletionConfig {
-                file,
-                baseline,
-                reap_policy,
-                harness,
-            } = config;
-            let mut baseline = baseline
-                .as_ref()
-                .map(route_owned_facts_from_cycle_state);
-            let mut logged_busy_cycle: Option<String> = None;
-            let mut ready_busy_ticks: u32 = 0;
-            let mut ready_busy_key: Option<(String, String)> = None;
-            let mut ready_busy_logged_key: Option<(String, String)> = None;
-            while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
-                if let Ok(Some(state)) = agent_doc_cycle_state_io::load(&file)
-                {
-                    let facts = route_owned_facts_from_cycle_state(&state);
-                    if !route_owned_cycle_committed_since_start(&facts, baseline.as_ref()) {
-                        if !sleep_with_stop(&stop, ROUTE_OWNED_COMPLETION_POLL_INTERVAL) {
-                            return;
-                        }
-                        continue;
-                    }
-                    let actor_ready = actor_state_is_ready(&shared);
-                    let ready_busy_reason = if actor_ready {
-                        ready_busy_blocker_reason(&shared, &harness)
-                    } else {
-                        None
-                    };
-                    let key = ready_busy_reason
-                        .as_ref()
-                        .map(|reason| (state.cycle_id.clone(), reason.clone()));
-                    if key.is_some() && key == ready_busy_key {
-                        ready_busy_ticks = ready_busy_ticks.saturating_add(1);
-                    } else {
-                        ready_busy_key = key.clone();
-                        ready_busy_ticks = u32::from(key.is_some());
-                    }
-                    let ready_busy_reconciled = ready_busy_conflict_reconcile_decision(
-                        actor_ready,
-                        ready_busy_reason.as_deref(),
-                        false,
-                        ready_busy_ticks,
-                        ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS,
-                    );
-                    if ready_busy_reconciled
-                        && key.is_some()
-                        && ready_busy_logged_key.as_ref() != key.as_ref()
-                    {
-                        let reason = ready_busy_reason.as_deref().unwrap_or("unknown");
-                        let event = format!(
-                            "owned_pane_ready_busy_conflict source=route_owned_completion harness={} pane={} reason={:?} after_ticks={} cycle={} event={}",
-                            harness.binary,
-                            owned_pane_label(&shared),
-                            reason,
-                            ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS,
-                            state.cycle_id,
-                            state.last_event
-                        );
-                        log_event(&mut session_log, &event);
-                        agent_doc_ops_log_io::log_op(&file, &event);
-                        ready_busy_logged_key = key.clone();
-                    }
+impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionState
+    for SupervisorShared
+{
+    fn actor_ready(&self) -> bool {
+        actor_state_is_ready(self)
+    }
 
-                    let live_pane_busy_reason = if ready_busy_reconciled {
-                        None
-                    } else {
-                        route_owned_live_pane_busy_reason(&shared, &harness)
-                    };
+    fn ready_busy_blocker_reason(
+        &self,
+        harness: &agent_doc_harness::HarnessConfig,
+    ) -> Option<String> {
+        ready_busy_blocker_reason(self, harness)
+    }
 
-                    let decision = if let Some(reason) = live_pane_busy_reason {
-                        RouteOwnedReapDecision {
-                            reap: false,
-                            reason,
-                        }
-                    } else {
-                        route_owned_reap_decision(
-                            reap_policy,
-                            route_owned_liveness_reason_for_file(&file, &facts),
-                        )
-                    };
-                    let event = format!(
-                        "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={}",
-                        reap_policy.as_str(),
-                        if decision.reap { "reap" } else { "keep_alive" },
-                        decision.reason,
-                        state.cycle_id,
-                        state.last_event
-                    );
-                    let busy_guard = decision.reason.starts_with("live_pane_busy_no_idle_prompt");
-                    if !busy_guard || logged_busy_cycle.as_deref() != Some(&state.cycle_id) {
-                        log_event(&mut session_log, &event);
-                        agent_doc_ops_log_io::log_op(&file, &event);
-                    }
-                    if decision.reap {
-                        completed.store(true, Ordering::Relaxed);
-                        shared.stop_requested.store(true, Ordering::Relaxed);
-                        shared.kill_child();
-                        return;
-                    }
-                    if busy_guard {
-                        logged_busy_cycle = Some(state.cycle_id.clone());
-                    } else {
-                        logged_busy_cycle = None;
-                        baseline = Some(facts);
-                    }
-                }
-                if !sleep_with_stop(&stop, ROUTE_OWNED_COMPLETION_POLL_INTERVAL) {
-                    return;
-                }
-            }
-        })
-        .expect("spawn route-owned completion thread")
+    fn live_pane_busy_reason(&self, harness: &agent_doc_harness::HarnessConfig) -> Option<String> {
+        route_owned_live_pane_busy_reason(self, harness)
+    }
+
+    fn owned_pane_label(&self) -> String {
+        owned_pane_label(self).to_string()
+    }
+
+    fn request_child_stop(&self) {
+        self.stop_requested.store(true, Ordering::Relaxed);
+        self.kill_child();
+    }
 }
 
 fn is_forwarded_ctrl_c_interrupt_exit(
@@ -2297,14 +2151,20 @@ mod tests {
     fn route_owned_liveness_file_adapter_maps_read_failure() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
-        let facts = route_owned_facts_from_cycle_state(&state);
+        let facts =
+            agent_doc_supervisor_process::route_owned_completion::route_owned_facts_from_cycle_state(
+                &state,
+            );
         let missing = tmp.path().join("missing.md");
 
-        let reason = route_owned_liveness_reason_for_file(&missing, &facts)
+        let reason =
+            agent_doc_supervisor_process::route_owned_completion::route_owned_liveness_reason_for_file(
+                &missing, &facts,
+            )
             .expect("missing file should be an adapter-failure liveness signal");
         assert!(
             reason.as_str().starts_with("read_failed:"),
-            "read failure should remain an orchestration adapter concern: {reason}"
+            "read failure should remain an explicit process adapter concern: {reason}"
         );
     }
 

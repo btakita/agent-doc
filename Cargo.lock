@@ -1792,12 +1792,14 @@ dependencies = [
 name = "agent-doc-supervisor-process"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-cycle-state-io",
  "agent-doc-harness",
  "agent-doc-ops-log-io",
  "agent-doc-supervisor",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
+ "agent-doc-turn",
  "alacritty_terminal",
  "anyhow",
  "libc",

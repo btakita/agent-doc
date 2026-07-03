@@ -16091,6 +16091,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor-crdt-io must own CRDT replica IPC response adapters"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor-process/src/route_owned_completion.rs")
+            .exists(),
+        "agent-doc-supervisor-process must own the route-owned completion thread loop"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -16177,6 +16183,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let supervisor_io_threads =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/io_threads.rs"))
             .unwrap();
+    let supervisor_route_owned_completion = fs::read_to_string(
+        manifest_dir.join("agent-doc-supervisor-process/src/route_owned_completion.rs"),
+    )
+    .unwrap();
     let supervisor_in_process =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/in_process.rs"))
             .unwrap();
@@ -16885,6 +16895,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum RouteOwnedReapPolicy",
         "pub enum RouteOwnedLivenessReason",
         "struct RouteOwnedReapDecision",
+        "fn route_owned_facts_from_cycle_state(",
+        "fn route_owned_liveness_reason_for_file(",
+        "fn spawn_route_owned_completion_thread(",
         "fn route_owned_reap_decision(",
         "fn route_owned_cycle_changed_after_start(",
         "fn route_owned_cycle_completed_after_start(",
@@ -16904,16 +16917,34 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     for required_snippet in [
+        "pub trait RouteOwnedCompletionState",
+        "pub struct RouteOwnedCompletionConfig",
+        "pub fn route_owned_facts_from_cycle_state(",
+        "pub fn route_owned_liveness_reason_for_file(",
+        "pub fn spawn_route_owned_completion_thread",
         "route_owned_liveness_reason_for_content",
         "route_owned_reap_decision(",
         "route_owned_cycle_committed_since_start(",
         "RouteOwnedLivenessReason::AdapterFailure",
     ] {
         assert!(
-            start_source.contains(required_snippet),
-            "start.rs should only adapt file reads and call focused route-owned policy directly: {required_snippet}"
+            supervisor_route_owned_completion.contains(required_snippet),
+            "agent-doc-supervisor-process should own route-owned completion adapters and loop: {required_snippet}"
         );
     }
+    assert!(
+        start_source.contains(
+            "impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionState"
+        ) && start_source.contains("fn live_pane_busy_reason(")
+            && start_source.contains("fn request_child_stop("),
+        "start.rs should only implement the live SupervisorShared adapter for the route-owned completion seam"
+    );
+    assert!(
+        start_run_source.contains("RouteOwnedCompletionConfig::new(")
+            && start_run_source.contains("spawn_route_owned_completion_thread(")
+            && start_run_source.contains("log_event,"),
+        "start/run.rs should call the supervisor-process route-owned completion loop directly"
+    );
     let cli_main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert!(
         cli_main.contains("agent_doc_supervisor::route_owned::RouteOwnedReapPolicy")
@@ -17153,7 +17184,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     assert!(
         idle_watch.contains("agent_doc_supervisor::{")
             && idle_watch.contains("idle_reconcile::{")
-            && start_source.contains(
+            && idle_watch.contains("ready_busy_conflict_reconcile_decision")
+            && supervisor_route_owned_completion.contains(
                 "agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision"
             ),
         "start paths should call focused supervisor idle_reconcile policy directly"

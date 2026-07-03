@@ -362,8 +362,12 @@ pub(crate) fn stream_step_response(
             }
             if !chunk.is_final && should_stream_exchange_patch(&response) {
                 let exchange = render_streamed_exchange(seed, &response);
-                agent_doc_orchestration::stream::flush_to_document(
-                    file, &exchange, "exchange", "",
+                agent_doc_stream_io::flush_to_document(
+                    file,
+                    &exchange,
+                    "exchange",
+                    "",
+                    &crate::CLI_STREAM_RUNTIME_EFFECTS,
                 )?;
                 last_streamed_response = Some(response.clone());
             }

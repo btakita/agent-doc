@@ -101,6 +101,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 struct CliClaimRuntimeEffects;
@@ -692,6 +693,91 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for CliBacklogCommandEf
     }
 }
 
+pub(crate) struct CliStreamRuntimeEffects;
+
+pub(crate) static CLI_STREAM_RUNTIME_EFFECTS: CliStreamRuntimeEffects = CliStreamRuntimeEffects;
+
+fn cli_stream_effects() -> Arc<dyn agent_doc_stream_io::StreamRuntimeEffects> {
+    Arc::new(CliStreamRuntimeEffects)
+}
+
+fn load_active_capture_for_hooks(
+    file: &Path,
+) -> Result<Option<agent_doc_hooks_io::PostResponseCapture>, String> {
+    agent_doc_capture_io::load_active(file)
+        .map(|capture| {
+            capture.map(|capture| agent_doc_hooks_io::PostResponseCapture {
+                capture_id: capture.capture_id,
+                response_sha256: capture.response_sha256,
+                response_body: capture.response_body,
+            })
+        })
+        .map_err(|err| err.to_string())
+}
+
+fn capture_tsift_memory_closeout_for_hooks(file: &Path, response_body: &str) {
+    let _ = agent_doc_memory_io::closeout::capture_tsift_memory_closeout(file, response_body);
+}
+
+fn reap_local_model_leases_for_hooks(file: &Path) {
+    let _ = agent_doc_lease_io::local_model::reap_local_model_leases(file);
+}
+
+fn reap_stale_editor_consumers_for_hooks(
+    file: &Path,
+) -> agent_doc_hooks_io::StaleConsumerReapCounts {
+    let counts = agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file(file);
+    agent_doc_hooks_io::StaleConsumerReapCounts {
+        consumer_patches: counts.consumer_patches,
+        live_buffers: counts.live_buffers,
+    }
+}
+
+fn cli_post_response_hook_effects() -> impl agent_doc_hooks_io::PostResponseHookEffects {
+    agent_doc_hooks_io::post_response_hook_effects(
+        load_active_capture_for_hooks,
+        capture_tsift_memory_closeout_for_hooks,
+        reap_local_model_leases_for_hooks,
+        reap_stale_editor_consumers_for_hooks,
+    )
+}
+
+impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
+    fn commit(&self, file: &Path) -> anyhow::Result<bool> {
+        agent_doc_orchestration::git::commit(file)
+    }
+
+    fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
+        agent_doc_orchestration::repair::save_pending(file, response)
+    }
+
+    fn clear_pending(&self, file: &Path) -> anyhow::Result<()> {
+        agent_doc_orchestration::repair::clear_pending(file)
+    }
+
+    fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
+        agent_doc_orchestration::write::atomic_write_pub(file, content)
+    }
+
+    fn try_ipc_stream_flush(
+        &self,
+        file: &Path,
+        patches: &[agent_doc_template::PatchBlock],
+        unmatched: &str,
+    ) -> anyhow::Result<bool> {
+        agent_doc_orchestration::write::try_ipc(
+            file, patches, unmatched, None, None, None, None, None,
+        )
+        .map(|result| result.success)
+    }
+
+    fn fire_post_write(&self, file: &Path, session_id: &str) {
+        let hook_effects = cli_post_response_hook_effects();
+        agent_doc_hooks_io::fire_post_write_with_effects(&hook_effects, file, session_id, 1);
+        agent_doc_hooks_io::fire_doc_event(file, "post_write");
+    }
+}
+
 fn queue_command_consume_outcome(
     outcome: agent_doc_orchestration::write::QueueConsumptionOutcome,
 ) -> agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
@@ -745,7 +831,13 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
         target: &str,
         baseline: &str,
     ) -> anyhow::Result<()> {
-        agent_doc_orchestration::stream::flush_to_document(file, text, target, baseline)
+        agent_doc_stream_io::flush_to_document(
+            file,
+            text,
+            target,
+            baseline,
+            &CLI_STREAM_RUNTIME_EFFECTS,
+        )
     }
 
     fn route_file_change(
@@ -3645,14 +3737,17 @@ fn main() -> anyhow::Result<()> {
                 ),
                 None => None,
             };
-            agent_doc_orchestration::stream::run(
-                &file,
-                interval,
-                agent.as_deref(),
-                model.as_deref(),
-                no_git,
-                &config,
-                lint_override,
+            agent_doc_stream_io::run(
+                agent_doc_stream_io::StreamRunOptions {
+                    file: &file,
+                    interval_ms: interval,
+                    agent_name: agent.as_deref(),
+                    model: model.as_deref(),
+                    no_git,
+                    config: &config,
+                    lint_override,
+                },
+                cli_stream_effects(),
             )
         }
         Commands::TemplateInfo { file } => {

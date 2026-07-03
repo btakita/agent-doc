@@ -105,6 +105,7 @@ dependencies = [
  "agent-doc-state-observer-io",
  "agent-doc-state-wire",
  "agent-doc-status-io",
+ "agent-doc-stream-io",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-sync-io",
@@ -1554,6 +1555,39 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-hash",
  "anyhow",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-stream-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-agent-io",
+ "agent-doc-capture-io",
+ "agent-doc-config",
+ "agent-doc-cycle-state-io",
+ "agent-doc-diff-io",
+ "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "agent-doc-hooks-io",
+ "agent-doc-lint-io",
+ "agent-doc-merge",
+ "agent-doc-merge-io",
+ "agent-doc-model-tier",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-root-io",
+ "agent-doc-prompt-context",
+ "agent-doc-prompt-context-io",
+ "agent-doc-run-context-io",
+ "agent-doc-secret-redact",
+ "agent-doc-session-accretion-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-template",
+ "agent-doc-template-io",
+ "agent-doc-turn",
+ "agent-doc-turn-executor",
+ "anyhow",
+ "fs2",
  "tempfile",
 ]
 

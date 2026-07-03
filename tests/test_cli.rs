@@ -2606,7 +2606,11 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
 
     for (relative, required) in [
         (
-            "agent-doc-orchestration/src/stream.rs",
+            "agent-doc-stream-io/src/lib.rs",
+            "effects.fire_post_write(file, &session_id)",
+        ),
+        (
+            "src/main.rs",
             "agent_doc_hooks_io::fire_post_write_with_effects(",
         ),
         (
@@ -2618,7 +2622,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent_doc_hooks_io::fire_post_commit(file, &session_id, None)",
         ),
         (
-            "agent-doc-orchestration/src/stream.rs",
+            "src/main.rs",
             "agent_doc_hooks_io::fire_doc_event(file, \"post_write\")",
         ),
         (
@@ -7267,7 +7271,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         );
     }
     let stream_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-stream-io/src/lib.rs")).unwrap();
     assert!(
         stream_source.contains("agent_doc_session_accretion_io::inspect(file)")
             && stream_source
@@ -7432,14 +7436,11 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
     let run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
     let stream_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-stream-io/src/lib.rs")).unwrap();
     let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
     for (relative, source) in [
         ("agent-doc-orchestration/src/run.rs", run_source.as_str()),
-        (
-            "agent-doc-orchestration/src/stream.rs",
-            stream_source.as_str(),
-        ),
+        ("agent-doc-stream-io/src/lib.rs", stream_source.as_str()),
         ("src/orchestrate.rs", orchestrate_source.as_str()),
     ] {
         assert!(
@@ -7562,7 +7563,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
             ],
         ),
         (
-            "agent-doc-orchestration/src/stream.rs",
+            "agent-doc-stream-io/src/lib.rs",
             "agent_doc_prompt_context::render_streaming_agent_prompt",
             [
                 "agent_doc_orchestration::prompt_contract::format_active_format_requirements",
@@ -9859,6 +9860,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("c65b9260", "Compact command archive/write IO graph"),
         ("af54bb9f", "Document realtime authority IO graph"),
         ("e756b12c", "Claim command binding IO graph"),
+        ("pending-current-round", "Stream command writeback IO graph"),
     ] {
         assert!(
             coverage_lines
@@ -9916,6 +9918,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/claim.rs",
             "agent-doc-claim-io/src/lib.rs",
             "Split git commit, route pane provisioning, sync prune",
+        ),
+        (
+            "Stream command writeback IO graph",
+            "agent-doc-orchestration/src/stream.rs",
+            "agent-doc-stream-io/src/lib.rs",
+            "Split streaming runtime callbacks",
         ),
         (
             "Legacy supervisor/agent runtime IO wave",
@@ -11141,7 +11149,7 @@ fn test_agent_doc_diff_owns_truncation_pure_policy() {
             "agent_doc_snapshot_io::DiffSnapshotStore::new(",
         ),
         (
-            "agent-doc-orchestration/src/stream.rs",
+            "agent-doc-stream-io/src/lib.rs",
             "agent_doc_diff_io::compute(",
             "agent_doc_snapshot_io::DiffSnapshotStore::new(",
         ),
@@ -11666,7 +11674,7 @@ fn test_global_config_has_no_orchestration_facade() {
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
-        "agent-doc-orchestration/src/stream.rs",
+        "agent-doc-stream-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -12016,7 +12024,7 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
     let orchestration_write =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let orchestration_stream =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-stream-io/src/lib.rs")).unwrap();
     assert!(
         orchestration_write.contains("agent_doc_lint_io::run_with_logger")
             && orchestration_write.contains("agent_doc_ops_log_io::log_op")
@@ -12041,7 +12049,7 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
     for relative_path in [
         "src/main.rs",
         "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/stream.rs",
+        "agent-doc-stream-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
@@ -15274,8 +15282,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-agent-io/src/agent/claude.rs")).unwrap();
     let opencode =
         fs::read_to_string(manifest_dir.join("agent-doc-agent-io/src/agent/opencode.rs")).unwrap();
-    let stream =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
+    let stream = fs::read_to_string(manifest_dir.join("agent-doc-stream-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "args.push(\"--append-system-prompt\".to_string())",
         "fn build_streaming_args(",
@@ -15341,7 +15348,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && codex.contains("parse_codex_line")
             && stream.contains("agent_doc_turn_executor::agent_stream::{")
             && stream.contains("StreamingAgent"),
-        "orchestration should call focused agent stream parsing/chunk/contract APIs directly"
+        "stream command code should call focused agent stream parsing/chunk/contract APIs directly"
     );
     let watch = fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/daemon.rs")).unwrap();
     assert_source_omits_all(
@@ -21085,7 +21092,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
     for relative in [
         "src/reset.rs",
         "agent-doc-compact-io/src/lib.rs",
-        "agent-doc-orchestration/src/stream.rs",
+        "agent-doc-stream-io/src/lib.rs",
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/flow/closeout.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",

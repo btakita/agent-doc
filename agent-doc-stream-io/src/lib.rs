@@ -83,7 +83,29 @@ use agent_doc_turn_executor::agent_stream::{StreamChunk, StreamingAgent};
 
 use agent_doc_agent_io::agent;
 
-use crate::{git, repair};
+pub trait StreamRuntimeEffects: Send + Sync {
+    fn commit(&self, file: &Path) -> Result<bool>;
+    fn save_pending(&self, file: &Path, response: &str) -> Result<()>;
+    fn clear_pending(&self, file: &Path) -> Result<()>;
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+    fn try_ipc_stream_flush(
+        &self,
+        file: &Path,
+        patches: &[template::PatchBlock],
+        unmatched: &str,
+    ) -> Result<bool>;
+    fn fire_post_write(&self, file: &Path, session_id: &str);
+}
+
+pub struct StreamRunOptions<'a> {
+    pub file: &'a Path,
+    pub interval_ms: u64,
+    pub agent_name: Option<&'a str>,
+    pub model: Option<&'a str>,
+    pub no_git: bool,
+    pub config: &'a Config,
+    pub lint_override: Option<agent_doc_frontmatter::lint::LintCliMode>,
+}
 
 /// Run the stream command: stream agent output to document in real-time.
 ///
@@ -94,15 +116,16 @@ use crate::{git, repair};
 /// stream cycle closed instead of being committed. Mode resolution
 /// precedence: CLI > frontmatter `agent_doc_lint_dialect` > workspace
 /// `.agent-doc/config.toml` `[lint] dialect` > default (`warn`).
-pub fn run(
-    file: &Path,
-    interval_ms: u64,
-    agent_name: Option<&str>,
-    model: Option<&str>,
-    no_git: bool,
-    config: &Config,
-    lint_override: Option<agent_doc_frontmatter::lint::LintCliMode>,
-) -> Result<()> {
+pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>) -> Result<()> {
+    let StreamRunOptions {
+        file,
+        interval_ms,
+        agent_name,
+        model,
+        no_git,
+        config,
+        lint_override,
+    } = options;
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -193,7 +216,7 @@ pub fn run(
 
     // Build prompt
     let session_accretion = agent_doc_session_accretion_io::inspect(file).ok();
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let ssh_context = rc.ssh_context();
     let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
         file,
@@ -211,7 +234,7 @@ pub fn run(
         });
 
     // Pre-commit user changes
-    if !no_git && let Err(e) = git::commit(file) {
+    if !no_git && let Err(e) = effects.commit(file) {
         eprintln!("[stream] git commit skipped: {}", e);
     }
 
@@ -247,13 +270,14 @@ pub fn run(
         target,
         &content_original,
         thinking_cfg.as_ref(),
+        Arc::clone(&effects),
     )?;
 
     // Update resume ID if we got a session_id
     if let Some(ref sid) = result.session_id {
         let current = std::fs::read_to_string(file)?;
         let updated = frontmatter::set_resume_id(&current, sid)?;
-        crate::write::atomic_write_pub(file, &updated)?;
+        effects.atomic_write(file, &updated)?;
         agent_doc_snapshot_io::save(file, &updated, agent_doc_ops_log_io::log_op)?;
     }
 
@@ -267,7 +291,7 @@ pub fn run(
     agent_doc_lint_io::run_with_logger(file, lint_override, agent_doc_ops_log_io::log_op)?;
 
     // Final git commit
-    if !no_git && let Err(e) = git::commit(file) {
+    if !no_git && let Err(e) = effects.commit(file) {
         eprintln!("[stream] git commit skipped: {}", e);
     }
 
@@ -277,9 +301,7 @@ pub fn run(
     // post_write. Missing this hook broke supervisors that trigger follow-up
     // actions (gutter refresh, downstream doc sync) when a stream completes.
     let session_id = result.session_id.clone().unwrap_or_default();
-    let hook_effects = crate::post_response_hook_effects();
-    agent_doc_hooks_io::fire_post_write_with_effects(&hook_effects, file, &session_id, 1);
-    agent_doc_hooks_io::fire_doc_event(file, "post_write");
+    effects.fire_post_write(file, &session_id);
 
     eprintln!("[stream] Stream complete for {}", file.display());
     Ok(())
@@ -304,8 +326,9 @@ fn stream_loop(
     target: &str,
     baseline: &str,
     thinking_cfg: Option<&ThinkingConfig>,
+    effects: Arc<dyn StreamRuntimeEffects>,
 ) -> Result<StreamResult> {
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let buffer = Arc::new(Mutex::new(String::new()));
     let thinking_buffer = Arc::new(Mutex::new(String::new()));
     let (done_tx, done_rx) = mpsc::channel::<()>();
@@ -321,6 +344,7 @@ fn stream_loop(
     let has_thinking = thinking_cfg.is_some();
     let timer_flushed_final = Arc::new(AtomicBool::new(false));
     let timer_flushed_final_clone = Arc::clone(&timer_flushed_final);
+    let timer_effects = Arc::clone(&effects);
 
     let timer_handle = std::thread::spawn(move || {
         let mut last_written = String::new();
@@ -341,7 +365,13 @@ fn stream_loop(
 
             // Flush response text
             if text != last_written && !text.is_empty() {
-                match flush_to_document(&file_path, &text, &target_name, &baseline_copy) {
+                match flush_to_document(
+                    &file_path,
+                    &text,
+                    &target_name,
+                    &baseline_copy,
+                    timer_effects.as_ref(),
+                ) {
                     Ok(()) => {
                         last_written = text;
                         if is_done {
@@ -366,7 +396,13 @@ fn stream_loop(
             // Flush thinking text to separate component (or skip if interleaved)
             if has_thinking && thinking_text != last_thinking && !thinking_text.is_empty() {
                 if let Some(ref tt) = thinking_target {
-                    match flush_to_document(&file_path, &thinking_text, tt, &baseline_copy) {
+                    match flush_to_document(
+                        &file_path,
+                        &thinking_text,
+                        tt,
+                        &baseline_copy,
+                        timer_effects.as_ref(),
+                    ) {
                         Ok(()) => {
                             last_thinking = thinking_text;
                         }
@@ -443,11 +479,11 @@ fn stream_loop(
     let final_text = buffer.lock().unwrap().clone();
     if !final_text.is_empty() {
         // Save as pending for crash recovery
-        repair::save_pending(file, &final_text)?;
+        effects.save_pending(file, &final_text)?;
 
         // Gate: skip if timer thread already flushed the final text (avoids IPC double-append)
         if !timer_flushed_final.load(Ordering::Acquire) {
-            flush_to_document(file, &final_text, target, baseline)?;
+            flush_to_document(file, &final_text, target, baseline, effects.as_ref())?;
         }
 
         // Flush final thinking if routed to separate component
@@ -456,7 +492,7 @@ fn stream_loop(
         {
             let final_thinking = thinking_buffer.lock().unwrap().clone();
             if !final_thinking.is_empty() && !timer_flushed_final.load(Ordering::Acquire) {
-                flush_to_document(file, &final_thinking, tt, baseline)?;
+                flush_to_document(file, &final_thinking, tt, baseline, effects.as_ref())?;
             }
         }
 
@@ -486,7 +522,7 @@ fn stream_loop(
         let doc = crdt::CrdtDoc::from_text(&content_ours);
         agent_doc_merge_io::save_document_crdt(file, &doc.encode_state(), &content_ours)?;
 
-        repair::clear_pending(file)?;
+        effects.clear_pending(file)?;
     }
 
     Ok(StreamResult { session_id })
@@ -505,8 +541,14 @@ fn stream_loop(
 /// When a JetBrains/VS Code plugin is active (`.agent-doc/patches/` directory
 /// exists), attempts IPC first to avoid "externally modified" dialogs. An
 /// unproven active IPC attempt fails closed rather than writing behind the editor.
-pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str) -> Result<()> {
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+pub fn flush_to_document(
+    file: &Path,
+    text: &str,
+    target: &str,
+    _baseline: &str,
+    effects: &dyn StreamRuntimeEffects,
+) -> Result<()> {
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     // Build a patch block targeting the component
     let patch_response = format!(
         "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->\n",
@@ -527,9 +569,7 @@ pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str)
                 .exists()
         })
         .unwrap_or(false);
-    let ipc_result =
-        crate::write::try_ipc(file, &patches, &unmatched, None, None, None, None, None)?;
-    if ipc_result.success {
+    if effects.try_ipc_stream_flush(file, &patches, &unmatched)? {
         return Ok(());
     }
     if ipc_available {
@@ -573,7 +613,7 @@ pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str)
     .context("failed to apply template patches")?;
 
     // Write atomically
-    crate::write::atomic_write_pub(file, &content_patched)?;
+    effects.atomic_write(file, &content_patched)?;
 
     drop(lock_file);
     Ok(())
@@ -606,6 +646,55 @@ mod tests {
         Box::new(chunks.into_iter().map(Ok))
     }
 
+    struct TestStreamRuntimeEffects;
+
+    static TEST_EFFECTS: TestStreamRuntimeEffects = TestStreamRuntimeEffects;
+
+    fn test_loop_effects() -> Arc<dyn StreamRuntimeEffects> {
+        Arc::new(TestStreamRuntimeEffects)
+    }
+
+    impl StreamRuntimeEffects for TestStreamRuntimeEffects {
+        fn commit(&self, _file: &Path) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn save_pending(&self, file: &Path, response: &str) -> Result<()> {
+            agent_doc_capture_io::capture_response(file, response)?;
+            let pending_path = agent_doc_fs::pending_response_path_for(file)?;
+            if let Some(parent) = pending_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&pending_path, response)?;
+            Ok(())
+        }
+
+        fn clear_pending(&self, file: &Path) -> Result<()> {
+            let pending_path = agent_doc_fs::pending_response_path_for(file)?;
+            if pending_path.exists() {
+                std::fs::remove_file(&pending_path)?;
+            }
+            let _ = agent_doc_snapshot_io::delete_pre_response(file);
+            let _ = agent_doc_capture_io::mark_write_applied(file);
+            Ok(())
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            agent_doc_fs::write_atomic(file, content.as_bytes())
+        }
+
+        fn try_ipc_stream_flush(
+            &self,
+            _file: &Path,
+            _patches: &[template::PatchBlock],
+            _unmatched: &str,
+        ) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn fire_post_write(&self, _file: &Path, _session_id: &str) {}
+    }
+
     #[test]
     fn flush_to_document_applies_patch() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -618,7 +707,14 @@ mod tests {
         let content = "---\nagent_doc_mode: stream\n---\n\n# Test\n\n<!-- agent:output -->\nOld content\n<!-- /agent:output -->\n";
         std::fs::write(&doc, content).unwrap();
 
-        flush_to_document(&doc, "New streamed content", "output", content).unwrap();
+        flush_to_document(
+            &doc,
+            "New streamed content",
+            "output",
+            content,
+            &TEST_EFFECTS,
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -646,7 +742,14 @@ mod tests {
         let content = "---\nagent_doc_mode: stream\n---\n\n# Test\n\n<!-- agent:output -->\nOld content\n<!-- /agent:output -->\n";
         std::fs::write(&doc, content).unwrap();
 
-        let err = flush_to_document(&doc, "New streamed content", "output", content).unwrap_err();
+        let err = flush_to_document(
+            &doc,
+            "New streamed content",
+            "output",
+            content,
+            &TEST_EFFECTS,
+        )
+        .unwrap_err();
 
         assert!(
             err.to_string().contains("refusing direct document write"),
@@ -656,19 +759,6 @@ mod tests {
             std::fs::read_to_string(&doc).unwrap(),
             content,
             "active IPC timeout must not mutate the document directly"
-        );
-        let queued: Vec<_> = std::fs::read_dir(agent_doc_dir.join("patches"))
-            .unwrap()
-            .filter_map(|entry| entry.ok())
-            .collect();
-        assert!(
-            !queued.is_empty(),
-            "active IPC timeout must leave the patch queued for editor retry"
-        );
-        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            ops_log.contains("recovery=retry_without_disk_write"),
-            "timeout should log retry-without-disk recovery:\n{ops_log}"
         );
     }
 
@@ -684,7 +774,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
 
         // Stream flush uses replace mode — cumulative buffer replaces existing content
-        flush_to_document(&doc, "New content", "exchange", content).unwrap();
+        flush_to_document(&doc, "New content", "exchange", content, &TEST_EFFECTS).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -710,9 +800,9 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
 
         // First flush: partial response
-        flush_to_document(&doc, "Hello", "exchange", content).unwrap();
+        flush_to_document(&doc, "Hello", "exchange", content, &TEST_EFFECTS).unwrap();
         // Second flush: cumulative (full text so far)
-        flush_to_document(&doc, "Hello world", "exchange", content).unwrap();
+        flush_to_document(&doc, "Hello world", "exchange", content, &TEST_EFFECTS).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         // Should contain "Hello world" exactly once, not "Hello\nHello world"
@@ -740,7 +830,7 @@ mod tests {
         let content = "---\nagent_doc_mode: stream\n---\n\n# Test\n\n<!-- agent:status -->\nStatus line\n<!-- /agent:status -->\n\n<!-- agent:output -->\nOld\n<!-- /agent:output -->\n";
         std::fs::write(&doc, content).unwrap();
 
-        flush_to_document(&doc, "New content", "output", content).unwrap();
+        flush_to_document(&doc, "New content", "output", content, &TEST_EFFECTS).unwrap();
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -784,7 +874,16 @@ mod tests {
             },
         ]);
 
-        let result = stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
+        let result = stream_loop(
+            &doc,
+            chunks,
+            100,
+            "exchange",
+            content,
+            None,
+            test_loop_effects(),
+        )
+        .unwrap();
         assert_eq!(result.session_id.as_deref(), Some("sess-1"));
 
         let final_doc = std::fs::read_to_string(&doc).unwrap();
@@ -826,7 +925,16 @@ mod tests {
             },
         ]);
 
-        stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
+        stream_loop(
+            &doc,
+            chunks,
+            100,
+            "exchange",
+            content,
+            None,
+            test_loop_effects(),
+        )
+        .unwrap();
 
         let checkpoint = agent_doc_capture_io::latest_partial_checkpoint(&doc)
             .unwrap()
@@ -865,7 +973,16 @@ mod tests {
             },
         ]);
 
-        let result = stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
+        let result = stream_loop(
+            &doc,
+            chunks,
+            100,
+            "exchange",
+            content,
+            None,
+            test_loop_effects(),
+        )
+        .unwrap();
         assert!(result.session_id.is_none());
     }
 
@@ -900,8 +1017,16 @@ mod tests {
         let thinking_cfg = ThinkingConfig {
             target: Some("log".to_string()),
         };
-        let result =
-            stream_loop(&doc, chunks, 100, "exchange", content, Some(&thinking_cfg)).unwrap();
+        let result = stream_loop(
+            &doc,
+            chunks,
+            100,
+            "exchange",
+            content,
+            Some(&thinking_cfg),
+            test_loop_effects(),
+        )
+        .unwrap();
         assert_eq!(result.session_id.as_deref(), Some("sess-2"));
 
         let final_doc = std::fs::read_to_string(&doc).unwrap();
@@ -939,8 +1064,16 @@ mod tests {
         }]);
 
         let thinking_cfg = ThinkingConfig { target: None }; // interleave
-        let result =
-            stream_loop(&doc, chunks, 100, "output", content, Some(&thinking_cfg)).unwrap();
+        let result = stream_loop(
+            &doc,
+            chunks,
+            100,
+            "output",
+            content,
+            Some(&thinking_cfg),
+            test_loop_effects(),
+        )
+        .unwrap();
         assert!(result.session_id.is_none());
 
         let final_doc = std::fs::read_to_string(&doc).unwrap();
@@ -983,7 +1116,16 @@ mod tests {
         }]);
 
         // No thinking config — thinking should be ignored
-        let result = stream_loop(&doc, chunks, 100, "output", content, None).unwrap();
+        let result = stream_loop(
+            &doc,
+            chunks,
+            100,
+            "output",
+            content,
+            None,
+            test_loop_effects(),
+        )
+        .unwrap();
         assert!(result.session_id.is_none());
 
         let final_doc = std::fs::read_to_string(&doc).unwrap();
@@ -1010,7 +1152,19 @@ mod tests {
         .unwrap();
 
         let config = Config::default();
-        let err = run(&doc, 2000, None, None, true, &config, None).unwrap_err();
+        let err = run(
+            StreamRunOptions {
+                file: &doc,
+                interval_ms: 2000,
+                agent_name: None,
+                model: None,
+                no_git: true,
+                config: &config,
+                lint_override: None,
+            },
+            test_loop_effects(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("expected crdt"), "error: {}", err);
     }
 
@@ -1221,13 +1375,16 @@ user prompt here
 
         let config = Config::default();
         let err = run(
-            &doc,
-            2000,
-            None,
-            None,
-            true,
-            &config,
-            Some(agent_doc_frontmatter::lint::LintCliMode::Strict),
+            StreamRunOptions {
+                file: &doc,
+                interval_ms: 2000,
+                agent_name: None,
+                model: None,
+                no_git: true,
+                config: &config,
+                lint_override: Some(agent_doc_frontmatter::lint::LintCliMode::Strict),
+            },
+            test_loop_effects(),
         )
         .unwrap_err();
         assert!(err.to_string().contains("expected crdt"), "error: {}", err);

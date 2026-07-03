@@ -47,7 +47,6 @@ pub mod route;
 pub mod run;
 pub mod session_check;
 pub mod start;
-pub mod stream;
 pub mod write;
 
 pub(crate) struct BacklogCommandEffects;

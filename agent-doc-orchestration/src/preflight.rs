@@ -1222,10 +1222,46 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
 }
 
 fn append_latest_ipc_dogfood_note(file: &Path) -> Result<bool> {
+    // Only agent-doc's OWN dogfood sessions may have an IPC diagnostic folded into
+    // the document exchange. A user's document (e.g. a recruiting doc that merely
+    // lives in a superproject alongside `src/agent-doc`) must never have binary
+    // IPC diagnostics written into its content — for those the diagnostic stays in
+    // ops.log only. Without this gate the interrupted-cycle recovery pollutes and
+    // re-duplicates diagnostics into real user documents.
+    if !is_agent_doc_dogfood_document(file) {
+        return Ok(false);
+    }
     let Some(diagnostic) = agent_doc_ops_log_io::latest_ipc_proof_diagnostic(file)? else {
         return Ok(false);
     };
     append_ipc_dogfood_note_for_diagnostic(file, &diagnostic)
+}
+
+/// True only for agent-doc's own dogfood sessions — a document under the agent-doc
+/// crate scope. Mirrors the scope check behind
+/// `project_controller::rpc::dogfood_agent_doc_crate_root`, reusing the canonical
+/// `is_agent_doc_dogfood_session` primitive. (Candidate for consolidation into a
+/// single shared `agent_doc_dogfood_crate_root` helper — see the IPC-action
+/// unification follow-up.)
+fn is_agent_doc_dogfood_document(file: &Path) -> bool {
+    let Ok(canonical) = file.canonicalize() else {
+        return false;
+    };
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        return false;
+    };
+    [project_root.clone(), project_root.join("src/agent-doc")]
+        .into_iter()
+        .any(|candidate| {
+            std::fs::read_to_string(candidate.join("Cargo.toml"))
+                .map(|cargo| cargo.contains("name = \"agent-doc\""))
+                .unwrap_or(false)
+                && agent_doc_supervisor::config::is_agent_doc_dogfood_session(
+                    &canonical,
+                    &project_root,
+                    &candidate,
+                )
+        })
 }
 
 pub(crate) fn append_ipc_dogfood_note_for_diagnostic(
@@ -2625,12 +2661,23 @@ mod tests {
             ),
         );
 
-        assert!(super::append_latest_ipc_dogfood_note(&doc).unwrap());
+        // Gated entry point must NOT append into a non-dogfood document (a user
+        // doc that merely sits in a superproject): the diagnostic stays in ops.log.
+        assert!(!super::append_latest_ipc_dogfood_note(&doc).unwrap());
+        assert!(
+            !std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("IPC proof issue dogfood log")
+        );
+
+        // The underlying appender (reached only for genuine agent-doc dogfood
+        // docs) still folds the diagnostic into the exchange and dedups a repeat.
+        assert!(super::append_ipc_dogfood_note_for_diagnostic(&doc, &diagnostic).unwrap());
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("IPC proof issue dogfood log"));
         assert!(updated.contains(&diagnostic));
 
-        assert!(!super::append_latest_ipc_dogfood_note(&doc).unwrap());
+        assert!(!super::append_ipc_dogfood_note_for_diagnostic(&doc, &diagnostic).unwrap());
     }
 
     /// #drained-done-queue-clear: a standalone no-diff preflight that drains a

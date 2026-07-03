@@ -1,7 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_route_io::pane_resolution::rescue_from_stash;
+use agent_doc_route_io::pane_resolution::{optimistic_busy_pane_dispatch, rescue_from_stash};
 use agent_doc_route_io::session_resolution::{ensure_auto_start_target_session, find_target_pane};
 use agent_doc_session_registry_io::dispatch_registry::{
     deregister_dispatch_registration, load_dispatch_registry, lookup_dispatch_registration,
@@ -1170,6 +1170,8 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
                         cycle_baseline,
                         prompt_bearing_marker,
                         detail.as_str(),
+                        route_dispatch_effects(),
+                        route_cycle_ack_effects(),
                     );
                 }
                 anyhow::bail!(
@@ -1196,6 +1198,8 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
                         cycle_baseline,
                         prompt_bearing_marker,
                         "bounded interrupt recovery never restored a dispatch-ready prompt",
+                        route_dispatch_effects(),
+                        route_cycle_ack_effects(),
                     );
                 }
                 anyhow::bail!(
@@ -1226,6 +1230,8 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
             fallback_detail
                 .as_deref()
                 .unwrap_or("still not showing an idle prompt"),
+            route_dispatch_effects(),
+            route_cycle_ack_effects(),
         );
     }
     anyhow::bail!(
@@ -1238,61 +1244,6 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
             auto_fix_attempted || allow_auto_fix_retry
         )
     );
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn optimistic_busy_pane_dispatch(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    pane: &str,
-    file_path: &str,
-    harness: &HarnessConfig,
-    cycle_baseline: Option<&agent_doc_cycle_state_io::CycleState>,
-    prompt_bearing_marker: Option<&str>,
-    detail: &str,
-) -> Result<String> {
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "route_busy_existing_pane_optimistic_dispatch file={} pane={} harness={} detail={}",
-            file.display(),
-            pane,
-            harness.binary,
-            detail
-        ),
-    );
-    eprintln!(
-        "[route] pane {} for {} is still busy ({}) but remains authoritative — sending the bare {} reopen anyway",
-        pane,
-        file.display(),
-        detail,
-        harness.binary
-    );
-    register_dispatch_target(tmux, session_id, pane, file_path)?;
-    let dispatch_start = dispatch_existing_managed_reopen(
-        tmux,
-        file,
-        session_id,
-        pane,
-        file_path,
-        harness,
-        route_dispatch_effects(),
-    )?;
-    let ack_pane = require_routed_cycle_ack(
-        tmux,
-        file,
-        pane,
-        session_id,
-        file_path,
-        harness,
-        cycle_baseline,
-        prompt_bearing_marker,
-        true,
-        dispatch_start,
-        route_cycle_ack_effects(),
-    )?;
-    Ok(ack_pane.unwrap_or_else(|| pane.to_string()))
 }
 
 #[cfg(test)]

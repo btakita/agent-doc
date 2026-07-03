@@ -3,6 +3,8 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+use crate::cycle_ack::{RouteCycleAckEffects, require_routed_cycle_ack};
+use crate::dispatch::{RouteDispatchEffects, dispatch_existing_managed_reopen};
 use crate::dispatch_only::{
     DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions, dispatch_only_send_reopen,
 };
@@ -350,6 +352,63 @@ pub fn rescue_from_stash(
         return moved;
     }
     false
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn optimistic_busy_pane_dispatch(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    cycle_baseline: Option<&agent_doc_cycle_state_io::CycleState>,
+    prompt_bearing_marker: Option<&str>,
+    detail: &str,
+    route_dispatch_effects: RouteDispatchEffects,
+    route_cycle_ack_effects: RouteCycleAckEffects,
+) -> Result<String> {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_busy_existing_pane_optimistic_dispatch file={} pane={} harness={} detail={}",
+            file.display(),
+            pane,
+            harness.binary,
+            detail
+        ),
+    );
+    eprintln!(
+        "[route] pane {} for {} is still busy ({}) but remains authoritative — sending the bare {} reopen anyway",
+        pane,
+        file.display(),
+        detail,
+        harness.binary
+    );
+    register_dispatch_target(tmux, session_id, pane, file_path)?;
+    let dispatch_start = dispatch_existing_managed_reopen(
+        tmux,
+        file,
+        session_id,
+        pane,
+        file_path,
+        harness,
+        route_dispatch_effects,
+    )?;
+    let ack_pane = require_routed_cycle_ack(
+        tmux,
+        file,
+        pane,
+        session_id,
+        file_path,
+        harness,
+        cycle_baseline,
+        prompt_bearing_marker,
+        true,
+        dispatch_start,
+        route_cycle_ack_effects,
+    )?;
+    Ok(ack_pane.unwrap_or_else(|| pane.to_string()))
 }
 
 pub fn controller_dispatch_actor_state(

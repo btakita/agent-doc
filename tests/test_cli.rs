@@ -14609,6 +14609,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && !route_pane_resolution_source
                 .contains("fn recover_dispatch_only_authoritative_waiting_input(")
             && !route_pane_resolution_source.contains("fn rescue_from_stash(")
+            && !route_pane_resolution_source.contains("fn optimistic_busy_pane_dispatch(")
             && route_supervisor_runtime_source.contains("pub fn query_supervisor_runtime(")
             && route_supervisor_runtime_source.contains("pub fn restart_via_supervisor(")
             && route_pane_provenance_source.contains("pub fn pane_route_provenance(")
@@ -14629,7 +14630,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
                 .contains("pub fn recover_dispatch_only_authoritative_waiting_input(")
             && route_pane_resolution_io_source.contains("pub fn rescue_from_stash(")
             && route_pane_resolution_io_source.contains("DispatchOnlyRouteEffects")
-            && route_pane_resolution_io_source.contains("dispatch_only_send_reopen("),
+            && route_pane_resolution_io_source.contains("dispatch_only_send_reopen(")
+            && route_pane_resolution_io_source.contains("pub fn optimistic_busy_pane_dispatch(")
+            && route_pane_resolution_io_source.contains("RouteDispatchEffects")
+            && route_pane_resolution_io_source.contains("RouteCycleAckEffects")
+            && route_pane_resolution_io_source.contains("require_routed_cycle_ack("),
         "shared route supervisor/provenance/dispatch-target/recovery/restart-handoff/pane-resolution helper IO should live in agent-doc-route-io"
     );
     for forbidden_snippet in [

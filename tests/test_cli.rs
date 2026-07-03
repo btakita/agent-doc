@@ -1346,10 +1346,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // so an accepted trigger queued behind an active turn is auditable
         // without waiting through the full dispatch-start proof budget.
         ("agent-doc-orchestration/src/route/dispatch.rs", "proof=") => 3,
-        // +1 (#1vhn `reason=harness_exited_to_bare_shell`): the pre-send
-        // dead-harness guard logs `route_dispatch_into_dead_shell_blocked` when
-        // the harness has crashed/exited to a bare interactive shell, so route
-        // fails closed instead of typing the trigger into the dead shell.
+        // 3 -> 0: dead-harness and auto-start reverify fail-closed reason
+        // logging moved with the tmux-facing route dispatch IO graph into
+        // `agent-doc-route-io`.
+        ("agent-doc-orchestration/src/route/dispatch.rs", "reason=") => 0,
         // +2 (#jbtsiftnosub
         // `reason=harness_not_dispatch_ready_before_auto_start_send`,
         // `reason=harness_exited_to_bare_shell_before_auto_start_send`): the
@@ -1357,7 +1357,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // fails closed and logs `dispatch_into_starting_pane` / `dispatch_into_shell`
         // when a freshly created pane is still cold-starting (or dropped to a bare
         // shell) at send time, instead of typing into a not-yet-submit-ready composer.
-        ("agent-doc-orchestration/src/route/dispatch.rs", "reason=") => 3,
+        ("agent-doc-route-io/src/startup_ready.rs", "reason=") => 2,
         ("agent-doc-route-io/src/busy_pane.rs", "reason=") => 1,
         // +8 for the audited `#do-id-closeout-open-backlog` guard:
         // `expect_done_or_gate_guard_fired` ops_log diagnostic plus seven
@@ -14664,12 +14664,42 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             "route/startup.rs must not re-own fresh-start ack policy: {forbidden_snippet}"
         );
     }
+    for required_snippet in [
+        "pub fn auto_start_dispatch_ready_block(",
+        "pub fn reverify_auto_start_dispatch_ready(",
+        "AutoStartDispatchBlock",
+        "AutoStartDispatchReadyFacts",
+        "classify_auto_start_dispatch_ready_block(",
+        "agent_doc_tmux_io::target_current_command(",
+        "agent_doc_tmux::pane_current_command_is_bare_shell(",
+        "auto_start_dispatch_ready_confirmed",
+        "dispatch_into_starting_pane",
+        "dispatch_into_shell",
+        "FreshStartAckOutcome",
+        "fresh_start_ack_outcome",
+        "agent_doc_harness::ready_prompt_candidate(&content, harness).is_some()",
+    ] {
+        assert!(
+            route_startup_ready_source.contains(required_snippet),
+            "agent-doc-route-io startup_ready should own startup readiness/fresh-start ack route IO: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "pub(crate) fn auto_start_dispatch_ready_block(",
+        "pub(crate) fn reverify_auto_start_dispatch_ready(",
+        "AutoStartDispatchReadyFacts",
+        "classify_auto_start_dispatch_ready_block(",
+        "dispatch_into_starting_pane file=",
+    ] {
+        assert!(
+            !route_dispatch_source.contains(forbidden_snippet),
+            "route/dispatch.rs must not re-own auto-start dispatch-ready reverify IO after it moves to agent-doc-route-io: {forbidden_snippet}"
+        );
+    }
     assert!(
-        route_startup_ready_source.contains(
-            "use agent_doc_controller::dispatch::{FreshStartAckOutcome, fresh_start_ack_outcome};"
-        ) && route_startup_ready_source
-            .contains("agent_doc_harness::ready_prompt_candidate(&content, harness).is_some()"),
-        "agent-doc-route-io startup_ready should adapt pane prompt detection into focused fresh-start ack policy"
+        route_startup_source
+            .contains("agent_doc_route_io::startup_ready::reverify_auto_start_dispatch_ready("),
+        "route/startup.rs should call focused route startup-ready IO directly"
     );
     for forbidden_snippet in [
         "pub(crate) fn should_require_routed_cycle_ack(",
@@ -19003,6 +19033,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
             .unwrap();
+    let startup_ready_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_ready.rs")).unwrap();
     for forbidden in [
         "pub(crate) fn pane_current_command_is_bare_shell(",
         "\"zsh\" | \"bash\" | \"sh\" | \"fish\" | \"dash\" | \"ksh\" | \"tcsh\" | \"csh\"",
@@ -19013,8 +19045,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         );
     }
     assert!(
-        dispatch_source.contains("use agent_doc_tmux::pane_current_command_is_bare_shell;"),
-        "route dispatch should call the focused tmux bare-shell API directly"
+        startup_ready_source.contains("agent_doc_tmux::pane_current_command_is_bare_shell("),
+        "route startup-ready IO should call the focused tmux bare-shell API directly"
     );
 
     for relative in [
@@ -19088,9 +19120,6 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
-    let route_dispatch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
-            .unwrap();
     let sessions_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
             .unwrap();
@@ -19137,7 +19166,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && route_pane_provenance.contains("agent_doc_tmux_io::target_session_name(")
             && route_pane_provenance.contains("agent_doc_tmux_io::target_current_command(")
             && route_source.contains("agent_doc_tmux_io::target_current_command(")
-            && route_dispatch.contains("agent_doc_tmux_io::target_current_command(")
+            && startup_ready_source.contains("agent_doc_tmux_io::target_current_command(")
             && route_dispatch_target.contains("agent_doc_tmux_io::target_window_id(")
             && route_startup_sync.contains("agent_doc_tmux_io::target_window_id(")
             && tmux_io_source.contains("pub fn current_pane_id_from_env_or_tmux(")

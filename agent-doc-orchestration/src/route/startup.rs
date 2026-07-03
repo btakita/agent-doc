@@ -427,7 +427,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                 // composer is actually submit-ready, and fail closed (logging
                 // `dispatch_into_starting_pane`) rather than typing the trigger into
                 // a not-yet-ready composer.
-                super::dispatch::reverify_auto_start_dispatch_ready(
+                agent_doc_route_io::startup_ready::reverify_auto_start_dispatch_ready(
                     tmux,
                     file,
                     &dispatch_pane,

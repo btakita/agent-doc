@@ -1,7 +1,11 @@
 //! Route startup readiness polling.
 
-use agent_doc_controller::dispatch::{FreshStartAckOutcome, fresh_start_ack_outcome};
+use agent_doc_controller::dispatch::{
+    AutoStartDispatchBlock, AutoStartDispatchReadyFacts, FreshStartAckOutcome,
+    classify_auto_start_dispatch_ready_block, fresh_start_ack_outcome,
+};
 use agent_doc_harness::HarnessConfig;
+use anyhow::Result;
 use std::time::{Duration, Instant};
 use tmux_router::Tmux;
 
@@ -156,5 +160,102 @@ pub fn fresh_start_pane_idle_ready(tmux: &Tmux, pane: &str, harness: &HarnessCon
             FreshStartAckOutcome::IdleNoOpKeep
         ),
         Err(_) => false,
+    }
+}
+
+/// `#jbtsiftnosub`: re-verify, immediately before an auto-start send, that the
+/// freshly created pane has reached a harness dispatch-ready prompt.
+pub fn auto_start_dispatch_ready_block(
+    tmux: &Tmux,
+    pane: &str,
+    harness: &HarnessConfig,
+) -> Option<AutoStartDispatchBlock> {
+    let pane_shows_dispatch_ready_prompt = agent_doc_tmux_io::capture_pane(tmux, pane)
+        .ok()
+        .and_then(|content| agent_doc_harness::ready_prompt_candidate(&content, harness))
+        .is_some();
+    let bare_shell_command = agent_doc_tmux_io::target_current_command(tmux, pane)
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .filter(|cmd| agent_doc_tmux::pane_current_command_is_bare_shell(cmd));
+    classify_auto_start_dispatch_ready_block(AutoStartDispatchReadyFacts {
+        pane_shows_dispatch_ready_prompt,
+        bare_shell_command,
+    })
+}
+
+/// Gate an auto-start send behind a bounded re-verify that the freshly created
+/// pane has reached a harness dispatch-ready prompt.
+pub fn reverify_auto_start_dispatch_ready(
+    tmux: &Tmux,
+    file: &std::path::Path,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    timeout: Duration,
+) -> Result<()> {
+    let start = Instant::now();
+    let poll_interval = Duration::from_millis(150);
+    let last_block = loop {
+        match auto_start_dispatch_ready_block(tmux, pane, harness) {
+            None => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "auto_start_dispatch_ready_confirmed file={} pane={} harness={} elapsed_secs={} #jbtsiftnosub",
+                        file.display(),
+                        pane,
+                        harness.binary,
+                        start.elapsed().as_secs()
+                    ),
+                );
+                return Ok(());
+            }
+            Some(block) if start.elapsed() >= timeout => break block,
+            Some(_) => {}
+        }
+        std::thread::sleep(poll_interval);
+    };
+    match last_block {
+        AutoStartDispatchBlock::StartingPane => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "dispatch_into_starting_pane file={} pane={} harness={} timeout_secs={} reason=harness_not_dispatch_ready_before_auto_start_send",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    timeout.as_secs()
+                ),
+            );
+            anyhow::bail!(
+                "route refusing to dispatch {} into pane {}: harness '{}' is still starting (no dispatch-ready prompt after {}s). The cold-start composer is not yet submit-ready — re-run `agent-doc route`/`Run Agent Doc` once the {} prompt is up, or claim/restart the harness.",
+                harness.trigger_command(file_path),
+                pane,
+                harness.binary,
+                timeout.as_secs(),
+                harness.binary,
+            );
+        }
+        AutoStartDispatchBlock::DeadShell(shell) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "dispatch_into_shell file={} pane={} harness={} pane_current_command={} timeout_secs={} reason=harness_exited_to_bare_shell_before_auto_start_send",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    shell,
+                    timeout.as_secs()
+                ),
+            );
+            anyhow::bail!(
+                "route refusing to dispatch {} into pane {}: harness '{}' is not running (pane is a bare '{}' shell). The harness crashed/exited during cold-start — claim/restart the harness before routing.",
+                harness.trigger_command(file_path),
+                pane,
+                harness.binary,
+                shell,
+            );
+        }
     }
 }

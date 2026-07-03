@@ -195,7 +195,7 @@ What I changed:
 One judgment call: I kept the budget question because it anchors the number and pairs naturally with "lower rate." If you'd rather lead with a concrete rate or a specific first slice of plumbing (e.g. the derived-data consistency engine) instead of asking his budget, say which and I'll swap it in.
 
 Want me to drop this into `corky`/LinkedIn as a draft (no auto-send)?
-<!-- agent:boundary:12a7186c -->
+<!-- agent:boundary:308551c7 -->
 <!-- /agent:exchange -->
 
 ## Queue

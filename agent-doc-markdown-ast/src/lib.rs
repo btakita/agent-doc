@@ -14,6 +14,7 @@
 
 pub mod crdt;
 pub mod events;
+pub mod exchange_tree;
 pub mod mutations;
 pub mod overlay;
 

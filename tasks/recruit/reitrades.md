@@ -260,6 +260,11 @@ Brian
 Judgment calls, flag if you disagree:
 - **Dropped the budget question.** "Worth a quick call?" replaced "give me a rough idea of your budget." The budget question made him do work before replying; the call ask is a lower-friction yes, and you negotiate the number live where you're stronger.
 - **Kept availability/flexibility as readiness, not need** (per the earlier exchange). "Room in my schedule" + "start this week" carries urgency without telegraphing it.
+- **Don't:** re-open full V1.2 pricing on this call, or mention needing the work. The credit-toward-Phase-1 line does the relationship-building for you.
+- **Ask him:** (1) which asset class to scope first, (2) repo + staging access timing, (3) whether the current teaser/OM generation is the BatchData + AI flow from the V1.2 brief or something's changed.
+- **If he asks for hourly instead:** $100/hr with a weekly cap he sets (same as the estimate report) — but steer back to fixed; he's budget-anxious and fixed kills that anxiety.
+- **If he says it's still too much:** trim to **$2,500** — drop the admin UI polish and audit log, keep engine + stale guard + regenerate. That's the floor; below it, decline politely and leave the door open.
+- **Your number:** $3,500 fixed, 2 weeks, start Monday. Say it plainly and stop talking.
 ❯ I like Route 2. He may want to talk today. Can we scope out the OM for a fixed bid that fits within his budget?
 ### Re: Four fresh routes — pick a direction — fable-5
 
@@ -339,7 +344,7 @@ Brian
 
 Recommendation: **Route 2** is the strongest opener for restarting the relationship. It asks for the smallest yes, proves how you work before asking for trust, and the "if the first slice works" line opens the ongoing-relationship door without naming it. Route 1 is the play if you'd rather be upfront that you're looking for a lasting arrangement. Hybrids work too, e.g. Route 2's offer with Route 1's opening.
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc (HEAD)
 
 ```text
 **IPC proof issue dogfood log**
@@ -350,7 +355,37 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/recruit/reitrades.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=23e134a22b8da55953a55f772195ab9c1a3097a1e7e10bfcab31dfd30aefb623 content_len=23694 content_hash=8cf4371cbff796499f21f6aaa202a9348b820be9fc73780be7c63aa22d8dc08a doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1783061401719
 ```
-<!-- agent:boundary:b4819bc7 -->
+<!-- agent:boundary:b34f127b -->
+
+### Re: OM sync slice scoped — fixed bid + call sheet — opus-4-8
+
+> **Prompt:** I like Route 2. He may want to talk today. Can we scope out the OM for a fixed bid that fits within his budget?
+
+Done. Fixed-bid one-pager at **tasks/recruit/rei-trades/om-sync-fixed-bid.md** (committed, 7821f13). Noted your edit to "I can start next week" in Route 2 — the bid matches it.
+
+**The bid:**
+
+| Option | Scope | Fixed price |
+|--------|-------|-------------|
+| **Core** | Dependency map, change detection, selective re-render, stale guard, admin out-of-sync indicator + regenerate, audit log | **$3,500** |
+| Core + AI prose regen | AI narrative regenerates only when source fields change, through a review gate | **$5,500** |
+
+Half at kickoff, half on acceptance. ~2 weeks from repo access. Credited against V1.2 Phase 1 if he proceeds later — it's the same "generate-once / regenerate" line item from the estimate report, so the numbers stay consistent with what he's already seen.
+
+**Why $3,500 fits his budget without knowing his budget:** his objection was the $27k–$40k tranche. This is ~10% of that, on the highest-trust feature he has ("100% accurate"), with the open-source structure carrying the discount story. It's an easy yes that doesn't reprice your labor.
+
+**Call sheet for today:**
+
+- **Your number:** $3,500 fixed, 2 weeks, start Monday. Say it plainly and stop talking.
+- **If he says it's still too much:** trim to **$2,500** — drop the admin UI polish and audit log, keep engine + stale guard + regenerate. That's the floor; below it, decline politely and leave the door open.
+- **If he asks for hourly instead:** $100/hr with a weekly cap he sets (same as the estimate report) — but steer back to fixed; he's budget-anxious and fixed kills that anxiety.
+- **Ask him:** (1) which asset class to scope first, (2) repo + staging access timing, (3) whether the current teaser/OM generation is the BatchData + AI flow from the V1.2 brief or something's changed.
+- **Don't:** re-open full V1.2 pricing on this call, or mention needing the work. The credit-toward-Phase-1 line does the relationship-building for you.
+
+**Acceptance test he'll understand on the phone:** "Change the asking price on a listing — the OM and teaser update without a full regen, and at no point could a buyer have seen the old number."
+
+Route 2 note is send-ready in the doc above; attach or paste the one-pager only if he replies or the call happens — the note alone is the opener, the bid is the follow-through.
+<!-- agent:boundary:a5a7b716 -->
 <!-- /agent:exchange -->
 
 ## Queue

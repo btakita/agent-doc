@@ -9627,7 +9627,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         })
         .collect();
     assert!(
-        coverage_lines.len() >= 32,
+        coverage_lines.len() >= 33,
         "coarse extraction commit coverage should include prior large-chunk rounds and current rounds; found {} rows",
         coverage_lines.len()
     );
@@ -9651,7 +9651,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 36,
+        ledger_rows.len() >= 37,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -9855,6 +9855,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("7fbe726a", "Focus command host IO"),
         ("369280b0", "Session actor store and mailbox IO"),
         ("5dc7c322", "Session registration and projection IO"),
+        ("0f90f7cf", "Project controller runtime IO"),
     ] {
         assert!(
             coverage_lines
@@ -10080,6 +10081,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/sessions.rs",
             "agent-doc-session-registry-io/src/registration.rs",
             "Split actor-backed sessions projection and projection diagnostics from tmux registration writes",
+        ),
+        (
+            "Project controller runtime IO",
+            "agent-doc-orchestration/src/project_controller.rs",
+            "agent-doc-controller-io/src/project_controller.rs",
+            "Split RPC client/server wire protocol from SQLite actor-store projection",
         ),
     ] {
         let row_text = ledger_rows

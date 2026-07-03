@@ -114,11 +114,7 @@ mod tests {
     fn concurrent_delete_and_insert_converge() {
         // A deletes a char, B inserts — concurrent overlapping-ish edits still
         // converge deterministically.
-        let out = converge_two_replicas(
-            "abc",
-            |a| a.delete(0),
-            |b| b.insert_str(b.len(), "d"),
-        );
+        let out = converge_two_replicas("abc", |a| a.delete(0), |b| b.insert_str(b.len(), "d"));
         assert!(out.converged);
         assert!(out.order_independent);
         assert!(

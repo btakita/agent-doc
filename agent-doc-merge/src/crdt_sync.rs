@@ -24,37 +24,49 @@
 //! rebuilding from git) lives in `agent-doc-orchestration` over this primitive,
 //! since the authority layer lives there.
 
-use anyhow::Result;
-use yrs::updates::decoder::Decode;
-use yrs::updates::encoder::Encode;
-use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact, Update};
+use anyhow::{Context, Result};
+use lazily::{TextCrdt, TextOp, VersionVector};
+use std::cell::RefCell;
 
-const TEXT_KEY: &str = "content";
+/// Convert a byte offset into a char index against `text`. Editor/diff offsets are
+/// byte offsets (char-aligned); lazily's [`TextCrdt`] is char-indexed. Saturates to
+/// the char count when out of range.
+fn byte_to_char(text: &str, byte_off: usize) -> usize {
+    if byte_off >= text.len() {
+        text.chars().count()
+    } else {
+        text[..byte_off].chars().count()
+    }
+}
 
 /// A durable per-replica CRDT state — one participant (an editor's FFI node, or
 /// the supervisor) in a multi-replica document session.
 ///
-/// Unlike [`crate::crdt::CrdtDoc`] used by the rebuild-from-text merge, a
-/// `ReplicaState` is **kept across cycles**: it accumulates ops and exchanges
-/// only deltas with its peers via [`ReplicaState::state_vector`] /
-/// [`ReplicaState::diff`] / [`ReplicaState::apply_update`].
+/// Backed by a lazily [`TextCrdt`] (replacing the former Yjs `Doc`). Unlike
+/// [`crate::crdt::CrdtDoc`] used by the rebuild-from-text merge, a `ReplicaState`
+/// is **kept across cycles**: it accumulates ops and exchanges only deltas with its
+/// peers via [`ReplicaState::state_vector`] (a `version_vector` frontier) /
+/// [`ReplicaState::diff`] (`delta_since`) / [`ReplicaState::apply_update`]
+/// (`apply_delta`). The wire form is JSON `TextOp` lists / version vectors.
 pub struct ReplicaState {
-    doc: Doc,
+    text: RefCell<TextCrdt>,
 }
 
 impl ReplicaState {
-    /// Create a fresh empty replica with a stable `client_id`. Distinct replicas
-    /// MUST use distinct client ids so concurrent inserts order deterministically
-    /// (yrs orders concurrent inserts at the same position by ascending client
-    /// id, matching the agent-before-human convention in [`crate::crdt`]).
+    /// Create a fresh empty replica with a stable `client_id` (the CRDT peer id).
+    /// Distinct replicas MUST use distinct ids so concurrent inserts order
+    /// deterministically (lazily tiebreaks same-position concurrent inserts by
+    /// peer).
     pub fn new(client_id: u64) -> Self {
-        let doc = Doc::with_client_id(client_id);
-        doc.get_or_insert_text(TEXT_KEY);
-        Self { doc }
+        Self {
+            text: RefCell::new(TextCrdt::new(client_id)),
+        }
     }
 
     /// Bootstrap a replica from a previously encoded state (the durable boundary
-    /// checkpoint / a peer's full snapshot on first contact).
+    /// checkpoint / a peer's full snapshot on first contact). `apply_delta` of the
+    /// snapshot preserves each element's `OpId`, so the reconstructed replica shares
+    /// identity with its origin and later deltas merge conflict-free.
     pub fn from_encoded(client_id: u64, state: &[u8]) -> Result<Self> {
         let replica = Self::new(client_id);
         replica.apply_update(state)?;
@@ -63,62 +75,58 @@ impl ReplicaState {
 
     /// The current converged text.
     pub fn text(&self) -> String {
-        let text = self.doc.get_or_insert_text(TEXT_KEY);
-        let txn = self.doc.transact();
-        text.get_string(&txn)
+        self.text.borrow().text()
     }
 
-    /// Apply a local edit: delete `delete_len` chars at `offset`, then insert
-    /// `insert` there (one transaction). Mirrors [`crate::crdt::CrdtDoc::apply_edit`].
+    /// Apply a local edit: delete `delete_len` bytes at byte `offset`, then insert
+    /// `insert` there. Mirrors [`crate::crdt::CrdtDoc::apply_edit`].
     pub fn apply_local_edit(&self, offset: u32, delete_len: u32, insert: &str) {
-        let text = self.doc.get_or_insert_text(TEXT_KEY);
-        let mut txn = self.doc.transact_mut();
+        let mut t = self.text.borrow_mut();
+        let cur = t.text();
+        let start_char = byte_to_char(&cur, offset as usize);
         if delete_len > 0 {
-            text.remove_range(&mut txn, offset, delete_len);
+            let end_char = byte_to_char(&cur, offset as usize + delete_len as usize);
+            for _ in start_char..end_char {
+                t.delete(start_char);
+            }
         }
         if !insert.is_empty() {
-            text.insert(&mut txn, offset, insert);
+            t.insert_str(start_char, insert);
         }
     }
 
-    /// This replica's state vector, encoded for the wire. The state vector is the
-    /// **compact per-client causal summary** (each client's clock), NOT the whole
-    /// document: a peer replies with [`diff`](Self::diff) carrying only the ops
-    /// this vector is missing.
+    /// This replica's version vector, encoded (JSON) for the wire. The **compact
+    /// per-peer frontier**, NOT the whole document: a peer replies with
+    /// [`diff`](Self::diff) carrying only the ops this frontier is missing.
     pub fn state_vector(&self) -> Vec<u8> {
-        let txn = self.doc.transact();
-        txn.state_vector().encode_v1()
+        serde_json::to_vec(&self.text.borrow().version_vector()).unwrap_or_default()
     }
 
     /// The incremental update carrying exactly the ops `their_sv` is missing
-    /// (`encode_state_as_update(their_sv)`) — a delta, never a whole-document
-    /// snapshot. This is the sync reply a replica sends a peer that announced
-    /// `their_sv`.
+    /// (`delta_since(their_vv)`) — a delta, never a whole-document snapshot. This is
+    /// the sync reply a replica sends a peer that announced `their_sv`.
     pub fn diff(&self, their_sv: &[u8]) -> Result<Vec<u8>> {
-        let sv = StateVector::decode_v1(their_sv)
-            .map_err(|e| anyhow::anyhow!("decode state vector: {e}"))?;
-        let txn = self.doc.transact();
-        Ok(txn.encode_state_as_update_v1(&sv))
+        let their_vv: VersionVector =
+            serde_json::from_slice(their_sv).context("decode version vector")?;
+        let delta = self.text.borrow().delta_since(&their_vv);
+        serde_json::to_vec(&delta).context("encode delta")
     }
 
-    /// Apply a remote update. **Idempotent** (re-applying a known update is a
-    /// no-op) and **causal-buffered** by yrs (an update whose causal dependencies
-    /// have not arrived is buffered and integrated once they do), so duplicate or
-    /// out-of-order delivery converges rather than corrupting.
+    /// Apply a remote update (a `TextOp` delta). **Idempotent** (re-applying a known
+    /// delta is a no-op) and order-independent (commutative/associative merge), so
+    /// duplicate or out-of-order delivery converges rather than corrupting.
     pub fn apply_update(&self, update: &[u8]) -> Result<()> {
-        let update =
-            Update::decode_v1(update).map_err(|e| anyhow::anyhow!("decode update: {e}"))?;
-        let mut txn = self.doc.transact_mut();
-        txn.apply_update(update)
-            .map_err(|e| anyhow::anyhow!("apply update: {e}"))?;
+        let ops: Vec<TextOp> = serde_json::from_slice(update).context("decode delta")?;
+        self.text.borrow_mut().apply_delta(&ops);
         Ok(())
     }
 
     /// The full encoded state — a durable projection / boundary checkpoint, or the
-    /// snapshot a peer needs on first contact (no shared history yet).
+    /// snapshot a peer needs on first contact. It is `delta_since(∅)`: every op the
+    /// replica holds, as a `TextOp` list.
     pub fn encode_state(&self) -> Vec<u8> {
-        let txn = self.doc.transact();
-        txn.encode_state_as_update_v1(&StateVector::default())
+        let snapshot = self.text.borrow().delta_since(&VersionVector::new());
+        serde_json::to_vec(&snapshot).unwrap_or_default()
     }
 }
 

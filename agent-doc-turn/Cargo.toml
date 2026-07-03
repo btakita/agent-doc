@@ -19,7 +19,7 @@ agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67"
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.67" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
-lazily = "0.13.1"
+lazily = { version = "0.20", features = ["thread-safe"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 similar = "3"

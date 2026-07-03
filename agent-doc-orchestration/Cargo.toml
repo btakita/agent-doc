@@ -119,7 +119,7 @@ agent-doc-watch-io = { path = "../agent-doc-watch-io", version = "0.34.67" }
 agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.67" }
 agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.34.67" }
 agent-doc-work-graph = { path = "../agent-doc-work-graph", version = "0.34.67" }
-lazily = "0.13.1"
+lazily = "0.20"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
@@ -137,7 +137,6 @@ instruction-files = "0.3"
 tmux-router = { path = "../../tmux-router", version = "0.3.11" }
 base64 = "0.22"
 regex = "1"
-yrs = "0.27"
 interprocess = { version = "2", default-features = false }
 htmd = "0.5.3"
 indexmap = { version = "2", features = ["serde"] }

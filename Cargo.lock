@@ -41,6 +41,7 @@ dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-element-backlog-io",
  "agent-doc-element-boundary",
  "agent-doc-element-exchange",
  "agent-doc-element-exchange-io",
@@ -423,6 +424,25 @@ dependencies = [
  "anyhow",
  "serde",
  "sha2 0.11.0",
+]
+
+[[package]]
+name = "agent-doc-element-backlog-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-cycle-state-io",
+ "agent-doc-document",
+ "agent-doc-element",
+ "agent-doc-element-backlog",
+ "agent-doc-element-done",
+ "agent-doc-element-review",
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-log-time",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-root-io",
+ "anyhow",
+ "tempfile",
 ]
 
 [[package]]
@@ -857,6 +877,7 @@ dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-element-backlog-io",
  "agent-doc-element-boundary",
  "agent-doc-element-done",
  "agent-doc-element-exchange",

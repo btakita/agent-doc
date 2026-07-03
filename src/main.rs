@@ -487,6 +487,31 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
 
 struct CliQueueCommandEffects;
 
+struct CliBacklogCommandEffects;
+
+static CLI_BACKLOG_COMMAND_EFFECTS: CliBacklogCommandEffects = CliBacklogCommandEffects;
+
+impl agent_doc_element_backlog_io::BacklogCommandEffects for CliBacklogCommandEffects {
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        current_content: &str,
+        target_content: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        agent_doc_orchestration::write::converge_or_disk_write(
+            file,
+            current_content,
+            target_content,
+            reason,
+        )
+    }
+
+    fn record_document_write_provenance(&self, file: &Path, content: &str) {
+        agent_doc_orchestration::write::record_document_write_provenance(file, content);
+    }
+}
+
 fn queue_command_consume_outcome(
     outcome: agent_doc_orchestration::write::QueueConsumptionOutcome,
 ) -> agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
@@ -4286,114 +4311,148 @@ fn main() -> anyhow::Result<()> {
             file,
             force_disk,
             action,
-        } => {
-            agent_doc_orchestration::backlog_cmd::with_force_disk_pending_writes(force_disk, || {
-                match action {
-                    PendingAction::Add { item } => {
-                        agent_doc_orchestration::backlog_cmd::add(&file, &item, false)
-                    }
-                    PendingAction::AddGated { item } => {
-                        agent_doc_orchestration::backlog_cmd::add(&file, &item, true)
-                    }
-                    PendingAction::Remove { target, contains } => {
-                        agent_doc_orchestration::backlog_cmd::remove(&file, &target, contains)
-                    }
-                    PendingAction::Reap => agent_doc_orchestration::backlog_cmd::reap(&file),
-                    PendingAction::Backfill => {
-                        agent_doc_orchestration::backlog_cmd::backfill(&file)
-                    }
-                    PendingAction::Done { id } => {
-                        agent_doc_orchestration::backlog_cmd::done(&file, &id)
-                    }
-                    PendingAction::Edit { id, text } => {
-                        agent_doc_orchestration::backlog_cmd::edit(&file, &id, &text)
-                    }
-                    PendingAction::Clear => agent_doc_orchestration::backlog_cmd::clear(&file),
-                    PendingAction::Reorder { ids } => {
-                        let ids: Vec<String> = ids
-                            .split(',')
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        agent_doc_orchestration::backlog_cmd::reorder(&file, &ids)
-                    }
-                    PendingAction::List => agent_doc_orchestration::backlog_cmd::list(&file),
-                    PendingAction::ResolveGate { gate_type } => {
-                        agent_doc_orchestration::backlog_cmd::resolve_gate(&file, &gate_type)
-                    }
-                    PendingAction::SetGateType { id, gate_type } => {
-                        agent_doc_orchestration::backlog_cmd::set_gate_type(&file, &id, &gate_type)
-                    }
-                    PendingAction::SetVerify { id, spec } => {
-                        agent_doc_orchestration::backlog_cmd::set_gate_verify(&file, &id, &spec)
-                    }
-                }
-            })
-        }
+        } => agent_doc_element_backlog_io::with_backlog_command_effects(
+            &CLI_BACKLOG_COMMAND_EFFECTS,
+            || {
+                agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+                    force_disk,
+                    || match action {
+                        PendingAction::Add { item } => {
+                            agent_doc_element_backlog_io::backlog_cmd::add(&file, &item, false)
+                        }
+                        PendingAction::AddGated { item } => {
+                            agent_doc_element_backlog_io::backlog_cmd::add(&file, &item, true)
+                        }
+                        PendingAction::Remove { target, contains } => {
+                            agent_doc_element_backlog_io::backlog_cmd::remove(
+                                &file, &target, contains,
+                            )
+                        }
+                        PendingAction::Reap => {
+                            agent_doc_element_backlog_io::backlog_cmd::reap(&file)
+                        }
+                        PendingAction::Backfill => {
+                            agent_doc_element_backlog_io::backlog_cmd::backfill(&file)
+                        }
+                        PendingAction::Done { id } => {
+                            agent_doc_element_backlog_io::backlog_cmd::done(&file, &id)
+                        }
+                        PendingAction::Edit { id, text } => {
+                            agent_doc_element_backlog_io::backlog_cmd::edit(&file, &id, &text)
+                        }
+                        PendingAction::Clear => {
+                            agent_doc_element_backlog_io::backlog_cmd::clear(&file)
+                        }
+                        PendingAction::Reorder { ids } => {
+                            let ids: Vec<String> = ids
+                                .split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            agent_doc_element_backlog_io::backlog_cmd::reorder(&file, &ids)
+                        }
+                        PendingAction::List => {
+                            agent_doc_element_backlog_io::backlog_cmd::list(&file)
+                        }
+                        PendingAction::ResolveGate { gate_type } => {
+                            agent_doc_element_backlog_io::backlog_cmd::resolve_gate(
+                                &file, &gate_type,
+                            )
+                        }
+                        PendingAction::SetGateType { id, gate_type } => {
+                            agent_doc_element_backlog_io::backlog_cmd::set_gate_type(
+                                &file, &id, &gate_type,
+                            )
+                        }
+                        PendingAction::SetVerify { id, spec } => {
+                            agent_doc_element_backlog_io::backlog_cmd::set_gate_verify(
+                                &file, &id, &spec,
+                            )
+                        }
+                    },
+                )
+            },
+        ),
         Commands::Icebox {
             file,
             force_disk,
             action,
-        } => {
-            agent_doc_orchestration::backlog_cmd::with_force_disk_pending_writes(force_disk, || {
-                match action {
-                    PendingAction::Add { item } => {
-                        agent_doc_orchestration::backlog_cmd::icebox_add(&file, &item)
-                    }
-                    PendingAction::AddGated { item: _ } => {
-                        anyhow::bail!(
-                            "agent-doc icebox add-gated is not supported; use `agent-doc review add` for gated review work"
-                        )
-                    }
-                    PendingAction::Remove { target, contains } => {
-                        agent_doc_orchestration::backlog_cmd::icebox_remove(
-                            &file, &target, contains,
-                        )
-                    }
-                    PendingAction::Reap => agent_doc_orchestration::backlog_cmd::icebox_reap(&file),
-                    PendingAction::Backfill => {
-                        agent_doc_orchestration::backlog_cmd::icebox_backfill(&file)
-                    }
-                    PendingAction::Done { id } => {
-                        agent_doc_orchestration::backlog_cmd::done(&file, &id)
-                    }
-                    PendingAction::Edit { id, text } => {
-                        agent_doc_orchestration::backlog_cmd::icebox_edit(&file, &id, &text)
-                    }
-                    PendingAction::Clear => {
-                        agent_doc_orchestration::backlog_cmd::icebox_clear(&file)
-                    }
-                    PendingAction::Reorder { ids } => {
-                        let ids: Vec<String> = ids
-                            .split(',')
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        agent_doc_orchestration::backlog_cmd::icebox_reorder(&file, &ids)
-                    }
-                    PendingAction::List => agent_doc_orchestration::backlog_cmd::icebox_list(&file),
-                    PendingAction::ResolveGate { gate_type } => {
-                        anyhow::bail!(
-                            "agent-doc icebox resolve-gate is not supported for parked work (requested gate type `{gate_type}`)"
-                        )
-                    }
-                    PendingAction::SetGateType { id, gate_type } => {
-                        anyhow::bail!(
-                            "agent-doc icebox set-gate-type is not supported for parked work (requested #{id} -> {gate_type})"
-                        )
-                    }
-                    PendingAction::SetVerify { id, spec: _ } => {
-                        anyhow::bail!(
-                            "agent-doc icebox set-verify is not supported for parked work (requested #{id})"
-                        )
-                    }
-                }
-            })
-        }
+        } => agent_doc_element_backlog_io::with_backlog_command_effects(
+            &CLI_BACKLOG_COMMAND_EFFECTS,
+            || {
+                agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+                    force_disk,
+                    || match action {
+                        PendingAction::Add { item } => {
+                            agent_doc_element_backlog_io::backlog_cmd::icebox_add(&file, &item)
+                        }
+                        PendingAction::AddGated { item: _ } => {
+                            anyhow::bail!(
+                                "agent-doc icebox add-gated is not supported; use `agent-doc review add` for gated review work"
+                            )
+                        }
+                        PendingAction::Remove { target, contains } => {
+                            agent_doc_element_backlog_io::backlog_cmd::icebox_remove(
+                                &file, &target, contains,
+                            )
+                        }
+                        PendingAction::Reap => {
+                            agent_doc_element_backlog_io::backlog_cmd::icebox_reap(&file)
+                        }
+                        PendingAction::Backfill => {
+                            agent_doc_element_backlog_io::backlog_cmd::icebox_backfill(&file)
+                        }
+                        PendingAction::Done { id } => {
+                            agent_doc_element_backlog_io::backlog_cmd::done(&file, &id)
+                        }
+                        PendingAction::Edit { id, text } => {
+                            agent_doc_element_backlog_io::backlog_cmd::icebox_edit(
+                                &file, &id, &text,
+                            )
+                        }
+                        PendingAction::Clear => {
+                            agent_doc_element_backlog_io::backlog_cmd::icebox_clear(&file)
+                        }
+                        PendingAction::Reorder { ids } => {
+                            let ids: Vec<String> = ids
+                                .split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            agent_doc_element_backlog_io::backlog_cmd::icebox_reorder(&file, &ids)
+                        }
+                        PendingAction::List => {
+                            agent_doc_element_backlog_io::backlog_cmd::icebox_list(&file)
+                        }
+                        PendingAction::ResolveGate { gate_type } => {
+                            anyhow::bail!(
+                                "agent-doc icebox resolve-gate is not supported for parked work (requested gate type `{gate_type}`)"
+                            )
+                        }
+                        PendingAction::SetGateType { id, gate_type } => {
+                            anyhow::bail!(
+                                "agent-doc icebox set-gate-type is not supported for parked work (requested #{id} -> {gate_type})"
+                            )
+                        }
+                        PendingAction::SetVerify { id, spec: _ } => {
+                            anyhow::bail!(
+                                "agent-doc icebox set-verify is not supported for parked work (requested #{id})"
+                            )
+                        }
+                    },
+                )
+            },
+        ),
         Commands::Review { action } => match action {
             ReviewAction::UngateTasks { file } => {
-                let report =
-                    agent_doc_orchestration::backlog_cmd::add_ungate_tasks_for_review(&file)?;
+                let report = agent_doc_element_backlog_io::with_backlog_command_effects(
+                    &CLI_BACKLOG_COMMAND_EFFECTS,
+                    || {
+                        agent_doc_element_backlog_io::backlog_cmd::add_ungate_tasks_for_review(
+                            &file,
+                        )
+                    },
+                )?;
                 println!("  scanned review: {} gated item(s)", report.scanned);
                 println!("  added {} backlog ungate task(s)", report.added.len());
                 println!("  (skipped {} already-tracked)", report.skipped.len());
@@ -4419,7 +4478,7 @@ fn main() -> anyhow::Result<()> {
                     },
                 };
                 let items =
-                    agent_doc_orchestration::backlog_cmd::list_review_items(&file, &filter)?;
+                    agent_doc_element_backlog_io::backlog_cmd::list_review_items(&file, &filter)?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&items)?);
                 } else if items.is_empty() {
@@ -4488,8 +4547,9 @@ fn main() -> anyhow::Result<()> {
                 let cwd = std::env::current_dir()?;
                 agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd)
             };
-            let total =
-                agent_doc_orchestration::backlog_cmd::resolve_gate_scan(&gate_type, &scan_root)?;
+            let total = agent_doc_element_backlog_io::backlog_cmd::resolve_gate_scan(
+                &gate_type, &scan_root,
+            )?;
             if total == 0 {
                 eprintln!(
                     "[resolve-gate] no [/{}] items found under {}",

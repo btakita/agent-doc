@@ -334,7 +334,12 @@ fn run_pending_maintenance_with_options(
                 snapshot_mutated = true;
             }
             if !removed_items.is_empty()
-                && let Some(archived) = archive_pending_done(file, snap_content, &removed_items)?
+                && let Some(archived) =
+                    agent_doc_element_backlog_io::done_archive::archive_pending_done(
+                        file,
+                        snap_content,
+                        &removed_items,
+                    )?
             {
                 *snap_content = archived;
                 snapshot_mutated = true;
@@ -347,7 +352,12 @@ fn run_pending_maintenance_with_options(
 
         current_content = comp.replace_content(&current_content, &current_body);
         if !removed_items.is_empty()
-            && let Some(archived) = archive_pending_done(file, &current_content, &removed_items)?
+            && let Some(archived) =
+                agent_doc_element_backlog_io::done_archive::archive_pending_done(
+                    file,
+                    &current_content,
+                    &removed_items,
+                )?
         {
             current_content = archived;
         }
@@ -744,7 +754,10 @@ pub(crate) fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunCont
     })?;
     let resolved_ids = agent_doc_cycle_state_io::resolved_pending_ids(file)?;
 
-    let external_done_ids = external_done_archive_ids(file, &current_content)?;
+    let external_done_ids = agent_doc_element_backlog_io::done_archive::external_done_archive_ids(
+        file,
+        &current_content,
+    )?;
     let report =
         agent_doc_element_backlog::backlog::detect_dropped_from_history_with_extra_current_ids(
             &current_content,

@@ -7033,13 +7033,14 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
             "{relative} must call agent_doc_log_time helpers directly"
         );
     }
-    let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let done_archive_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/done_archive.rs"))
+            .unwrap();
     assert!(
-        preflight_source.contains("agent_doc_log_time::current_local_date_ymd()")
-            && !preflight_source.contains("Command::new(\"date\")")
-            && !preflight_source.contains("std::process::Command::new(\"date\")"),
-        "preflight archive date stamping must use the focused log-time helper"
+        done_archive_source.contains("agent_doc_log_time::current_local_date_ymd()")
+            && !done_archive_source.contains("Command::new(\"date\")")
+            && !done_archive_source.contains("std::process::Command::new(\"date\")"),
+        "done-archive IO date stamping must use the focused log-time helper"
     );
     let sqlite_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-sqlite/Cargo.toml")).unwrap();
@@ -9630,7 +9631,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 30,
+        ledger_rows.len() >= 32,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -9865,6 +9866,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/queue_continuation.rs",
             "agent-doc-queue-io/src/queue_continuation.rs",
             "Move pure queue policy regression tests into `agent-doc-queue`",
+        ),
+        (
+            "Tracked-work command and done-archive IO",
+            "agent-doc-orchestration/src/backlog_cmd.rs",
+            "agent-doc-element-backlog-io/src/{backlog_cmd.rs,done_archive.rs}",
+            "Split command rendering from document mutation adapters",
         ),
     ] {
         let row_text = ledger_rows
@@ -17034,6 +17041,9 @@ fn test_agent_doc_element_done_owns_done_archive_content_policy() {
     );
     let preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let done_archive =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/done_archive.rs"))
+            .unwrap();
     for forbidden in [
         "fn insert_pending_done_component(",
         "fn insert_done_component_after_tracked_work(",
@@ -17051,11 +17061,14 @@ fn test_agent_doc_element_done_owns_done_archive_content_policy() {
         );
     }
     assert!(
-        preflight.contains("agent_doc_element_done::insert_done_component_after_tracked_work")
-            && preflight.contains("agent_doc_element_done::render_done_archive_entry")
-            && preflight.contains("agent_doc_element_done::collect_done_component_own_ids")
-            && preflight.contains("agent_doc_element_done::collect_done_item_own_ids"),
-        "preflight.rs should call done archive content policy through agent-doc-element-done directly"
+        preflight.contains("agent_doc_element_backlog_io::done_archive::archive_pending_done")
+            && !preflight.contains("agent_doc_element_done::render_done_archive_entry"),
+        "preflight.rs should call the focused done-archive IO host instead of owning archive rendering"
+    );
+    assert!(
+        done_archive.contains("agent_doc_element_done::insert_done_component_after_tracked_work")
+            && done_archive.contains("agent_doc_element_done::render_done_archive_entry"),
+        "done_archive IO should call archive insertion/rendering policy through agent-doc-element-done directly"
     );
 }
 
@@ -17084,8 +17097,10 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         );
     }
 
+    let backlog_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/lib.rs")).unwrap();
     let backlog_cmd =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/backlog_cmd.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/backlog_cmd.rs"))
             .unwrap();
     let preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
@@ -17102,10 +17117,14 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         "orchestration must not keep a pending_cmd compatibility module"
     );
     assert!(
-        orchestration_lib.contains("pub mod backlog_cmd;")
+        !manifest_dir
+            .join("agent-doc-orchestration/src/backlog_cmd.rs")
+            .exists()
+            && backlog_io_lib.contains("pub mod backlog_cmd;")
+            && !orchestration_lib.contains("pub mod backlog_cmd;")
             && !orchestration_lib.contains("pub mod pending_cmd")
             && !orchestration_lib.contains("pub use backlog_cmd as pending_cmd"),
-        "orchestration should expose backlog_cmd directly without a pending_cmd alias"
+        "tracked-work command IO should live in agent-doc-element-backlog-io without orchestration backlog/pending facades"
     );
     for forbidden in [
         "pub struct ReviewItemView",
@@ -17210,7 +17229,7 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_reap_policy() {
     }
 
     let backlog_cmd =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/backlog_cmd.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/backlog_cmd.rs"))
             .unwrap();
     let preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
@@ -18956,7 +18975,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
     for relative in [
         "agent-doc-ops-log-io/src/lib.rs",
         "agent-doc-op-capture-io/src/lib.rs",
-        "agent-doc-orchestration/src/backlog_cmd.rs",
+        "agent-doc-element-backlog-io/src/backlog_cmd.rs",
         "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-debounce/src/lib.rs",
@@ -20283,7 +20302,7 @@ fn test_agent_doc_document_owns_status_projection_policy() {
     for relative in [
         "agent-doc-orchestration/src/compact.rs",
         "agent-doc-orchestration/src/repair.rs",
-        "agent-doc-orchestration/src/backlog_cmd.rs",
+        "agent-doc-element-backlog-io/src/backlog_cmd.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -21976,7 +21995,7 @@ fn test_agent_doc_element_backlog_owns_active_identity_projection_policy() {
     );
 
     let backlog_cmd =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/backlog_cmd.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/backlog_cmd.rs"))
             .unwrap();
     assert!(
         backlog_cmd.contains("backlog::ensure_new_item_explicit_id_available"),

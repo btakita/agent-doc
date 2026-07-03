@@ -35,7 +35,6 @@
 //! split into narrower crates.
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
-pub mod backlog_cmd;
 pub mod claim;
 pub mod codex_hook;
 pub mod compact;
@@ -59,6 +58,26 @@ pub mod start;
 pub mod stream;
 pub mod sync;
 pub mod write;
+
+pub(crate) struct BacklogCommandEffects;
+
+pub(crate) static BACKLOG_COMMAND_EFFECTS: BacklogCommandEffects = BacklogCommandEffects;
+
+impl agent_doc_element_backlog_io::BacklogCommandEffects for BacklogCommandEffects {
+    fn converge_or_disk_write(
+        &self,
+        file: &std::path::Path,
+        current_content: &str,
+        target_content: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        crate::write::converge_or_disk_write(file, current_content, target_content, reason)
+    }
+
+    fn record_document_write_provenance(&self, file: &std::path::Path, content: &str) {
+        crate::write::record_document_write_provenance(file, content);
+    }
+}
 
 pub(crate) struct PipelineFrontmatterEffects;
 

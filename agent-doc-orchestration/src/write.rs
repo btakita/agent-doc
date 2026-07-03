@@ -234,6 +234,7 @@ use agent_doc_document_realtime::write_policy::{
     VisibleWriteReconcile, reconcile_visible_write, response_already_in_current,
 };
 use agent_doc_element::element::{self, is_backlog_component};
+use agent_doc_element_backlog_io::backlog_cmd;
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,
     repair_response_precedes_prompt_in_exchange as repair_response_prompt_order_in_exchange,
@@ -676,7 +677,7 @@ fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(());
     }
-    let Some(component_name) = crate::backlog_cmd::open_item_component_name(file, id)? else {
+    let Some(component_name) = backlog_cmd::open_item_component_name(file, id)? else {
         return Ok(());
     };
     if agent_doc_element::element::is_review_component(&component_name) {
@@ -946,182 +947,205 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if has_pending_ops {
-        crate::backlog_cmd::with_force_disk_pending_writes(options.force_disk, || {
-            if options.pending_clear {
-                crate::backlog_cmd::clear(file)?;
-            }
-            if options.icebox_clear {
-                crate::backlog_cmd::icebox_clear(file)?;
-            }
-            // `#opsproof-samecycle-add`: track ids added this cycle so post-commit
-            // ops-proof auto-completion never reaps a brand-new same-cycle add.
-            let mut same_cycle_added_ids: Vec<String> =
-                crate::backlog_cmd::add_many(file, &options.pending_add, false)?;
-            let pending_add_targets = group_pending_add_targets(&options.pending_add_to)?;
-            for (target, items) in &pending_add_targets {
-                ensure_pending_add_target(target)?;
-                crate::backlog_cmd::add_many(target, items, false).with_context(|| {
-                    format!(
-                        "failed to apply --backlog-add-to target {}",
-                        target.display()
-                    )
-                })?;
-            }
-            same_cycle_added_ids.extend(crate::backlog_cmd::add_many(
-                file,
-                &options.pending_add_gated,
-                true,
-            )?);
-            // #ah0s: explicit-position adds (after/before <id>, tail). Applied after
-            // the front-insert default so anchor ids added this same cycle resolve.
-            for pair in options.pending_add_after.chunks(2) {
-                if let [anchor, text] = pair {
-                    let id = crate::backlog_cmd::add_after(file, anchor, text)
-                        .with_context(|| format!("failed to apply --backlog-add-after {anchor}"))?;
-                    same_cycle_added_ids.push(id);
-                } else {
-                    anyhow::bail!("--backlog-add-after expects repeated ID TEXT pairs");
-                }
-            }
-            for pair in options.pending_add_before.chunks(2) {
-                if let [anchor, text] = pair {
-                    let id =
-                        crate::backlog_cmd::add_before(file, anchor, text).with_context(|| {
-                            format!("failed to apply --backlog-add-before {anchor}")
+        agent_doc_element_backlog_io::with_backlog_command_effects(
+            &crate::BACKLOG_COMMAND_EFFECTS,
+            || {
+                backlog_cmd::with_force_disk_pending_writes(options.force_disk, || {
+                    if options.pending_clear {
+                        backlog_cmd::clear(file)?;
+                    }
+                    if options.icebox_clear {
+                        backlog_cmd::icebox_clear(file)?;
+                    }
+                    // `#opsproof-samecycle-add`: track ids added this cycle so post-commit
+                    // ops-proof auto-completion never reaps a brand-new same-cycle add.
+                    let mut same_cycle_added_ids: Vec<String> =
+                        backlog_cmd::add_many(file, &options.pending_add, false)?;
+                    let pending_add_targets = group_pending_add_targets(&options.pending_add_to)?;
+                    for (target, items) in &pending_add_targets {
+                        ensure_pending_add_target(target)?;
+                        backlog_cmd::add_many(target, items, false).with_context(|| {
+                            format!(
+                                "failed to apply --backlog-add-to target {}",
+                                target.display()
+                            )
                         })?;
-                    same_cycle_added_ids.push(id);
-                } else {
-                    anyhow::bail!("--backlog-add-before expects repeated ID TEXT pairs");
-                }
-            }
-            for text in &options.pending_add_back {
-                same_cycle_added_ids.push(crate::backlog_cmd::add_back(file, text)?);
-            }
-            same_cycle_added_ids.extend(crate::backlog_cmd::icebox_add_many(
-                file,
-                &options.icebox_add,
-            )?);
-            for pair in options.icebox_add_after.chunks(2) {
-                if let [anchor, text] = pair {
-                    let id = crate::backlog_cmd::icebox_add_after(file, anchor, text)
-                        .with_context(|| format!("failed to apply --icebox-add-after {anchor}"))?;
-                    same_cycle_added_ids.push(id);
-                } else {
-                    anyhow::bail!("--icebox-add-after expects repeated ID TEXT pairs");
-                }
-            }
-            for pair in options.icebox_add_before.chunks(2) {
-                if let [anchor, text] = pair {
-                    let id = crate::backlog_cmd::icebox_add_before(file, anchor, text)
-                        .with_context(|| format!("failed to apply --icebox-add-before {anchor}"))?;
-                    same_cycle_added_ids.push(id);
-                } else {
-                    anyhow::bail!("--icebox-add-before expects repeated ID TEXT pairs");
-                }
-            }
-            for text in &options.icebox_add_back {
-                same_cycle_added_ids.push(crate::backlog_cmd::icebox_add_back(file, text)?);
-            }
-            if !options.pending_add.is_empty()
-                || !options.pending_add_to.is_empty()
-                || !options.pending_add_gated.is_empty()
-                || !options.pending_add_after.is_empty()
-                || !options.pending_add_before.is_empty()
-                || !options.pending_add_back.is_empty()
-                || !options.icebox_add.is_empty()
-                || !options.icebox_add_after.is_empty()
-                || !options.icebox_add_before.is_empty()
-                || !options.icebox_add_back.is_empty()
-            {
-                agent_doc_cycle_state_io::mark_pending_mutations(file)?;
-                agent_doc_cycle_state_io::mark_pending_added(file)?;
-            }
-            if !same_cycle_added_ids.is_empty() {
-                agent_doc_cycle_state_io::record_pending_added_ids(file, &same_cycle_added_ids)?;
-            }
-            if !options.pending_edit.is_empty() {
-                let edits = parse_tracked_work_edits(&options.pending_edit, "--backlog-edit")?;
-                crate::backlog_cmd::edit_many(file, &edits)?;
-            }
-            if !options.icebox_edit.is_empty() {
-                let edits = parse_tracked_work_edits(&options.icebox_edit, "--icebox-edit")?;
-                crate::backlog_cmd::icebox_edit_many(file, &edits)?;
-            }
-            for id in &options.pending_gate {
-                crate::backlog_cmd::gate(file, id)?;
-            }
-            if !options.pending_gate.is_empty() {
-                agent_doc_cycle_state_io::record_pending_gated_ids(file, &options.pending_gate)?;
-            }
-            for pair in &options.pending_set_gate_type {
-                let (id, gt) = pair.split_once('=').with_context(|| {
-                    format!("--backlog-set-gate-type expects 'id=type', got: {}", pair)
-                })?;
-                crate::backlog_cmd::set_gate_type(file, id, gt)?;
-            }
-            for pair in &options.pending_set_verify {
-                let (id, spec) = pair.split_once('=').with_context(|| {
-                    format!(
-                        "--backlog-set-verify expects 'id=<verify/disproof predicate spec>', got: {}",
-                        pair
-                    )
-                })?;
-                crate::backlog_cmd::set_gate_verify(file, id, spec)?;
-            }
-            let mut review_added_ids: Vec<String> = Vec::new();
-            for value in &options.review_add {
-                if let Some(id) = crate::backlog_cmd::review_add(file, value)? {
-                    review_added_ids.push(id);
-                }
-            }
-            if !review_added_ids.is_empty() {
-                // `#opsproof-samecycle-add`: a freshly added gated review item must
-                // not be ops-proof auto-completed on the cycle it first appears.
-                agent_doc_cycle_state_io::record_pending_added_ids(file, &review_added_ids)?;
-            }
-            for pair in &options.review_edit {
-                let (id, text) = pair
-                    .split_once('=')
-                    .with_context(|| format!("--review-edit expects 'id=text', got: {}", pair))?;
-                crate::backlog_cmd::review_edit(file, id, text)?;
-            }
-            for id in &options.review_resolve {
-                crate::backlog_cmd::review_resolve(file, id)?;
-            }
-            for id in &options.review_remove {
-                crate::backlog_cmd::review_remove(file, id)?;
-            }
-            for id in &options.pending_ungate {
-                crate::backlog_cmd::ungate(file, id)?;
-            }
-            for gt in &options.pending_resolve_gate {
-                crate::backlog_cmd::resolve_gate(file, gt)?;
-            }
-            for id in &options.pending_done {
-                enforce_review_done_guard(file, id)?;
-                crate::backlog_cmd::done(file, id)?;
-            }
-            if !options.pending_done.is_empty() {
-                agent_doc_cycle_state_io::record_pending_done_ids(file, &options.pending_done)?;
-                agent_doc_cycle_state_io::mark_pending_mutations(file)?;
-            }
-            if let Some(ref order) = options.pending_reorder {
-                let ids = parse_id_order(order);
-                crate::backlog_cmd::reorder(file, &ids)?;
-            }
-            if let Some(ref order) = options.icebox_reorder {
-                let ids = parse_id_order(order);
-                crate::backlog_cmd::icebox_reorder(file, &ids)?;
-            }
-            if !pending_kept_open_ids.is_empty() {
-                agent_doc_cycle_state_io::record_pending_kept_open_ids(
-                    file,
-                    &pending_kept_open_ids,
-                )?;
-            }
-            agent_doc_cycle_state_io::mark_pending_mutations(file)?;
-            Ok(())
-        })?;
+                    }
+                    same_cycle_added_ids.extend(backlog_cmd::add_many(
+                        file,
+                        &options.pending_add_gated,
+                        true,
+                    )?);
+                    // #ah0s: explicit-position adds (after/before <id>, tail). Applied after
+                    // the front-insert default so anchor ids added this same cycle resolve.
+                    for pair in options.pending_add_after.chunks(2) {
+                        if let [anchor, text] = pair {
+                            let id =
+                                backlog_cmd::add_after(file, anchor, text).with_context(|| {
+                                    format!("failed to apply --backlog-add-after {anchor}")
+                                })?;
+                            same_cycle_added_ids.push(id);
+                        } else {
+                            anyhow::bail!("--backlog-add-after expects repeated ID TEXT pairs");
+                        }
+                    }
+                    for pair in options.pending_add_before.chunks(2) {
+                        if let [anchor, text] = pair {
+                            let id =
+                                backlog_cmd::add_before(file, anchor, text).with_context(|| {
+                                    format!("failed to apply --backlog-add-before {anchor}")
+                                })?;
+                            same_cycle_added_ids.push(id);
+                        } else {
+                            anyhow::bail!("--backlog-add-before expects repeated ID TEXT pairs");
+                        }
+                    }
+                    for text in &options.pending_add_back {
+                        same_cycle_added_ids.push(backlog_cmd::add_back(file, text)?);
+                    }
+                    same_cycle_added_ids
+                        .extend(backlog_cmd::icebox_add_many(file, &options.icebox_add)?);
+                    for pair in options.icebox_add_after.chunks(2) {
+                        if let [anchor, text] = pair {
+                            let id = backlog_cmd::icebox_add_after(file, anchor, text)
+                                .with_context(|| {
+                                    format!("failed to apply --icebox-add-after {anchor}")
+                                })?;
+                            same_cycle_added_ids.push(id);
+                        } else {
+                            anyhow::bail!("--icebox-add-after expects repeated ID TEXT pairs");
+                        }
+                    }
+                    for pair in options.icebox_add_before.chunks(2) {
+                        if let [anchor, text] = pair {
+                            let id = backlog_cmd::icebox_add_before(file, anchor, text)
+                                .with_context(|| {
+                                    format!("failed to apply --icebox-add-before {anchor}")
+                                })?;
+                            same_cycle_added_ids.push(id);
+                        } else {
+                            anyhow::bail!("--icebox-add-before expects repeated ID TEXT pairs");
+                        }
+                    }
+                    for text in &options.icebox_add_back {
+                        same_cycle_added_ids.push(backlog_cmd::icebox_add_back(file, text)?);
+                    }
+                    if !options.pending_add.is_empty()
+                        || !options.pending_add_to.is_empty()
+                        || !options.pending_add_gated.is_empty()
+                        || !options.pending_add_after.is_empty()
+                        || !options.pending_add_before.is_empty()
+                        || !options.pending_add_back.is_empty()
+                        || !options.icebox_add.is_empty()
+                        || !options.icebox_add_after.is_empty()
+                        || !options.icebox_add_before.is_empty()
+                        || !options.icebox_add_back.is_empty()
+                    {
+                        agent_doc_cycle_state_io::mark_pending_mutations(file)?;
+                        agent_doc_cycle_state_io::mark_pending_added(file)?;
+                    }
+                    if !same_cycle_added_ids.is_empty() {
+                        agent_doc_cycle_state_io::record_pending_added_ids(
+                            file,
+                            &same_cycle_added_ids,
+                        )?;
+                    }
+                    if !options.pending_edit.is_empty() {
+                        let edits =
+                            parse_tracked_work_edits(&options.pending_edit, "--backlog-edit")?;
+                        backlog_cmd::edit_many(file, &edits)?;
+                    }
+                    if !options.icebox_edit.is_empty() {
+                        let edits =
+                            parse_tracked_work_edits(&options.icebox_edit, "--icebox-edit")?;
+                        backlog_cmd::icebox_edit_many(file, &edits)?;
+                    }
+                    for id in &options.pending_gate {
+                        backlog_cmd::gate(file, id)?;
+                    }
+                    if !options.pending_gate.is_empty() {
+                        agent_doc_cycle_state_io::record_pending_gated_ids(
+                            file,
+                            &options.pending_gate,
+                        )?;
+                    }
+                    for pair in &options.pending_set_gate_type {
+                        let (id, gt) = pair.split_once('=').with_context(|| {
+                            format!("--backlog-set-gate-type expects 'id=type', got: {}", pair)
+                        })?;
+                        backlog_cmd::set_gate_type(file, id, gt)?;
+                    }
+                    for pair in &options.pending_set_verify {
+                        let (id, spec) = pair.split_once('=').with_context(|| {
+                            format!(
+                                "--backlog-set-verify expects 'id=<verify/disproof predicate spec>', got: {}",
+                                pair
+                            )
+                        })?;
+                        backlog_cmd::set_gate_verify(file, id, spec)?;
+                    }
+                    let mut review_added_ids: Vec<String> = Vec::new();
+                    for value in &options.review_add {
+                        if let Some(id) = backlog_cmd::review_add(file, value)? {
+                            review_added_ids.push(id);
+                        }
+                    }
+                    if !review_added_ids.is_empty() {
+                        // `#opsproof-samecycle-add`: a freshly added gated review item must
+                        // not be ops-proof auto-completed on the cycle it first appears.
+                        agent_doc_cycle_state_io::record_pending_added_ids(
+                            file,
+                            &review_added_ids,
+                        )?;
+                    }
+                    for pair in &options.review_edit {
+                        let (id, text) = pair.split_once('=').with_context(|| {
+                            format!("--review-edit expects 'id=text', got: {}", pair)
+                        })?;
+                        backlog_cmd::review_edit(file, id, text)?;
+                    }
+                    for id in &options.review_resolve {
+                        backlog_cmd::review_resolve(file, id)?;
+                    }
+                    for id in &options.review_remove {
+                        backlog_cmd::review_remove(file, id)?;
+                    }
+                    for id in &options.pending_ungate {
+                        backlog_cmd::ungate(file, id)?;
+                    }
+                    for gt in &options.pending_resolve_gate {
+                        backlog_cmd::resolve_gate(file, gt)?;
+                    }
+                    for id in &options.pending_done {
+                        enforce_review_done_guard(file, id)?;
+                        backlog_cmd::done(file, id)?;
+                    }
+                    if !options.pending_done.is_empty() {
+                        agent_doc_cycle_state_io::record_pending_done_ids(
+                            file,
+                            &options.pending_done,
+                        )?;
+                        agent_doc_cycle_state_io::mark_pending_mutations(file)?;
+                    }
+                    if let Some(ref order) = options.pending_reorder {
+                        let ids = parse_id_order(order);
+                        backlog_cmd::reorder(file, &ids)?;
+                    }
+                    if let Some(ref order) = options.icebox_reorder {
+                        let ids = parse_id_order(order);
+                        backlog_cmd::icebox_reorder(file, &ids)?;
+                    }
+                    if !pending_kept_open_ids.is_empty() {
+                        agent_doc_cycle_state_io::record_pending_kept_open_ids(
+                            file,
+                            &pending_kept_open_ids,
+                        )?;
+                    }
+                    agent_doc_cycle_state_io::mark_pending_mutations(file)?;
+                    Ok(())
+                })
+            },
+        )?;
     }
 
     if let Some(ref status_text) = options.status {
@@ -2624,7 +2648,7 @@ fn atomic_write_raw(path: &Path, content: &str) -> Result<()> {
 /// `atomic_write` and the direct-run `run.rs` `atomic_write`) so a foreign-looking
 /// disk change from any agent-doc writer is positively attributed instead of
 /// inferred from the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic.
-pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
+pub fn record_document_write_provenance(path: &Path, content: &str) {
     if !agent_doc_document_realtime::write_authority::is_visible_document(path) {
         return;
     }

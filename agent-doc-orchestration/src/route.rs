@@ -584,9 +584,14 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
         }
     };
     let items = [item];
-    match crate::backlog_cmd::with_force_disk_pending_writes(
-        FORCE_DISK_ROUTE_WRITES.with(Cell::get),
-        || crate::backlog_cmd::add_many(&target_file, &items, false),
+    match agent_doc_element_backlog_io::with_backlog_command_effects(
+        &crate::BACKLOG_COMMAND_EFFECTS,
+        || {
+            agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+                FORCE_DISK_ROUTE_WRITES.with(Cell::get),
+                || agent_doc_element_backlog_io::backlog_cmd::add_many(&target_file, &items, false),
+            )
+        },
     ) {
         Ok(ids) => {
             let id = ids

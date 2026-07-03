@@ -33,6 +33,7 @@ agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.67" }
+agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.34.67" }
 agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.67" }
 agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.34.67" }
 agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.34.67" }

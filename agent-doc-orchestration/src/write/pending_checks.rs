@@ -631,12 +631,20 @@ pub(crate) fn precommit_pending_done_check_with_options(
     }
 
     if crate::session_check::resolve_auto_done(file)? {
-        crate::backlog_cmd::with_force_disk_pending_writes(options.force_disk, || {
-            for id in &missing {
-                auto_apply_pending_done_id(file, id)?;
-            }
-            Ok(())
-        })?;
+        agent_doc_element_backlog_io::with_backlog_command_effects(
+            &crate::BACKLOG_COMMAND_EFFECTS,
+            || {
+                agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+                    options.force_disk,
+                    || {
+                        for id in &missing {
+                            auto_apply_pending_done_id(file, id)?;
+                        }
+                        Ok(())
+                    },
+                )
+            },
+        )?;
         agent_doc_cycle_state_io::record_pending_done_ids(file, &missing)?;
         agent_doc_cycle_state_io::mark_pending_mutations(file)?;
         eprintln!(
@@ -818,12 +826,20 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
         return Ok(());
     };
 
-    crate::backlog_cmd::with_force_disk_pending_writes(flags.force_disk, || {
-        for id in &missing {
-            auto_apply_pending_done_id(file, id)?;
-        }
-        Ok(())
-    })?;
+    agent_doc_element_backlog_io::with_backlog_command_effects(
+        &crate::BACKLOG_COMMAND_EFFECTS,
+        || {
+            agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+                flags.force_disk,
+                || {
+                    for id in &missing {
+                        auto_apply_pending_done_id(file, id)?;
+                    }
+                    Ok(())
+                },
+            )
+        },
+    )?;
     agent_doc_cycle_state_io::record_pending_done_ids(file, &missing)?;
     agent_doc_cycle_state_io::mark_pending_mutations(file)?;
     *current_content = std::fs::read_to_string(file)
@@ -840,13 +856,14 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
 }
 
 pub(crate) fn auto_apply_pending_done_id(file: &Path, id: &str) -> Result<()> {
-    if let Some(component) = crate::backlog_cmd::open_item_component_name(file, id)?
+    if let Some(component) =
+        agent_doc_element_backlog_io::backlog_cmd::open_item_component_name(file, id)?
         && agent_doc_element::element::is_backlog_component(&component)
     {
-        crate::backlog_cmd::gate(file, id)?;
+        agent_doc_element_backlog_io::backlog_cmd::gate(file, id)?;
     }
     enforce_review_done_guard(file, id)?;
-    crate::backlog_cmd::done(file, id)
+    agent_doc_element_backlog_io::backlog_cmd::done(file, id)
 }
 
 pub(crate) fn run_closeout_pending_maintenance(

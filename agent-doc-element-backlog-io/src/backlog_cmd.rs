@@ -16,6 +16,7 @@ use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::done_archive::archive_pending_done;
 use agent_doc_element::element;
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_backlog::backlog;
@@ -50,7 +51,7 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
     if force_disk {
         std::fs::write(file, target)
             .with_context(|| format!("pending_write: failed to write {}", file.display()))?;
-        crate::write::record_document_write_provenance(file, target);
+        crate::record_document_write_provenance(file, target);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -63,7 +64,7 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
         return Ok(());
     }
 
-    crate::write::converge_or_disk_write(file, current, target, "pending_write")
+    crate::converge_or_disk_write(file, current, target, "pending_write")
 }
 
 fn find_tracked_list_component(
@@ -452,7 +453,7 @@ pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
         id,
         &agent_doc_hash::document_id_for_path(file),
     )?;
-    let archived = crate::preflight::archive_pending_done(file, &plan.content, &plan.removed)
+    let archived = archive_pending_done(file, &plan.content, &plan.removed)
         .context("failed to archive resolved review item(s) to agent:done")?
         .unwrap_or(plan.content);
     persist_pending_write(file, &full_content, &archived)?;
@@ -664,7 +665,7 @@ fn reap_list(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
     );
     let mut new_doc = comp.replace_content(&full_content, &canonical);
     if !removed_items.is_empty() {
-        let archived = crate::preflight::archive_pending_done(file, &new_doc, &removed_items)
+        let archived = archive_pending_done(file, &new_doc, &removed_items)
             .context("failed to archive reaped item(s) to agent:done")?
             .context("failed to archive reaped item(s) to agent:done")?;
         new_doc = archived;
@@ -1486,31 +1487,5 @@ mod tests {
             .unwrap_or_default();
         assert!(done_body.contains("[#aa11]"), "{after}");
         assert!(done_body.contains("finished work"), "{after}");
-    }
-
-    #[test]
-    fn run_pending_maintenance_dedupes_identical_review_entries() {
-        // #reviewrm: finalize closeout collapses identical same-id review
-        // entries (the preset_item_id_collision shape) to a single entry.
-        let (_tmp, doc) = doc_with_review(concat!(
-            "- [/] [#saevon] activate early-ack\n",
-            "- [/] [#saevon] activate early-ack\n",
-        ));
-        crate::preflight::run_pending_maintenance_force_disk(&doc).unwrap();
-        let after = fs::read_to_string(&doc).unwrap();
-        assert_eq!(after.matches("[#saevon]").count(), 1, "{after}");
-    }
-
-    #[test]
-    fn run_pending_maintenance_preserves_distinct_same_id_entries() {
-        // Only exact duplicates collapse; distinct items sharing an id stay so
-        // the ambiguity warning still surfaces for the operator.
-        let (_tmp, doc) = doc_with_review(concat!(
-            "- [/] [#saevon] first meaning\n",
-            "- [/] [#saevon] second meaning\n",
-        ));
-        crate::preflight::run_pending_maintenance_force_disk(&doc).unwrap();
-        let after = fs::read_to_string(&doc).unwrap();
-        assert_eq!(after.matches("[#saevon]").count(), 2, "{after}");
     }
 }

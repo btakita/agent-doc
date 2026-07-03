@@ -2894,7 +2894,18 @@ fn main() -> anyhow::Result<()> {
                 agent_doc_orchestration::preflight::PreflightOptions { probe },
             )
         }
-        Commands::Admit { file } => agent_doc_orchestration::admit::run(&file),
+        Commands::Admit { file } => {
+            let output = agent_doc_cycle_state_io::admit_with_current_resolver(
+                &file,
+                |file, disk| {
+                    agent_doc_orchestration::realtime_model::resolve_current_doc(file, disk).content
+                },
+                agent_doc_snapshot_io::load,
+                agent_doc_ops_log_io::log_op,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            Ok(())
+        }
         Commands::Doctor {
             file,
             preflight_json,

@@ -49,7 +49,7 @@ use agent_doc_turn::cycle_policy::{
     is_stable_commit_event, normalize_checkpoint_task_id, normalize_checkpoint_text_list,
 };
 use agent_doc_turn::{CycleEvent, CyclePhase, CyclePhaseMachine};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -241,6 +241,22 @@ pub struct CycleState {
     pub blocked_closeout: Option<BlockedCloseout>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AdmitOutput {
+    pub admitted: bool,
+    pub file: String,
+    pub cycle_id: String,
+    pub cycle_phase: String,
+    pub last_event: String,
+    pub source: String,
+    pub maintenance_required: bool,
+    pub preflight_required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_hash: Option<String>,
+}
+
 /// `#suprecyclespin` — seconds an open cycle may sit untouched (no IPC ack
 /// connection in flight) at a harness turn boundary before the supervisor
 /// recycle/restart defer path force-closes it as abandoned. Generous enough never
@@ -293,6 +309,57 @@ pub fn load(file: &Path) -> Result<Option<CycleState>> {
     };
     let state: CycleState = serde_json::from_str(&content)?;
     Ok(Some(state))
+}
+
+pub fn admit_with_current_resolver<R, S, L>(
+    file: &Path,
+    mut resolve_current: R,
+    mut load_snapshot: S,
+    mut log_admission: L,
+) -> Result<AdmitOutput>
+where
+    R: FnMut(&Path, &str) -> String,
+    S: FnMut(&Path) -> Result<Option<String>>,
+    L: FnMut(&Path, &str),
+{
+    if !file.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+
+    let disk = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let current = resolve_current(file, &disk);
+    let snapshot = load_snapshot(file)
+        .with_context(|| format!("failed to load snapshot for {}", file.display()))?;
+
+    let state = start_preflight(file, snapshot.as_deref(), Some(&current))?;
+    let phase = state.phase.as_str().to_string();
+    log_admission(
+        file,
+        &format!(
+            "realtime_admit file={} cycle_id={} phase={} source=admit action=accepted maintenance_required=false preflight_required=false",
+            file.display(),
+            state.cycle_id,
+            phase
+        ),
+    );
+
+    Ok(AdmitOutput {
+        admitted: true,
+        file: file
+            .canonicalize()
+            .unwrap_or_else(|_| file.to_path_buf())
+            .display()
+            .to_string(),
+        cycle_id: state.cycle_id,
+        cycle_phase: phase,
+        last_event: state.last_event,
+        source: "admit".to_string(),
+        maintenance_required: false,
+        preflight_required: false,
+        snapshot_hash: state.snapshot_hash,
+        file_hash: state.file_hash,
+    })
 }
 
 pub fn start_preflight(
@@ -1345,6 +1412,59 @@ mod tests {
             CyclePhase::PreflightStarted
         );
         assert!(load(&doc).unwrap().unwrap().is_open());
+    }
+
+    #[test]
+    fn admit_with_current_resolver_opens_cycle_without_preflight_maintenance() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let original = "# Session\n\nOperator prompt.\n";
+        fs::write(&doc, original).unwrap();
+        let mut logs = Vec::new();
+
+        let output = admit_with_current_resolver(
+            &doc,
+            |_file, disk| disk.to_string(),
+            |_file| Ok(None),
+            |file, message| logs.push((file.display().to_string(), message.to_string())),
+        )
+        .unwrap();
+
+        assert!(output.admitted);
+        assert_eq!(output.source, "admit");
+        assert!(!output.maintenance_required);
+        assert!(!output.preflight_required);
+        assert_eq!(output.cycle_phase, "preflight_started");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), original);
+
+        let state = load(&doc).unwrap().unwrap();
+        assert_eq!(state.cycle_id, output.cycle_id);
+        assert_eq!(state.phase, CyclePhase::PreflightStarted);
+        assert_eq!(state.last_event, "preflight_started");
+
+        assert_eq!(logs.len(), 1);
+        let log = &logs[0].1;
+        assert!(log.contains("realtime_admit"), "admission log:\n{log}");
+        assert!(
+            log.contains("maintenance_required=false"),
+            "admission log:\n{log}"
+        );
+        assert!(
+            log.contains("preflight_required=false"),
+            "admission log:\n{log}"
+        );
+        assert!(
+            !log.contains("preflight_diff_start"),
+            "admit must not run preflight diff start:\n{log}"
+        );
+        assert!(
+            !log.contains("deprecated_queue_active_line_dropped"),
+            "admit must not run queue maintenance:\n{log}"
+        );
+        assert!(
+            !log.contains("layout repair"),
+            "admit must not run preflight layout repair:\n{log}"
+        );
     }
 
     fn ack(

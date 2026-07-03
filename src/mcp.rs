@@ -383,7 +383,14 @@ fn tool_read(args: &Map<String, Value>) -> Result<Value> {
 fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
     ensure_mcp_binary_fresh_for_mutation()?;
     let file = required_path_arg(args, "file")?;
-    let admit = agent_doc_orchestration::admit::admit(&file)?;
+    let admit = agent_doc_cycle_state_io::admit_with_current_resolver(
+        &file,
+        |file, disk| {
+            agent_doc_orchestration::realtime_model::resolve_current_doc(file, disk).content
+        },
+        agent_doc_snapshot_io::load,
+        agent_doc_ops_log_io::log_op,
+    )?;
     let structured = json!({
         "ok": true,
         "file": file.display().to_string(),

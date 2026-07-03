@@ -36,7 +36,6 @@
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod admin;
-pub mod admit;
 pub mod autofix;
 pub mod backlog_cmd;
 pub mod claim;

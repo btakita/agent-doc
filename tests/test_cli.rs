@@ -6751,8 +6751,22 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         !orchestration_lib.contains("pub mod cycle_state"),
         "agent-doc-orchestration must not keep a cycle_state facade module"
     );
+    assert!(
+        !orchestration_lib.contains("pub mod admit"),
+        "agent-doc-orchestration must not keep an admit facade module"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/admit.rs")
+            .exists(),
+        "admit must live in the focused cycle-state IO crate, not orchestration"
+    );
     let cycle_state_source =
         fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
+    assert!(
+        cycle_state_source.contains("pub fn admit_with_current_resolver"),
+        "cycle_state IO must own the realtime admission cycle-open API"
+    );
     assert!(
         !cycle_state_source.contains("pub use agent_doc_turn::CyclePhase"),
         "cycle_state must not re-export CyclePhase from the focused turn crate"
@@ -9611,6 +9625,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/cycle_state.rs",
             "agent-doc-cycle-state-io/src/lib.rs",
             "Split schema/pathing/atomic writes from higher-level lifecycle bookkeeping",
+        ),
+        (
+            "Realtime admission cycle opener",
+            "agent-doc-orchestration/src/admit.rs",
+            "agent-doc-cycle-state-io/src/lib.rs",
+            "extract current-document authority from `agent-doc-orchestration::realtime_model`",
         ),
         (
             "Session accretion IO adapter",

@@ -1197,7 +1197,12 @@ fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
 }
 
 fn start_run_cycle(file: &Path) -> Result<()> {
-    crate::admit::admit(file)?;
+    agent_doc_cycle_state_io::admit_with_current_resolver(
+        file,
+        |file, disk| crate::realtime_model::resolve_current_doc(file, disk).content,
+        agent_doc_snapshot_io::load,
+        agent_doc_ops_log_io::log_op,
+    )?;
     Ok(())
 }
 

@@ -1107,6 +1107,8 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/route/pane_resolution.rs",
         "agent-doc-orchestration/src/route/dispatch.rs",
         "agent-doc-route-io/src/session_resolution.rs",
+        "agent-doc-route-io/src/startup_ready.rs",
+        "agent-doc-route-io/src/startup_sync.rs",
         "agent-doc-orchestration/src/route/cycle_ack.rs",
         "agent-doc-orchestration/src/route/busy_pane.rs",
         "agent-doc-orchestration/src/route/startup.rs",
@@ -12464,6 +12466,33 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         "route/startup.rs must not keep the route startup harness-resolution helper"
     );
 
+    let route_startup_ready =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_ready.rs")).unwrap();
+    assert!(
+        route_startup_ready.contains("pub enum AgentReadyWaitOutcome")
+            && route_startup_ready.contains("pub fn wait_for_agent_ready_outcome")
+            && route_startup_ready.contains("pub fn fresh_start_pane_idle_ready"),
+        "agent-doc-route-io startup readiness should own route ready-wait and fresh-start idle IO"
+    );
+    assert!(
+        !route_startup_source.contains("fn wait_for_agent_ready(")
+            && !route_startup_source.contains("fn wait_for_agent_ready_outcome")
+            && !route_startup_source.contains("fn fresh_start_pane_idle_ready"),
+        "route/startup.rs must not keep the route ready-wait graph"
+    );
+
+    let route_startup_sync =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_sync.rs")).unwrap();
+    assert!(
+        route_startup_sync.contains("pub fn sync_after_claim")
+            && route_startup_sync.contains("agent_doc_sync_io::sync::run_with_tmux"),
+        "agent-doc-route-io startup sync should own post-claim sync layout IO"
+    );
+    assert!(
+        !route_startup_source.contains("fn sync_after_claim("),
+        "route/startup.rs must not keep the post-claim sync graph"
+    );
+
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
@@ -13874,6 +13903,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_startup_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
             .unwrap();
+    let route_startup_ready_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_ready.rs")).unwrap();
     let route_pane_resolution_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
     )
@@ -14396,11 +14427,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
-        route_startup_source.contains(
+        route_startup_ready_source.contains(
             "use agent_doc_controller::dispatch::{FreshStartAckOutcome, fresh_start_ack_outcome};"
-        ) && route_startup_source
+        ) && route_startup_ready_source
             .contains("agent_doc_harness::ready_prompt_candidate(&content, harness).is_some()"),
-        "route/startup.rs should adapt pane prompt detection into focused fresh-start ack policy"
+        "agent-doc-route-io startup_ready should adapt pane prompt detection into focused fresh-start ack policy"
     );
     for forbidden_snippet in [
         "pub(crate) fn should_require_routed_cycle_ack(",
@@ -18776,6 +18807,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
         "agent-doc-orchestration/src/route/startup.rs",
+        "agent-doc-route-io/src/startup_sync.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in [
@@ -18803,6 +18835,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let route_startup =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
             .unwrap();
+    let route_startup_sync =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_sync.rs")).unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     let route_dispatch =
@@ -18855,7 +18889,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && route_source.contains("agent_doc_tmux_io::target_current_command(")
             && route_dispatch.contains("agent_doc_tmux_io::target_current_command(")
             && route_dispatch.contains("agent_doc_tmux_io::target_window_id(")
-            && route_startup.contains("agent_doc_tmux_io::target_window_id(")
+            && route_startup_sync.contains("agent_doc_tmux_io::target_window_id(")
             && tmux_io_source.contains("pub fn current_pane_id_from_env_or_tmux(")
             && claim_source.contains("agent_doc_tmux_io::pane_pid(")
             && claim_source.contains("agent_doc_tmux_io::current_pane_id_from_env_or_tmux(")

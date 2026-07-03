@@ -221,6 +221,10 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
 use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup_debounce::await_idle;
+pub(crate) use agent_doc_route_io::startup_ready::{
+    AgentReadyWaitOutcome, fresh_start_pane_idle_ready, wait_for_agent_ready,
+    wait_for_agent_ready_outcome,
+};
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
 use agent_doc_session_registry_io::dispatch_registry::{
@@ -429,12 +433,6 @@ enum RoutedDispatchStartTracker {
 /// short poll instead of a 300ms floor. The loop captures before sleeping, so a
 /// near-instant consume returns on the first capture.
 const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
-
-/// Poll cadence for `wait_for_agent_ready_outcome`. `#run-agent-doc-latency`:
-/// tightened from 500ms so the 2-poll ready streak settles in ~150-300ms instead
-/// of the old ~500-1000ms floor, while still requiring two consecutive idle
-/// observations to debounce a transient prompt flicker.
-const AGENT_READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
 fn editor_route_attempt_id() -> Option<String> {
     agent_doc_controller_io::route_snapshot::editor_route_attempt_id()
@@ -691,26 +689,6 @@ fn log_route_latency(
             harness.binary,
             outcome
         );
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AgentReadyWaitOutcome {
-    Ready,
-    Blocked { reason: String },
-    TimedOut,
-}
-
-impl AgentReadyWaitOutcome {
-    fn is_ready(&self) -> bool {
-        matches!(self, Self::Ready)
-    }
-
-    fn blocker_reason(&self) -> Option<&str> {
-        match self {
-            Self::Blocked { reason } => Some(reason.as_str()),
-            _ => None,
-        }
     }
 }
 

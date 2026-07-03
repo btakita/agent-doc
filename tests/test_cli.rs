@@ -1109,8 +1109,10 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-route-io/src/startup_ready.rs",
         "agent-doc-route-io/src/startup_sync.rs",
+        "agent-doc-route-io/src/busy_pane.rs",
+        "agent-doc-route-io/src/pane_provenance.rs",
+        "agent-doc-route-io/src/supervisor_runtime.rs",
         "agent-doc-orchestration/src/route/cycle_ack.rs",
-        "agent-doc-orchestration/src/route/busy_pane.rs",
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-session-check-io/src/partial_staging.rs",
@@ -1353,7 +1355,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // when a freshly created pane is still cold-starting (or dropped to a bare
         // shell) at send time, instead of typing into a not-yet-submit-ready composer.
         ("agent-doc-orchestration/src/route/dispatch.rs", "reason=") => 3,
-        ("agent-doc-orchestration/src/route/busy_pane.rs", "reason=") => 1,
+        ("agent-doc-route-io/src/busy_pane.rs", "reason=") => 1,
         // +8 for the audited `#do-id-closeout-open-backlog` guard:
         // `expect_done_or_gate_guard_fired` ops_log diagnostic plus seven
         // `expect_done_or_gate_guard_*` test names. +1 for the audited
@@ -13898,7 +13900,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch_only.rs"))
             .unwrap();
     let route_busy_pane_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/busy_pane.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/busy_pane.rs")).unwrap();
+    let route_pane_provenance_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_provenance.rs")).unwrap();
+    let route_supervisor_runtime_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/supervisor_runtime.rs"))
             .unwrap();
     let route_startup_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
@@ -14181,10 +14187,27 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/route/busy_pane.rs")
+            .exists()
+            && !route_source.contains("mod busy_pane;")
+            && route_source.contains("agent_doc_route_io::busy_pane::{"),
+        "orchestration must not keep a busy-pane route module after the graph moves to agent-doc-route-io"
+    );
+    assert!(
         !route_busy_pane_source.contains("fn busy_existing_pane_auto_fix_outcome(")
             && route_busy_pane_source.contains("controller_busy_existing_pane_auto_fix_outcome(")
             && route_busy_pane_source.contains("BusyPaneAutoFixFacts"),
-        "route/busy_pane.rs must adapt supervisor facts into focused controller busy-pane auto-fix policy directly"
+        "agent-doc-route-io busy_pane should adapt supervisor facts into focused controller busy-pane auto-fix policy directly"
+    );
+    assert!(
+        !route_source.contains("fn query_supervisor_runtime(")
+            && !route_source.contains("fn restart_via_supervisor(")
+            && !route_source.contains("fn pane_route_provenance(")
+            && route_supervisor_runtime_source.contains("pub fn query_supervisor_runtime(")
+            && route_supervisor_runtime_source.contains("pub fn restart_via_supervisor(")
+            && route_pane_provenance_source.contains("pub fn pane_route_provenance("),
+        "shared route supervisor/provenance IO should live in agent-doc-route-io"
     );
     assert!(
         !manifest_dir
@@ -14276,7 +14299,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("dispatch_only_should_print_unproven_progress")
             && route_source.contains("fresh_route_start_ack_timeout")
             && route_source.contains("routed_cycle_ack_timeout")
-            && route_source.contains("existing_pane_ready_timeout")
             && route_source.contains("DispatchOnlyBusyRefusalFacts")
             && route_source.contains("controller_dispatch_only_busy_refusal_message(")
             && route_source.contains("DispatchActorState")
@@ -18808,6 +18830,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         "agent-doc-orchestration/src/route/pane_resolution.rs",
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-route-io/src/startup_sync.rs",
+        "agent-doc-route-io/src/pane_provenance.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in [
@@ -18837,6 +18860,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             .unwrap();
     let route_startup_sync =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_sync.rs")).unwrap();
+    let route_pane_provenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_provenance.rs")).unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     let route_dispatch =
@@ -18884,8 +18909,9 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && route_pane_resolution.contains("agent_doc_tmux_io::target_window_name(")
             && route_startup.contains("agent_doc_tmux_io::has_window_named(")
             && route_startup.contains("agent_doc_tmux_io::pane_pid(")
-            && route_source.contains("agent_doc_tmux_io::pane_pid(")
-            && route_source.contains("agent_doc_tmux_io::target_session_name(")
+            && route_pane_provenance.contains("agent_doc_tmux_io::pane_pid(")
+            && route_pane_provenance.contains("agent_doc_tmux_io::target_session_name(")
+            && route_pane_provenance.contains("agent_doc_tmux_io::target_current_command(")
             && route_source.contains("agent_doc_tmux_io::target_current_command(")
             && route_dispatch.contains("agent_doc_tmux_io::target_current_command(")
             && route_dispatch.contains("agent_doc_tmux_io::target_window_id(")
@@ -20073,13 +20099,12 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "sync should call focused project-root IO instead of owning actor/supervisor root discovery"
     );
     let route_busy_pane_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/busy_pane.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/busy_pane.rs")).unwrap();
     assert!(
         !route_busy_pane_source.contains("agent_doc_fs::find_project_root(")
             && route_busy_pane_source
                 .contains("agent_doc_project_root_io::project_root_containing("),
-        "route busy-pane should call focused project-root IO instead of owning .agent-doc root discovery"
+        "route busy-pane IO should call focused project-root IO instead of owning .agent-doc root discovery"
     );
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
@@ -24641,7 +24666,7 @@ fn test_agent_doc_controller_owns_route_text_predicates() {
     }
 
     for relative_path in [
-        "agent-doc-orchestration/src/route/busy_pane.rs",
+        "agent-doc-route-io/src/busy_pane.rs",
         "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-sync-io/src/sync.rs",
         "agent-doc-sync-io/src/resync.rs",

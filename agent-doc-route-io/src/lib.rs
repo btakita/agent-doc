@@ -4,9 +4,12 @@
 //! route startup helpers. It does not own command dispatch, document mutation,
 //! queue policy, or supervisor process startup.
 
+pub mod busy_pane;
+pub mod pane_provenance;
 pub mod session_resolution;
 pub mod startup_debounce;
 pub mod startup_harness;
 pub mod startup_locks;
 pub mod startup_ready;
 pub mod startup_sync;
+pub mod supervisor_runtime;

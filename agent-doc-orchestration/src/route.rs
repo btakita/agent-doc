@@ -161,8 +161,8 @@ use std::time::{Duration, Instant};
 
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
-    AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixFacts,
-    BusyPaneAutoFixOutcome, CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts,
+    AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixOutcome,
+    CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts,
     DegradedAuthoritativeActorDirectSubmit, DegradedAuthoritativeActorFacts,
     DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
     DispatchDrainRetryDecision, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyBusyRefusalFacts,
@@ -180,7 +180,6 @@ use agent_doc_controller::dispatch::{
     StartupMissRouteFacts, accepted_only_dispatch_start_log_message,
     accepted_only_dispatch_start_refusal_message, actor_blocked_by_starting_timeout,
     actor_dispatch_blocker_reason, actor_recovery_hint, authoritative_actor_ready_retry_budget,
-    busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
     busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
     classify_closeout_block_dispatch, classify_codex_routed_dispatch_start_proof,
@@ -197,12 +196,11 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, dispatch_proof_failed_event,
-    duplicate_pane_policy_error_message, existing_pane_ready_timeout, failclosed_wait_context,
-    fresh_route_start_ack_timeout, opencode_pane_state_changed_from_idle,
-    prompt_ready_barrier_failed_event, route_busy_diagnostic_message,
-    route_busy_queued_diagnostic_message, route_closeout_user_outcome_fields,
-    route_dispatch_bug_report_item, route_latency_message, route_latency_status,
-    route_startup_miss_diagnostic_message, route_submit_issue_message,
+    duplicate_pane_policy_error_message, failclosed_wait_context, fresh_route_start_ack_timeout,
+    opencode_pane_state_changed_from_idle, prompt_ready_barrier_failed_event,
+    route_busy_diagnostic_message, route_busy_queued_diagnostic_message,
+    route_closeout_user_outcome_fields, route_dispatch_bug_report_item, route_latency_message,
+    route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_cycle_ack_timeout,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
     starting_actor_not_ready_log_line, starting_actor_ready_log_line,
@@ -210,6 +208,11 @@ use agent_doc_controller::dispatch::{
     starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
     startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
     startup_miss_superseded_by_later_open_start,
+};
+#[cfg(test)]
+use agent_doc_controller::dispatch::{
+    BusyPaneAutoFixFacts,
+    busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
 };
 use agent_doc_controller_io::route_snapshot::RoutePaneSnapshot;
 use agent_doc_controller_io::starting_actor_timeout::{
@@ -219,11 +222,21 @@ use agent_doc_controller_io::starting_actor_timeout::{
 };
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
+pub(crate) use agent_doc_route_io::busy_pane::{
+    BusyPaneInterruptRecoveryOutcome, ExistingPaneDispatchReadiness,
+    attempt_busy_existing_pane_auto_fix, attempt_busy_existing_pane_interrupt_recovery,
+    ensure_existing_pane_ready_for_dispatch,
+};
+use agent_doc_route_io::pane_provenance::pane_route_provenance;
 use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup_debounce::await_idle;
 pub(crate) use agent_doc_route_io::startup_ready::{
     AgentReadyWaitOutcome, fresh_start_pane_idle_ready, wait_for_agent_ready,
     wait_for_agent_ready_outcome,
+};
+use agent_doc_route_io::supervisor_runtime::{
+    query_supervisor_health, query_supervisor_runtime, restart_via_supervisor,
+    restart_via_supervisor_with_mode, supervisor_socket_path,
 };
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
@@ -341,24 +354,6 @@ pub(crate) struct CommandDispatchResult {
 pub enum RouteMode {
     Managed,
     DispatchOnly,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ExistingPaneDispatchReadiness {
-    Ready,
-    BusyAlreadyRunning,
-    BusyNeedsAutoFix {
-        provenance: String,
-        blocker_reason: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BusyPaneInterruptRecoveryOutcome {
-    Recovered,
-    Blocked { reason: String },
-    TimedOut,
-    Skipped,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -692,20 +687,6 @@ fn log_route_latency(
     }
 }
 
-fn pane_route_provenance(tmux: &Tmux, pane_id: &str) -> String {
-    let pane_pid = agent_doc_tmux_io::pane_pid(tmux, pane_id)
-        .map(|pid| pid.to_string())
-        .unwrap_or_else(|| "?".to_string());
-    let pane_session =
-        agent_doc_tmux_io::target_session_name(tmux, pane_id).unwrap_or_else(|| "?".to_string());
-    let current_command =
-        agent_doc_tmux_io::target_current_command(tmux, pane_id).unwrap_or_else(|| "?".to_string());
-    format!(
-        "pane={} pane_pid={} pane_session={} current_command={}",
-        pane_id, pane_pid, pane_session, current_command
-    )
-}
-
 fn codex_dispatch_start_tracking_enabled(file: &Path) -> bool {
     codex_tracking_roots(file)
         .into_iter()
@@ -936,97 +917,6 @@ fn authoritative_actor_ready_facts_from_target(
         last_transition_reason: target.record.last_transition.reason.clone(),
         last_transition_caller: target.record.last_transition.caller.clone(),
     }
-}
-
-fn supervisor_socket_path(file: &Path, session_id: &str) -> Option<std::path::PathBuf> {
-    let canonical = file.canonicalize().ok()?;
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
-    Some(agent_doc_supervisor_io::ipc::socket_path(
-        &project_root,
-        session_id,
-    ))
-}
-
-fn query_supervisor_runtime(file: &Path, session_id: &str) -> SupervisorRuntime {
-    let Some(sock) = supervisor_socket_path(file, session_id) else {
-        return SupervisorRuntime {
-            health: SupervisorHealth::NoSocket,
-            actor_state: None,
-        };
-    };
-    if !sock.exists() {
-        return SupervisorRuntime {
-            health: SupervisorHealth::NoSocket,
-            actor_state: None,
-        };
-    }
-    match agent_doc_supervisor_io::ipc::send_command(&sock, &IpcMethod::State) {
-        Ok(resp) if resp.ok => {
-            if let Some(data) = &resp.data {
-                let running = data
-                    .get("running")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let state = data.get("state").and_then(|v| v.as_str()).unwrap_or("");
-                let restart_count = data
-                    .get("restart_count")
-                    .and_then(|v| v.as_u64())
-                    .and_then(|v| u32::try_from(v).ok())
-                    .unwrap_or(0);
-                let actor_state = data
-                    .get("actor_state")
-                    .and_then(|v| v.as_str())
-                    .and_then(RouteActorState::parse);
-                let health = if running && state == "healthy" {
-                    SupervisorHealth::Healthy
-                } else if state == "halted" {
-                    SupervisorHealth::Halted { restart_count }
-                } else {
-                    SupervisorHealth::Restartable
-                };
-                SupervisorRuntime {
-                    health,
-                    actor_state,
-                }
-            } else {
-                SupervisorRuntime {
-                    health: SupervisorHealth::Restartable,
-                    actor_state: None,
-                }
-            }
-        }
-        Ok(_) | Err(_) => SupervisorRuntime {
-            health: SupervisorHealth::Unreachable,
-            actor_state: None,
-        },
-    }
-}
-
-fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
-    query_supervisor_runtime(file, session_id).health
-}
-
-fn restart_via_supervisor_with_mode(file: &Path, session_id: &str, mode: &str) -> bool {
-    let canonical = match file.canonicalize() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let project_root = match agent_doc_project_root_io::project_root_containing(&canonical) {
-        Some(r) => r,
-        None => return false,
-    };
-    let sock = agent_doc_supervisor_io::ipc::socket_path(&project_root, session_id);
-    let method = IpcMethod::Restart {
-        mode: mode.to_string(),
-    };
-    match agent_doc_supervisor_io::ipc::send_command(&sock, &method) {
-        Ok(resp) => resp.ok,
-        Err(_) => false,
-    }
-}
-
-fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
-    restart_via_supervisor_with_mode(file, session_id, "continue")
 }
 
 fn tracked_harness_clear_requires_fresh_restart(
@@ -3585,8 +3475,6 @@ pub(crate) use pane_resolution::*;
 mod dispatch;
 pub(crate) use dispatch::*;
 
-mod busy_pane;
-pub(crate) use busy_pane::*;
 mod cycle_ack;
 pub(crate) use cycle_ack::*;
 

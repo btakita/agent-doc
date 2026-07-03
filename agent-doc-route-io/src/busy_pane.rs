@@ -1,8 +1,40 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
-use super::*;
-use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
+use crate::pane_provenance::pane_route_provenance;
+use crate::startup_ready::{AgentReadyWaitOutcome, wait_for_agent_ready_outcome};
+use crate::supervisor_runtime::{query_supervisor_health, restart_via_supervisor};
+use agent_doc_controller::dispatch::busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome;
+use agent_doc_controller::dispatch::{
+    BusyPaneAutoFixFacts, BusyPaneAutoFixOutcome, existing_pane_ready_timeout,
+    fresh_route_start_ack_timeout, is_codex_shell_search_blocker,
+};
+use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
+use agent_doc_supervisor::route_runtime::SupervisorHealth;
+#[cfg(test)]
+use anyhow::Context;
+use anyhow::Result;
+use std::path::Path;
+use std::time::Duration;
+use tmux_router::Tmux;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExistingPaneDispatchReadiness {
+    Ready,
+    BusyAlreadyRunning,
+    BusyNeedsAutoFix {
+        provenance: String,
+        blocker_reason: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BusyPaneInterruptRecoveryOutcome {
+    Recovered,
+    Blocked { reason: String },
+    TimedOut,
+    Skipped,
+}
 
 #[cfg(test)]
 pub(crate) fn maybe_run_test_busy_auto_fix_hook(
@@ -72,7 +104,7 @@ pub(crate) fn maybe_run_test_busy_interrupt_hook(
     Ok(false)
 }
 
-pub(crate) fn attempt_busy_existing_pane_auto_fix(
+pub fn attempt_busy_existing_pane_auto_fix(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
@@ -158,7 +190,7 @@ pub(crate) fn attempt_busy_existing_pane_auto_fix(
 /// capture rather than only the last few lines —
 /// critical here because the shell-search line sits above trailing blank pane
 /// rows, out of the window `HarnessConfig::dispatch_blocker_reason` inspects.
-pub(crate) fn codex_pane_in_shell_search_state(
+pub fn codex_pane_in_shell_search_state(
     tmux: &Tmux,
     pane: &str,
     harness: &HarnessConfig,
@@ -178,7 +210,7 @@ pub(crate) fn codex_pane_in_shell_search_state(
     )
 }
 
-pub(crate) fn attempt_busy_existing_pane_interrupt_recovery(
+pub fn attempt_busy_existing_pane_interrupt_recovery(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
@@ -289,7 +321,7 @@ pub(crate) fn attempt_busy_existing_pane_interrupt_recovery(
     })
 }
 
-pub(crate) fn attempt_opencode_busy_interrupt_recovery(
+pub fn attempt_opencode_busy_interrupt_recovery(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
@@ -356,7 +388,7 @@ pub(crate) fn attempt_opencode_busy_interrupt_recovery(
     })
 }
 
-pub(crate) fn ensure_existing_pane_ready_for_dispatch(
+pub fn ensure_existing_pane_ready_for_dispatch(
     tmux: &Tmux,
     file: &Path,
     pane: &str,

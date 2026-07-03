@@ -224,6 +224,44 @@ Two options if you want to lean in harder:
 My recommendation: send it as-is (availability + flexible, budget question intact). It gets you a fast reply and a number to work from, and you can go lower in the actual negotiation without having pre-committed to a floor. Want me to drop this into `corky`/LinkedIn as a draft (no auto-send)?
 I need the money right now. So I'm willing to work at a lower rate.
 <!-- agent:boundary:7d02b5de -->
+Use my voice without AI tells. "I'd take a share of the work — the non-differentiating pieces, the plumbing and general libraries any product like yours needs but that aren't your edge — at a lower rate." It's not me taking a share of the work. It's making some parts of the system open source.
+
+### Re: Rewritten — your voice, open-source framing, sharper hook — opus-4-8
+
+> **Prompt:** Use my voice without AI tells. "I'd take a share of the work — the non-differentiating pieces, the plumbing and general libraries any product like yours needs but that aren't your edge — at a lower rate." It's not me taking a share of the work. It's making some parts of the system open source.
+
+> **Prompt (session):** I don't think the pitch is compelling enough.
+
+Rewrote it around three changes:
+
+1. **Open-source framing, as you said.** The offer is no longer "I take a share of the work at a lower rate." It's: the generic parts of the engine get open sourced, so you only pay for what's REItrades-specific. That's a cleaner deal and it reads as confidence, not a discount.
+2. **A compelling pitch leads with his risk, not your interests.** The old opener was about what work you enjoy. The new opener is the cost of one wrong number in front of a buyer. That's the thing "100% accurate" is protecting, and it's the fear that makes him reply.
+3. **It answers the objection he actually has.** He already picked a cheaper build path. The note now says the accuracy engine runs alongside whoever else is building, so saying yes to you doesn't mean firing anyone. Plus the cash+equity door from the earlier re-engagement plan.
+
+Voice pass: short declarative sentences, no em-dashes, cut "genuinely," "Here's a way to make it easy on the budget," and the salesy connective tissue.
+
+Paste-ready:
+
+```
+Hi Artur,
+
+Happy 4th.
+
+I keep coming back to REItrades for one reason: the product rides on "100% accurate". That's also the part that quietly breaks. A listing's numbers change, the OM and teaser don't, and the first person to catch the mismatch is a buyer. One wrong number in front of a buyer costs more than whatever it saved on the build.
+
+Here's what I'd build to prevent that. Code owns every number. The AI only proposes. Anything the system isn't confident about gets flagged for a person before a buyer sees it. When a listing changes, only the affected content regenerates, so the OM and teaser can't drift from the data.
+
+On budget: the generic parts of that engine, the recompute layer, the extraction and validation framework, the audit trail, aren't your edge. I'd open source those and maintain them, so you're only paying for the REItrades-specific work. Your schemas, templates, and business rules stay yours. This runs fine alongside whoever else is building for you. I'd own the accuracy engine, they keep shipping features. If a cash plus equity mix works better for this phase, I'm open to that.
+
+I have room in my schedule now and could start on a first slice this week. Worth a quick call?
+
+Brian
+```
+
+Judgment calls, flag if you disagree:
+- **Dropped the budget question.** "Worth a quick call?" replaced "give me a rough idea of your budget." The budget question made him do work before replying; the call ask is a lower-friction yes, and you negotiate the number live where you're stronger.
+- **Kept availability/flexibility as readiness, not need** (per the earlier exchange). "Room in my schedule" + "start this week" carries urgency without telegraphing it.
+<!-- agent:boundary:8a7153fe -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -257,7 +257,7 @@ use agent_doc_workflow::session_cycle::{
     pending_kept_open_ids_from_mutations,
 };
 
-use agent_doc_element_exchange_io::{DuplicatePromptRepairOptions, DuplicatePromptRepairReport};
+use agent_doc_element_exchange_io::DuplicatePromptRepairOptions;
 use agent_doc_flow::types::FlowOutcome;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_template as template;
@@ -1780,20 +1780,6 @@ fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
     )
 }
 
-fn repair_duplicate_prompt_artifacts(
-    content: &str,
-    file: &Path,
-    options: DuplicatePromptRepairOptions<'_>,
-) -> Result<(String, DuplicatePromptRepairReport)> {
-    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
-        content,
-        file,
-        options,
-        agent_doc_ops_log_io::log_op,
-        log_duplicate_prompt_residue_guard,
-    )
-}
-
 pub fn repair_commit_prompt_artifacts_against_snapshot(
     file: &Path,
     snapshot: &str,
@@ -1836,11 +1822,14 @@ pub fn normalize_template_structure_or_fail_preserving(
         }
         result
     };
-    let (normalized, _) = repair_duplicate_prompt_artifacts(
-        &agent_doc_element::element::strip_backlog_patch_attr(&deduped_openers),
-        file,
-        DuplicatePromptRepairOptions::new("structure").preserving(preserve_doc),
-    )?;
+    let (normalized, _) =
+        agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+            &agent_doc_element::element::strip_backlog_patch_attr(&deduped_openers),
+            file,
+            DuplicatePromptRepairOptions::new("structure").preserving(preserve_doc),
+            agent_doc_ops_log_io::log_op,
+            log_duplicate_prompt_residue_guard,
+        )?;
     match agent_doc_template::guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
         Err(err)
@@ -1859,12 +1848,15 @@ pub fn normalize_template_structure_or_fail_preserving(
                     FlowOutcome::Completed,
                     agent_doc_ops_log_io::log_op,
                 );
-                let (repaired, _) = repair_duplicate_prompt_artifacts(
-                    &repaired,
-                    file,
-                    DuplicatePromptRepairOptions::new("duplicate-scaffold repair")
-                        .preserving(preserve_doc),
-                )?;
+                let (repaired, _) =
+                    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+                        &repaired,
+                        file,
+                        DuplicatePromptRepairOptions::new("duplicate-scaffold repair")
+                            .preserving(preserve_doc),
+                        agent_doc_ops_log_io::log_op,
+                        log_duplicate_prompt_residue_guard,
+                    )?;
                 agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
                     .context(format!(
                         "template structure guard failed for {} after duplicate-scaffold repair",
@@ -1895,12 +1887,15 @@ pub fn normalize_template_structure_or_fail_preserving(
                     FlowOutcome::Completed,
                     agent_doc_ops_log_io::log_op,
                 );
-                let (repaired, _) = repair_duplicate_prompt_artifacts(
-                    &repaired,
-                    file,
-                    DuplicatePromptRepairOptions::new("duplicate-close repair")
-                        .preserving(preserve_doc),
-                )?;
+                let (repaired, _) =
+                    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+                        &repaired,
+                        file,
+                        DuplicatePromptRepairOptions::new("duplicate-close repair")
+                            .preserving(preserve_doc),
+                        agent_doc_ops_log_io::log_op,
+                        log_duplicate_prompt_residue_guard,
+                    )?;
                 agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
                     .context(format!(
                         "template structure guard failed for {} after duplicate-close repair",
@@ -1926,9 +1921,6 @@ const SHRINK_GUARD_MAX_RATIO: f64 = 0.10;
 
 mod converge;
 pub use converge::*;
-
-mod exchange_reconcile;
-pub(crate) use exchange_reconcile::*;
 
 struct TemplatePatchApplicationBase<'a, 'b> {
     file: &'b Path,
@@ -2201,14 +2193,17 @@ fn normalize_final_template_content(
         preserve_current_or_base,
     )?;
     if let Some(before) = before_current {
-        let (deduped, report) = repair_duplicate_prompt_artifacts(
-            &normalized,
-            file,
-            DuplicatePromptRepairOptions::new("final-template")
-                .with_before(Some(before))
-                .preserving(Some(base))
-                .preserving_current(Some(before)),
-        )?;
+        let (deduped, report) =
+            agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+                &normalized,
+                file,
+                DuplicatePromptRepairOptions::new("final-template")
+                    .with_before(Some(before))
+                    .preserving(Some(base))
+                    .preserving_current(Some(before)),
+                agent_doc_ops_log_io::log_op,
+                log_duplicate_prompt_residue_guard,
+            )?;
         if report.changed() {
             normalized = normalize_template_structure_or_fail_preserving(
                 &deduped,

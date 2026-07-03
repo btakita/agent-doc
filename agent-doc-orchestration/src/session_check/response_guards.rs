@@ -190,7 +190,9 @@ pub(crate) fn check_snapshot_committed_guard(
             // skip, the guard would still bail with the misleading "cycle
             // state is committed but the snapshot does not match HEAD"
             // message that masks the JB cache-conflict cancel root cause.
-            if detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
+            if agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable_with_context(
+                file, rc,
+            )? {
                 return Ok(GuardResult::None);
             }
             let side_effects = agent_doc_git_io::status::tracked_side_effect_note(file)?;

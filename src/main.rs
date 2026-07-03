@@ -180,7 +180,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
     }
 
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> anyhow::Result<bool> {
-        agent_doc_orchestration::session_check::detect_jb_cache_conflict_cancel_recoverable(file)
+        agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(file)
     }
 
     fn detect_uncommitted_closeout_drift(&self, file: &Path) -> anyhow::Result<Option<String>> {

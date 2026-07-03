@@ -1274,7 +1274,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     // drift is an adjacent duplicate response and dedupe(current) is HEAD, drop
     // the replay before the generic direct-patchback guard fires.
     if let Some(replay) =
-        crate::session_check::detect_jb_cache_conflict_accept_duplicate_replay_with_context(
+        agent_doc_session_check_io::detect_jb_cache_conflict_accept_duplicate_replay_with_context(
             file, rc,
         )?
     {
@@ -1303,7 +1303,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     // HEAD over the working tree + snapshot before the generic direct-patchback
     // guard fires. See tasks/agent-doc/plan-duplicate-response-after-commit.md.
     if let Some(overapplication) =
-        crate::session_check::detect_late_ipc_response_overapplication_with_context(file, rc)?
+        agent_doc_session_check_io::detect_late_ipc_response_overapplication_with_context(file, rc)?
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1337,7 +1337,9 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     // `session_check::detect_uncommitted_closeout_drift` already returns
     // `Ok(None)` for the same pattern, but the drift will recur on the next
     // call until something actually commits — that "something" lives here.
-    if crate::session_check::detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
+    if agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable_with_context(
+        file, rc,
+    )? {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

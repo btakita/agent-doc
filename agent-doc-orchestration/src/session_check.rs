@@ -73,14 +73,19 @@ use agent_doc_workflow::session_check::{BlockedCloseoutMessage, GuardResult};
 use anyhow::{Context, Result};
 use std::path::Path;
 
+#[cfg(test)]
+use agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable;
+use agent_doc_session_check_io::{
+    detect_jb_cache_conflict_accept_duplicate_replay,
+    detect_jb_cache_conflict_cancel_recoverable_with_context,
+    detect_late_ipc_response_overapplication,
+};
 pub use agent_doc_session_check_io::{
     detect_unstarted_prompt_bearing_diff, first_unstarted_prompt_bearing_change,
 };
 
 mod response_guards;
 pub(crate) use response_guards::*;
-mod detect;
-pub use detect::*;
 
 fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
     let file_key = file.to_string_lossy();
@@ -536,7 +541,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_parent_submodule_pointer_guard(file)? {
+        match agent_doc_session_check_io::check_parent_submodule_pointer_guard(file)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -568,7 +573,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_prompt_only_exchange_tail_guard(file, &rc)? {
+        match agent_doc_session_check_io::check_prompt_only_exchange_tail_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -682,6 +687,78 @@ pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
     match report.status {
         SessionCheckStatus::Ok(_) => Ok(()),
         SessionCheckStatus::Interrupted(message) => anyhow::bail!(message),
+    }
+}
+
+pub fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    detect_uncommitted_closeout_drift_with_context(file, &rc)
+}
+
+pub fn detect_uncommitted_closeout_drift_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<Option<String>> {
+    if crate::git::repair_committed_historical_snapshot_drift(file)?.is_some() {
+        return Ok(None);
+    }
+    if let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)? {
+        return Ok(Some(agent_doc_git::parent_submodule_pointer_message(
+            &drift.relative_path,
+            drift.parent_head.as_deref(),
+            &drift.submodule_head,
+            &file.display().to_string(),
+        )));
+    }
+    // Phase 3 (#jbccc3): jb_cache_conflict_cancel is auto-recoverable through
+    // `git::commit`. Skip the lower-precision `detect_bypassed_response_write`
+    // and `SnapshotDiffersFromHead` paths below so neither this caller nor
+    // standalone `session-check` accuses the user of a direct patchback when
+    // the binary-owned write path actually applied the response but the commit
+    // boundary never landed. Preflight's `enforce_no_uncommitted_closeout_drift`
+    // separately runs `git::commit` to close the cycle.
+    if detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
+        return Ok(None);
+    }
+    if let Some(marker) = detect_bypassed_response_write(file)? {
+        return Ok(Some(format!(
+            "found likely direct response patchback without agent-doc cycle: {}{} {}",
+            marker,
+            agent_doc_git_io::status::tracked_side_effect_note(file)?,
+            closeout_recovery_hint(file)
+        )));
+    }
+    if let Some(marker) = detect_uncommitted_exchange_drift(file)? {
+        if detect_unstarted_prompt_bearing_diff(file)?.is_some() {
+            return Ok(None);
+        }
+        return Ok(Some(format!(
+            "document has uncommitted exchange changes beyond the committed snapshot: {}{} {}",
+            marker,
+            agent_doc_git_io::status::tracked_side_effect_note(file)?,
+            closeout_recovery_hint(file)
+        )));
+    }
+    match rc.snapshot_commit_status() {
+        agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead {
+            snapshot_len,
+            head_len,
+        } => {
+            if detect_unstarted_prompt_bearing_diff(file)?.is_some() {
+                return Ok(None);
+            }
+            Ok(Some(format!(
+                "snapshot differs from HEAD without an open or recoverable agent-doc cycle (snapshot_len={}, head_len={}){} {}",
+                snapshot_len,
+                head_len,
+                agent_doc_git_io::status::tracked_side_effect_note(file)?,
+                closeout_recovery_hint(file)
+            )))
+        }
+        agent_doc_snapshot_io::SnapshotCommitStatus::Committed
+        | agent_doc_snapshot_io::SnapshotCommitStatus::NoSnapshot
+        | agent_doc_snapshot_io::SnapshotCommitStatus::NoHead
+        | agent_doc_snapshot_io::SnapshotCommitStatus::NotInGitRepo => Ok(None),
     }
 }
 
@@ -8060,5 +8137,133 @@ Body\n\
         assert!(ops_log.contains("next_action=yield_to_supervisor_clear_and_continue"));
         assert!(ops_log.contains(&format!("head_bytes={}", head.len())));
         assert!(ops_log.contains("head_sha256="));
+    }
+
+    #[test]
+    fn enforce_clean_closeout_self_heals_late_ipc_overapplication() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\n\n",
+            "Answer A.\n",
+            "### Re: second — opus-4-8\n\n",
+            "Answer B.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed", "--no-verify"])
+            .output()
+            .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        let overapplied = committed.replace(
+            "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
+            "### Re: first — opus-4-8\n\nAnswer A.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &overapplied).unwrap();
+        assert!(
+            agent_doc_session_check_io::detect_late_ipc_response_overapplication(&doc)
+                .unwrap()
+                .is_some(),
+            "precondition: late-IPC over-application present"
+        );
+
+        enforce_clean_closeout(&doc).expect("enforce_clean_closeout should self-heal, not bail");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), committed);
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            committed
+        );
+    }
+
+    #[test]
+    fn detects_prompt_prefixed_corrupted_duplicate_as_overapplication() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "do [#fix-thing]\n",
+            "### Re: fix thing — gpt-5\n\n",
+            "**Scope:** narrow.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed response", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let corrupted = committed.replace(
+            "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
+            "### Re: fix thing — gpt-5\n\n❯ **Scope:** narrow.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, corrupted).unwrap();
+
+        let overapplication =
+            agent_doc_session_check_io::detect_late_ipc_response_overapplication(&doc)
+                .unwrap()
+                .expect("prompt-prefixed corrupted duplicate must be detected");
+        assert_eq!(overapplication.remediated_content, committed);
     }
 }

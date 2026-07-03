@@ -1157,7 +1157,8 @@ pub fn classify_closeout_recovery_state_for_file(file: &Path) -> CloseoutRecover
     // landed) is `git::commit`-recoverable, so it must NOT be misread as a direct
     // patchback — mirror `session_check::detect_uncommitted_closeout_drift`.
     input.direct_response_patchback =
-        !crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file).unwrap_or(false)
+        !agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(file)
+            .unwrap_or(false)
             && crate::session_check::detect_bypassed_response_write(file)
                 .ok()
                 .flatten()

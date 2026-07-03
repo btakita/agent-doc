@@ -782,7 +782,14 @@ pub fn run_stream(
                 normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
             // Shrink guard: refuse if new exchange content is dramatically shorter
-            check_exchange_shrink_guard(&content_at_start, &content_ours, file)?;
+            agent_doc_element_exchange_io::check_exchange_shrink_guard_with_log(
+                &content_at_start,
+                &content_ours,
+                file,
+                SHRINK_GUARD_MIN_BYTES,
+                SHRINK_GUARD_MAX_RATIO,
+                agent_doc_ops_log_io::log_op,
+            )?;
 
             // Dedup: skip IPC if patches produce no changes (strip boundary markers)
             if strip_boundary_for_dedup(&content_ours)
@@ -952,7 +959,14 @@ pub fn run_stream(
         normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
     // Shrink guard: refuse if new exchange content is dramatically shorter
-    check_exchange_shrink_guard(&content_at_start, &content_ours, file)?;
+    agent_doc_element_exchange_io::check_exchange_shrink_guard_with_log(
+        &content_at_start,
+        &content_ours,
+        file,
+        SHRINK_GUARD_MIN_BYTES,
+        SHRINK_GUARD_MAX_RATIO,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     // Re-read file to check for user edits since lock acquisition
     let content_current = std::fs::read_to_string(file)
@@ -1454,7 +1468,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 consumed_without_materialization = true;
                 break;
             }
-            if file_ipc_consumed_without_live_exchange_ack(
+            if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
                 file,
                 "explicit_file_ipc",
                 Some(&patch_id),
@@ -1462,6 +1476,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 Some(&content_at_start),
                 &content,
                 false,
+                agent_doc_ops_log_io::log_op,
+                log_ipc_proof_failure,
             ) {
                 consumed_without_materialization = true;
                 break;

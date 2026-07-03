@@ -2797,7 +2797,7 @@ mod tests {
             agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
         ));
         assert!(
-            crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
             "preconditions: cancel pattern should be detected before recovery"
         );
 
@@ -2860,7 +2860,7 @@ mod tests {
             agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
         ));
         assert!(
-            crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
             "preconditions: write_applied cancel pattern should be detected before recovery"
         );
 
@@ -2948,7 +2948,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
             "preconditions: committed cancel pattern should be recoverable before preflight"
         );
 
@@ -3043,7 +3043,7 @@ mod tests {
         );
         std::fs::write(&doc, replayed).unwrap();
         assert!(
-            crate::session_check::detect_jb_cache_conflict_accept_duplicate_replay(&doc)
+            agent_doc_session_check_io::detect_jb_cache_conflict_accept_duplicate_replay(&doc)
                 .unwrap()
                 .is_some(),
             "preconditions: accepted-conflict duplicate replay should be detected"
@@ -3117,13 +3117,13 @@ mod tests {
         std::fs::write(&doc, overapplied).unwrap();
 
         assert!(
-            crate::session_check::detect_jb_cache_conflict_accept_duplicate_replay(&doc)
+            agent_doc_session_check_io::detect_jb_cache_conflict_accept_duplicate_replay(&doc)
                 .unwrap()
                 .is_none(),
             "preconditions: non-adjacent duplicate is missed by the consecutive replay detector"
         );
         assert!(
-            crate::session_check::detect_late_ipc_response_overapplication(&doc)
+            agent_doc_session_check_io::detect_late_ipc_response_overapplication(&doc)
                 .unwrap()
                 .is_some(),
             "preconditions: late-IPC over-application should be detected"
@@ -3204,7 +3204,7 @@ mod tests {
             "preconditions: strict over-application must NOT match a drifted-body replay"
         );
         assert!(
-            crate::session_check::detect_late_ipc_response_overapplication(&doc)
+            agent_doc_session_check_io::detect_late_ipc_response_overapplication(&doc)
                 .unwrap()
                 .is_some(),
             "the stale-replay fallback should detect the over-application"

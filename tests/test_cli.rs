@@ -1125,7 +1125,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-session-check-io/src/guard_modes.rs",
         "agent-doc-session-check-io/src/queue_head_guards.rs",
         "agent-doc-orchestration/src/session_check/response_guards.rs",
-        "agent-doc-orchestration/src/session_check/detect.rs",
+        "agent-doc-session-check-io/src/detect.rs",
         "agent-doc-workflow/src/session_check.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-queue-io/src/queue_consume.rs",
@@ -1135,7 +1135,6 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/write/converge.rs",
         "agent-doc-orchestration/src/write/pending_checks.rs",
         "agent-doc-orchestration/src/write/materialize.rs",
-        "agent-doc-orchestration/src/write/exchange_reconcile.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
     ];
     let tokens = [
@@ -1540,7 +1539,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // 1 -> 2 (#prompt-tail-workflow-extract): the prompt-only exchange tail
         // message moved to `agent-doc-workflow`; this adapter now names the
         // focused guard message builder directly.
-        ("agent-doc-orchestration/src/session_check/detect.rs", "guard_") => 2,
+        ("agent-doc-session-check-io/src/detect.rs", "guard_") => 2,
         // +1 for the audited `guard_visible_write_idle(..., "queue_done_id_mark")`
         // call: opportunistic done-id queue marking is a document write path and
         // must use the same visible editor drift guard as active-head queue consume.
@@ -1615,10 +1614,6 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `agent_doc_turn::response_replay` ownership move removed the duplicate
         // materialization-policy copy and its final guard-marker token.
         ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 1,
-        // 5 -> 3 (#pure-helper-extraction): the shrink guard predicate moved to
-        // `agent-doc-element-exchange`; orchestration keeps the effect adapter
-        // log entry and imports the focused pure policy directly.
-        ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 1,
         // -2 `guard_`, -1 `reason=` (#nodiskipc): active IPC timeout/no-proof
         // paths no longer enter the direct document-write fallback, so the removed
         // visible-write guard/reason tokens are retired rather than rerouted.
@@ -5140,10 +5135,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
 
-    let detect_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
-    )
-    .unwrap();
+    let detect_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
     for forbidden in [
         "pub(crate) enum ResponseSource",
         "pub(crate) struct ReapedResponseLossInput",
@@ -5153,7 +5146,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     ] {
         assert!(
             !detect_source.contains(forbidden),
-            "session_check::detect must not re-own closeout response-loss policy: {forbidden}"
+            "session-check detect IO must not re-own closeout response-loss policy: {forbidden}"
         );
     }
 
@@ -5282,7 +5275,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             .contains("agent_doc_workflow::session_check::prompt_only_exchange_tail_guard")
             && workflow_session_check
                 .contains("agent_doc_turn::exchange_tail::prompt_only_exchange_tail"),
-        "session_check::detect should route prompt-only exchange-tail checks through workflow while workflow calls focused turn policy"
+        "session-check detect IO should route prompt-only exchange-tail checks through workflow while workflow calls focused turn policy"
     );
 
     let response_guards = fs::read_to_string(
@@ -5771,10 +5764,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "orchestration repair must not re-own response replay/application policy: {forbidden}"
         );
     }
-    let session_check_detect = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
-    )
-    .unwrap();
+    let session_check_detect =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
     for forbidden in [
         "struct JbCacheConflictAcceptDuplicateReplay",
         "struct LateIpcResponseOverapplication",
@@ -5785,14 +5776,14 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     ] {
         assert!(
             !session_check_detect.contains(forbidden),
-            "session_check/detect.rs must adapt file IO into focused response replay policy, not re-own it: {forbidden}"
+            "session-check detect IO must adapt file IO into focused response replay policy, not re-own it: {forbidden}"
         );
     }
     assert!(
         session_check_detect.contains("use agent_doc_turn::response_replay::{")
             && session_check_detect.contains("classify_jb_cache_conflict_accept_duplicate_replay(")
             && session_check_detect.contains("classify_late_ipc_response_overapplication("),
-        "session_check/detect.rs should call focused response replay classifiers directly"
+        "session-check detect IO should call focused response replay classifiers directly"
     );
     for relative in [
         "agent-doc-capture-io/src/lib.rs",
@@ -10210,6 +10201,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-orchestration/src/session_check/partial_staging.rs",
         "agent-doc-orchestration/src/session_check/queue_head_guards.rs",
         "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
+        "agent-doc-orchestration/src/session_check/detect.rs",
     ] {
         assert!(
             !manifest_dir.join(old_path).exists(),
@@ -10224,6 +10216,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
         "agent-doc-session-check-io/src/guard_modes.rs",
         "agent-doc-session-check-io/src/prompt_bearing.rs",
+        "agent-doc-session-check-io/src/detect.rs",
     ] {
         assert!(
             manifest_dir.join(new_path).exists(),
@@ -10239,6 +10232,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "mod partial_staging;",
         "mod queue_head_guards;",
         "mod queue_head_provenance_guards;",
+        "mod detect;",
     ] {
         assert!(
             !session_check.contains(forbidden),
@@ -10262,6 +10256,10 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         session_check.contains("agent_doc_session_check_io::check_shadow_backlog_guard")
             && session_check
                 .contains("agent_doc_session_check_io::check_free_text_queue_head_provenance")
+            && session_check
+                .contains("agent_doc_session_check_io::check_parent_submodule_pointer_guard")
+            && session_check
+                .contains("agent_doc_session_check_io::check_prompt_only_exchange_tail_guard")
             && session_check.contains("first_unstarted_prompt_bearing_change"),
         "session_check.rs should call the focused guard IO crate directly"
     );
@@ -18309,10 +18307,11 @@ fn test_extracted_pure_layers_keep_focused_owners() {
             "agent-doc-git must own parent submodule pointer messaging policy: {required}"
         );
     }
-    let detect = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
-    )
-    .unwrap();
+    let detect =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
+    let session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+            .unwrap();
     for forbidden in [
         "fn short_oid(",
         "fn parent_pointer_recovery_hint(",
@@ -18320,12 +18319,13 @@ fn test_extracted_pure_layers_keep_focused_owners() {
     ] {
         assert!(
             !detect.contains(forbidden),
-            "session_check detect must not keep git messaging shims: {forbidden}"
+            "session-check detect IO must not keep git messaging shims: {forbidden}"
         );
     }
     assert!(
-        detect.contains("agent_doc_git::parent_submodule_pointer_message("),
-        "session_check detect should call agent-doc-git messaging helpers directly"
+        detect.contains("agent_doc_git::parent_submodule_pointer_guard_message(")
+            && session_check.contains("agent_doc_git::parent_submodule_pointer_message("),
+        "session-check detect IO and the remaining uncommitted-drift adapter should call agent-doc-git messaging helpers directly"
     );
 
     let compact_archive =
@@ -21761,7 +21761,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
     for relative in [
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/session_check.rs",
-        "agent-doc-orchestration/src/session_check/detect.rs",
+        "agent-doc-session-check-io/src/detect.rs",
         "agent-doc-orchestration/src/session_check/closeout_guards.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/converge.rs",
@@ -22303,10 +22303,11 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     let closeout_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
             .unwrap();
-    let detect_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
-    )
-    .unwrap();
+    let detect_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
+    let session_check_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+            .unwrap();
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let preflight_run_source =
@@ -22339,7 +22340,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             && closeout_source
                 .contains("agent_doc_git_io::submodule::submodule_pointer_drift(file)")
             && detect_source.contains("agent_doc_git_io::submodule::submodule_pointer_drift(file)")
-            && detect_source.contains("agent_doc_git_io::status::tracked_side_effect_note(file)?")
+            && session_check_source
+                .contains("agent_doc_git_io::status::tracked_side_effect_note(file)?")
             && preflight_source
                 .contains("agent_doc_git_io::revision::last_commit_mtime(&resolved)")
             && preflight_run_source
@@ -22368,8 +22370,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         );
     }
     assert!(
-        !detect_source.contains("pub(crate) fn tracked_side_effect_note("),
-        "session_check/detect.rs must call focused git status IO directly"
+        !session_check_source.contains("pub(crate) fn tracked_side_effect_note("),
+        "session_check.rs must call focused git status IO directly"
     );
     for forbidden in [
         "fn git_rev_parse(",
@@ -22644,13 +22646,12 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "orchestration must depend on the focused exchange element crate directly"
     );
 
-    let write_exchange_reconcile = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/write/exchange_reconcile.rs"),
-    )
-    .unwrap();
+    let exchange_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-exchange-io/src/lib.rs")).unwrap();
     assert!(
-        write_exchange_reconcile.contains("use agent_doc_element_exchange::{"),
-        "write exchange reconciliation should import exchange policy from the focused crate"
+        exchange_io.contains("pub fn check_exchange_shrink_guard_with_log(")
+            && exchange_io.contains("pub fn file_ipc_consumed_without_live_exchange_ack_with_log("),
+        "agent-doc-element-exchange-io must own logged exchange write adapters"
     );
     let snapshot_source =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/document_init.rs"))
@@ -22708,6 +22709,20 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         write_run_entry.contains("use agent_doc_element_exchange::extract_normalization_targets;"),
         "write run entry should import normalization target extraction from the focused crate"
     );
+    assert!(
+        write_run_entry.contains("agent_doc_element_exchange_io::check_exchange_shrink_guard_with_log(")
+            && write_run_entry.contains(
+                "agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log("
+            )
+            && write_ipc_transport.contains(
+                "agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log("
+            ),
+        "write adapters should call focused exchange IO directly instead of an orchestration exchange_reconcile module"
+    );
+    assert!(
+        !write_main.contains("mod exchange_reconcile"),
+        "orchestration write must not keep an exchange_reconcile facade module"
+    );
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
     assert!(
@@ -22740,7 +22755,6 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
 
     let orchestration_policy_sources = [
         ("write.rs", write_main),
-        ("write/exchange_reconcile.rs", write_exchange_reconcile),
         ("write/normalize.rs", write_normalize),
         ("write/run_entry.rs", write_run_entry),
         ("write/ipc.rs", write_ipc),

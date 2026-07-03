@@ -1499,6 +1499,7 @@ dependencies = [
  "agent-doc-element-backlog-io",
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-git",
  "agent-doc-git-io",
  "agent-doc-ops-log-io",
  "agent-doc-project-config-io",

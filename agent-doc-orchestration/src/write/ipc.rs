@@ -399,13 +399,15 @@ pub(crate) fn normalized_content_ours_fallback(
 ) -> String {
     let fallback = content_ours_merged_with_disk_edits(file, baseline, content_ours);
     let normalized = normalize_exchange_prefixes_for_targets(&fallback, normalize_prefix_lines);
-    repair_duplicate_prompt_artifacts(
+    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
         &normalized,
         file,
         DuplicatePromptRepairOptions::new("normalization_fallback")
             .with_before(baseline)
             .preserving(baseline)
             .without_residue_guard(),
+        agent_doc_ops_log_io::log_op,
+        log_duplicate_prompt_residue_guard,
     )
     .map(|(repaired, _)| repaired)
     .unwrap_or(normalized)
@@ -2060,13 +2062,15 @@ pub(crate) fn ipc_repair_decision_from_sidecar(
     {
         let bad_state = snap_content;
         let normalized = normalize_exchange_prefixes_for_targets(&bad_state, lines);
-        let repaired = repair_duplicate_prompt_artifacts(
+        let repaired = agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
             &normalized,
             file,
             DuplicatePromptRepairOptions::new("normalization_sidecar_retry")
                 .with_before(baseline)
                 .preserving(baseline)
                 .without_residue_guard(),
+            agent_doc_ops_log_io::log_op,
+            log_duplicate_prompt_residue_guard,
         )
         .map(|(repaired, _)| repaired)
         .unwrap_or(normalized);
@@ -2848,13 +2852,16 @@ pub fn dedupe_ipc_snapshot_content(
         .as_ref()
         .map(|repair| repair.content.as_str())
         .unwrap_or(content);
-    let (deduped, report) = repair_duplicate_prompt_artifacts(
-        singleton_repaired,
-        file,
-        DuplicatePromptRepairOptions::new(source)
-            .with_before(before)
-            .preserving(before),
-    )?;
+    let (deduped, report) =
+        agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+            singleton_repaired,
+            file,
+            DuplicatePromptRepairOptions::new(source)
+                .with_before(before)
+                .preserving(before),
+            agent_doc_ops_log_io::log_op,
+            log_duplicate_prompt_residue_guard,
+        )?;
     let changed = singleton_changed || deduped != content;
     if let Some(repair) = &singleton_repair {
         agent_doc_ops_log_io::log_op(

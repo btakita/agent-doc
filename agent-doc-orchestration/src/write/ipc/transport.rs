@@ -1672,7 +1672,7 @@ pub(crate) fn write_ipc_and_poll(
                 )?;
                 return Ok(false);
             }
-            if file_ipc_consumed_without_live_exchange_ack(
+            if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
                 doc_file,
                 "file_ipc",
                 Some(patch_id),
@@ -1683,6 +1683,8 @@ pub(crate) fn write_ipc_and_poll(
                 before_content.as_deref(),
                 &current_on_disk,
                 ack_content_proven,
+                agent_doc_ops_log_io::log_op,
+                log_ipc_proof_failure,
             ) {
                 return Ok(false);
             }
@@ -1703,7 +1705,7 @@ pub(crate) fn write_ipc_and_poll(
             } else {
                 repair_decision.snapshot_content = snap_content;
             }
-            if file_ipc_consumed_without_live_exchange_ack(
+            if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
                 doc_file,
                 "file_ipc",
                 Some(patch_id),
@@ -1714,6 +1716,8 @@ pub(crate) fn write_ipc_and_poll(
                 before_content.as_deref(),
                 &repair_decision.snapshot_content,
                 ack_content_proven,
+                agent_doc_ops_log_io::log_op,
+                log_ipc_proof_failure,
             ) {
                 return Ok(false);
             }

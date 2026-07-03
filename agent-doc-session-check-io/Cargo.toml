@@ -19,6 +19,7 @@ agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "
 agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-git = { path = "../agent-doc-git", version = "0.34.67" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }

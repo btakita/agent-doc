@@ -9,6 +9,7 @@ pub mod ownership;
 
 pub mod cell_doc;
 pub mod crdt;
+pub mod exchange_node_merge;
 pub mod crdt_sync;
 pub mod frontmatter_crdt;
 pub mod semantic_merge;

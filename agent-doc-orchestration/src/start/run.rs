@@ -687,12 +687,11 @@ pub fn run_with_reap_policy(
     // session actor`. Always taking the `next_generation` (`infer + 1`) path
     // keeps the value handed to the controller aligned with the CAS contract.
     let start_generation = {
-        let generations = crate::session_actor::next_generation(&canonical, &session_id).unwrap_or(
-            agent_doc_supervisor::OwnershipGeneration {
+        let generations = agent_doc_session_actor_io::next_generation(&canonical, &session_id)
+            .unwrap_or(agent_doc_supervisor::OwnershipGeneration {
                 prior_generation: 0,
                 new_generation: 1,
-            },
-        );
+            });
         log_event(
             &mut session_log,
             &agent_doc_supervisor::format_transition_event(

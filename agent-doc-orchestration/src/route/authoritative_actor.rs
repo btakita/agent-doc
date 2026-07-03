@@ -578,7 +578,7 @@ pub(crate) fn load_authoritative_actor_for_registered_pane(
     pane: &str,
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    let document_id = crate::session_actor::canonical_document_id_in(&base_dir, file_path);
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(&base_dir, file_path);
     let record = crate::project_controller::load_actor_store(&base_dir)?
         .values()
         .find(|record| {
@@ -707,7 +707,7 @@ mod tests {
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-authoritative-actor-claude";
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,

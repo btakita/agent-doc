@@ -28,12 +28,10 @@ impl agent_doc_focus_io::FocusEffects for CliFocusEffects {
             .ok()
             .unwrap_or_else(|| file.to_path_buf());
         let base_dir = agent_doc_project_root_io::project_root_containing(&canonical)?;
-        let record = agent_doc_orchestration::session_actor::load_record_in(
-            &base_dir,
-            &canonical.to_string_lossy(),
-        )
-        .ok()
-        .flatten()?;
+        let record =
+            agent_doc_session_actor_io::load_record_in(&base_dir, &canonical.to_string_lossy())
+                .ok()
+                .flatten()?;
         if record.session_id != session_id
             || matches!(
                 record.state,

@@ -63,6 +63,7 @@ members = [
     "agent-doc-run-context-io",
     "agent-doc-session-accretion",
     "agent-doc-session-accretion-io",
+    "agent-doc-session-actor-io",
     "agent-doc-session-check-io",
     "agent-doc-session-registry",
     "agent-doc-session-registry-io",
@@ -210,6 +211,7 @@ agent-doc-run-context-io = { path = "agent-doc-run-context-io", version = "0.34.
 agent-doc-secret-redact = { path = "agent-doc-secret-redact", version = "0.34.67" }
 agent-doc-session-accretion = { path = "agent-doc-session-accretion", version = "0.34.67" }
 agent-doc-session-accretion-io = { path = "agent-doc-session-accretion-io", version = "0.34.67" }
+agent-doc-session-actor-io = { path = "agent-doc-session-actor-io", version = "0.34.67" }
 agent-doc-session-check-io = { path = "agent-doc-session-check-io", version = "0.34.67" }
 agent-doc-session-registry = { path = "agent-doc-session-registry", version = "0.34.67" }
 agent-doc-session-registry-io = { path = "agent-doc-session-registry-io", version = "0.34.67" }

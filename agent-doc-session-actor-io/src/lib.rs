@@ -26,10 +26,10 @@
 
 use agent_doc_harness::{document_harness_from_content, normalize_harness_name};
 use agent_doc_supervisor::{OwnershipGeneration, infer_latest_generation_from_content};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-use agent_doc_sqlite::state_store::{ActorLastTransition, ActorRecord, ActorState};
+use agent_doc_sqlite::state_store::{self, ActorLastTransition, ActorRecord, ActorState};
 
 type ActorStore = std::collections::BTreeMap<String, ActorRecord>;
 
@@ -91,8 +91,53 @@ pub fn canonical_document_id_in(base_dir: &Path, file: &str) -> String {
         .unwrap_or_else(|| tmux_router::registry::canonical_registry_key_in(base_dir, file))
 }
 
+fn legacy_actor_projection(project_root: &Path) -> Result<Option<ActorStore>> {
+    let path = agent_doc_controller::paths::actor_projection_path(project_root);
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+        return Ok(None);
+    };
+    let store = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    Ok(Some(store))
+}
+
+fn migrate_legacy_actor_projection(
+    project_root: &Path,
+    conn: &mut state_store::Connection,
+) -> Result<()> {
+    if !state_store::actor_documents_empty(conn)? {
+        return Ok(());
+    }
+    let Some(store) = legacy_actor_projection(project_root)? else {
+        return Ok(());
+    };
+    state_store::migrate_actor_store_tx(conn, &store, None, None)
+}
+
 fn load_store_in(base_dir: &Path) -> Result<ActorStore> {
-    crate::project_controller::load_actor_store(base_dir)
+    let mut conn = state_store::open_state_db(base_dir)?;
+    migrate_legacy_actor_projection(base_dir, &mut conn)?;
+    state_store::load_actor_store_from_db(&conn)
+}
+
+fn load_actor_record_by_document_id(
+    base_dir: &Path,
+    document_id: &str,
+) -> Result<Option<ActorRecord>> {
+    let mut conn = state_store::open_state_db(base_dir)?;
+    migrate_legacy_actor_projection(base_dir, &mut conn)?;
+    state_store::load_actor_record_from_db(&conn, document_id)
+}
+
+fn store_actor_record_in(
+    base_dir: &Path,
+    expected_prior_generation: Option<u64>,
+    record: &ActorRecord,
+) -> Result<ActorRecord> {
+    let mut conn = state_store::open_state_db(base_dir)?;
+    migrate_legacy_actor_projection(base_dir, &mut conn)?;
+    state_store::store_actor_record_tx(&mut conn, expected_prior_generation, record, None, None)?;
+    Ok(record.clone())
 }
 
 /// `#closeout-recovery-state-machine` debug API: load every actor record in the
@@ -145,7 +190,7 @@ fn store_record_in(
     update: ActorRecordUpdate<'_>,
 ) -> Result<ActorRecord> {
     let document_id = canonical_document_id_in(base_dir, file);
-    let current_record = crate::project_controller::load_actor_record(base_dir, &document_id)?;
+    let current_record = load_actor_record_by_document_id(base_dir, &document_id)?;
     let prior_generation = current_record
         .as_ref()
         .map(|record| record.generation)
@@ -186,11 +231,7 @@ fn store_record_in(
             new_generation: update.generation,
         },
     };
-    let stored = crate::project_controller::store_actor_record(
-        base_dir,
-        update.expected_prior_generation,
-        &record,
-    )?;
+    let stored = store_actor_record_in(base_dir, update.expected_prior_generation, &record)?;
     Ok(stored)
 }
 

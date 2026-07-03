@@ -260,7 +260,7 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
         }
     };
 
-    let store = agent_doc_orchestration::session_actor::load_all_records_in(&base_dir)?;
+    let store = agent_doc_session_actor_io::load_all_records_in(&base_dir)?;
     let mut rows: Vec<serde_json::Value> = Vec::with_capacity(store.len());
     for (document_id, record) in &store {
         let doc_path = Path::new(document_id);
@@ -2459,7 +2459,7 @@ fn build_context(file: &Path) -> Result<SessionContext> {
             canonical_file.display()
         )
     })?;
-    let harness = agent_doc_orchestration::session_actor::detect_document_harness_in(
+    let harness = agent_doc_session_actor_io::detect_document_harness_in(
         &base_dir,
         &canonical_file.to_string_lossy(),
     );
@@ -4465,7 +4465,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "---\nagent_doc_session: session-status\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        agent_doc_orchestration::session_actor::record_session_start_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-status",
             "%41",
@@ -4473,7 +4473,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             1,
         )
         .unwrap();
-        agent_doc_orchestration::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-status",
             "%41",
@@ -4662,7 +4662,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let pane_window = iso.pane_window(&pane).unwrap();
         agent_doc_orchestration::sessions::register("session-clear", &pane, &doc.to_string_lossy())
             .unwrap();
-        agent_doc_orchestration::session_actor::record_session_start(
+        agent_doc_session_actor_io::record_session_start(
             &doc,
             "session-clear",
             &pane,

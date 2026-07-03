@@ -1522,7 +1522,7 @@ fn actor_record_for_file(
         return Ok(None);
     };
     let file_arg = canonical.to_string_lossy();
-    crate::session_actor::load_record_in(&project_root, &file_arg)
+    agent_doc_session_actor_io::load_record_in(&project_root, &file_arg)
 }
 
 fn maybe_abort_after_write_applied_for_test() -> Result<()> {

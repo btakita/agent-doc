@@ -345,7 +345,7 @@ mod tests {
         let first_window = iso.pane_window(&first_pane).unwrap();
         let second_window = iso.pane_window(&second_pane).unwrap();
 
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             root,
             &doc.to_string_lossy(),
             "cached-actor",
@@ -368,7 +368,7 @@ mod tests {
             "the first lookup should populate the per-sync proof cache"
         );
 
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             root,
             &doc.to_string_lossy(),
             "cached-actor",
@@ -414,7 +414,7 @@ mod tests {
         let iso = IsolatedTmux::new("sync-safe-passive-local-actor");
         let pane = iso.new_session("test", root).unwrap();
         let window = iso.pane_window(&pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             root,
             &doc.to_string_lossy(),
             "local-projection",

@@ -987,8 +987,10 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
         return Ok(false);
     };
-    let document_id =
-        crate::session_actor::canonical_document_id_in(&project_root, &file.to_string_lossy());
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
     let queue_head_prompt = state
         .active_queue_heads
         .first()
@@ -3091,7 +3093,7 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
 
-        crate::session_actor::record_session_start_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-heartbeat",
             "%41",
@@ -3099,7 +3101,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let record = crate::session_actor::transition_state_direct(
+        let record = agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-heartbeat",
             "%41",
@@ -3163,9 +3165,15 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
 
-        crate::session_actor::record_session_start_direct(&doc, "session-old", "%41", "@1", 1)
-            .unwrap();
-        let ready = crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-old",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        let ready = agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-old",
             "%41",
@@ -3197,7 +3205,7 @@ mod tests {
             },
         )
         .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-old",
             "%41",
@@ -3267,9 +3275,15 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
 
-        crate::session_actor::record_session_start_direct(&doc, "session-old", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-old",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-old",
             "%41",
@@ -3370,9 +3384,15 @@ mod tests {
             "sentinel PID must not exist for the reboot-stale regression"
         );
 
-        crate::session_actor::record_session_start_direct(&doc, "session-reboot", "%41", "@1", 1)
-            .unwrap();
-        let record = crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-reboot",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        let record = agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-reboot",
             "%41",
@@ -3472,7 +3492,7 @@ mod tests {
             "---\nagent_doc_session: session-stale-starting\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        let record = crate::session_actor::record_session_start_direct(
+        let record = agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-stale-starting",
             "%41",
@@ -3515,7 +3535,7 @@ mod tests {
             "---\nagent_doc_session: session-live-starting\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        let record = crate::session_actor::record_session_start_direct(
+        let record = agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-live-starting",
             "%41",
@@ -3564,7 +3584,7 @@ mod tests {
             "---\nagent_doc_session: session-stuck-starting\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        let record = crate::session_actor::record_session_start_direct(
+        let record = agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-stuck-starting",
             "%42",
@@ -3621,7 +3641,7 @@ mod tests {
             "---\nagent_doc_session: session-preflight-stale\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        let record = crate::session_actor::record_session_start_direct(
+        let record = agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-preflight-stale",
             "%51",
@@ -3671,9 +3691,15 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-stale", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-stale",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &doc.to_string_lossy(),
             "session-stale",
@@ -3723,10 +3749,22 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-same", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::record_session_start_direct(&doc, "session-same", "%41", "@1", 2)
-            .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-same",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-same",
+            "%41",
+            "@1",
+            2,
+        )
+        .unwrap();
 
         let lifecycle = ControllerRequest {
             command: "mark_lifecycle".to_string(),
@@ -3774,9 +3812,15 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-route", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-route",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-route",
             "%41",
@@ -4025,9 +4069,15 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-queue", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-queue",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-queue",
             "%41",
@@ -4148,8 +4198,10 @@ mod tests {
         )));
 
         let conn = open_state_db(dir.path()).unwrap();
-        let document_id =
-            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
         let (failed_stage, diagnostic_payload): (String, Option<String>) = conn
             .query_row(
                 "SELECT failed_stage, diagnostic_payload FROM dispatch_attempts WHERE document_id = ?1 ORDER BY id DESC LIMIT 1",
@@ -4263,9 +4315,15 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-reopen", "%42", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-reopen",
+            "%42",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-reopen",
             "%42",
@@ -4359,8 +4417,10 @@ mod tests {
 
         // The pause row stays (one-shot bypass — auto callers remain blocked).
         let conn = open_state_db(dir.path()).unwrap();
-        let document_id =
-            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
         let state: String = conn
             .query_row(
                 "SELECT state FROM queue_controls WHERE scope_kind = 'document' AND scope_id = ?1",
@@ -4395,9 +4455,15 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-preset",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-preset",
             "%41",
@@ -4462,8 +4528,10 @@ mod tests {
         );
 
         let conn = open_state_db(dir.path()).unwrap();
-        let document_id =
-            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
         let effective = state_store::load_effective_queue_control_from_db(
             &conn,
             &document_id,
@@ -4501,9 +4569,15 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-preset",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-preset",
             "%41",
@@ -4577,8 +4651,10 @@ mod tests {
             "drained preset queue must deactivate:\n{updated}"
         );
         let conn = open_state_db(dir.path()).unwrap();
-        let document_id =
-            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
         let effective = state_store::load_effective_queue_control_from_db(
             &conn,
             &document_id,
@@ -4616,9 +4692,15 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-preset", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-preset",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-preset",
             "%41",
@@ -4688,8 +4770,10 @@ mod tests {
             "registered preset-token head should be consumed:\n{updated}"
         );
         let conn = open_state_db(dir.path()).unwrap();
-        let document_id =
-            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
         let effective = state_store::load_effective_queue_control_from_db(
             &conn,
             &document_id,
@@ -4724,9 +4808,15 @@ mod tests {
             .unwrap();
             let bootstrap = test_bootstrap(&dir);
             let mut should_stop = false;
-            crate::session_actor::record_session_start_direct(&doc, "session-jbr", "%52", "@1", 1)
-                .unwrap();
-            crate::session_actor::transition_state_direct(
+            agent_doc_session_actor_io::record_session_start_direct(
+                &doc,
+                "session-jbr",
+                "%52",
+                "@1",
+                1,
+            )
+            .unwrap();
+            agent_doc_session_actor_io::transition_state_direct(
                 &doc,
                 "session-jbr",
                 "%52",
@@ -4858,7 +4948,7 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-admin-control",
             "%41",
@@ -4866,7 +4956,7 @@ mod tests {
             1,
         )
         .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-admin-control",
             "%41",
@@ -4921,8 +5011,10 @@ mod tests {
         assert!(envelope.ok);
         assert_eq!(envelope.data.unwrap().status, "accepted");
 
-        let document_id =
-            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
         let record = load_actor_record(dir.path(), &document_id)
             .unwrap()
             .unwrap();
@@ -5005,8 +5097,10 @@ agent:queue\n\
         assert!(persist_session_actor_closeout(&doc).unwrap());
 
         let conn = Connection::open(state_db_path(dir.path())).unwrap();
-        let document_id =
-            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
         let cycle: (String, Option<String>, Option<String>) = conn
             .query_row(
                 "SELECT state, queue_head_id, response_commit FROM document_cycles WHERE document_id = ?1 AND cycle_id = ?2",
@@ -5175,7 +5269,7 @@ agent:queue\n\
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-closed-clear",
             "%41",
@@ -5183,7 +5277,7 @@ agent:queue\n\
             1,
         )
         .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-closed-clear",
             "%41",
@@ -5261,8 +5355,14 @@ agent:queue\n\
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-attach", "%41", "@1", 1)
-            .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-attach",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
         let conn = Connection::open(state_db_path(dir.path())).unwrap();
         let diagnostics_before_attach: i64 = conn
             .query_row(
@@ -5759,9 +5859,9 @@ agent:queue\n\
             "---\nagent_doc_session: session-m2\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        crate::session_actor::record_session_start_direct(&doc, "session-m2", "%41", "@1", 1)
+        agent_doc_session_actor_io::record_session_start_direct(&doc, "session-m2", "%41", "@1", 1)
             .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-m2",
             "%41",
@@ -5847,9 +5947,15 @@ agent:queue\n\
             "---\nagent_doc_session: session-idle\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        crate::session_actor::record_session_start_direct(&doc, "session-idle", "%61", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-idle",
+            "%61",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-idle",
             "%61",
@@ -5919,9 +6025,9 @@ agent:queue\n\
             "---\nagent_doc_session: session-sb\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        crate::session_actor::record_session_start_direct(&doc, "session-sb", "%51", "@1", 1)
+        agent_doc_session_actor_io::record_session_start_direct(&doc, "session-sb", "%51", "@1", 1)
             .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-sb",
             "%51",

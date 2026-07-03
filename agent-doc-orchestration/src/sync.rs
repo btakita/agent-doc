@@ -4591,7 +4591,7 @@ mod tests {
             &root.to_string_lossy(),
         )
         .unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             root,
             &doc.to_string_lossy(),
             "actor-owner",
@@ -6165,7 +6165,7 @@ mod tests {
         let active_pane = iso.split_window(&stale_pane, root, "-dh").unwrap();
         let active_window = iso.pane_window(&active_pane).unwrap();
 
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             root,
             &active_doc.to_string_lossy(),
             "active-session",
@@ -6179,7 +6179,7 @@ mod tests {
             root,
             Some(0),
             &agent_doc_sqlite::state_store::ActorRecord {
-                document_id: crate::session_actor::canonical_document_id_in(
+                document_id: agent_doc_session_actor_io::canonical_document_id_in(
                     root,
                     &stale_doc.to_string_lossy(),
                 ),

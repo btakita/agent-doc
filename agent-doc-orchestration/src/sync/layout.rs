@@ -629,7 +629,7 @@ mod tests {
             &root.to_string_lossy(),
         )
         .unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             root,
             &doc.to_string_lossy(),
             "actor-owned",

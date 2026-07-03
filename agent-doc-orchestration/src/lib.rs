@@ -50,7 +50,6 @@ pub mod repair;
 pub mod resync;
 pub mod route;
 pub mod run;
-pub mod session_actor;
 pub mod session_check;
 pub mod sessions;
 pub mod start;
@@ -120,7 +119,7 @@ impl agent_doc_queue_io::write_queue::DocumentWriteQueueSubmitter
         R: Send + 'static,
         F: FnOnce() -> R + Send + 'static,
     {
-        let actor = crate::session_actor::document_actor_in(base_dir, file);
+        let actor = agent_doc_session_actor_io::document_actor_in(base_dir, file);
         actor.submit(kind, move |_ctx| job())
     }
 }

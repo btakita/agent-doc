@@ -3336,7 +3336,7 @@ mod tests {
         sessions::register(session_id, &actor_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -3425,7 +3425,7 @@ mod tests {
         sessions::register(session_id, &actor_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -3576,7 +3576,10 @@ mod tests {
             dir.path(),
             None,
             &agent_doc_sqlite::state_store::ActorRecord {
-                document_id: crate::session_actor::canonical_document_id_in(dir.path(), &file_path),
+                document_id: agent_doc_session_actor_io::canonical_document_id_in(
+                    dir.path(),
+                    &file_path,
+                ),
                 session_id: session_id.to_string(),
                 generation: 1,
                 pane_id: actor_pane.clone(),

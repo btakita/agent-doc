@@ -319,8 +319,10 @@ pub fn authoritative_actor_binding(
 ) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
     #[cfg(any(test, feature = "test-support"))]
     {
-        let document_id =
-            crate::session_actor::canonical_document_id_in(project_root, &file.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            project_root,
+            &file.to_string_lossy(),
+        );
         return load_actor_record(project_root, &document_id);
     }
 
@@ -497,8 +499,10 @@ pub fn authorize_dispatch(
 pub fn session_operator_status(project_root: &Path, file: &Path) -> Result<SessionOperatorStatus> {
     #[cfg(any(test, feature = "test-support"))]
     {
-        let document_id =
-            crate::session_actor::canonical_document_id_in(project_root, &file.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            project_root,
+            &file.to_string_lossy(),
+        );
         let mut conn = open_state_db(project_root)?;
         migrate_legacy_actor_projection(project_root, &mut conn)?;
         return load_session_operator_status_from_db(&conn, &document_id);
@@ -2660,12 +2664,14 @@ pub(crate) fn handle_start_session(
     let pane_id = request_string(&request.pane_id, "pane_id")?;
     let window_id = request_string(&request.window_id, "window_id")?;
     let generation = request_u64(request.generation, "generation")?;
-    let document_id = crate::session_actor::canonical_document_id_in(
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let harness =
-        crate::session_actor::detect_document_harness_in(&bootstrap.project_root, &document_id);
+    let harness = agent_doc_session_actor_io::detect_document_harness_in(
+        &bootstrap.project_root,
+        &document_id,
+    );
     let record = agent_doc_sqlite::state_store::ActorRecord {
         document_id: document_id.clone(),
         session_id: session_id.clone(),
@@ -2755,7 +2761,7 @@ fn replace_closed_actor_from_same_supervisor_report(
         generation,
         pane_id,
         window_id: current.window_id.clone(),
-        harness: crate::session_actor::detect_document_harness_in(
+        harness: agent_doc_session_actor_io::detect_document_harness_in(
             &bootstrap.project_root,
             &current.document_id,
         ),
@@ -2805,7 +2811,7 @@ pub(crate) fn handle_register_supervisor(
         .state
         .as_deref()
         .unwrap_or(agent_doc_sqlite::state_store::ActorState::Starting.as_str());
-    let document_id = crate::session_actor::canonical_document_id_in(
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
@@ -2875,7 +2881,7 @@ pub(crate) fn handle_mark_lifecycle(
         .with_context(|| format!("unknown lifecycle state: {state_raw}"))?;
     let caller = request_string(&request.caller, "caller")?;
     let reason = request_string(&request.reason, "reason")?;
-    let document_id = crate::session_actor::canonical_document_id_in(
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
@@ -2977,7 +2983,7 @@ pub(crate) fn handle_supervisor_heartbeat(
         .state
         .as_deref()
         .unwrap_or(agent_doc_sqlite::state_store::ActorState::Starting.as_str());
-    let document_id = crate::session_actor::canonical_document_id_in(
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
@@ -3044,7 +3050,7 @@ pub(crate) fn handle_actor_binding(
     request: ControllerRequest,
 ) -> Result<ActorBindingResponse> {
     let file = request_file(&request)?;
-    let document_id = crate::session_actor::canonical_document_id_in(
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
@@ -3076,7 +3082,7 @@ pub(crate) fn handle_dispatch(
         .as_deref()
         .unwrap_or_default()
         .to_string();
-    let document_id = crate::session_actor::canonical_document_id_in(
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
@@ -3542,7 +3548,7 @@ pub(crate) fn handle_session_status(
     request: ControllerRequest,
 ) -> Result<SessionOperatorStatus> {
     let file = request_file(&request)?;
-    let document_id = crate::session_actor::canonical_document_id_in(
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
@@ -3562,7 +3568,7 @@ pub(crate) fn admin_target_record(
     let mut conn = open_state_db(&bootstrap.project_root)?;
     migrate_legacy_actor_projection(&bootstrap.project_root, &mut conn)?;
     if let Some(file) = request.file.as_ref() {
-        let document_id = crate::session_actor::canonical_document_id_in(
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
             &bootstrap.project_root,
             &file.to_string_lossy(),
         );
@@ -3952,7 +3958,7 @@ pub(crate) fn handle_attach_pane(
     let session_id = request_string(&request.session_id, "session_id")?;
     let pane_id = request_string(&request.pane_id, "pane_id")?;
     let window_id = request_string(&request.window_id, "window_id")?;
-    let document_id = crate::session_actor::canonical_document_id_in(
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
@@ -3968,7 +3974,10 @@ pub(crate) fn handle_attach_pane(
         .map(|record| record.harness.clone())
         .filter(|harness| !harness.trim().is_empty())
         .unwrap_or_else(|| {
-            crate::session_actor::detect_document_harness_in(&bootstrap.project_root, &document_id)
+            agent_doc_session_actor_io::detect_document_harness_in(
+                &bootstrap.project_root,
+                &document_id,
+            )
         });
     let record = agent_doc_sqlite::state_store::ActorRecord {
         document_id: document_id.clone(),
@@ -4017,7 +4026,7 @@ pub(crate) fn handle_operator_command(
         .as_deref()
         .unwrap_or_default()
         .to_string();
-    let document_id = crate::session_actor::canonical_document_id_in(
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
@@ -4578,7 +4587,7 @@ pub(crate) fn handle_admin_operation(
     let operation_kind = request_string(&request.command_kind, "command_kind")?;
     let status = request.state.as_deref().unwrap_or("accepted");
     let document_id = request.file.as_ref().map(|file| {
-        crate::session_actor::canonical_document_id_in(
+        agent_doc_session_actor_io::canonical_document_id_in(
             &bootstrap.project_root,
             &file.to_string_lossy(),
         )
@@ -4982,9 +4991,15 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-operator", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-operator",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-operator",
             "%41",
@@ -5082,9 +5097,15 @@ mod tests {
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
-        crate::session_actor::record_session_start_direct(&doc, "session-restart", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-restart",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-restart",
             "%41",
@@ -5704,10 +5725,10 @@ mod tests {
             "---\nagent_doc_session: session-qf\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        crate::session_actor::record_session_start_direct(&doc, "session-qf", "%41", "@1", 1)
+        agent_doc_session_actor_io::record_session_start_direct(&doc, "session-qf", "%41", "@1", 1)
             .unwrap();
         // Actor actively running a turn (mid-turn / pane busy).
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-qf",
             "%41",
@@ -5717,8 +5738,10 @@ mod tests {
             "turn_started",
         )
         .unwrap();
-        let document_id =
-            crate::session_actor::canonical_document_id_in(dir.path(), &doc.to_string_lossy());
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
         let bootstrap = test_bootstrap(&dir);
         let dispatch = || ControllerRequest {
             command: "dispatch".to_string(),
@@ -5840,8 +5863,14 @@ mod tests {
             "---\nagent_doc_session: session-anw0\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        crate::session_actor::record_session_start_direct(&doc, "session-anw0", "%41", "@1", 1)
-            .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-anw0",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let stale_dispatch = || ControllerRequest {
             command: "dispatch".to_string(),
@@ -5862,7 +5891,7 @@ mod tests {
 
         // Current generation (1) is Ready ⇒ a retry would be authorized ⇒ structured
         // redirect with the marker + retry target pointing at the current generation.
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-anw0",
             "%41",
@@ -5883,7 +5912,7 @@ mod tests {
 
         // Current generation (1) is Closed ⇒ a retry cannot help ⇒ terminal reject with
         // NO redirect marker, so racing dispatch does not loop against a dead actor.
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-anw0",
             "%41",
@@ -5913,9 +5942,15 @@ mod tests {
             "---\nagent_doc_session: session-anw0h\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        crate::session_actor::record_session_start_direct(&doc, "session-anw0h", "%41", "@1", 1)
-            .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-anw0h",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
             &doc,
             "session-anw0h",
             "%41",
@@ -6416,7 +6451,7 @@ mod tests {
         )
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
-        let doc_id = crate::session_actor::canonical_document_id_in(
+        let doc_id = agent_doc_session_actor_io::canonical_document_id_in(
             &bootstrap.project_root,
             &doc.to_string_lossy(),
         );
@@ -6429,7 +6464,7 @@ mod tests {
             generation: 83,
             pane_id: "%33".to_string(),
             window_id: "@9".to_string(),
-            harness: crate::session_actor::detect_document_harness_in(
+            harness: agent_doc_session_actor_io::detect_document_harness_in(
                 &bootstrap.project_root,
                 &doc_id,
             ),
@@ -6446,7 +6481,7 @@ mod tests {
 
         // The start path now unconditionally takes the `next_generation` branch:
         // it infers 83 from the up-to-date controller actor and returns 84.
-        let generations = crate::session_actor::next_generation(&doc, "efs").unwrap();
+        let generations = agent_doc_session_actor_io::next_generation(&doc, "efs").unwrap();
         assert_eq!(generations.prior_generation, 83);
         assert_eq!(generations.new_generation, 84);
 

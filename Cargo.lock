@@ -92,6 +92,7 @@ dependencies = [
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
+ "agent-doc-session-actor-io",
  "agent-doc-session-check-io",
  "agent-doc-session-registry",
  "agent-doc-session-registry-io",
@@ -943,6 +944,7 @@ dependencies = [
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
+ "agent-doc-session-actor-io",
  "agent-doc-session-check-io",
  "agent-doc-session-registry",
  "agent-doc-session-registry-io",
@@ -1292,6 +1294,25 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-session-actor-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-controller",
+ "agent-doc-document-realtime",
+ "agent-doc-frontmatter-io",
+ "agent-doc-fs",
+ "agent-doc-harness",
+ "agent-doc-model-tier",
+ "agent-doc-project-root-io",
+ "agent-doc-sqlite",
+ "agent-doc-supervisor",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+ "tmux-router",
 ]
 
 [[package]]

@@ -3177,7 +3177,7 @@ operator note
             "---\nagent_doc_session: session-admin-ffi\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        agent_doc_orchestration::session_actor::record_session_start_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-admin-ffi",
             "%41",
@@ -3232,7 +3232,7 @@ operator note
             "---\nagent_doc_session: session-inspect-ffi\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        agent_doc_orchestration::session_actor::record_session_start_direct(
+        agent_doc_session_actor_io::record_session_start_direct(
             &doc,
             "session-inspect-ffi",
             "%42",

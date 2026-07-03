@@ -1913,7 +1913,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 &supervisor_instance_id,
             )
             .unwrap();
-            crate::session_actor::project_binding_in(
+            agent_doc_session_actor_io::project_binding_in(
                 &registry_root,
                 &file_for_thread,
                 session_id,
@@ -2193,7 +2193,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 &supervisor_instance_id,
             )
             .unwrap();
-            crate::session_actor::project_binding_in(
+            agent_doc_session_actor_io::project_binding_in(
                 &registry_root,
                 &file_for_thread,
                 session_id,
@@ -2715,7 +2715,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -2860,7 +2860,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -2989,7 +2989,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -3143,7 +3143,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -3256,7 +3256,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             sessions::register(&session_id, &stale_pane, &file_path).unwrap();
 
             let actor_window = iso.pane_window(&actor_pane).unwrap();
-            crate::session_actor::project_binding_in(
+            agent_doc_session_actor_io::project_binding_in(
                 dir.path(),
                 &file_path,
                 &session_id,
@@ -3374,7 +3374,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -3516,7 +3516,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -3655,7 +3655,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -3775,7 +3775,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,
@@ -3896,7 +3896,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         sessions::register(session_id, &stale_pane, &file_path).unwrap();
 
         let actor_window = iso.pane_window(&actor_pane).unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             dir.path(),
             &file_path,
             session_id,

@@ -441,7 +441,7 @@ fn editor_route_attempt_id() -> Option<String> {
 fn route_current_actor_generation(file: &Path) -> Option<u64> {
     let canonical = file.canonicalize().ok()?;
     let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
-    crate::session_actor::load_record_in(&root, canonical.to_string_lossy().as_ref())
+    agent_doc_session_actor_io::load_record_in(&root, canonical.to_string_lossy().as_ref())
         .ok()
         .flatten()
         .map(|record| record.generation)

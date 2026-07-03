@@ -580,7 +580,7 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
         let observation =
             agent_doc_watch_io::observe_document_event(doc_id, file, raw, current_content);
         if let Some(event) = observation.state_event {
-            let actor = agent_doc_orchestration::session_actor::document_actor_in(base_dir, file);
+            let actor = agent_doc_session_actor_io::document_actor_in(base_dir, file);
             let base_dir = base_dir.to_path_buf();
             actor.submit(
                 agent_doc_document_realtime::session_ops::SessionOpKind::FileWatch,

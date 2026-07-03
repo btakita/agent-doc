@@ -5001,7 +5001,7 @@ mod tests {
                 ("secondary-session", "%73", &secondary, "@2", "2026-01-01"),
             ],
         );
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             root,
             &primary.to_string_lossy(),
             "primary-session",
@@ -5011,7 +5011,7 @@ mod tests {
             "primary_owner",
         )
         .unwrap();
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             root,
             &secondary.to_string_lossy(),
             "secondary-session",
@@ -5089,7 +5089,7 @@ mod tests {
                 ("secondary-session", "%70", &secondary, "@1", "2026-01-01"),
             ],
         );
-        crate::session_actor::project_binding_in(
+        agent_doc_session_actor_io::project_binding_in(
             root,
             &primary.to_string_lossy(),
             "primary-session",

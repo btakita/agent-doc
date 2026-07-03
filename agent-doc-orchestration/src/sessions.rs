@@ -436,7 +436,7 @@ fn register_full_internal(
     let mut controller_row_exists = false;
     if let Some(previous) = registry.get(&registry_key).cloned() {
         if transition_caller != "start" {
-            let generations = crate::session_actor::project_binding_in(
+            let generations = agent_doc_session_actor_io::project_binding_in(
                 base_dir,
                 file,
                 session_id,
@@ -458,7 +458,7 @@ fn register_full_internal(
             controller_row_exists = true;
         }
     } else if transition_caller != "start" {
-        let _ = crate::session_actor::project_binding_in(
+        let _ = agent_doc_session_actor_io::project_binding_in(
             base_dir,
             file,
             session_id,

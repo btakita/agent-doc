@@ -180,7 +180,7 @@ fn test_cli_admin_json_receipts_and_inspection_cover_controller_paths() {
         "---\nagent_doc_session: session-cli-admin\nagent: codex\n---\nBody\n",
     )
     .unwrap();
-    agent_doc_orchestration::session_actor::record_session_start_direct(
+    agent_doc_session_actor_io::record_session_start_direct(
         &doc,
         "session-cli-admin",
         "%51",
@@ -188,7 +188,7 @@ fn test_cli_admin_json_receipts_and_inspection_cover_controller_paths() {
         1,
     )
     .unwrap();
-    agent_doc_orchestration::session_actor::transition_state_direct(
+    agent_doc_session_actor_io::transition_state_direct(
         &doc,
         "session-cli-admin",
         "%51",
@@ -373,7 +373,7 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
         "---\nagent_doc_session: session-cli-bulk-reap\nagent: codex\n---\nBody\n",
     )
     .unwrap();
-    let record = agent_doc_orchestration::session_actor::record_session_start_direct(
+    let record = agent_doc_session_actor_io::record_session_start_direct(
         &doc,
         "session-cli-bulk-reap",
         "%999999",
@@ -381,7 +381,7 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
         1,
     )
     .unwrap();
-    agent_doc_orchestration::session_actor::transition_state_direct(
+    agent_doc_session_actor_io::transition_state_direct(
         &doc,
         "session-cli-bulk-reap",
         "%999999",
@@ -12477,17 +12477,28 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
 fn test_session_actor_has_no_sqlite_state_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let session_actor_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-actor-io/src/lib.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/session_actor.rs")
+            .exists(),
+        "orchestration must not keep a session_actor facade module"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod session_actor;"),
+        "orchestration must not expose a session_actor facade module"
+    );
     assert!(
         !session_actor_source.contains("pub use agent_doc_sqlite::state_store"),
-        "session_actor.rs must not re-export SQLite actor storage types"
+        "agent-doc-session-actor-io must not re-export SQLite actor storage types"
     );
     assert!(
         session_actor_source.contains(
-            "use agent_doc_sqlite::state_store::{ActorLastTransition, ActorRecord, ActorState};"
+            "use agent_doc_sqlite::state_store::{self, ActorLastTransition, ActorRecord, ActorState};"
         ),
-        "session_actor.rs should import SQLite actor storage types privately"
+        "agent-doc-session-actor-io should import SQLite actor storage types privately"
     );
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -15572,8 +15583,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     let session_actor_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-actor-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub struct OwnershipGeneration",
         "pub struct OwnershipTransitionEvent",
@@ -15582,13 +15592,13 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     ] {
         assert!(
             !session_actor_source.contains(forbidden_snippet),
-            "session_actor must not re-own supervisor lifecycle vocabulary: {forbidden_snippet}"
+            "agent-doc-session-actor-io must not re-own supervisor lifecycle vocabulary: {forbidden_snippet}"
         );
     }
     assert!(
         session_actor_source.contains("use agent_doc_supervisor::{")
             && session_actor_source.contains("infer_latest_generation_from_content(&content)"),
-        "session_actor should call focused supervisor lifecycle vocabulary directly"
+        "agent-doc-session-actor-io should call focused supervisor lifecycle vocabulary directly"
     );
     for required_snippet in [
         "pub enum ExistingSessionPaneAction",
@@ -18358,7 +18368,7 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
     let direct_call_sources = [
         "src/rename.rs",
         "agent-doc-orchestration/src/sync.rs",
-        "agent-doc-orchestration/src/session_actor.rs",
+        "agent-doc-session-actor-io/src/lib.rs",
         "agent-doc-orchestration/src/project_controller.rs",
         "agent-doc-orchestration/src/sync/pane_repair.rs",
         "agent-doc-orchestration/src/sync/registry.rs",
@@ -19839,12 +19849,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "flow closeout should call focused project-root IO instead of owning terminal proof/editor IPC root discovery"
     );
     let session_actor_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-actor-io/src/lib.rs")).unwrap();
     assert!(
         !session_actor_source.contains("agent_doc_fs::find_project_root(")
             && session_actor_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "session_actor should call focused project-root IO instead of owning actor log/store root discovery"
+        "agent-doc-session-actor-io should call focused project-root IO instead of owning actor log/store root discovery"
     );
     let snapshot_source =
         fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
@@ -22988,8 +22997,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "orchestration realtime delivery should import editor identity helpers from the focused realtime crate directly"
     );
     let orchestration_session_actor =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-actor-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub enum SessionOpKind",
         "enum SessionOpKind",
@@ -22997,11 +23005,11 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     ] {
         assert!(
             !orchestration_session_actor.contains(forbidden_snippet),
-            "orchestration must not re-own or facade session operation vocabulary: {forbidden_snippet}"
+            "agent-doc-session-actor-io must not re-own or facade session operation vocabulary: {forbidden_snippet}"
         );
     }
     for relative in [
-        "agent-doc-orchestration/src/session_actor.rs",
+        "agent-doc-session-actor-io/src/lib.rs",
         "agent-doc-orchestration/src/lib.rs",
         "agent-doc-queue-io/src/write_queue.rs",
         "src/main.rs",

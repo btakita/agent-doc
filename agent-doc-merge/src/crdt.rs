@@ -57,63 +57,75 @@
 //! - `compact_preserves_text`: compact state → decoded text unchanged.
 
 use anyhow::{Context, Result};
-use yrs::updates::decoder::Decode;
-use yrs::{Doc, GetString, ReadTxn, Text, TextRef, Transact, Update};
+use lazily::TextCrdt;
+use std::cell::RefCell;
 
-const TEXT_KEY: &str = "content";
+/// Peer id owning the base text of a [`CrdtDoc`]. Merge forks derive `ours`/`theirs`
+/// peers from this (see [`merge_inner`]); a single-doc `CrdtDoc` only ever needs one.
+const BASE_PEER: u64 = 0;
 
-/// CRDT document wrapping a Yjs `Doc` for conflict-free merging.
+/// Convert a byte offset into a char index against `text`. Diff/editor offsets are
+/// byte offsets (line-diff boundaries, so always char-aligned); lazily's
+/// [`TextCrdt`] is char-indexed. Saturates to the char count if out of range.
+fn byte_to_char(text: &str, byte_off: usize) -> usize {
+    if byte_off >= text.len() {
+        text.chars().count()
+    } else {
+        text[..byte_off].chars().count()
+    }
+}
+
+/// CRDT document backed by a lazily [`TextCrdt`] (character-granular sequence CRDT)
+/// for conflict-free merging. Replaces the former Yjs `Doc` backend; the document
+/// text is authoritative, so state is persisted/rebuilt as UTF-8 text bytes rather
+/// than an op-log (`tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md`).
 pub struct CrdtDoc {
-    doc: Doc,
+    text: RefCell<TextCrdt>,
 }
 
 impl CrdtDoc {
     /// Create a new CRDT document initialized with the given text content.
     pub fn from_text(content: &str) -> Self {
-        let doc = Doc::new();
-        let text = doc.get_or_insert_text(TEXT_KEY);
-        let mut txn = doc.transact_mut();
-        text.insert(&mut txn, 0, content);
-        drop(txn);
-        CrdtDoc { doc }
+        CrdtDoc {
+            text: RefCell::new(TextCrdt::from_str(BASE_PEER, content)),
+        }
     }
 
     /// Extract the current text content from the CRDT document.
     pub fn to_text(&self) -> String {
-        let text = self.doc.get_or_insert_text(TEXT_KEY);
-        let txn = self.doc.transact();
-        text.get_string(&txn)
+        self.text.borrow().text()
     }
 
-    /// Apply a local edit: delete `delete_len` chars at `offset`, then insert `insert` there.
-    #[allow(dead_code)] // Used in tests and Phase 4 stream write-back
+    /// Apply a local edit: delete `delete_len` bytes at byte `offset`, then insert
+    /// `insert` there.
+    #[allow(dead_code)] // Used in tests and stream write-back
     pub fn apply_edit(&self, offset: u32, delete_len: u32, insert: &str) {
-        let text = self.doc.get_or_insert_text(TEXT_KEY);
-        let mut txn = self.doc.transact_mut();
+        let mut t = self.text.borrow_mut();
+        let cur = t.text();
+        let start_char = byte_to_char(&cur, offset as usize);
         if delete_len > 0 {
-            text.remove_range(&mut txn, offset, delete_len);
+            let end_char = byte_to_char(&cur, offset as usize + delete_len as usize);
+            for _ in start_char..end_char {
+                t.delete(start_char);
+            }
         }
         if !insert.is_empty() {
-            text.insert(&mut txn, offset, insert);
+            t.insert_str(start_char, insert);
         }
     }
 
-    /// Encode the full document state (for persistence).
+    /// Encode the document state for persistence. Rebuild-from-text: the state is
+    /// the visible UTF-8 text (the document is the source of truth), not a CRDT
+    /// op-log.
     pub fn encode_state(&self) -> Vec<u8> {
-        let txn = self.doc.transact();
-        txn.encode_state_as_update_v1(&yrs::StateVector::default())
+        self.text.borrow().text().into_bytes()
     }
 
-    /// Decode a previously encoded state into a new CrdtDoc.
+    /// Decode a previously encoded state (UTF-8 text bytes) into a new CrdtDoc.
     pub fn decode_state(bytes: &[u8]) -> Result<Self> {
-        let doc = Doc::new();
-        let update = Update::decode_v1(bytes)
-            .map_err(|e| anyhow::anyhow!("failed to decode CRDT state: {}", e))?;
-        let mut txn = doc.transact_mut();
-        txn.apply_update(update)
-            .map_err(|e| anyhow::anyhow!("failed to apply CRDT update: {}", e))?;
-        drop(txn);
-        Ok(CrdtDoc { doc })
+        let text = std::str::from_utf8(bytes)
+            .map_err(|e| anyhow::anyhow!("failed to decode CRDT state (not UTF-8): {e}"))?;
+        Ok(CrdtDoc::from_text(text))
     }
 }
 
@@ -344,80 +356,28 @@ fn merge_inner(
     let ours_ops = compute_edit_ops(&base_text, ours_text);
     let theirs_ops = compute_edit_ops(&base_text, theirs_text);
 
-    // Create two independent docs from the base state.
-    // If base was overridden (stale detection), rebuild from the new base_text.
-    let base_encoded = if base_text == base_doc.to_text() {
-        base_doc.encode_state()
-    } else {
-        CrdtDoc::from_text(&base_text).encode_state()
-    };
+    // Build the base CRDT from the (possibly stale-detection-rebuilt) base text,
+    // then two divergent forks. lazily orders same-origin concurrent inserts by
+    // OpId `(counter, peer)` DESCENDING, so at an equal counter the HIGHER peer
+    // sorts first. Give `ours` (agent) the higher peer (2) so agent content lands
+    // before human content at a shared append boundary — the lazily analogue of
+    // the former Yjs lower-client-id-first ordering.
+    let base_crdt = TextCrdt::from_str(BASE_PEER, &base_text);
 
-    // Agent gets lower client ID (1) so Yrs natively places agent content
-    // BEFORE human content when both insert at the same position.
-    // Yrs orders concurrent inserts by client ID: lower client ID goes first.
-    let ours_doc = Doc::with_client_id(1);
-    {
-        let update =
-            Update::decode_v1(&base_encoded).map_err(|e| anyhow::anyhow!("decode error: {}", e))?;
-        let mut txn = ours_doc.transact_mut();
-        txn.apply_update(update)
-            .map_err(|e| anyhow::anyhow!("apply error: {}", e))?;
-    }
-
-    let theirs_doc = Doc::with_client_id(2);
-    {
-        let update =
-            Update::decode_v1(&base_encoded).map_err(|e| anyhow::anyhow!("decode error: {}", e))?;
-        let mut txn = theirs_doc.transact_mut();
-        txn.apply_update(update)
-            .map_err(|e| anyhow::anyhow!("apply error: {}", e))?;
-    }
-
-    // Apply ours edits
-    {
-        let text = ours_doc.get_or_insert_text(TEXT_KEY);
-        let mut txn = ours_doc.transact_mut();
-        apply_ops(&text, &mut txn, &ours_ops);
-    }
+    let mut ours_crdt = base_crdt.fork(2);
+    apply_ops_lazily(&mut ours_crdt, &ours_ops);
 
     // Apply theirs edits — from the editor's real ops when the gate passed,
     // otherwise from the diff-guess (#qnodemerge4).
-    {
-        let text = theirs_doc.get_or_insert_text(TEXT_KEY);
-        let mut txn = theirs_doc.transact_mut();
-        match theirs_replay_ops {
-            Some(ops) => apply_editor_ops(&text, &mut txn, ops),
-            None => apply_ops(&text, &mut txn, &theirs_ops),
-        }
+    let mut theirs_crdt = base_crdt.fork(1);
+    match theirs_replay_ops {
+        Some(ops) => apply_editor_ops_lazily(&mut theirs_crdt, ops),
+        None => apply_ops_lazily(&mut theirs_crdt, &theirs_ops),
     }
 
-    // Merge: apply theirs' changes into ours
-    let ours_sv = {
-        let txn = ours_doc.transact();
-        txn.state_vector()
-    };
-    let theirs_update = {
-        let txn = theirs_doc.transact();
-        txn.encode_state_as_update_v1(&ours_sv)
-    };
-    {
-        let update = Update::decode_v1(&theirs_update)
-            .map_err(|e| anyhow::anyhow!("decode error: {}", e))?;
-        let mut txn = ours_doc.transact_mut();
-        txn.apply_update(update)
-            .map_err(|e| anyhow::anyhow!("apply error: {}", e))?;
-    }
-
-    // Read merged result. With agent/ours=client_id(1) and theirs=client_id(2)
-    // (see the client-id assignment above), Yrs natively orders concurrent
-    // inserts at the same position by ascending client id, so agent content
-    // lands before foreign content at the append boundary. No post-merge
-    // reorder needed.
-    let merged = {
-        let text = ours_doc.get_or_insert_text(TEXT_KEY);
-        let txn = ours_doc.transact();
-        text.get_string(&txn)
-    };
+    // Merge theirs into ours (conflict-free), then read the merged text.
+    ours_crdt.merge(&theirs_crdt);
+    let merged = ours_crdt.text();
 
     // Committed-response protection (#ipc-crdt-response-drift): a stale or
     // divergent `theirs` (e.g. a concurrent foreign supervisor, or a stale
@@ -1325,21 +1285,12 @@ fn order_union(ours_keys: &[&str], theirs_keys: &[&str]) -> Vec<String> {
     result
 }
 
-/// Encode `text` as a Yrs state with a **fixed** client id, so identical text
-/// always produces byte-identical state. [`CrdtDoc::from_text`] uses
-/// `Doc::new()`, which assigns a random client id, making every re-encode of the
-/// same text differ — unsuitable for stable per-node persistence and no-change
-/// detection. The base client id is irrelevant to [`merge`] (which reads only the
-/// base text), so a fixed id is safe here.
+/// Encode `text` as a persisted node state. With the lazily rebuild-from-text
+/// backend the state is simply the UTF-8 text bytes, which is inherently
+/// deterministic (identical text → identical bytes) — suitable for stable per-node
+/// persistence and no-change detection.
 fn encode_text_deterministic(text: &str) -> Vec<u8> {
-    let doc = Doc::with_client_id(0);
-    let yrs_text = doc.get_or_insert_text(TEXT_KEY);
-    {
-        let mut txn = doc.transact_mut();
-        yrs_text.insert(&mut txn, 0, text);
-    }
-    let txn = doc.transact();
-    txn.encode_state_as_update_v1(&yrs::StateVector::default())
+    text.as_bytes().to_vec()
 }
 
 /// Magic prefix identifying a [`MultiNodeState`] container on disk, so a per-node
@@ -1882,32 +1833,48 @@ pub fn replay_editor_ops(base: &str, ops: &[EditorOp]) -> Option<String> {
 /// Myers-diff reconstruction (`#qnodemerge4`). Offsets are byte offsets,
 /// consistent with [`apply_ops`]. Callers must validate the ops with
 /// [`replay_editor_ops`] first; this assumes in-bounds, char-aligned offsets.
-fn apply_editor_ops(text: &TextRef, txn: &mut yrs::TransactionMut<'_>, ops: &[EditorOp]) {
+fn apply_editor_ops_lazily(t: &mut TextCrdt, ops: &[EditorOp]) {
     for op in ops {
         match op {
             EditorOp::Insert { offset, text: s } => {
-                text.insert(txn, *offset as u32, s);
+                let cur = t.text();
+                let char_idx = byte_to_char(&cur, *offset);
+                t.insert_str(char_idx, s);
             }
             EditorOp::Delete { offset, len } => {
-                text.remove_range(txn, *offset as u32, *len as u32);
+                let cur = t.text();
+                let start_char = byte_to_char(&cur, *offset);
+                let end_char = byte_to_char(&cur, *offset + *len);
+                for _ in start_char..end_char {
+                    t.delete(start_char);
+                }
             }
         }
     }
 }
 
-/// Apply edit operations to a Yrs text type within a transaction.
-fn apply_ops(text: &TextRef, txn: &mut yrs::TransactionMut<'_>, ops: &[EditOp]) {
-    let mut cursor: u32 = 0;
+/// Apply diff edit operations to a lazily [`TextCrdt`]. Offsets are byte-based
+/// (line-diff boundaries, so char-aligned); each is converted to a char index
+/// against the running buffer via [`byte_to_char`].
+fn apply_ops_lazily(t: &mut TextCrdt, ops: &[EditOp]) {
+    let mut byte_cursor: usize = 0;
     for op in ops {
         match op {
-            EditOp::Retain(n) => cursor += n,
+            EditOp::Retain(n) => byte_cursor += *n as usize,
             EditOp::Delete(n) => {
-                text.remove_range(txn, cursor, *n);
-                // cursor stays — content shifted left
+                let cur = t.text();
+                let start_char = byte_to_char(&cur, byte_cursor);
+                let end_char = byte_to_char(&cur, byte_cursor + *n as usize);
+                for _ in start_char..end_char {
+                    t.delete(start_char);
+                }
+                // byte_cursor stays — content shifted left.
             }
             EditOp::Insert(s) => {
-                text.insert(txn, cursor, s);
-                cursor += s.len() as u32;
+                let cur = t.text();
+                let char_idx = byte_to_char(&cur, byte_cursor);
+                t.insert_str(char_idx, s);
+                byte_cursor += s.len();
             }
         }
     }

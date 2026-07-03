@@ -7651,7 +7651,7 @@ fn test_agent_doc_topic_owns_compact_summary_policy() {
     let compact_archive =
         fs::read_to_string(manifest_dir.join("agent-doc-document/src/compact_archive.rs")).unwrap();
     let compact_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-compact-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "fn summarize_compacted_exchange(",
         "fn summarize_response_topic(",
@@ -9627,7 +9627,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         })
         .collect();
     assert!(
-        coverage_lines.len() >= 34,
+        coverage_lines.len() >= 35,
         "coarse extraction commit coverage should include prior large-chunk rounds and current rounds; found {} rows",
         coverage_lines.len()
     );
@@ -9651,7 +9651,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 38,
+        ledger_rows.len() >= 39,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -9857,6 +9857,10 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("5dc7c322", "Session registration and projection IO"),
         ("0f90f7cf", "Project controller runtime IO"),
         ("d6387afa", "Sync and resync runtime IO graph"),
+        (
+            "pending-current-round",
+            "Compact command archive/write IO graph",
+        ),
     ] {
         assert!(
             coverage_lines
@@ -9896,6 +9900,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/{sync.rs,sync/*,resync.rs,resync/*}",
             "agent-doc-sync-io/src/{sync.rs,sync/*,resync.rs,resync/*}",
             "extract the temporary `SyncRuntimeEffects` callbacks",
+        ),
+        (
+            "Compact command archive/write IO graph",
+            "agent-doc-orchestration/src/compact.rs",
+            "agent-doc-compact-io/src/lib.rs",
+            "Split archive file creation/indexing into `agent-doc-archive-io`",
         ),
         (
             "Legacy supervisor/agent runtime IO wave",
@@ -17630,8 +17640,7 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_reap_policy() {
         "backlog_cmd should call tracked-work batch add policy from agent-doc-element-backlog"
     );
 
-    let compact =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+    let compact = fs::read_to_string(manifest_dir.join("agent-doc-compact-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn non_exchange_list_item_counts(",
         "fn tracked_component_item_counts(",
@@ -17848,8 +17857,7 @@ fn test_extracted_pure_layers_keep_focused_owners() {
             "agent-doc-document must own compact archive rendering policy: {required}"
         );
     }
-    let compact =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+    let compact = fs::read_to_string(manifest_dir.join("agent-doc-compact-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn append_compact_summary_section(",
         "fn format_compact_timestamp_from_unix_secs(",
@@ -20019,7 +20027,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "resync should call focused project-root IO instead of owning registry root discovery"
     );
     let compact_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-compact-io/src/lib.rs")).unwrap();
     assert!(
         !compact_source.contains("fn find_project_root(")
             && compact_source.contains("agent_doc_project_root_io::project_root_or_file_parent("),
@@ -20182,7 +20190,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "agent-doc-orchestration/src/write/converge.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
-        "agent-doc-orchestration/src/compact.rs",
+        "agent-doc-compact-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -20664,7 +20672,7 @@ fn test_agent_doc_document_owns_status_projection_policy() {
     }
 
     for relative in [
-        "agent-doc-orchestration/src/compact.rs",
+        "agent-doc-compact-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-element-backlog-io/src/backlog_cmd.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
@@ -20968,7 +20976,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
     for relative in [
         "src/reset.rs",
         "agent-doc-orchestration/src/git.rs",
-        "agent-doc-orchestration/src/compact.rs",
+        "agent-doc-compact-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -21037,7 +21045,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
     );
     for relative in [
         "src/reset.rs",
-        "agent-doc-orchestration/src/compact.rs",
+        "agent-doc-compact-io/src/lib.rs",
         "agent-doc-orchestration/src/stream.rs",
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/flow/closeout.rs",
@@ -21170,8 +21178,7 @@ fn test_agent_doc_document_owns_compact_projection_policy() {
         "agent-doc-document should expose compact projection through its owning module"
     );
 
-    let compact =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+    let compact = fs::read_to_string(manifest_dir.join("agent-doc-compact-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn parse_exchanges(",
         "fn build_compacted(",
@@ -21591,7 +21598,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         );
     }
     let compact_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-compact-io/src/lib.rs")).unwrap();
     assert!(
         compact_source.contains("agent_doc_git_io::checkpoint::create_pre_mutation_tag(")
             && !compact_source.contains("pub fn create_pre_mutation_tag(")

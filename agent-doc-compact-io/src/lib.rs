@@ -95,6 +95,7 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use agent_doc_document::compact_archive::{
     CompactArchiveMetadata, build_component_archive_content, build_exchange_compact_summary,
@@ -110,6 +111,140 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_sqlite::archive_index;
 
 use agent_doc_topic::parse_topic_sections_with_tail;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompactCommitOutcome {
+    pub did_commit: bool,
+    pub vcs_refresh_signaled: Option<bool>,
+}
+
+pub trait CompactRuntimeEffects: Sync {
+    fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome>;
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+    fn try_editor_converge(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<bool>;
+    fn guard_no_stale_snapshot_reset_drift(
+        &self,
+        file: &Path,
+        projected: Option<&str>,
+        visible: &str,
+        stage: &str,
+    ) -> Result<bool>;
+}
+
+static RUNTIME_EFFECTS: OnceLock<&'static dyn CompactRuntimeEffects> = OnceLock::new();
+
+pub fn install_runtime_effects(effects: &'static dyn CompactRuntimeEffects) {
+    let _ = RUNTIME_EFFECTS.set(effects);
+}
+
+fn runtime_effects() -> Result<&'static dyn CompactRuntimeEffects> {
+    if let Some(effects) = RUNTIME_EFFECTS.get().copied() {
+        return Ok(effects);
+    }
+    #[cfg(test)]
+    {
+        return Ok(&TEST_RUNTIME_EFFECTS);
+    }
+    #[cfg(not(test))]
+    anyhow::bail!("agent-doc compact runtime effects are not installed")
+}
+
+#[cfg(test)]
+struct TestCompactRuntimeEffects;
+
+#[cfg(test)]
+impl CompactRuntimeEffects for TestCompactRuntimeEffects {
+    fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome> {
+        let outcome = agent_doc_orchestration::git::commit_with_outcome(file)?;
+        Ok(CompactCommitOutcome {
+            did_commit: outcome.did_commit,
+            vcs_refresh_signaled: outcome.vcs_refresh_signaled,
+        })
+    }
+
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_orchestration::write::atomic_write_pub(file, content)
+    }
+
+    fn try_editor_converge(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        agent_doc_orchestration::write::try_editor_converge(
+            file,
+            target_content,
+            source_content,
+            reason,
+        )
+    }
+
+    fn guard_no_stale_snapshot_reset_drift(
+        &self,
+        file: &Path,
+        projected: Option<&str>,
+        visible: &str,
+        stage: &str,
+    ) -> Result<bool> {
+        agent_doc_orchestration::write::guard_no_stale_snapshot_reset_drift(
+            file, projected, visible, stage,
+        )
+    }
+}
+
+#[cfg(test)]
+static TEST_RUNTIME_EFFECTS: TestCompactRuntimeEffects = TestCompactRuntimeEffects;
+
+#[cfg(test)]
+pub(crate) struct PipelineFrontmatterEffects;
+
+#[cfg(test)]
+pub(crate) const PIPELINE_FRONTMATTER_EFFECTS: PipelineFrontmatterEffects =
+    PipelineFrontmatterEffects;
+
+#[cfg(test)]
+impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
+    for PipelineFrontmatterEffects
+{
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        current_content: &str,
+        target_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        runtime_effects()?
+            .try_editor_converge(file, target_content, current_content, reason)
+            .map(|_| ())
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::path::Path;
+
+    pub(crate) fn wait_for_live_prompt_drift_listener(project_root: &Path) {
+        for _ in 0..100 {
+            if agent_doc_ipc_io::is_listener_active(project_root) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("fake socket listener did not start within 1s");
+    }
+}
 
 /// Run the compact command.
 ///
@@ -483,7 +618,7 @@ fn compact_disk_matches_expected(file: &Path, expected_content: &str) -> bool {
 }
 
 fn closeout_compact_with_commit(file: &Path) -> Result<()> {
-    let outcome = crate::git::commit_with_outcome(file)?;
+    let outcome = runtime_effects()?.commit_with_outcome(file)?;
     if outcome.did_commit && outcome.vcs_refresh_signaled == Some(false) {
         anyhow::bail!(
             "compact closeout committed {} but failed to write vcs-refresh.signal",
@@ -643,7 +778,7 @@ fn apply_compacted_document(
     assert_non_exchange_markers_preserved(file, source_content, compacted, "apply")?;
 
     if force_disk {
-        crate::write::atomic_write_pub(file, compacted)?;
+        runtime_effects()?.atomic_write(file, compacted)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -659,7 +794,7 @@ fn apply_compacted_document(
         // If no live editor owns the document, `try_editor_converge` may use the
         // guarded DetachedDisk path, but only after rechecking that the current
         // visible file still matches the compact input.
-        crate::write::try_editor_converge(file, compacted, source_content, "compact")?;
+        runtime_effects()?.try_editor_converge(file, compacted, source_content, "compact")?;
     }
 
     agent_doc_snapshot_io::save(file, snapshot_content, agent_doc_ops_log_io::log_op)?;
@@ -1899,13 +2034,17 @@ mod tests {
         // With the overlay advanced, the stale-snapshot drift guard must NOT bail.
         // (Before the fix, the overlay carried the large doc and a re-projected
         // snapshot would trip the "manual cleanup" refusal.)
-        crate::write::guard_no_stale_snapshot_reset_drift(
-            &file,
-            Some(projected.as_str()),
-            &visible,
-            "commit",
-        )
-        .expect("compacted overlay/snapshot must not trip the stale-snapshot reset-drift guard");
+        runtime_effects()
+            .unwrap()
+            .guard_no_stale_snapshot_reset_drift(
+                &file,
+                Some(projected.as_str()),
+                &visible,
+                "commit",
+            )
+            .expect(
+                "compacted overlay/snapshot must not trip the stale-snapshot reset-drift guard",
+            );
     }
 
     #[test]

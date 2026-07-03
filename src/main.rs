@@ -205,6 +205,54 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
 
 static SYNC_RUNTIME_EFFECTS: CliSyncRuntimeEffects = CliSyncRuntimeEffects;
 
+struct CliCompactRuntimeEffects;
+
+impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
+    fn commit_with_outcome(
+        &self,
+        file: &Path,
+    ) -> anyhow::Result<agent_doc_compact_io::CompactCommitOutcome> {
+        let outcome = agent_doc_orchestration::git::commit_with_outcome(file)?;
+        Ok(agent_doc_compact_io::CompactCommitOutcome {
+            did_commit: outcome.did_commit,
+            vcs_refresh_signaled: outcome.vcs_refresh_signaled,
+        })
+    }
+
+    fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
+        agent_doc_orchestration::write::atomic_write_pub(file, content)
+    }
+
+    fn try_editor_converge(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> anyhow::Result<bool> {
+        agent_doc_orchestration::write::try_editor_converge(
+            file,
+            target_content,
+            source_content,
+            reason,
+        )
+    }
+
+    fn guard_no_stale_snapshot_reset_drift(
+        &self,
+        file: &Path,
+        projected: Option<&str>,
+        visible: &str,
+        stage: &str,
+    ) -> anyhow::Result<bool> {
+        agent_doc_orchestration::write::guard_no_stale_snapshot_reset_drift(
+            file, projected, visible, stage,
+        )
+    }
+}
+
+static COMPACT_RUNTIME_EFFECTS: CliCompactRuntimeEffects = CliCompactRuntimeEffects;
+
 /// Document mode for agent-doc sessions.
 #[derive(Clone, Debug, ValueEnum)]
 pub enum AgentDocMode {
@@ -3037,6 +3085,7 @@ fn main() -> anyhow::Result<()> {
         &PROJECT_CONTROLLER_RUNTIME_EFFECTS,
     );
     agent_doc_sync_io::install_runtime_effects(&SYNC_RUNTIME_EFFECTS);
+    agent_doc_compact_io::install_runtime_effects(&COMPACT_RUNTIME_EFFECTS);
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();
     let pending_alias_used = deprecated_pending_alias_used(&raw_args);
@@ -3811,7 +3860,7 @@ fn main() -> anyhow::Result<()> {
             tag,
             commit,
             force_disk,
-        } => agent_doc_orchestration::compact::run(
+        } => agent_doc_compact_io::run(
             &file,
             keep,
             component.as_deref(),

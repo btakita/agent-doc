@@ -30,6 +30,7 @@ dependencies = [
  "agent-doc-callback-io",
  "agent-doc-capture-io",
  "agent-doc-codex-hook-io",
+ "agent-doc-compact-io",
  "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-controller-io",
@@ -239,6 +240,38 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-compact-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-capture-io",
+ "agent-doc-cycle-state-io",
+ "agent-doc-debounce",
+ "agent-doc-document",
+ "agent-doc-element",
+ "agent-doc-element-backlog",
+ "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-hash",
+ "agent-doc-ipc-io",
+ "agent-doc-markdown-ast",
+ "agent-doc-merge",
+ "agent-doc-merge-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-orchestration",
+ "agent-doc-project-root-io",
+ "agent-doc-session-accretion-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-sqlite",
+ "agent-doc-template",
+ "agent-doc-topic",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

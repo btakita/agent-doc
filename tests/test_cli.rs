@@ -9650,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 48,
+        ledger_rows.len() >= 49,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -14185,16 +14185,20 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         !authoritative_actor
             .contains("pub(crate) use agent_doc_controller_io::starting_actor_timeout")
             && authoritative_actor
-                .contains("use agent_doc_controller_io::starting_actor_timeout::clear_starting_actor_timeout_record;"),
+                .contains("use agent_doc_controller_io::starting_actor_timeout::{")
+            && authoritative_actor.contains("clear_starting_actor_timeout_record")
+            && authoritative_actor.contains("record_starting_actor_timeout")
+            && authoritative_actor.contains("StartingActorTimeoutLogDecision"),
         "agent-doc-route-io/authoritative_actor.rs should call starting-actor timeout IO without re-exporting it"
     );
     assert!(
-        route_source.contains("use agent_doc_controller_io::starting_actor_timeout::{")
-            && route_source.contains("record_starting_actor_timeout")
-            && route_source.contains("StartingActorTimeoutLogDecision")
-            && route_source.contains("starting_actor_timeout_record_matches")
-            && route_source.contains("clear_starting_actor_timeout_record"),
-        "route.rs should import starting-actor timeout sidecar IO from agent-doc-controller-io directly"
+        !route_source.contains("fn wait_for_authoritative_actor_ready(")
+            && !route_source.contains("record_starting_actor_timeout(file_path,")
+            && authoritative_actor.contains("pub fn wait_for_authoritative_actor_ready(")
+            && authoritative_actor.contains("record_starting_actor_timeout(file_path")
+            && authoritative_actor.contains("starting_actor_timeout_record_matches(file_path")
+            && authoritative_actor.contains("clear_starting_actor_timeout_record(file_path"),
+        "authoritative actor ready-wait IO should live in agent-doc-route-io and call starting-actor timeout sidecars there"
     );
     for required_snippet in [
         "pub enum RoutedDispatchStartTracker",
@@ -14711,19 +14715,20 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("AuthoritativeActorDispatchAction")
             && route_source.contains("AuthoritativeActorDispatchActionFacts")
             && route_source.contains("classify_authoritative_actor_dispatch_action")
-            && route_source.contains("PromptReadyBarrierDecision")
-            && route_source.contains("AuthoritativeActorReadyFacts")
-            && route_source.contains("AuthoritativePromptReadyBarrierFacts")
-            && route_source.contains("classify_authoritative_prompt_ready_barrier")
+            && authoritative_actor.contains("pub fn wait_for_authoritative_actor_ready(")
+            && authoritative_actor.contains("PromptReadyBarrierDecision")
+            && authoritative_actor.contains("AuthoritativeActorReadyFacts")
+            && authoritative_actor.contains("AuthoritativePromptReadyBarrierFacts")
+            && authoritative_actor.contains("classify_authoritative_prompt_ready_barrier")
             && route_source.contains("RoutedReopenGuardReason")
-            && route_source.contains("prompt_ready_barrier_failed_event")
-            && route_source.contains("agent_doc_flow_io::log_flow_event")
+            && authoritative_actor.contains("prompt_ready_barrier_failed_event")
+            && authoritative_actor.contains("agent_doc_flow_io::log_flow_event")
             && route_dispatch_only_source.contains("dispatch_only_blocked_guard_reason")
             && authoritative_actor.contains("effective_authoritative_actor_state")
             && route_pane_resolution_io_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
-            && route_source.contains("RetryBudget")
-            && route_source.contains("authoritative_actor_ready_retry_budget")
+            && authoritative_actor.contains("RetryBudget")
+            && authoritative_actor.contains("authoritative_actor_ready_retry_budget")
             && route_source.contains("CloseoutBlockDispatchDecision")
             && route_source.contains("CloseoutBlockDispatchFacts")
             && route_source.contains("classify_closeout_block_dispatch")

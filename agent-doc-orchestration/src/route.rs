@@ -155,17 +155,17 @@
 
 use anyhow::Result;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
-    AuthoritativePromptReadyBarrierFacts, CloseoutBlockDispatchDecision,
-    CloseoutBlockDispatchFacts, DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts,
-    DispatchOnlyReopenDelivery, PromptReadyBarrierDecision, ReopenMode, RetryBudget,
+    CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts, DispatchDrainRetryDecision,
+    DispatchOnlyBusyRefusalFacts, DispatchOnlyReopenDelivery, ReopenMode,
     RouteCloseoutDrainOutcome, RoutedReopenFacts, RoutedReopenGuardReason,
     StartingTimeoutActorFacts, actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
-    authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
-    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
+    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
     classify_closeout_block_dispatch, decide_authoritative_reopen, dispatch_drain_retry_decision,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
@@ -173,15 +173,13 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_timeout_for_binary, failclosed_wait_context,
     prompt_ready_barrier_failed_event, route_closeout_user_outcome_fields,
-    starting_actor_ready_log_line, starting_actor_terminal_log_line,
-    starting_actor_timeout_coalesced_log_line,
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
-    AuthoritativeActorReadyFacts, RoutedDispatchStartProof, STARTING_ACTOR_TIMEOUT_REASON,
-    starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
-    startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
-    startup_miss_superseded_by_later_open_start,
+    AuthoritativeActorReadyFacts, PromptReadyBarrierDecision, RoutedDispatchStartProof,
+    STARTING_ACTOR_TIMEOUT_REASON, starting_timeout_blocked_actor_can_recover,
+    startup_miss_requires_fresh_start, startup_miss_should_fail_closed,
+    startup_miss_should_restart_live_owner, startup_miss_superseded_by_later_open_start,
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
@@ -192,6 +190,7 @@ use agent_doc_controller::dispatch::{
 use agent_doc_controller::dispatch::{
     DegradedAuthoritativeActorDirectSubmit, degraded_authoritative_actor_direct_submit_log_message,
 };
+#[cfg(test)]
 use agent_doc_controller_io::starting_actor_timeout::{
     StartingActorTimeoutLogDecision, clear_starting_actor_timeout_record,
     record_starting_actor_timeout, starting_actor_timeout_record_identity_matches,
@@ -200,12 +199,11 @@ use agent_doc_controller_io::starting_actor_timeout::{
 use agent_doc_harness::HarnessConfig;
 use agent_doc_route_io::authoritative_actor::{
     AuthoritativeActorDispatchTarget, RouteDispatchAuthorization, actor_dispatch_state,
-    authoritative_actor_dispatch_recovery_hint, authoritative_actor_ready_facts_from_target,
-    authorize_controller_dispatch, current_generation_ready_prompt_proven,
-    load_authoritative_actor_binding, mark_starting_actor_timeout_blocked,
+    authoritative_actor_dispatch_recovery_hint, authorize_controller_dispatch,
+    current_generation_ready_prompt_proven, load_authoritative_actor_binding,
     promote_starting_authoritative_actor_if_dispatch_ready,
     recover_starting_timeout_blocked_actor_if_dispatch_ready, route_dispatch_deduped_pane,
-    route_starting_actor_not_ready_log_line,
+    wait_for_authoritative_actor_ready,
 };
 #[cfg(test)]
 use agent_doc_route_io::authoritative_actor::{
@@ -213,7 +211,7 @@ use agent_doc_route_io::authoritative_actor::{
     authoritative_actor_start_wait_terminal_state,
     dispatch_only_can_use_degraded_authoritative_actor, load_authoritative_actor_dispatch_target,
     load_authoritative_actor_for_registered_pane, managed_capability_proof_status,
-    tracked_harness_clear_requires_fresh_restart,
+    route_starting_actor_not_ready_log_line, tracked_harness_clear_requires_fresh_restart,
 };
 #[cfg(test)]
 use agent_doc_route_io::cycle_ack::pending_prompt_bearing_context_for_route;
@@ -949,226 +947,6 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
     })
 }
 
-/// `#jb-run-agent-doc-busy-wait-deadlock`: the `wait_for_ready` override exists
-/// for a slow-`starting` supervisor (JB `Run Agent Doc` passes `--wait-for-ready
-/// 60`), not for a busy *active turn*. A dispatch-only route that finds the
-/// authoritative actor `Busy` (mid active turn) must not honor that start
-/// override here: an active turn will not become dispatch-ready by waiting, so a
-/// 60s block before the `DispatchOnlyBusyQueue` enqueue is an operator-perceived
-/// deadlock. When a queue-prompt fallback exists, skip the wait entirely and let
-/// the busy actor queue the prompt immediately for the supervisor idle-queue
-/// watch to drain; a stale-busy-but-actually-ready projection is still repaired
-/// by the later direct-pane-evidence check (`#snrun`). Only wait when there is
-/// no queue fallback (where route would otherwise have to bail).
-fn wait_for_authoritative_actor_ready(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    file_path: &str,
-    harness: &HarnessConfig,
-    initial: &AuthoritativeActorDispatchTarget,
-) -> Result<Option<AuthoritativeActorDispatchTarget>> {
-    let override_timeout = wait_for_ready_override();
-    let budget = match override_timeout {
-        Some(timeout) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_wait_for_ready_override file={} harness={} timeout_secs={}",
-                    file.display(),
-                    harness.binary,
-                    timeout.as_secs()
-                ),
-            );
-            RetryBudget::new(timeout, Duration::from_millis(100))
-        }
-        None => authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test)),
-    };
-    let deadline = Instant::now() + budget.timeout;
-    let mut last_facts = authoritative_actor_ready_facts_from_target(
-        initial,
-        current_generation_ready_prompt_proven(tmux, initial, harness),
-    );
-    let start = Instant::now();
-    if last_facts.actor_state != ActorDispatchState::Starting
-        && starting_actor_timeout_record_identity_matches(file_path, &last_facts)
-    {
-        clear_starting_actor_timeout_record(file_path);
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_starting_actor_timeout_cleared_nonstarting file={} pane={} generation={} actor_state={}",
-                file.display(),
-                last_facts.pane_id,
-                last_facts.generation,
-                last_facts.actor_state.as_str()
-            ),
-        );
-    }
-    if starting_actor_timeout_record_matches(file_path, &last_facts) {
-        mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
-        let file_display = file.display().to_string();
-        agent_doc_ops_log_io::log_op(
-            file,
-            &starting_actor_timeout_coalesced_log_line(
-                file_display.as_str(),
-                harness.binary.as_str(),
-                start.elapsed(),
-                &last_facts,
-            ),
-        );
-        return Ok(None);
-    }
-
-    while Instant::now() < deadline {
-        if let Some(refreshed) = load_authoritative_actor_binding(
-            tmux, file, session_id, file_path, harness, false, false,
-        )? {
-            let prompt_ready = current_generation_ready_prompt_proven(tmux, &refreshed, harness);
-            last_facts = authoritative_actor_ready_facts_from_target(&refreshed, prompt_ready);
-            match classify_authoritative_prompt_ready_barrier(
-                AuthoritativePromptReadyBarrierFacts {
-                    ready_facts: &last_facts,
-                    dispatch_eligible: supervisor_authoritative_actor_dispatch_target_eligible(
-                        &refreshed.runtime,
-                    ),
-                },
-            ) {
-                PromptReadyBarrierDecision::Ready => {
-                    let elapsed = start.elapsed();
-                    let file_display = file.display().to_string();
-                    clear_starting_actor_timeout_record(file_path);
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &starting_actor_ready_log_line(
-                            file_display.as_str(),
-                            harness.binary.as_str(),
-                            elapsed,
-                            &last_facts,
-                        ),
-                    );
-                    if override_timeout.is_some() {
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "route_wait_for_ready_elapsed file={} harness={} elapsed_ms={} timeout_ms={}",
-                                file.display(),
-                                harness.binary,
-                                elapsed.as_millis(),
-                                budget.timeout.as_millis()
-                            ),
-                        );
-                    }
-                    return Ok(Some(refreshed));
-                }
-                PromptReadyBarrierDecision::Terminal => {
-                    let elapsed = start.elapsed();
-                    let file_display = file.display().to_string();
-                    clear_starting_actor_timeout_record(file_path);
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &starting_actor_terminal_log_line(
-                            file_display.as_str(),
-                            harness.binary.as_str(),
-                            elapsed,
-                            &last_facts,
-                        ),
-                    );
-                    return Ok(Some(refreshed));
-                }
-                PromptReadyBarrierDecision::Continue => {}
-            }
-        }
-        std::thread::sleep(budget.poll_interval);
-    }
-
-    let elapsed = start.elapsed();
-    let log_line = route_starting_actor_not_ready_log_line(
-        file,
-        harness,
-        budget.timeout,
-        elapsed,
-        &last_facts,
-    );
-    if last_facts.actor_state == ActorDispatchState::Starting {
-        match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
-            Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
-                agent_doc_ops_log_io::log_op(file, &log_line);
-                agent_doc_flow_io::log_flow_event(
-                    file,
-                    prompt_ready_barrier_failed_event(
-                        RoutedReopenGuardReason::StartingActorNotReady,
-                    ),
-                    agent_doc_ops_log_io::log_op,
-                );
-                mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
-            }
-            Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
-                mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
-                let file_display = file.display().to_string();
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &starting_actor_timeout_coalesced_log_line(
-                        file_display.as_str(),
-                        harness.binary.as_str(),
-                        elapsed,
-                        &last_facts,
-                    ),
-                );
-            }
-            Err(err) => {
-                eprintln!(
-                    "[route] warning: failed to persist starting actor timeout for {}: {}",
-                    file.display(),
-                    err
-                );
-                agent_doc_ops_log_io::log_op(file, &log_line);
-                agent_doc_flow_io::log_flow_event(
-                    file,
-                    prompt_ready_barrier_failed_event(
-                        RoutedReopenGuardReason::StartingActorNotReadyUnpersisted,
-                    ),
-                    agent_doc_ops_log_io::log_op,
-                );
-            }
-        }
-    } else {
-        clear_starting_actor_timeout_record(file_path);
-        agent_doc_ops_log_io::log_op(file, &log_line);
-        // Diagnostic: capture the pane content at timeout so we can analyze
-        // why ready_prompt_candidate never matched.
-        if let Ok(content) = tmux.capture_pane(&initial.record.pane_id, Some(80)) {
-            let candidate = agent_doc_harness::ready_prompt_candidate(&content, harness);
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_wait_for_ready_timeout_diagnostic file={} pane={} harness={} candidate={:?} bottom_idle_chrome={} has_busy_cue={} lines={}",
-                    file.display(),
-                    initial.record.pane_id,
-                    harness.binary,
-                    candidate,
-                    harness.is_bottom_idle_chrome(&content, 12),
-                    harness.has_busy_cue(&content),
-                    content.lines().count()
-                ),
-            );
-        }
-    }
-    if override_timeout.is_some() {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_wait_for_ready_timeout file={} harness={} elapsed_ms={} timeout_ms={}",
-                file.display(),
-                harness.binary,
-                elapsed.as_millis(),
-                budget.timeout.as_millis()
-            ),
-        );
-    }
-    Ok(None)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn route_via_authoritative_actor(
     tmux: &Tmux,
@@ -1287,8 +1065,15 @@ fn route_via_authoritative_actor(
         return Ok(dispatch_pane);
     }
     if actor_state == agent_doc_sqlite::state_store::ActorState::Starting
-        && let Some(refreshed) =
-            wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
+        && let Some(refreshed) = wait_for_authoritative_actor_ready(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            harness,
+            &actor,
+            wait_for_ready_override(),
+        )?
     {
         if refreshed.record.generation != actor.record.generation
             || refreshed.record.pane_id != actor.record.pane_id
@@ -1394,9 +1179,15 @@ fn route_via_authoritative_actor(
         prompt_context.is_some() || has_existing_inactive_queue_fallback,
         active_turn_busy_cue.is_some(),
     ) {
-        if let Some(refreshed) =
-            wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
-        {
+        if let Some(refreshed) = wait_for_authoritative_actor_ready(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            harness,
+            &actor,
+            wait_for_ready_override(),
+        )? {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -1513,7 +1304,13 @@ fn route_via_authoritative_actor(
             actor_state = actor.actor_state();
             dispatch_pane = actor.record.pane_id.clone();
         } else if let Some(after_wait) = wait_for_authoritative_actor_ready(
-            tmux, file, session_id, file_path, harness, &refreshed,
+            tmux,
+            file,
+            session_id,
+            file_path,
+            harness,
+            &refreshed,
+            wait_for_ready_override(),
         )? {
             agent_doc_ops_log_io::log_op(
                 file,

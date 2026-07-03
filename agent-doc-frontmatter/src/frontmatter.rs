@@ -1040,8 +1040,9 @@ pub fn parse_for_startup(file_display: &str, content: &str) -> StartupFrontmatte
                         StartupFrontmatter::Repaired {
                             frontmatter: fm,
                             repaired_yaml,
-                            note: "repaired malformed frontmatter (tabs/stray fence) before startup"
-                                .to_string(),
+                            note:
+                                "repaired malformed frontmatter (tabs/stray fence) before startup"
+                                    .to_string(),
                         }
                     }
                     Err(err2) => StartupFrontmatter::Unrepairable {
@@ -1895,7 +1896,10 @@ mod tests {
         // A tab-indented nested key is invalid YAML (tabs forbidden for indent) —
         // the supervisor must repair rather than fail to open.
         let content = "---\nagent_doc_stream:\n\tinterval: 200\n---\n\nbody\n";
-        assert!(parse(content).is_err(), "precondition: tabs break the parse");
+        assert!(
+            parse(content).is_err(),
+            "precondition: tabs break the parse"
+        );
         match parse_for_startup("plan.md", content) {
             StartupFrontmatter::Repaired { repaired_yaml, .. } => {
                 assert!(!repaired_yaml.contains('\t'));

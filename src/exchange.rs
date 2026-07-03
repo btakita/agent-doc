@@ -62,7 +62,10 @@ fn mutate(file: &Path, transform: impl FnOnce(&str) -> Result<String>) -> Result
     // (from_current = true, preserve_session = true, force_disk = true).
     crate::reset::run(file, true, true, true)
         .context("failed to re-baseline snapshot/CRDT after exchange mutation")?;
-    eprintln!("[exchange] mutated {} and re-baselined sidecars", file.display());
+    eprintln!(
+        "[exchange] mutated {} and re-baselined sidecars",
+        file.display()
+    );
     Ok(())
 }
 
@@ -78,7 +81,9 @@ pub fn remove(file: &Path, node_id: &str) -> Result<()> {
 /// (body read from stdin).
 pub fn add_response(file: &Path, header: &str) -> Result<()> {
     let body = read_stdin()?;
-    mutate(file, |inner| Ok(exchange_tree::add_response(inner, header, &body)))
+    mutate(file, |inner| {
+        Ok(exchange_tree::add_response(inner, header, &body))
+    })
 }
 
 /// `agent-doc exchange add-prompt <FILE>` — append a user prompt turn (text read
@@ -91,8 +96,7 @@ pub fn add_prompt(file: &Path) -> Result<()> {
 /// `agent-doc exchange move <FILE> --id <N> --before|--after <Anchor>`.
 pub fn move_node(file: &Path, node_id: &str, anchor: &str, before: bool) -> Result<()> {
     mutate(file, |inner| {
-        exchange_tree::move_exchange_node(inner, node_id, anchor, before).with_context(|| {
-            format!("move failed: missing node `{node_id}` or anchor `{anchor}`")
-        })
+        exchange_tree::move_exchange_node(inner, node_id, anchor, before)
+            .with_context(|| format!("move failed: missing node `{node_id}` or anchor `{anchor}`"))
     })
 }

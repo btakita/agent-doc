@@ -793,7 +793,12 @@ where
             // keyed per-child reconciliation when splittable, else a body-only merge
             // that reframes with valid markers — never a text merge of the framed
             // slice (which could duplicate/drop the component markers).
-            merge_one_component(component_name, node_base.as_deref(), ours_slice, theirs_slice)?
+            merge_one_component(
+                component_name,
+                node_base.as_deref(),
+                ours_slice,
+                theirs_slice,
+            )?
         } else {
             // Interstitial (no component framing to protect): flat leaf merge.
             let node_base_state = node_base
@@ -1051,8 +1056,10 @@ fn merge_one_component(
     if let Some(merged) = reconcile_component(name, base_text, ours_text, theirs_text) {
         return Ok(merged);
     }
-    if let (Some((ours_open, ours_body, ours_close)), Some((theirs_open, theirs_body, theirs_close))) =
-        (component_framing(ours_text), component_framing(theirs_text))
+    if let (
+        Some((ours_open, ours_body, ours_close)),
+        Some((theirs_open, theirs_body, theirs_close)),
+    ) = (component_framing(ours_text), component_framing(theirs_text))
     {
         let base_framing = base_text.and_then(component_framing);
         let base_body = base_framing.map(|(_, b, _)| b);
@@ -3255,15 +3262,37 @@ Second answer line three.
         let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
 
         // Valid framing (no cross-splice): one open/close per component.
-        assert_eq!(merged.matches("<!-- agent:exchange -->").count(), 1, "{merged}");
-        assert_eq!(merged.matches("<!-- /agent:exchange -->").count(), 1, "{merged}");
-        assert_eq!(merged.matches("<!-- agent:queue -->").count(), 1, "{merged}");
-        assert_eq!(merged.matches("<!-- /agent:queue -->").count(), 1, "{merged}");
+        assert_eq!(
+            merged.matches("<!-- agent:exchange -->").count(),
+            1,
+            "{merged}"
+        );
+        assert_eq!(
+            merged.matches("<!-- /agent:exchange -->").count(),
+            1,
+            "{merged}"
+        );
+        assert_eq!(
+            merged.matches("<!-- agent:queue -->").count(),
+            1,
+            "{merged}"
+        );
+        assert_eq!(
+            merged.matches("<!-- /agent:queue -->").count(),
+            1,
+            "{merged}"
+        );
         // Agent's exchange edit survives; the operator queue item is NOT dropped.
         assert!(merged.contains("Response."), "agent edit lost:\n{merged}");
-        assert!(merged.contains("[#a1]"), "operator queue item dropped:\n{merged}");
+        assert!(
+            merged.contains("[#a1]"),
+            "operator queue item dropped:\n{merged}"
+        );
         // The result must re-segment cleanly (never emit malformed framing).
-        assert!(segment_into_nodes(&merged).is_ok(), "malformed framing:\n{merged}");
+        assert!(
+            segment_into_nodes(&merged).is_ok(),
+            "malformed framing:\n{merged}"
+        );
     }
 
     // ---- #qnodemerge2: per-node CRDT state persistence --------------------

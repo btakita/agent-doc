@@ -59,7 +59,10 @@ fn concurrent_same_component_edits_stay_inside_one_component() {
         1,
         "merge must not duplicate the component open marker:\n{merged}"
     );
-    assert!(merged.contains("agent response"), "agent content lost:\n{merged}");
+    assert!(
+        merged.contains("agent response"),
+        "agent content lost:\n{merged}"
+    );
     assert!(
         merged.contains("operator added a long note"),
         "operator content lost:\n{merged}"
@@ -91,10 +94,26 @@ fn divergent_component_sets_merge_by_union_not_whole_doc_splice() {
         agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
 
     // Valid framing: exactly one open/close per component, both components present.
-    assert_eq!(merged.matches("<!-- agent:exchange -->").count(), 1, "{merged}");
-    assert_eq!(merged.matches("<!-- /agent:exchange -->").count(), 1, "{merged}");
-    assert_eq!(merged.matches("<!-- agent:queue -->").count(), 1, "{merged}");
-    assert_eq!(merged.matches("<!-- /agent:queue -->").count(), 1, "{merged}");
+    assert_eq!(
+        merged.matches("<!-- agent:exchange -->").count(),
+        1,
+        "{merged}"
+    );
+    assert_eq!(
+        merged.matches("<!-- /agent:exchange -->").count(),
+        1,
+        "{merged}"
+    );
+    assert_eq!(
+        merged.matches("<!-- agent:queue -->").count(),
+        1,
+        "{merged}"
+    );
+    assert_eq!(
+        merged.matches("<!-- /agent:queue -->").count(),
+        1,
+        "{merged}"
+    );
     // Both sides' contributions survive.
     assert!(merged.contains("A (agent)."), "agent edit lost:\n{merged}");
     assert!(

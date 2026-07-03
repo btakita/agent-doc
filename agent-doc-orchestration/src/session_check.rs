@@ -8,19 +8,19 @@
 use anyhow::Result;
 use std::path::Path;
 
+pub use agent_doc_session_check_io::{
+    SessionCheckReport, SessionCheckStatus, detect_unstarted_prompt_bearing_diff,
+    first_unstarted_prompt_bearing_change,
+};
 #[cfg(test)]
 use agent_doc_session_check_io::{
-    detect_jb_cache_conflict_accept_duplicate_replay,
-    detect_jb_cache_conflict_cancel_recoverable, detect_late_ipc_response_overapplication,
+    detect_jb_cache_conflict_accept_duplicate_replay, detect_jb_cache_conflict_cancel_recoverable,
+    detect_late_ipc_response_overapplication,
 };
 #[cfg(test)]
 use agent_doc_turn::op_log::PREFLIGHT_START_EVENT;
 #[cfg(test)]
 use agent_doc_workflow::session_check::GuardResult;
-pub use agent_doc_session_check_io::{
-    SessionCheckReport, SessionCheckStatus, detect_unstarted_prompt_bearing_diff,
-    first_unstarted_prompt_bearing_change,
-};
 
 struct OrchestrationSessionCheckEffects;
 

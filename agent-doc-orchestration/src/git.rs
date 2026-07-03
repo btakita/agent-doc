@@ -1371,8 +1371,8 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     if ipc_listener_active {
         eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
     } else if let Ok(working) = std::fs::read_to_string(file) {
-        let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&working);
         let snapshot_after_reposition = agent_doc_snapshot_io::load(file).ok().flatten();
+        let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&working);
         let normalize_prefix_lines = snapshot_after_reposition
             .as_deref()
             .map(|snapshot| {
@@ -1606,6 +1606,27 @@ fn repair_clean_head_if_only_transient_worktree_drift(
     if let Some(repaired) =
         repair_stale_agent_response_collapse_worktree(file, &head_doc, file_content)?
     {
+        return Ok(Some((Some(head_doc.clone()), repaired)));
+    }
+    if let Some(repaired) =
+        agent_doc_document::write_normalization::reconcile_postcommit_exchange_to_head(
+            file_content,
+            &head_doc,
+        )
+    {
+        crate::write::atomic_write_pub(file, &repaired)?;
+        if repaired == head_doc {
+            agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
+        }
+        refresh_live_closeout_sidecars(file, &repaired, true)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "postcommit_exchange_reconcile_to_head file={} basis=head preserved_non_exchange_drift={}",
+                file.display(),
+                repaired != head_doc
+            ),
+        );
         return Ok(Some((Some(head_doc.clone()), repaired)));
     }
     if normalize_transient_agent_doc_markers(file_content)

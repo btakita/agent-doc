@@ -950,9 +950,7 @@ pub unsafe extern "C" fn agent_doc_exchange_nodes(file_path: *const c_char) -> *
     let json = serde_json::to_string(
         &nodes
             .iter()
-            .map(|n| {
-                serde_json::json!({ "id": n.node_id, "kind": n.kind, "label": n.label })
-            })
+            .map(|n| serde_json::json!({ "id": n.node_id, "kind": n.kind, "label": n.label }))
             .collect::<Vec<_>>(),
     )
     .unwrap_or_else(|_| "[]".to_string());

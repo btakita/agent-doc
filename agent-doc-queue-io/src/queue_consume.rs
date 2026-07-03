@@ -1229,7 +1229,10 @@ mod core_tests {
             reason: &str,
         ) -> Result<()> {
             agent_doc_fs::write_atomic(file, target_content.as_bytes()).with_context(|| {
-                format!("{reason}: failed detached disk write for {}", file.display())
+                format!(
+                    "{reason}: failed detached disk write for {}",
+                    file.display()
+                )
             })?;
             agent_doc_ops_log_io::log_op(
                 file,

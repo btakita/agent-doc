@@ -11,15 +11,48 @@ pub fn overlay_state_from_markdown(content: &str) -> Vec<u8> {
     agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(content).encode_state()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverlayProjectionSource {
+    Structured,
+    RebuiltFromFallback { error: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OverlayProjection {
+    pub markdown: String,
+    pub source: OverlayProjectionSource,
+}
+
 /// Project structured-overlay state bytes back to markdown.
 ///
 /// `fallback_markdown` is passed through to legacy-state migration when callers
 /// are decoding a sidecar that may have been written by an older runtime.
 pub fn project_overlay_state(bytes: &[u8], fallback_markdown: Option<&str>) -> Result<String> {
-    agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state_or_migrate(bytes, fallback_markdown)
-        .context("failed to decode overlay state")?
-        .to_markdown()
-        .context("failed to project overlay state")
+    project_overlay_state_with_source(bytes, fallback_markdown)
+        .map(|projection| projection.markdown)
+}
+
+pub fn project_overlay_state_with_source(
+    bytes: &[u8],
+    fallback_markdown: Option<&str>,
+) -> Result<OverlayProjection> {
+    match agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(bytes) {
+        Ok(overlay) => {
+            let markdown = overlay
+                .to_markdown()
+                .context("failed to project overlay state")?;
+            Ok(OverlayProjection {
+                markdown,
+                source: OverlayProjectionSource::Structured,
+            })
+        }
+        Err(err) => Ok(OverlayProjection {
+            markdown: fallback_markdown.unwrap_or("").to_string(),
+            source: OverlayProjectionSource::RebuiltFromFallback {
+                error: err.to_string(),
+            },
+        }),
+    }
 }
 
 /// Round-trip markdown through the same persist-reload-project pipeline used by

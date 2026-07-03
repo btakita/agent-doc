@@ -44,10 +44,7 @@ fn node_trailing_boundary_split(node: &ExchangeNode) -> Option<(Vec<String>, Vec
         }
     }
     if saw_boundary {
-        Some((
-            node.lines[..split].to_vec(),
-            node.lines[split..].to_vec(),
-        ))
+        Some((node.lines[..split].to_vec(), node.lines[split..].to_vec()))
     } else {
         None
     }

@@ -333,10 +333,16 @@ mod tests {
         // Leading note + the caret prompt are two prompt nodes, neither of which
         // is folded into a response.
         assert_eq!(prompts.len(), 2);
-        assert!(prompts.iter().any(|p| p.render().contains("Leading user note.")));
-        assert!(prompts
-            .iter()
-            .any(|p| p.render().contains("❯ Regenerate the response.")));
+        assert!(
+            prompts
+                .iter()
+                .any(|p| p.render().contains("Leading user note."))
+        );
+        assert!(
+            prompts
+                .iter()
+                .any(|p| p.render().contains("❯ Regenerate the response."))
+        );
     }
 
     #[test]

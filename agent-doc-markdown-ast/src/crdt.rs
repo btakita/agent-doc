@@ -49,7 +49,10 @@ impl std::fmt::Display for CrdtSchemaError {
             }
             CrdtSchemaError::InvalidKind(kind) => write!(f, "invalid overlay item kind `{kind}`"),
             CrdtSchemaError::InvalidNumber(field, value) => {
-                write!(f, "overlay field `{field}` has invalid numeric value {value}")
+                write!(
+                    f,
+                    "overlay field `{field}` has invalid numeric value {value}"
+                )
             }
         }
     }
@@ -94,7 +97,9 @@ impl OverlayCrdtDoc {
     ) -> Result<Self, CrdtSchemaError> {
         match Self::decode_state(bytes) {
             Ok(overlay) => Ok(overlay),
-            Err(_) => Ok(OverlayCrdtDoc::from_markdown(fallback_markdown.unwrap_or(""))),
+            Err(_) => Ok(OverlayCrdtDoc::from_markdown(
+                fallback_markdown.unwrap_or(""),
+            )),
         }
     }
 

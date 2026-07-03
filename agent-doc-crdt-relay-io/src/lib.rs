@@ -694,7 +694,10 @@ pub fn request_disk_change_reconcile(file: &Path) -> Result<()> {
     let path = agent_doc_fs::disk_change_request_path_for(file)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| {
-            format!("failed to create disk-change-request dir {}", parent.display())
+            format!(
+                "failed to create disk-change-request dir {}",
+                parent.display()
+            )
         })?;
     }
     let requested_at = std::time::SystemTime::now()
@@ -748,10 +751,7 @@ pub fn consume_disk_change_reconcile(file: &Path) -> Result<Option<DiskChangeOut
 /// the disk-authority load path owns them) and non-changes drop none. This keeps
 /// headless documents — the common case — from accumulating markers no supervisor
 /// would consume.
-pub fn route_disk_change_signal(
-    file: &Path,
-    delivery: &WatchDelivery,
-) -> Result<WatchAction> {
+pub fn route_disk_change_signal(file: &Path, delivery: &WatchDelivery) -> Result<WatchAction> {
     let authority = authority_for_file(&file.display().to_string());
     // The supervisor's own reconcile barrier handles an in-flight editor edit, so
     // the daemon does not need the live edit epoch here — pass `false` and let the
@@ -1507,8 +1507,8 @@ mod tests {
         // No live editor → decide_watch_action yields ApplyAsDiskAuthority, which
         // the disk-authority load path owns — no marker for a supervisor to consume.
         let (_dir, file) = temp_doc("route-headless.md");
-        let action = route_disk_change_signal(&file, &WatchDelivery::Change { generation: 1 })
-            .unwrap();
+        let action =
+            route_disk_change_signal(&file, &WatchDelivery::Change { generation: 1 }).unwrap();
         assert_eq!(action, WatchAction::ApplyAsDiskAuthority);
         assert!(!disk_change_request_pending(&file));
     }

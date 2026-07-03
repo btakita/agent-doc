@@ -232,9 +232,7 @@ pub fn run_with_options(
                 // baselined into the snapshot. Defer the queue (do not force the
                 // Codex final-gate) while such a prompt exists so the next cycle
                 // answers it instead of skipping to the queue head.
-                if let Some(unresolved) =
-                    crate::unresolved_exchange_prompt(file)?
-                {
+                if let Some(unresolved) = crate::unresolved_exchange_prompt(file)? {
                     let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
                         agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
                     )
@@ -429,9 +427,8 @@ pub fn run_with_options(
                 && cycle.capture_id.is_none()
                 && cycle.response_sha256.is_none()
             {
-                let has_visible_response =
-                    crate::unresolved_exchange_prompt(file)?.is_none()
-                        && crate::exchange_tail_has_response_heading(file);
+                let has_visible_response = crate::unresolved_exchange_prompt(file)?.is_none()
+                    && crate::exchange_tail_has_response_heading(file);
                 if has_visible_response {
                     eprintln!(
                         "[session-check] codex-final-gate: recursive direct invocation was blocked for {} but the response is already visible in agent:exchange — adopting the manual patchback idempotently.",
@@ -521,9 +518,7 @@ pub fn inspect_with_warnings(
                 return Ok(report);
             }
         }
-        if let Some(message) =
-            crate::check_completed_pending_reap_guard(file, &rc)?
-        {
+        if let Some(message) = crate::check_completed_pending_reap_guard(file, &rc)? {
             report.status = SessionCheckStatus::Interrupted(message);
             return Ok(report);
         }
@@ -551,11 +546,9 @@ pub fn inspect_with_warnings(
                 return Ok(report);
             }
         }
-        match crate::check_snapshot_committed_guard(
-            file,
-            &rc,
-            |file| effects.closeout_recovery_hint(file),
-        )? {
+        match crate::check_snapshot_committed_guard(file, &rc, |file| {
+            effects.closeout_recovery_hint(file)
+        })? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -571,10 +564,9 @@ pub fn inspect_with_warnings(
                 return Ok(report);
             }
         }
-        match crate::check_committed_without_response_body_guard(
-            file,
-            |file| effects.closeout_recovery_hint(file),
-        )? {
+        match crate::check_committed_without_response_body_guard(file, |file| {
+            effects.closeout_recovery_hint(file)
+        })? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -731,7 +723,10 @@ pub fn detect_uncommitted_closeout_drift_with_context(
     rc: &agent_doc_run_context_io::RunContext,
     effects: &impl SessionCheckEffects,
 ) -> Result<Option<String>> {
-    if effects.repair_committed_historical_snapshot_drift(file)?.is_some() {
+    if effects
+        .repair_committed_historical_snapshot_drift(file)?
+        .is_some()
+    {
         return Ok(None);
     }
     if let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)? {
@@ -838,10 +833,9 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                     file, &state, blocked,
                 )));
             }
-            if let Some(reason) = effects.recover_missing_commit_boundary(
-                file,
-                "session_check_commit_boundary_recovered",
-            )? {
+            if let Some(reason) = effects
+                .recover_missing_commit_boundary(file, "session_check_commit_boundary_recovered")?
+            {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(
                         "[session-check] INTERRUPTED: cycle `{}` was `{}` ({}), recovered the missing commit boundary from {}, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
@@ -860,14 +854,12 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                     reason
                 )));
             }
-            if let Some(message) =
-                crate::open_cycle_manual_patchback_message(file, &state)?
-            {
+            if let Some(message) = crate::open_cycle_manual_patchback_message(file, &state)? {
                 return Ok(SessionCheckStatus::Interrupted(message));
             }
-            return Ok(SessionCheckStatus::Interrupted(
-                crate::open_cycle_message(file, &state)?,
-            ));
+            return Ok(SessionCheckStatus::Interrupted(crate::open_cycle_message(
+                file, &state,
+            )?));
         }
         // #codex-owned-pane-prompt-miss: a recursive same-pane direct invocation
         // that abandoned its empty cycle is terminal, but that abandon is NOT
@@ -999,9 +991,7 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                 ),
             ));
         }
-        if let Some(marker) =
-            crate::detect_active_session_post_commit_drift(file)?
-        {
+        if let Some(marker) = crate::detect_active_session_post_commit_drift(file)? {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                 state.cycle_id,
@@ -1052,10 +1042,8 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                     reason
                 )));
             }
-            if let Some(marker) = crate::detect_bypassed_response_write(file)?
-            {
-                if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)?
-                {
+            if let Some(marker) = crate::detect_bypassed_response_write(file)? {
+                if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
                     if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                         return Ok(SessionCheckStatus::Interrupted(format!(
                             "[session-check] INTERRUPTED: repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no agent-doc cycle ever started: {}",
@@ -1074,17 +1062,13 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                     effects.closeout_recovery_hint(file)
                 )));
             }
-            if let Some(marker) =
-                crate::detect_active_session_post_commit_drift(file)?
-            {
+            if let Some(marker) = crate::detect_active_session_post_commit_drift(file)? {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                     marker
                 )));
             }
-            if let Some(marker) =
-                crate::detect_uncommitted_exchange_drift(file)?
-            {
+            if let Some(marker) = crate::detect_uncommitted_exchange_drift(file)? {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: document has uncommitted exchange changes beyond the committed snapshot (no cycle state): {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle.",
                     marker,
@@ -1109,10 +1093,9 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
             )))
         }
         Some(event) if is_write_completed_commit_missing_event(&event) => {
-            if let Some(reason) = effects.recover_missing_commit_boundary(
-                file,
-                "session_check_commit_boundary_recovered",
-            )? {
+            if let Some(reason) = effects
+                .recover_missing_commit_boundary(file, "session_check_commit_boundary_recovered")?
+            {
                 let repaired_cycle = agent_doc_cycle_state_io::load(file)?;
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(
@@ -1151,10 +1134,8 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                     event, reason
                 )));
             }
-            if let Some(marker) = crate::detect_bypassed_response_write(file)?
-            {
-                if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)?
-                {
+            if let Some(marker) = crate::detect_bypassed_response_write(file)? {
+                if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
                     if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                         return Ok(SessionCheckStatus::Interrupted(format!(
                             "[session-check] INTERRUPTED: last ops.log event is terminal, repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
@@ -1173,17 +1154,13 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                     effects.closeout_recovery_hint(file)
                 )));
             }
-            if let Some(marker) =
-                crate::detect_active_session_post_commit_drift(file)?
-            {
+            if let Some(marker) = crate::detect_active_session_post_commit_drift(file)? {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: last ops.log event is terminal, but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                     marker
                 )));
             }
-            if let Some(marker) =
-                crate::detect_uncommitted_exchange_drift(file)?
-            {
+            if let Some(marker) = crate::detect_uncommitted_exchange_drift(file)? {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: last ops.log event is terminal, but the document has uncommitted exchange changes beyond the committed snapshot: {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle.",
                     marker,

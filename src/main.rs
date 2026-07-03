@@ -3438,9 +3438,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Exchange { action } => match action {
             ExchangeAction::List { file } => exchange::list(&file),
             ExchangeAction::Remove { file, id } => exchange::remove(&file, &id),
-            ExchangeAction::AddResponse { file, header } => {
-                exchange::add_response(&file, &header)
-            }
+            ExchangeAction::AddResponse { file, header } => exchange::add_response(&file, &header),
             ExchangeAction::AddPrompt { file } => exchange::add_prompt(&file),
             ExchangeAction::Move {
                 file,

@@ -6,7 +6,8 @@
 //! effects.
 
 use agent_doc_document::model_projection::{
-    first_diff_byte, overlay_carries_unbaselined_content, project_overlay_state,
+    OverlayProjectionSource, first_diff_byte, overlay_carries_unbaselined_content,
+    project_overlay_state_with_source,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,11 +152,15 @@ pub fn resolve_crdt_merge_base(
             fallback_markdown.to_string(),
             CrdtMergeBaseSource::FallbackNoOverlay,
         ),
-        Some(bytes) => match project_overlay_state(bytes, Some(fallback_markdown)) {
-            Ok(markdown) if markdown == fallback_markdown => {
-                (markdown, CrdtMergeBaseSource::Overlay)
+        Some(bytes) => match project_overlay_state_with_source(bytes, Some(fallback_markdown)) {
+            Ok(projection)
+                if projection.source == OverlayProjectionSource::Structured
+                    && projection.markdown == fallback_markdown =>
+            {
+                (projection.markdown, CrdtMergeBaseSource::Overlay)
             }
-            Ok(overlay_md) => {
+            Ok(projection) if projection.source == OverlayProjectionSource::Structured => {
+                let overlay_md = projection.markdown;
                 events.push(CrdtMergeBaseEvent::OverlayStale {
                     overlay_len: overlay_md.len(),
                     fallback_len: fallback_markdown.len(),
@@ -187,11 +192,27 @@ pub fn resolve_crdt_merge_base(
                     )
                 }
             }
+            Ok(projection) => {
+                let OverlayProjectionSource::RebuiltFromFallback { error } = projection.source
+                else {
+                    unreachable!("structured overlay projections are handled above");
+                };
+                events.push(CrdtMergeBaseEvent::OverlayDecodeError {
+                    error,
+                    baseline_len: fallback_markdown.len(),
+                });
+                rebuild_overlay_to_baseline = true;
+                (
+                    projection.markdown,
+                    CrdtMergeBaseSource::FallbackOverlayDecodeError,
+                )
+            }
             Err(err) => {
                 events.push(CrdtMergeBaseEvent::OverlayDecodeError {
                     error: err.to_string(),
                     baseline_len: fallback_markdown.len(),
                 });
+                rebuild_overlay_to_baseline = true;
                 (
                     fallback_markdown.to_string(),
                     CrdtMergeBaseSource::FallbackOverlayDecodeError,
@@ -364,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_base_falls_back_without_rebuild_on_decode_error() {
+    fn merge_base_falls_back_and_rebuilds_on_foreign_overlay_state() {
         let fallback = "baseline\n";
 
         let resolved = resolve_crdt_merge_base(Some(b"not a crdt state"), fallback, false);
@@ -374,7 +395,7 @@ mod tests {
             resolved.base.source,
             CrdtMergeBaseSource::FallbackOverlayDecodeError
         );
-        assert!(!resolved.rebuild_overlay_to_baseline);
+        assert!(resolved.rebuild_overlay_to_baseline);
         assert_eq!(decode_base_markdown(&resolved.base), fallback);
         assert!(matches!(
             resolved.events.as_slice(),

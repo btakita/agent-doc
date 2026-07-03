@@ -375,6 +375,23 @@ pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Optio
     if head_norm == working_norm {
         return None;
     }
+    let replace_exchange_with_head = || {
+        let start = working_exchange.open_end;
+        let end = working_exchange.close_start;
+        if !(start <= end
+            && end <= working.len()
+            && working.is_char_boundary(start)
+            && working.is_char_boundary(end))
+        {
+            return None;
+        }
+        let mut out = working.to_string();
+        out.replace_range(start..end, head_body);
+        Some(out)
+    };
+    if stale_prompt_targets_are_committed_queue_echoes(head_body, working_body) {
+        return replace_exchange_with_head();
+    }
     let head_lines: HashSet<&str> = head_norm
         .lines()
         .map(str::trim)
@@ -398,18 +415,156 @@ pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Optio
     {
         return None;
     }
-    let start = working_exchange.open_end;
-    let end = working_exchange.close_start;
-    if !(start <= end
-        && end <= working.len()
-        && working.is_char_boundary(start)
-        && working.is_char_boundary(end))
-    {
+    replace_exchange_with_head()
+}
+
+fn stale_prompt_targets_are_committed_queue_echoes(head_body: &str, working_body: &str) -> bool {
+    let (head_without_queue_proofs, _) = remove_committed_queue_prompt_proofs(head_body);
+    let (working_without_queue_proofs, _) = remove_committed_queue_prompt_proofs(working_body);
+    let response_headings = response_heading_match_keys(&head_without_queue_proofs);
+    let (working_without_stale_prompts, removed_prompt_target) = remove_stale_prompt_target_lines(
+        &working_without_queue_proofs,
+        &head_without_queue_proofs,
+        &response_headings,
+    );
+    if !removed_prompt_target {
+        return false;
+    }
+    compact_exchange_for_compare(&head_without_queue_proofs)
+        == compact_exchange_for_compare(&working_without_stale_prompts)
+}
+
+fn remove_committed_queue_prompt_proofs(body: &str) -> (String, bool) {
+    let mut out = String::with_capacity(body.len());
+    let mut in_queue_prompt = false;
+    let mut removed = false;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed == "> **Queue prompt:**" {
+            in_queue_prompt = true;
+            removed = true;
+            continue;
+        }
+        if !in_queue_prompt {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with('>') {
+            removed = true;
+            continue;
+        } else {
+            in_queue_prompt = false;
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if body.ends_with('\n') || out.is_empty() {
+        (out, removed)
+    } else {
+        (out.trim_end_matches('\n').to_string(), removed)
+    }
+}
+
+fn remove_stale_prompt_target_lines(
+    body: &str,
+    head_without_queue_proofs: &str,
+    response_headings: &[String],
+) -> (String, bool) {
+    let head_prompt_targets: HashSet<String> = head_without_queue_proofs
+        .lines()
+        .filter(|line| line.trim_start().starts_with('❯'))
+        .map(|line| line.trim().to_string())
+        .collect();
+    let mut out = String::with_capacity(body.len());
+    let mut removed = false;
+    for line in body.lines() {
+        if line.trim_start().starts_with('❯')
+            && !head_prompt_targets.contains(line.trim())
+            && prompt_target_matches_response_heading(line, response_headings)
+        {
+            removed = true;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if body.ends_with('\n') || out.is_empty() {
+        (out, removed)
+    } else {
+        (out.trim_end_matches('\n').to_string(), removed)
+    }
+}
+
+fn response_heading_match_keys(body: &str) -> Vec<String> {
+    body.lines()
+        .filter_map(response_heading_match_key)
+        .collect()
+}
+
+fn response_heading_match_key(line: &str) -> Option<String> {
+    let normalized = normalize_transient_agent_doc_markers(line);
+    let trimmed = normalized.trim_start();
+    let hash_count = trimmed.chars().take_while(|&ch| ch == '#').count();
+    if !(1..=6).contains(&hash_count) {
         return None;
     }
-    let mut out = working.to_string();
-    out.replace_range(start..end, head_body);
-    Some(out)
+    let rest = trimmed.get(hash_count..)?.trim_start();
+    let title = rest.strip_prefix("Re:")?.trim();
+    let title = title
+        .split(" — ")
+        .next()
+        .unwrap_or(title)
+        .split(" - ")
+        .next()
+        .unwrap_or(title);
+    let key = prompt_match_key(title);
+    if key.is_empty() { None } else { Some(key) }
+}
+
+fn prompt_target_matches_response_heading(line: &str, response_headings: &[String]) -> bool {
+    let prompt = prompt_match_key(&normalized_prompt_line(line));
+    if prompt.is_empty() {
+        return false;
+    }
+    response_headings.iter().any(|heading| {
+        if heading.is_empty() {
+            return false;
+        }
+        if prompt == *heading || prompt.contains(heading) || heading.contains(&prompt) {
+            return true;
+        }
+        let heading_tokens = heading.split_whitespace().collect::<Vec<_>>();
+        heading_tokens.len() >= 2 && heading_tokens.iter().all(|token| prompt.contains(token))
+    })
+}
+
+fn prompt_match_key(text: &str) -> String {
+    text.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn compact_exchange_for_compare(body: &str) -> Vec<String> {
+    normalize_transient_agent_doc_markers(body)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.starts_with("<!-- agent:boundary:"))
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn prompt_bearing_user_changes_between(
@@ -894,6 +1049,79 @@ mod tests {
         assert!(
             reconcile_postcommit_exchange_to_head(&reconciled, &head).is_none(),
             "reconcile must converge"
+        );
+    }
+
+    #[test]
+    fn reconcile_postcommit_exchange_adopts_head_when_consumed_queue_prompt_echoes_stale_target() {
+        let head = doc_with_queue_and_exchange(
+            "- ~~do #fix1~~\n- do #fix2\n",
+            "❯ describe the project\n\n### Re: do #fix1 - gpt-5\n\n> **Queue prompt:**\n>\n> do #fix1\n\nImplemented.",
+        );
+        let working = doc_with_queue_and_exchange(
+            "- ~~do #fix1~~\n- do #fix2\n",
+            "❯ describe the project\n\n### Re: do #fix1 - gpt-5 (HEAD)\nImplemented.\n❯ do #fix1",
+        );
+
+        let reconciled = reconcile_postcommit_exchange_to_head(&working, &head)
+            .expect("stale consumed queue prompt target must reconcile to HEAD exchange");
+
+        assert!(
+            !reconciled.contains("❯ do #fix1"),
+            "stale prompt target must be removed:\n{reconciled}"
+        );
+        assert!(
+            reconciled.contains("> do #fix1"),
+            "committed queue prompt proof should be preserved:\n{reconciled}"
+        );
+        assert!(
+            reconciled.contains("❯ describe the project"),
+            "baseline prompt target should be preserved:\n{reconciled}"
+        );
+        assert!(
+            reconciled.contains("- ~~do #fix1~~"),
+            "queue mutation outside exchange must be preserved:\n{reconciled}"
+        );
+    }
+
+    #[test]
+    fn reconcile_postcommit_exchange_adopts_head_when_batch_prompt_echo_is_only_live_drift() {
+        let head = doc_with_queue_and_exchange(
+            "",
+            "❯ why did the queue stop?\n\n### Re: queued batch - gpt-5\n\n> **Queue prompt:**\n>\n> do [#cspe]\n>\n> do [#ctes]\n\nChanged paths: specs.md.\nCommands: cargo test queue_batch.\nVerification: passed.",
+        );
+        let working = doc_with_queue_and_exchange(
+            "",
+            "❯ why did the queue stop?\n\n### Re: queued batch - gpt-5 (HEAD)\n\n> **Queue prompt:**\n>\n> do [#cspe]\n>\n> do [#ctes]\n\nChanged paths: specs.md.\nCommands: cargo test queue_batch.\nVerification: passed.\n❯ Handle the whole queued batch in this response.",
+        );
+
+        let reconciled = reconcile_postcommit_exchange_to_head(&working, &head)
+            .expect("batch prompt target echo must reconcile to HEAD exchange");
+
+        assert!(
+            !reconciled.contains("Handle the whole queued batch"),
+            "stale batch prompt target must be removed:\n{reconciled}"
+        );
+        assert!(
+            reconciled.contains("> do [#cspe]"),
+            "committed queue proof should remain:\n{reconciled}"
+        );
+    }
+
+    #[test]
+    fn reconcile_postcommit_exchange_rejects_unrelated_late_prompt_target() {
+        let head = doc_with_queue_and_exchange(
+            "",
+            "❯ Please reply\n\n### Re: Please reply - gpt-5\nAnswered only the original prompt.",
+        );
+        let working = doc_with_queue_and_exchange(
+            "",
+            "❯ Please reply\n\n### Re: Please reply - gpt-5 (HEAD)\nAnswered only the original prompt.\n❯ What remains after this response?",
+        );
+
+        assert!(
+            reconcile_postcommit_exchange_to_head(&working, &head).is_none(),
+            "an unrelated late prompt target must stay visible for session-check"
         );
     }
 

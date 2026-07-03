@@ -227,7 +227,9 @@ pub(crate) use agent_doc_route_io::busy_pane::{
     attempt_busy_existing_pane_auto_fix, attempt_busy_existing_pane_interrupt_recovery,
     ensure_existing_pane_ready_for_dispatch,
 };
+use agent_doc_route_io::dispatch_target::register_dispatch_target;
 use agent_doc_route_io::pane_provenance::pane_route_provenance;
+use agent_doc_route_io::restart_handoff::wait_for_busy_restart_handoff;
 use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup_debounce::await_idle;
 pub(crate) use agent_doc_route_io::startup_ready::{
@@ -260,6 +262,7 @@ use agent_doc_turn::closeout_recovery::{
 use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 use tmux_router::Tmux;
 
+#[cfg(test)]
 use agent_doc_session_registry_io::registration as sessions;
 use std::cell::Cell;
 

@@ -1373,6 +1373,7 @@ dependencies = [
  "agent-doc-supervisor-io",
  "agent-doc-sync",
  "agent-doc-sync-io",
+ "agent-doc-tmux",
  "agent-doc-tmux-io",
  "agent-doc-turn-executor-tmux",
  "anyhow",

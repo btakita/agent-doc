@@ -5,7 +5,9 @@
 //! queue policy, or supervisor process startup.
 
 pub mod busy_pane;
+pub mod dispatch_target;
 pub mod pane_provenance;
+pub mod restart_handoff;
 pub mod session_resolution;
 pub mod startup_debounce;
 pub mod startup_harness;

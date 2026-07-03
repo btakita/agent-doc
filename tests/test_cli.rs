@@ -1110,7 +1110,9 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-route-io/src/startup_ready.rs",
         "agent-doc-route-io/src/startup_sync.rs",
         "agent-doc-route-io/src/busy_pane.rs",
+        "agent-doc-route-io/src/dispatch_target.rs",
         "agent-doc-route-io/src/pane_provenance.rs",
+        "agent-doc-route-io/src/restart_handoff.rs",
         "agent-doc-route-io/src/supervisor_runtime.rs",
         "agent-doc-orchestration/src/route/cycle_ack.rs",
         "agent-doc-orchestration/src/route/startup.rs",
@@ -13065,6 +13067,8 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
     let route_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
             .unwrap();
+    let route_dispatch_target =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     for forbidden in [
         "pub(crate) fn canonical_dispatch_file(",
         "pub(crate) fn canonical_registered_file(",
@@ -13075,6 +13079,7 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
         "pub(crate) fn ensure_dispatch_target_can_bind_file(",
         "pub(crate) fn pane_registration_matches_file(",
         "pub(crate) fn ensure_dispatch_target_matches_file(",
+        "pub(crate) fn register_dispatch_target(",
     ] {
         assert!(
             !route_dispatch.contains(forbidden),
@@ -13086,6 +13091,13 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
             && route_dispatch.contains("dispatch_registry::canonical_dispatch_file(")
             && route_dispatch.contains("dispatch_registry::ensure_dispatch_target_matches_file("),
         "route/dispatch.rs should call focused session dispatch-registry IO directly"
+    );
+    assert!(
+        route_dispatch_target.contains("pub fn register_dispatch_target(")
+            && route_dispatch_target
+                .contains("dispatch_registry::ensure_dispatch_target_can_bind_file(")
+            && route_dispatch_target.contains("registration::register_full_with_cwd_in("),
+        "agent-doc-route-io dispatch_target should own route dispatch target registry binding"
     );
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -13901,8 +13913,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .unwrap();
     let route_busy_pane_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/busy_pane.rs")).unwrap();
+    let route_dispatch_target_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     let route_pane_provenance_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_provenance.rs")).unwrap();
+    let route_restart_handoff_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/restart_handoff.rs")).unwrap();
     let route_supervisor_runtime_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/supervisor_runtime.rs"))
             .unwrap();
@@ -14204,10 +14220,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         !route_source.contains("fn query_supervisor_runtime(")
             && !route_source.contains("fn restart_via_supervisor(")
             && !route_source.contains("fn pane_route_provenance(")
+            && !route_dispatch_source.contains("fn register_dispatch_target(")
+            && !route_pane_resolution_source.contains("fn wait_for_busy_restart_handoff(")
             && route_supervisor_runtime_source.contains("pub fn query_supervisor_runtime(")
             && route_supervisor_runtime_source.contains("pub fn restart_via_supervisor(")
-            && route_pane_provenance_source.contains("pub fn pane_route_provenance("),
-        "shared route supervisor/provenance IO should live in agent-doc-route-io"
+            && route_pane_provenance_source.contains("pub fn pane_route_provenance(")
+            && route_dispatch_target_source.contains("pub fn register_dispatch_target(")
+            && route_restart_handoff_source.contains("pub fn wait_for_busy_restart_handoff("),
+        "shared route supervisor/provenance/dispatch-target/restart-handoff IO should live in agent-doc-route-io"
     );
     assert!(
         !manifest_dir
@@ -18831,6 +18851,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-route-io/src/startup_sync.rs",
         "agent-doc-route-io/src/pane_provenance.rs",
+        "agent-doc-route-io/src/dispatch_target.rs",
+        "agent-doc-route-io/src/restart_handoff.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in [
@@ -18862,6 +18884,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_sync.rs")).unwrap();
     let route_pane_provenance =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_provenance.rs")).unwrap();
+    let route_dispatch_target =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     let route_dispatch =
@@ -18914,7 +18938,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && route_pane_provenance.contains("agent_doc_tmux_io::target_current_command(")
             && route_source.contains("agent_doc_tmux_io::target_current_command(")
             && route_dispatch.contains("agent_doc_tmux_io::target_current_command(")
-            && route_dispatch.contains("agent_doc_tmux_io::target_window_id(")
+            && route_dispatch_target.contains("agent_doc_tmux_io::target_window_id(")
             && route_startup_sync.contains("agent_doc_tmux_io::target_window_id(")
             && tmux_io_source.contains("pub fn current_pane_id_from_env_or_tmux(")
             && claim_source.contains("agent_doc_tmux_io::pane_pid(")

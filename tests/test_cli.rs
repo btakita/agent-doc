@@ -8997,7 +8997,7 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
             "agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight",
         ),
         (
-            "agent-doc-route-io/src/dispatch_only.rs",
+            "agent-doc-route-io/src/dispatch_only/proof.rs",
             "agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending",
         ),
     ] {

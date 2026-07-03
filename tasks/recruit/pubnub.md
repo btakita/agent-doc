@@ -8,6 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
+queue: start
 ---
 
 ## Status
@@ -96,17 +97,50 @@ The through-line: **"I've spent 20+ years on real-time and reactive systems, and
 - Keep the "why not placed yet" answer confident and brief — it's a fit/confidence check, not a defense.
 
 Sources: [PubNub careers](https://www.pubnub.com/company/careers/), [Rama Sudha (LinkedIn)](https://sg.linkedin.com/in/rama-sudha-a328632b), [Built In — PubNub jobs](https://builtin.com/company/pubnub/jobs), [Real-time messaging](https://www.pubnub.com/real-time-messaging-and-events/), [Global network infra](https://www.pubnub.com/global-network-infrastructure/), [MCP server](https://www.pubnub.com/networking-mcp-server/), [Illuminate](https://www.pubnub.com/decision-intelligence-software/), [Concepts](https://www.pubnub.com/docs/general/concepts).
-<!-- agent:boundary:50a82602 -->
+❯ I would like to make an integration with the Signal Patchboard project. But I have not yet started. I have started with lazily and signal-space. Would this be worth bringing up or should I implement before the technical round if I move on?
+
+### Re: Should you bring up the Signal Patchboard / PubNub integration? — opus-4-8
+
+**Yes — bring it up, briefly, as enthusiasm — but do NOT build it before this call.** Here's the reasoning, because the two halves of your question have different answers.
+
+**Why it's a strong thing to mention (to a recruiter):** it's genuine "why PubNub" signal. Your `patchboard` already has a transport-agnostic realtime I/O layer designed in (`#spb3 patchboard-io`: webhook/WebSocket ingress + egress "to notify other systems in realtime", with `IoBinding` transport descriptors in the spec). **PubNub's pub/sub is a textbook drop-in transport for that layer** — subscribe → signal on ingress, signal-delta → publish on egress. So you're not inventing a reason to like them; you already built the socket their product plugs into. That reads as "this person thinks in our domain," which is exactly the fit signal a recruiter screen is filtering for.
+
+**How to say it (one or two sentences, then stop):**
+> "One reason PubNub stands out to me: I'm building a realtime signal patchboard — reactive signal graphs with a transport-agnostic I/O layer — and PubNub's pub/sub is a natural transport for it. I've got the reactive core (lazily, signal-space) working; the patchboard's realtime I/O host is where a transport like PubNub would slot right in."
+
+Be honest about state: **lazily and signal-space are real and working; patchboard is in active development; the PubNub connector specifically is not started.** Say "designing/planning," never "built." Overclaiming a demo you don't have is the one way this backfires.
+
+### Re: Build it before the technical round? — opus-4-8
+
+**Conditional yes — but gate it on advancing, not on this call.** Don't invest build time before you know (a) you've passed the screen and (b) it's actually the Rust core-systems role.
+
+If you *do* advance, a tight PubNub-transport POC is a **high-ROI differentiator** for a technical round — walking in with working code that rides their platform is far stronger than talking about it. And it's cheap because the hard part already exists: `#spb3` already has the WebSocket transport spine, so PubNub is just another connector.
+
+**Scope it ruthlessly** so it's a weekend, not a project:
+- One channel **in** (PubNub subscribe → `patchboard-io` ingress → signal) and one channel **out** (signal delta → PubNub publish), on their **free tier**.
+- Reuse the existing `IoBinding` / WebSocket path; don't build the Slint UI for this — a headless rack + console trace is enough to demo.
+- Keep it as a `patchboard-io` connector module, not a fork.
+
+I've filed this as **`#pubnubpoc` [recommended]** in the backlog with those exact guardrails (don't build before the call or before role/timeline is confirmed).
+
+### Re: Net recommendation — opus-4-8
+
+1. **In the call:** mention it in ~2 sentences as your "why PubNub," framed as designing/planning. It strengthens fit signal at zero risk.
+2. **Don't build first.** A recruiter screen doesn't reward a prototype, and you'd be investing before confirming the role/timeline.
+3. **After you advance (technical round):** build the tight `#pubnubpoc` connector — that's where working code pays off.
+<!-- agent:boundary:1229b043 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+/goal Implement backlog item(s): #bt09
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#pubnubpoc] [recommended] IF advancing past the PubNub recruiter screen to a technical round: build a tight patchboard-io PubNub-transport POC — one channel ingress (PubNub subscribe -> signal) + one channel egress (signal delta -> PubNub publish) on their free tier, reusing the #spb3 IoBinding/WebSocket spine. Weekend-sized; high-ROI technical-round differentiator. Do NOT build before the recruiter call or before role/timeline is confirmed.
 <!-- /agent:backlog -->
 
 ## Icebox

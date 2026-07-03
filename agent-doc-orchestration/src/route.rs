@@ -162,16 +162,15 @@ use std::time::{Duration, Instant};
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativePromptReadyBarrierFacts, CloseoutBlockDispatchDecision,
-    CloseoutBlockDispatchFacts, DegradedAuthoritativeActorDirectSubmit, DispatchDrainRetryDecision,
-    DispatchOnlyBusyRefusalFacts, DispatchOnlyReopenDelivery, PromptReadyBarrierDecision,
-    ReopenMode, RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
-    RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts,
-    RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
-    StartingTimeoutActorFacts, actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
+    CloseoutBlockDispatchFacts, DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts,
+    DispatchOnlyReopenDelivery, PromptReadyBarrierDecision, ReopenMode, RetryBudget,
+    RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts, RouteCloseoutDrainOutcome,
+    RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts, RoutedDispatchStartProof,
+    RoutedReopenFacts, RoutedReopenGuardReason, StartingTimeoutActorFacts,
+    actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
     authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
-    classify_closeout_block_dispatch, decide_authoritative_reopen,
-    degraded_authoritative_actor_direct_submit_log_message, dispatch_drain_retry_decision,
+    classify_closeout_block_dispatch, decide_authoritative_reopen, dispatch_drain_retry_decision,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_probe_active_turn_cue,
@@ -195,6 +194,10 @@ use agent_doc_controller::dispatch::{
     BusyPaneAutoFixFacts, BusyPaneAutoFixOutcome,
     busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
 };
+#[cfg(test)]
+use agent_doc_controller::dispatch::{
+    DegradedAuthoritativeActorDirectSubmit, degraded_authoritative_actor_direct_submit_log_message,
+};
 use agent_doc_controller_io::starting_actor_timeout::{
     StartingActorTimeoutLogDecision, clear_starting_actor_timeout_record,
     record_starting_actor_timeout, starting_actor_timeout_record_identity_matches,
@@ -206,8 +209,7 @@ use agent_doc_route_io::authoritative_actor::{
     AuthoritativeActorDispatchTarget, RouteDispatchAuthorization, actor_dispatch_state,
     authoritative_actor_dispatch_recovery_hint, authoritative_actor_ready_facts_from_target,
     authorize_controller_dispatch, current_generation_ready_prompt_proven,
-    dispatch_only_can_use_degraded_authoritative_actor, load_authoritative_actor_binding,
-    load_authoritative_actor_dispatch_target, load_authoritative_actor_for_registered_pane,
+    load_authoritative_actor_binding, load_authoritative_actor_dispatch_target,
     mark_starting_actor_timeout_blocked, promote_starting_authoritative_actor_if_dispatch_ready,
     recover_starting_timeout_blocked_actor_if_dispatch_ready, route_dispatch_deduped_pane,
     route_starting_actor_not_ready_log_line,
@@ -215,7 +217,9 @@ use agent_doc_route_io::authoritative_actor::{
 #[cfg(test)]
 use agent_doc_route_io::authoritative_actor::{
     ManagedCapabilityProofStatus, authoritative_actor_dispatch_can_queue_optimistically,
-    authoritative_actor_start_wait_terminal_state, managed_capability_proof_status,
+    authoritative_actor_start_wait_terminal_state,
+    dispatch_only_can_use_degraded_authoritative_actor,
+    load_authoritative_actor_for_registered_pane, managed_capability_proof_status,
     tracked_harness_clear_requires_fresh_restart,
 };
 pub(crate) use agent_doc_route_io::cycle_ack::{
@@ -228,9 +232,11 @@ use agent_doc_route_io::dispatch::{
     BusyRouteQueuedDiagnosticFacts, RouteDispatchBugReportFacts, RouteDispatchEffects,
     dispatch_existing_managed_reopen, dispatch_via_supervisor_ipc,
 };
+#[cfg(test)]
+use agent_doc_route_io::dispatch_only::dispatch_only_reopen_existing_pane;
 pub(crate) use agent_doc_route_io::dispatch_only::{
     DispatchOnlyQueuedPromptOutcome, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
-    dispatch_only_reopen_existing_pane, dispatch_only_send_reopen,
+    dispatch_only_send_reopen,
 };
 #[cfg(test)]
 use agent_doc_route_io::dispatch_recovery::resolve_fresh_dispatch_target_after_ready_wait;
@@ -257,10 +263,11 @@ use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registrati
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::pane_registration_matches_file;
 #[cfg(test)]
+use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason;
+#[cfg(test)]
 use agent_doc_supervisor::route_runtime::{RouteActorState, SupervisorRuntime};
 use agent_doc_supervisor::route_runtime::{
     SupervisorHealth,
-    authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason,
     authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
 };
 use agent_doc_tmux::is_first_column;
@@ -840,17 +847,36 @@ pub fn run_with_tmux_with_options(
             &harness,
             &mut created_panes,
         ),
-        RouteMode::DispatchOnly => resolve_or_create_pane_dispatch_only(
-            tmux,
-            file,
-            pane,
-            col_args,
-            &session_id,
-            &file_path,
-            &target_session,
-            &harness,
-            &mut created_panes,
-        ),
+        RouteMode::DispatchOnly => {
+            agent_doc_route_io::pane_resolution::resolve_or_create_pane_dispatch_only(
+                tmux,
+                file,
+                pane,
+                col_args,
+                &session_id,
+                &file_path,
+                &target_session,
+                &harness,
+                &mut created_panes,
+                |split_before, baseline, prompt_context, actor| {
+                    route_via_authoritative_actor(
+                        tmux,
+                        file,
+                        &session_id,
+                        &file_path,
+                        &target_session,
+                        split_before,
+                        &harness,
+                        baseline,
+                        prompt_context,
+                        true,
+                        actor,
+                    )
+                },
+                route_dispatch_only_effects(),
+                route_startup_effects(),
+            )
+        }
     };
 
     match pane_id {

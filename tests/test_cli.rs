@@ -9637,7 +9637,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 42,
+        ledger_rows.len() >= 43,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -14613,6 +14613,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && !route_pane_resolution_source.contains("fn rescue_from_stash(")
             && !route_pane_resolution_source.contains("fn optimistic_busy_pane_dispatch(")
             && !route_pane_resolution_source.contains("fn retry_route_after_busy_pane_auto_fix(")
+            && route_pane_resolution_source.contains(
+                "#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub(crate) fn resolve_or_create_pane_dispatch_only("
+            )
             && route_supervisor_runtime_source.contains("pub fn query_supervisor_runtime(")
             && route_supervisor_runtime_source.contains("pub fn restart_via_supervisor(")
             && route_pane_provenance_source.contains("pub fn pane_route_provenance(")
@@ -14631,6 +14634,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_pane_resolution_io_source.contains("pub fn controller_dispatch_actor_state(")
             && route_pane_resolution_io_source
                 .contains("pub fn recover_dispatch_only_authoritative_waiting_input(")
+            && route_pane_resolution_io_source
+                .contains("pub fn resolve_or_create_pane_dispatch_only(")
             && route_pane_resolution_io_source.contains("pub fn rescue_from_stash(")
             && route_pane_resolution_io_source.contains("DispatchOnlyRouteEffects")
             && route_pane_resolution_io_source.contains("dispatch_only_send_reopen(")

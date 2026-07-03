@@ -12,6 +12,7 @@ use agent_doc_session_registry_io::dispatch_registry::{
     deregister_dispatch_registration, load_dispatch_registry, lookup_dispatch_registration,
 };
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_or_create_pane_dispatch_only(
     tmux: &Tmux,

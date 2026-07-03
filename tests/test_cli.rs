@@ -13962,6 +13962,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_dispatch_recovery_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_recovery.rs"))
             .unwrap();
+    let route_dispatch_start_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_start.rs")).unwrap();
     let route_dispatch_target_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     let route_pane_provenance_source =
@@ -14032,6 +14034,48 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("starting_actor_timeout_record_matches")
             && route_source.contains("clear_starting_actor_timeout_record"),
         "route.rs should import starting-actor timeout sidecar IO from agent-doc-controller-io directly"
+    );
+    for required_snippet in [
+        "pub enum RoutedDispatchStartTracker",
+        "pub fn codex_dispatch_start_tracking_enabled(",
+        "fn codex_hooks_visible_from_file(",
+        "fn codex_tracking_roots(",
+        "pub fn build_routed_dispatch_start_tracker(",
+        "fn codex_routed_dispatch_start_proof_facts",
+        "fn opencode_pane_dispatch_start_proof_facts",
+        "pub fn wait_for_routed_dispatch_start(",
+        "agent_doc_codex_hook_io::load_latest_prompt_state_for_file(",
+        "agent_doc_tmux_io::capture_pane(",
+        "classify_codex_routed_dispatch_start_proof(",
+        "opencode_pane_state_changed_from_idle(",
+    ] {
+        assert!(
+            route_dispatch_start_source.contains(required_snippet),
+            "agent-doc-route-io dispatch_start should own routed dispatch-start tracking IO: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "enum RoutedDispatchStartTracker",
+        "fn codex_dispatch_start_tracking_enabled(",
+        "fn codex_hooks_visible_from_file(",
+        "fn codex_tracking_roots(",
+        "fn build_routed_dispatch_start_tracker(",
+        "fn codex_routed_dispatch_start_proof_facts",
+        "fn opencode_pane_dispatch_start_proof_facts",
+        "fn wait_for_routed_dispatch_start(",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own routed dispatch-start tracking IO after it moves to agent-doc-route-io: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_source.contains("use agent_doc_route_io::dispatch_start::{")
+            && route_source.contains("RoutedDispatchStartTracker")
+            && route_source.contains("build_routed_dispatch_start_tracker")
+            && route_source.contains("codex_dispatch_start_tracking_enabled")
+            && route_source.contains("wait_for_routed_dispatch_start"),
+        "route.rs should call focused route dispatch-start IO directly"
     );
     for required_snippet in [
         "pub enum DispatchActorState",
@@ -14320,11 +14364,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
-            && route_source.contains("CodexRoutedDispatchStartProofFacts")
             && route_source.contains("classify_dispatch_start_proof")
-            && route_source.contains("classify_codex_routed_dispatch_start_proof")
-            && route_source.contains("OpenCodePaneDispatchStartProofFacts")
-            && route_source.contains("opencode_pane_state_changed_from_idle")
             && route_source.contains("DirectPaneSubmitStatus as CommandDispatchStatus")
             && route_source.contains("RetryBudget")
             && route_source.contains("authoritative_actor_ready_retry_budget")

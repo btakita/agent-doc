@@ -1360,6 +1360,7 @@ dependencies = [
 name = "agent-doc-route-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-codex-hook-io",
  "agent-doc-controller",
  "agent-doc-debounce",
  "agent-doc-fs",

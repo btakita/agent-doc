@@ -49,6 +49,7 @@ agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", versi
 anyhow = "1"
 fs2 = "0.4"
 tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+tracing = "0.1"
 
 [dev-dependencies]
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }

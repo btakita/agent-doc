@@ -3,12 +3,22 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+use crate::dispatch_only::{
+    DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions, dispatch_only_send_reopen,
+};
+use crate::dispatch_recovery::{
+    resolve_fresh_dispatch_target_after_ready_wait, wait_for_starting_pane_recovery_target,
+};
+use crate::dispatch_target::register_dispatch_target;
 use crate::pane_provenance::pane_route_provenance;
+use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
-    DispatchActorState, DispatchRuntimeHealth, StartupMissRouteFacts,
+    DispatchActorState, DispatchOnlyReopenDelivery, DispatchRuntimeHealth, StartupMissRouteFacts,
+    is_stash_window_name,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::route_runtime::SupervisorHealth;
+use agent_doc_supervisor::startup_miss::StartingPaneRecoveryTarget;
 use tmux_router::Tmux;
 
 pub fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
@@ -191,6 +201,155 @@ pub fn should_preserve_failed_route_pane(
         })
         .unwrap_or(false)
         && tmux.pane_alive(pane_id)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn recover_dispatch_only_authoritative_waiting_input(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    split_before: bool,
+    harness: &HarnessConfig,
+    pane: &str,
+    generation: u64,
+    effects: DispatchOnlyRouteEffects,
+) -> Result<String> {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_waiting_input_restart file={} pane={} harness={} generation={}",
+            file.display(),
+            pane,
+            harness.binary,
+            generation
+        ),
+    );
+    eprintln!(
+        "[route] authoritative actor generation {} for {} is waiting for supervisor restart input on pane {} — restarting fresh once before the dispatch-only reroute",
+        generation,
+        file.display(),
+        pane
+    );
+    let initial_status =
+        agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
+            .ok()
+            .flatten();
+
+    if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
+        anyhow::bail!(
+            "authoritative actor generation {} for {} owns pane {} but route could not restart the waiting supervisor fresh. Run `agent-doc start {}` manually to recover",
+            generation,
+            file.display(),
+            pane,
+            file.display()
+        );
+    }
+
+    let dispatch_pane = match wait_for_starting_pane_recovery_target(
+        tmux,
+        file,
+        session_id,
+        pane,
+        file_path,
+        harness,
+        initial_status.as_ref(),
+    ) {
+        Some(StartingPaneRecoveryTarget::DifferentPane(recovered)) => recovered,
+        Some(StartingPaneRecoveryTarget::SamePane) | None => {
+            resolve_fresh_dispatch_target_after_ready_wait(tmux, session_id, pane, file_path, None)?
+        }
+    };
+
+    rescue_from_stash(
+        tmux,
+        &dispatch_pane,
+        session_id,
+        file_path,
+        target_session,
+        split_before,
+    );
+    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+    dispatch_only_send_reopen(
+        tmux,
+        file,
+        session_id,
+        &dispatch_pane,
+        file_path,
+        harness,
+        DispatchOnlySendReopenOptions {
+            delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            queue_prompt_text: None,
+            effects,
+        },
+    )
+}
+
+/// Rescue a pane from a stash window back to the agent-doc window.
+/// Only rescues if the pane is in the target session -- never swaps across sessions.
+///
+/// Returns `true` when the pane was actually moved out of a stash window so callers
+/// can re-evaluate state that depends on pane location (e.g. Starting->Ready
+/// promotion after the rescue makes the pane visible). Returns `false` when the
+/// rescue was a no-op (pane not in stash, or session guard tripped).
+pub fn rescue_from_stash(
+    tmux: &Tmux,
+    pane_id: &str,
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    split_before: bool,
+) -> bool {
+    let pane_session = agent_doc_tmux_io::target_session_name(tmux, pane_id).unwrap_or_default();
+    if pane_session != target_session {
+        eprintln!(
+            "[route] Pane {} is in session '{}', not target '{}' — skipping stash rescue",
+            pane_id, pane_session, target_session
+        );
+        return false;
+    }
+
+    let pane_win_name = agent_doc_tmux_io::target_window_name(tmux, pane_id).unwrap_or_default();
+
+    if is_stash_window_name(&pane_win_name) {
+        tracing::debug!(pane_id, window = %pane_win_name, target_session, "route: rescuing pane from stash");
+        eprintln!(
+            "[route] Pane {} is in stash window '{}', rescuing to agent-doc window",
+            pane_id, pane_win_name
+        );
+        let agent_doc_window = format!("{}:agent-doc", target_session);
+        let target_panes = tmux
+            .list_window_panes(&agent_doc_window)
+            .unwrap_or_default();
+        let target = if split_before {
+            target_panes.first()
+        } else {
+            target_panes.last()
+        };
+        let mut moved = false;
+        if let Some(target) = target {
+            let join_flag = if split_before { "-dbh" } else { "-dh" };
+            match agent_doc_tmux_io::join_pane_guarded(
+                tmux,
+                pane_id,
+                target,
+                target_session,
+                join_flag,
+            ) {
+                Ok(()) => {
+                    eprintln!("[route] Rescued pane {} via join-pane", pane_id);
+                    moved = true;
+                }
+                Err(e) => eprintln!("[route] join-pane rescue failed for {} ({})", pane_id, e),
+            }
+        }
+        if let Err(e) = register_dispatch_target(tmux, session_id, pane_id, file_path) {
+            eprintln!("[route] warning: re-register failed: {}", e);
+        }
+        return moved;
+    }
+    false
 }
 
 pub fn controller_dispatch_actor_state(

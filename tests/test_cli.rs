@@ -14606,6 +14606,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && !route_dispatch_source
                 .contains("fn resolve_fresh_dispatch_target_after_ready_wait(")
             && !route_pane_resolution_source.contains("fn wait_for_busy_restart_handoff(")
+            && !route_pane_resolution_source
+                .contains("fn recover_dispatch_only_authoritative_waiting_input(")
+            && !route_pane_resolution_source.contains("fn rescue_from_stash(")
             && route_supervisor_runtime_source.contains("pub fn query_supervisor_runtime(")
             && route_supervisor_runtime_source.contains("pub fn restart_via_supervisor(")
             && route_pane_provenance_source.contains("pub fn pane_route_provenance(")
@@ -14621,7 +14624,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
                 .contains("pub fn fail_if_recent_session_loss_window(")
             && route_pane_resolution_io_source.contains("pub fn is_agent_process(")
             && route_pane_resolution_io_source.contains("pub fn cleanup_failed_route_panes(")
-            && route_pane_resolution_io_source.contains("pub fn controller_dispatch_actor_state("),
+            && route_pane_resolution_io_source.contains("pub fn controller_dispatch_actor_state(")
+            && route_pane_resolution_io_source
+                .contains("pub fn recover_dispatch_only_authoritative_waiting_input(")
+            && route_pane_resolution_io_source.contains("pub fn rescue_from_stash(")
+            && route_pane_resolution_io_source.contains("DispatchOnlyRouteEffects")
+            && route_pane_resolution_io_source.contains("dispatch_only_send_reopen("),
         "shared route supervisor/provenance/dispatch-target/recovery/restart-handoff/pane-resolution helper IO should live in agent-doc-route-io"
     );
     for forbidden_snippet in [
@@ -19454,10 +19462,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let route_session_resolution =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/session_resolution.rs"))
             .unwrap();
-    let route_pane_resolution = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
-    )
-    .unwrap();
+    let route_pane_resolution_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
     let route_startup =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup.rs")).unwrap();
     let route_startup_sync =
@@ -19506,8 +19512,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && route_session_resolution.contains("agent_doc_tmux_io::target_session_name(")
             && route_session_resolution.contains("agent_doc_tmux_io::target_window_name(")
             && route_session_resolution.contains("agent_doc_tmux_io::has_window_named(")
-            && route_pane_resolution.contains("agent_doc_tmux_io::target_session_name(")
-            && route_pane_resolution.contains("agent_doc_tmux_io::target_window_name(")
+            && route_pane_resolution_io.contains("agent_doc_tmux_io::target_session_name(")
+            && route_pane_resolution_io.contains("agent_doc_tmux_io::target_window_name(")
             && route_startup.contains("agent_doc_tmux_io::has_window_named(")
             && route_pane_provenance.contains("agent_doc_tmux_io::pane_pid(")
             && route_pane_provenance.contains("agent_doc_tmux_io::target_session_name(")
@@ -19526,7 +19532,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && prompt_source.contains("agent_doc_tmux_io::capture_pane_with_ansi(")
             && prompt_source.contains("agent_doc_tmux_io::send_key_logged(")
             && watch_source.contains("agent_doc_tmux_io::capture_pane(")
-            && route_pane_resolution.contains("agent_doc_tmux_io::join_pane_guarded(")
+            && route_pane_resolution_io.contains("agent_doc_tmux_io::join_pane_guarded(")
             && sync_source.contains("agent_doc_tmux_io::join_pane_guarded(")
             && write_source.contains("agent_doc_tmux_io::in_tmux()")
             && preflight_source.contains("agent_doc_tmux_io::in_tmux()")

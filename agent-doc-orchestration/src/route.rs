@@ -237,9 +237,8 @@ pub(crate) use agent_doc_route_io::dispatch_only::{
     DispatchOnlyQueuedPromptOutcome, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,
     dispatch_only_reopen_existing_pane, dispatch_only_send_reopen,
 };
-pub(crate) use agent_doc_route_io::dispatch_recovery::{
-    resolve_fresh_dispatch_target_after_ready_wait, wait_for_starting_pane_recovery_target,
-};
+#[cfg(test)]
+use agent_doc_route_io::dispatch_recovery::resolve_fresh_dispatch_target_after_ready_wait;
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
 use agent_doc_route_io::launch_contract::reapply_codex_launch_contract_before_reuse;
 use agent_doc_route_io::pane_provenance::pane_route_provenance;
@@ -247,7 +246,8 @@ use agent_doc_route_io::pane_provenance::pane_route_provenance;
 use agent_doc_route_io::pane_resolution::should_preserve_failed_route_pane;
 use agent_doc_route_io::pane_resolution::{
     cleanup_failed_route_panes, controller_dispatch_actor_state,
-    fail_if_recent_session_loss_window, is_agent_process, startup_miss_route_facts,
+    fail_if_recent_session_loss_window, is_agent_process,
+    recover_dispatch_only_authoritative_waiting_input, rescue_from_stash, startup_miss_route_facts,
     startup_miss_route_provenance,
 };
 use agent_doc_route_io::restart_handoff::wait_for_busy_restart_handoff;
@@ -270,7 +270,6 @@ use agent_doc_supervisor::route_runtime::{
     authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason,
     authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
 };
-use agent_doc_supervisor::startup_miss::StartingPaneRecoveryTarget;
 use agent_doc_tmux::is_first_column;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, blocked_closeout_recovery_command,
@@ -2349,6 +2348,7 @@ fn route_via_authoritative_actor(
                 harness,
                 &dispatch_pane,
                 actor.record.generation,
+                route_dispatch_only_effects(),
             )
         }
         AuthoritativeActorDispatchAction::ManagedSupervisorQueue => {

@@ -114,7 +114,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `359f2a09` | Route launch contract reuse IO graph; Route dispatch-only send/retry IO graph |
 | `8706e30c` | Route startup/provision IO graph |
 | `c7b9b3e0` | Route pane-resolution helper IO batch |
-| `pending-current-round` | Editor IPC live-editor targeting IO batch |
+| `d34d00b1` | Editor IPC live-editor targeting IO batch |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

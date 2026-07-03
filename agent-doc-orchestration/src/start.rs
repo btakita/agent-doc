@@ -1848,9 +1848,9 @@ impl SessionActorRuntime {
         caller: &str,
         reason: &str,
     ) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
-        crate::project_controller::mark_lifecycle(
+        agent_doc_controller_io::project_controller::mark_lifecycle(
             &self.project_root,
-            crate::project_controller::LifecycleRequest {
+            agent_doc_controller_io::project_controller::LifecycleRequest {
                 file: self.file.clone(),
                 session_id: self.session_id.clone(),
                 pane_id: self.pane_id.clone(),

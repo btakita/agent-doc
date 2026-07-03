@@ -558,7 +558,7 @@ fn load_live_authoritative_actor_record_uncached(
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
     let base_dir = agent_doc_project_root_io::project_root_containing(&canonical)?;
-    let record = crate::project_controller::authoritative_actor_binding(&base_dir, &canonical)
+    let record = agent_doc_controller_io::project_controller::authoritative_actor_binding(&base_dir, &canonical)
         .ok()
         .flatten()?;
     if record.session_id != session_id || !tmux.pane_alive(&record.pane_id) {
@@ -1669,7 +1669,7 @@ fn run_with_options_internal(
     if let Ok(cwd) = std::env::current_dir()
         && let Some(project_root) = agent_doc_project_root_io::project_root_containing(&cwd)
     {
-        match crate::project_controller::close_stale_starting_actors_for_caller(
+        match agent_doc_controller_io::project_controller::close_stale_starting_actors_for_caller(
             &project_root,
             std::time::Duration::from_secs(3600),
             false,
@@ -1684,7 +1684,7 @@ fn run_with_options_internal(
             Ok(_) => {}
             Err(e) => eprintln!("[sync] actor gc warning: {}", e),
         }
-        match crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+        match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
             &project_root,
             false,
             "sync",
@@ -1707,7 +1707,7 @@ fn run_with_options_internal(
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let layout_state_root = agent_doc_sync::layout_state_scope_root(col_args, focus, &cwd);
     let layout_state_path = agent_doc_sync::layout_state_path(col_args, focus, &cwd);
-    let saved_layout = match crate::project_controller::load_layout_state(&layout_state_root) {
+    let saved_layout = match agent_doc_controller_io::project_controller::load_layout_state(&layout_state_root) {
         Ok(layout) => layout,
         Err(err) => {
             eprintln!(
@@ -3000,7 +3000,7 @@ fn run_with_options_internal(
         // Only save if at least one column has an agent doc
         if layout_state.iter().any(|s| !s.is_empty())
             && let Err(err) =
-                crate::project_controller::store_layout_state(&layout_state_root, &layout_state)
+                agent_doc_controller_io::project_controller::store_layout_state(&layout_state_root, &layout_state)
         {
             eprintln!(
                 "[sync] warning: failed to persist controller layout state for {}: {}",
@@ -6176,7 +6176,7 @@ mod tests {
             "postlock_focus_test",
         )
         .unwrap();
-        crate::project_controller::store_actor_record(
+        agent_doc_controller_io::project_controller::store_actor_record(
             root,
             Some(0),
             &agent_doc_sqlite::state_store::ActorRecord {

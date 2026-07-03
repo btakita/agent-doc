@@ -1,6 +1,6 @@
 use agent_doc_cycle_state_io as cycle_state;
 use agent_doc_hash::content_hash;
-use agent_doc_orchestration::project_controller;
+use agent_doc_controller_io::project_controller;
 use agent_doc_state_backbone as state_backbone;
 use agent_doc_turn::turn_scope::{Address, TurnScope};
 use assert_cmd::Command;

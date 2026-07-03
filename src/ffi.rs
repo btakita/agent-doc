@@ -2235,7 +2235,7 @@ pub unsafe extern "C" fn agent_doc_admin_inspect_json(
         let session_id = unsafe { optional_ffi_string(session_id, "session_id") }?;
         let pane_id = unsafe { optional_ffi_string(pane_id, "pane_id") }?;
         let root = resolve_admin_root(project_root.as_deref(), document_path.as_deref())?;
-        agent_doc_orchestration::project_controller::inspect_actor(
+        agent_doc_controller_io::project_controller::inspect_actor(
             &root,
             document_path.as_deref(),
             session_id.as_deref(),
@@ -2271,7 +2271,7 @@ pub unsafe extern "C" fn agent_doc_admin_queue_control_json(
         let reason = unsafe { optional_ffi_string(reason, "reason") }?;
         let item_id = unsafe { optional_ffi_string(item_id, "item_id") }?;
         let root = resolve_admin_root(project_root.as_deref(), document_path.as_deref())?;
-        agent_doc_orchestration::project_controller::control_queue(
+        agent_doc_controller_io::project_controller::control_queue(
             &root,
             document_path.as_deref(),
             &action,
@@ -2307,7 +2307,7 @@ pub unsafe extern "C" fn agent_doc_admin_reap_json(
         let observed_generation = required_generation(observed_generation, "observed_generation")?;
         let reason = unsafe { required_ffi_string(reason, "reason") }?;
         let root = resolve_admin_root(project_root.as_deref(), document_path.as_deref())?;
-        agent_doc_orchestration::project_controller::admin_reap(
+        agent_doc_controller_io::project_controller::admin_reap(
             &root,
             document_path.as_deref(),
             session_id.as_deref(),
@@ -2341,7 +2341,7 @@ pub unsafe extern "C" fn agent_doc_admin_handoff_json(
         let observed_generation = required_generation(observed_generation, "observed_generation")?;
         let reason = unsafe { required_ffi_string(reason, "reason") }?;
         let root = resolve_admin_root(project_root.as_deref(), Some(document_path.as_path()))?;
-        agent_doc_orchestration::project_controller::admin_handoff(
+        agent_doc_controller_io::project_controller::admin_handoff(
             &root,
             &document_path,
             &to_pane,
@@ -2376,7 +2376,7 @@ pub unsafe extern "C" fn agent_doc_admin_repair_projection_json(
         let observed_generation = optional_generation(observed_generation, "observed_generation")?;
         let reason = unsafe { optional_ffi_string(reason, "reason") }?;
         let root = resolve_admin_root(project_root.as_deref(), document_path.as_deref())?;
-        agent_doc_orchestration::project_controller::repair_projection(
+        agent_doc_controller_io::project_controller::repair_projection(
             &root,
             document_path.as_deref(),
             &projection,

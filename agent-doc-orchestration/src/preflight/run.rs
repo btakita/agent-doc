@@ -29,7 +29,7 @@ impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
         stale_after: std::time::Duration,
         dry_run: bool,
     ) -> Result<(usize, usize)> {
-        crate::project_controller::close_stale_starting_actors(project_root, stale_after, dry_run)
+        agent_doc_controller_io::project_controller::close_stale_starting_actors(project_root, stale_after, dry_run)
     }
 
     fn close_stale_dead_pane_actors(
@@ -39,7 +39,7 @@ impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
         caller: &str,
         reason: &str,
     ) -> Result<(usize, usize)> {
-        crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+        agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
             project_root,
             dry_run,
             caller,
@@ -53,7 +53,7 @@ impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
         prune_after: std::time::Duration,
         dry_run: bool,
     ) -> Result<(usize, usize)> {
-        crate::project_controller::prune_dead_actors(project_root, prune_after, dry_run)
+        agent_doc_controller_io::project_controller::prune_dead_actors(project_root, prune_after, dry_run)
     }
 
     fn terminate_stale_preparing_controllers(
@@ -62,7 +62,7 @@ impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
         stale_after: std::time::Duration,
         dry_run: bool,
     ) -> Result<(usize, usize)> {
-        crate::project_controller::terminate_stale_preparing_controllers(
+        agent_doc_controller_io::project_controller::terminate_stale_preparing_controllers(
             project_root,
             stale_after,
             dry_run,
@@ -75,7 +75,7 @@ impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
         stale_after: std::time::Duration,
         dry_run: bool,
     ) -> Result<(usize, usize)> {
-        crate::project_controller::reap_orphaned_preparing_controllers(
+        agent_doc_controller_io::project_controller::reap_orphaned_preparing_controllers(
             project_root,
             stale_after,
             dry_run,
@@ -88,7 +88,7 @@ impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
         dry_run: bool,
         caller: &str,
     ) -> Result<(usize, usize)> {
-        crate::project_controller::reap_orphaned_preparing_controllers_all_projects(
+        agent_doc_controller_io::project_controller::reap_orphaned_preparing_controllers_all_projects(
             stale_after,
             dry_run,
             caller,
@@ -104,9 +104,9 @@ fn run_auto_gc(root: &Path) -> Result<agent_doc_gc_io::GcResult> {
         &mut effects,
         agent_doc_gc_io::GcControllerConfig {
             stale_starting_after: std::time::Duration::from_secs(3600),
-            dead_actor_prune_after: crate::project_controller::DEAD_ACTOR_PRUNE_AFTER,
+            dead_actor_prune_after: agent_doc_controller_io::project_controller::DEAD_ACTOR_PRUNE_AFTER,
             stale_preparing_controller_after:
-                crate::project_controller::stale_preparing_controller_threshold(),
+                agent_doc_controller_io::project_controller::stale_preparing_controller_threshold(),
         },
     )
 }
@@ -121,7 +121,7 @@ fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool)
     else {
         return;
     };
-    if let Err(err) = crate::project_controller::persist_session_actor_closeout(file)
+    if let Err(err) = agent_doc_controller_io::project_controller::persist_session_actor_closeout(file)
         .and_then(|_| crate::flow::closeout::record_terminal_closeout_proof(file, did_commit))
     {
         eprintln!("[preflight] terminal proof warning: {err}");
@@ -170,7 +170,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // long-running process hasn't been recycled). Surfaces the silent failure mode
     // instead of leaving the operator to re-file File-Cache-Conflict dialogs. Fail-open
     // — any status/stat error yields no warning and never blocks the cycle.
-    if let Some(message) = crate::project_controller::stale_supervisor_warning_for_doc(file) {
+    if let Some(message) = agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file) {
         let warning = PreflightWarning {
             code: "supervisor_binary_stale".to_string(),
             message,
@@ -201,7 +201,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !options.probe {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
         if let Some(root) = agent_doc_project_root_io::project_root_containing(&canonical) {
-            match crate::project_controller::close_stale_starting_actors_for_caller(
+            match agent_doc_controller_io::project_controller::close_stale_starting_actors_for_caller(
                 &root,
                 std::time::Duration::from_secs(3600),
                 false,
@@ -654,7 +654,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !options.probe {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
         if let Some(root) = agent_doc_project_root_io::project_root_containing(&canonical) {
-            match crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+            match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
                 &root,
                 false,
                 "preflight",
@@ -1896,12 +1896,12 @@ mod tests {
                 new_generation: 1,
             },
         };
-        crate::project_controller::store_actor_record(dir.path(), Some(0), &stale_record).unwrap();
+        agent_doc_controller_io::project_controller::store_actor_record(dir.path(), Some(0), &stale_record).unwrap();
 
         run(&doc).unwrap();
 
         let updated =
-            crate::project_controller::load_actor_record(dir.path(), &stale_record.document_id)
+            agent_doc_controller_io::project_controller::load_actor_record(dir.path(), &stale_record.document_id)
                 .unwrap()
                 .unwrap();
         assert_eq!(

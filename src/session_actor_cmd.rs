@@ -349,9 +349,9 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
         .with_context(|| format!("failed to read window for pane {pane_id}"))?;
     let pid = agent_doc_tmux_io::pane_pid(&tmux, &pane_id)
         .with_context(|| format!("failed to read pane PID for {pane_id}"))?;
-    agent_doc_orchestration::project_controller::attach_pane(
+    agent_doc_controller_io::project_controller::attach_pane(
         &ctx.base_dir,
-        agent_doc_orchestration::project_controller::AttachPaneRequest {
+        agent_doc_controller_io::project_controller::AttachPaneRequest {
             file: ctx.canonical_file.clone(),
             session_id: ctx.session_id.clone(),
             pane_id: pane_id.clone(),
@@ -389,9 +389,9 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
         guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Restart)?;
     }
     prepare_restart_live_busy_pane(&ctx, &tmux, force)?;
-    let receipt = agent_doc_orchestration::project_controller::request_supervisor_replacement(
+    let receipt = agent_doc_controller_io::project_controller::request_supervisor_replacement(
         &ctx.base_dir,
-        agent_doc_orchestration::project_controller::SupervisorReplacementRequest {
+        agent_doc_controller_io::project_controller::SupervisorReplacementRequest {
             file: ctx.canonical_file.clone(),
             mode: mode.as_str().to_string(),
             force,
@@ -414,7 +414,7 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
 /// can restart the agent manually at the keepalive (press Enter).
 pub fn stop_agent(file: &Path, reason: Option<String>) -> Result<()> {
     let ctx = build_context(file)?;
-    let authorization = agent_doc_orchestration::project_controller::authorize_operator_command(
+    let authorization = agent_doc_controller_io::project_controller::authorize_operator_command(
         &ctx.base_dir,
         &ctx.canonical_file,
         "session_stop_agent",
@@ -494,7 +494,7 @@ fn prepare_restart_live_busy_pane(ctx: &SessionContext, tmux: &Tmux, force: bool
 
 pub fn clear(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
-    let authorization = agent_doc_orchestration::project_controller::authorize_operator_command(
+    let authorization = agent_doc_controller_io::project_controller::authorize_operator_command(
         &ctx.base_dir,
         &ctx.canonical_file,
         "session_clear",
@@ -1227,7 +1227,7 @@ fn document_turn_active(ctx: &SessionContext) -> bool {
 /// only interrupts — it does NOT clear context.
 pub fn cancel_turn(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
-    agent_doc_orchestration::project_controller::authorize_operator_command(
+    agent_doc_controller_io::project_controller::authorize_operator_command(
         &ctx.base_dir,
         &ctx.canonical_file,
         "session_cancel_turn",
@@ -1316,7 +1316,7 @@ pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
     }
 
     let ctx = build_context(file)?;
-    agent_doc_orchestration::project_controller::authorize_operator_command(
+    agent_doc_controller_io::project_controller::authorize_operator_command(
         &ctx.base_dir,
         &ctx.canonical_file,
         "session_interrupt_clear",
@@ -1422,7 +1422,7 @@ struct ForceInterruptClearReport {
 
 fn force_interrupt_clear(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
-    if let Err(err) = agent_doc_orchestration::project_controller::authorize_operator_command(
+    if let Err(err) = agent_doc_controller_io::project_controller::authorize_operator_command(
         &ctx.base_dir,
         &ctx.canonical_file,
         "session_interrupt_clear",
@@ -1528,9 +1528,9 @@ fn force_close_actor_record(ctx: &SessionContext) -> bool {
     if record.state == ActorState::Closed {
         return true;
     }
-    match agent_doc_orchestration::project_controller::mark_lifecycle(
+    match agent_doc_controller_io::project_controller::mark_lifecycle(
         &ctx.base_dir,
-        agent_doc_orchestration::project_controller::LifecycleRequest {
+        agent_doc_controller_io::project_controller::LifecycleRequest {
             file: ctx.canonical_file.clone(),
             session_id: record.session_id.clone(),
             pane_id: record.pane_id.clone(),
@@ -2292,9 +2292,9 @@ fn reconcile_idle_projection_from_evidence(
     let Some(record) = ctx.actor_record.as_ref() else {
         return Ok(false);
     };
-    agent_doc_orchestration::project_controller::mark_lifecycle(
+    agent_doc_controller_io::project_controller::mark_lifecycle(
         &ctx.base_dir,
-        agent_doc_orchestration::project_controller::LifecycleRequest {
+        agent_doc_controller_io::project_controller::LifecycleRequest {
             file: ctx.canonical_file.clone(),
             session_id: record.session_id.clone(),
             pane_id: record.pane_id.clone(),
@@ -2305,9 +2305,9 @@ fn reconcile_idle_projection_from_evidence(
         },
     )?;
     if let Some(lease) = ctx.operator_status.supervisor_lease.as_ref() {
-        agent_doc_orchestration::project_controller::refresh_supervisor_lease(
+        agent_doc_controller_io::project_controller::refresh_supervisor_lease(
             &ctx.base_dir,
-            agent_doc_orchestration::project_controller::SupervisorHeartbeatRequest {
+            agent_doc_controller_io::project_controller::SupervisorHeartbeatRequest {
                 file: ctx.canonical_file.clone(),
                 session_id: record.session_id.clone(),
                 pane_id: record.pane_id.clone(),
@@ -2424,12 +2424,12 @@ fn clear_closed_actor_pane_projection(ctx: &SessionContext) -> Result<Option<Str
         prior_generation: record.generation,
         new_generation: record.generation,
     };
-    agent_doc_orchestration::project_controller::store_actor_record(
+    agent_doc_controller_io::project_controller::store_actor_record(
         &ctx.base_dir,
         Some(record.generation),
         &cleared,
     )?;
-    agent_doc_orchestration::project_controller::project_sessions_projection_for_actor(
+    agent_doc_controller_io::project_controller::project_sessions_projection_for_actor(
         &ctx.base_dir,
         &cleared.document_id,
     )?;
@@ -2463,7 +2463,7 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         &base_dir,
         &canonical_file.to_string_lossy(),
     );
-    let operator_status = agent_doc_orchestration::project_controller::session_operator_status(
+    let operator_status = agent_doc_controller_io::project_controller::session_operator_status(
         &base_dir,
         &canonical_file,
     )?;
@@ -2999,9 +2999,9 @@ fn reconcile_controller_lease_with_supervisor_runtime(
         return Ok(operator_status);
     }
 
-    agent_doc_orchestration::project_controller::refresh_supervisor_lease(
+    agent_doc_controller_io::project_controller::refresh_supervisor_lease(
         base_dir,
-        agent_doc_orchestration::project_controller::SupervisorHeartbeatRequest {
+        agent_doc_controller_io::project_controller::SupervisorHeartbeatRequest {
             file: canonical_file.to_path_buf(),
             session_id: record.session_id.clone(),
             pane_id: record.pane_id.clone(),
@@ -3011,7 +3011,7 @@ fn reconcile_controller_lease_with_supervisor_runtime(
             runtime_state: runtime_state.as_str().to_string(),
         },
     )?;
-    agent_doc_orchestration::project_controller::session_operator_status(base_dir, canonical_file)
+    agent_doc_controller_io::project_controller::session_operator_status(base_dir, canonical_file)
 }
 
 fn parse_actor_state(raw: &str) -> Option<ActorState> {
@@ -4483,9 +4483,9 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "prompt_ready",
         )
         .unwrap();
-        agent_doc_orchestration::project_controller::refresh_supervisor_lease(
+        agent_doc_controller_io::project_controller::refresh_supervisor_lease(
             dir.path(),
-            agent_doc_orchestration::project_controller::SupervisorHeartbeatRequest {
+            agent_doc_controller_io::project_controller::SupervisorHeartbeatRequest {
                 file: doc.clone(),
                 session_id: "session-status".to_string(),
                 pane_id: "%41".to_string(),

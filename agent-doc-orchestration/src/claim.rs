@@ -245,11 +245,11 @@ pub fn run(
             // state degrade to `false` (no guard fired).
             let fresh_foreign_lease = agent_doc_project_root_io::project_root_containing(file)
                 .map(|project_root| {
-                    crate::project_controller::fresh_foreign_supervisor_lease_holds_document(
+                    agent_doc_controller_io::project_controller::fresh_foreign_supervisor_lease_holds_document(
                         &project_root,
                         &file.to_string_lossy(),
                         std::process::id(),
-                        crate::project_controller::SUPERVISOR_LEASE_GUARD_STALE_AFTER,
+                        agent_doc_controller_io::project_controller::SUPERVISOR_LEASE_GUARD_STALE_AFTER,
                     )
                 })
                 .unwrap_or(false);

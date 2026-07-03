@@ -101,6 +101,41 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+struct CliProjectControllerRuntimeEffects;
+
+impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffects
+    for CliProjectControllerRuntimeEffects
+{
+    fn consume_queue_prompt_force_disk(
+        &self,
+        file: &Path,
+    ) -> anyhow::Result<
+        Option<agent_doc_controller_io::project_controller::ControllerQueueConsumptionOutcome>,
+    > {
+        Ok(agent_doc_orchestration::write::consume_queue_prompt_force_disk(file)?.map(
+            |outcome| agent_doc_controller_io::project_controller::ControllerQueueConsumptionOutcome {
+                consumed_text: outcome.consumed_text,
+                remaining: outcome.remaining,
+                drained: outcome.drained,
+            },
+        ))
+    }
+
+    fn route_auto_start(
+        &self,
+        tmux: &tmux_router::Tmux,
+        file: &Path,
+        session_id: &str,
+        file_arg: &str,
+        window: Option<&str>,
+    ) -> anyhow::Result<String> {
+        agent_doc_orchestration::route::auto_start(tmux, file, session_id, file_arg, window)
+    }
+}
+
+static PROJECT_CONTROLLER_RUNTIME_EFFECTS: CliProjectControllerRuntimeEffects =
+    CliProjectControllerRuntimeEffects;
+
 /// Document mode for agent-doc sessions.
 #[derive(Clone, Debug, ValueEnum)]
 pub enum AgentDocMode {
@@ -153,7 +188,7 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
         project_root: &Path,
         file: &Path,
     ) -> anyhow::Result<agent_doc_workflow::doctor::ActorDoctorFacts> {
-        let inspection = agent_doc_orchestration::project_controller::inspect_actor(
+        let inspection = agent_doc_controller_io::project_controller::inspect_actor(
             project_root,
             Some(file),
             None,
@@ -210,7 +245,7 @@ impl agent_doc_gc_io::GcControllerEffects for CliGcControllerEffects {
         stale_after: Duration,
         dry_run: bool,
     ) -> anyhow::Result<(usize, usize)> {
-        agent_doc_orchestration::project_controller::close_stale_starting_actors(
+        agent_doc_controller_io::project_controller::close_stale_starting_actors(
             project_root,
             stale_after,
             dry_run,
@@ -224,7 +259,7 @@ impl agent_doc_gc_io::GcControllerEffects for CliGcControllerEffects {
         caller: &str,
         reason: &str,
     ) -> anyhow::Result<(usize, usize)> {
-        agent_doc_orchestration::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+        agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
             project_root,
             dry_run,
             caller,
@@ -238,7 +273,7 @@ impl agent_doc_gc_io::GcControllerEffects for CliGcControllerEffects {
         prune_after: Duration,
         dry_run: bool,
     ) -> anyhow::Result<(usize, usize)> {
-        agent_doc_orchestration::project_controller::prune_dead_actors(
+        agent_doc_controller_io::project_controller::prune_dead_actors(
             project_root,
             prune_after,
             dry_run,
@@ -251,7 +286,7 @@ impl agent_doc_gc_io::GcControllerEffects for CliGcControllerEffects {
         stale_after: Duration,
         dry_run: bool,
     ) -> anyhow::Result<(usize, usize)> {
-        agent_doc_orchestration::project_controller::terminate_stale_preparing_controllers(
+        agent_doc_controller_io::project_controller::terminate_stale_preparing_controllers(
             project_root,
             stale_after,
             dry_run,
@@ -264,7 +299,7 @@ impl agent_doc_gc_io::GcControllerEffects for CliGcControllerEffects {
         stale_after: Duration,
         dry_run: bool,
     ) -> anyhow::Result<(usize, usize)> {
-        agent_doc_orchestration::project_controller::reap_orphaned_preparing_controllers(
+        agent_doc_controller_io::project_controller::reap_orphaned_preparing_controllers(
             project_root,
             stale_after,
             dry_run,
@@ -277,7 +312,7 @@ impl agent_doc_gc_io::GcControllerEffects for CliGcControllerEffects {
         dry_run: bool,
         caller: &str,
     ) -> anyhow::Result<(usize, usize)> {
-        agent_doc_orchestration::project_controller::reap_orphaned_preparing_controllers_all_projects(
+        agent_doc_controller_io::project_controller::reap_orphaned_preparing_controllers_all_projects(
             stale_after,
             dry_run,
             caller,
@@ -298,7 +333,7 @@ impl Default for CliAdminControllerEffects {
 }
 
 fn admin_receipt_view(
-    receipt: agent_doc_orchestration::project_controller::ControllerAdminReceipt,
+    receipt: agent_doc_controller_io::project_controller::ControllerAdminReceipt,
 ) -> agent_doc_admin_io::ControllerAdminReceiptView {
     agent_doc_admin_io::ControllerAdminReceiptView {
         receipt_id: receipt.receipt_id,
@@ -314,7 +349,7 @@ fn admin_receipt_view(
 }
 
 fn actor_inspection_view(
-    inspection: agent_doc_orchestration::project_controller::ControllerActorInspection,
+    inspection: agent_doc_controller_io::project_controller::ControllerActorInspection,
 ) -> agent_doc_admin_io::ControllerActorInspectionView {
     agent_doc_admin_io::ControllerActorInspectionView {
         target: inspection.target,
@@ -337,7 +372,7 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         &self,
         root: &Path,
     ) -> anyhow::Result<Vec<agent_doc_controller::fleet::ActorListRecord>> {
-        let actors = agent_doc_orchestration::project_controller::load_actor_store(root)?;
+        let actors = agent_doc_controller_io::project_controller::load_actor_store(root)?;
         Ok(actors
             .values()
             .map(|record| agent_doc_controller::fleet::ActorListRecord {
@@ -380,7 +415,7 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         session: Option<&str>,
         pane: Option<&str>,
     ) -> anyhow::Result<agent_doc_admin_io::ControllerActorInspectionView> {
-        agent_doc_orchestration::project_controller::inspect_actor(root, document, session, pane)
+        agent_doc_controller_io::project_controller::inspect_actor(root, document, session, pane)
             .map(actor_inspection_view)
     }
 
@@ -393,7 +428,7 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         reason: Option<&str>,
         item_id: Option<&str>,
     ) -> anyhow::Result<agent_doc_admin_io::ControllerAdminReceiptView> {
-        agent_doc_orchestration::project_controller::control_queue(
+        agent_doc_controller_io::project_controller::control_queue(
             root,
             document,
             action,
@@ -413,7 +448,7 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         observed_generation: u64,
         reason: &str,
     ) -> anyhow::Result<agent_doc_admin_io::ControllerAdminReceiptView> {
-        agent_doc_orchestration::project_controller::admin_reap(
+        agent_doc_controller_io::project_controller::admin_reap(
             root,
             document,
             session,
@@ -432,7 +467,7 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         caller: &str,
         reason: &str,
     ) -> anyhow::Result<(usize, usize)> {
-        agent_doc_orchestration::project_controller::close_stale_dead_pane_actors_for_caller(
+        agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_for_caller(
             root, pane_alive, dry_run, caller, reason,
         )
     }
@@ -444,7 +479,7 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         caller: &str,
         reason: &str,
     ) -> anyhow::Result<(usize, usize)> {
-        agent_doc_orchestration::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+        agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
             root, dry_run, caller, reason,
         )
     }
@@ -457,7 +492,7 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         observed_generation: u64,
         reason: &str,
     ) -> anyhow::Result<agent_doc_admin_io::ControllerAdminReceiptView> {
-        agent_doc_orchestration::project_controller::admin_handoff(
+        agent_doc_controller_io::project_controller::admin_handoff(
             root,
             document,
             to_pane,
@@ -475,7 +510,7 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         observed_generation: Option<u64>,
         reason: Option<&str>,
     ) -> anyhow::Result<agent_doc_admin_io::ControllerAdminReceiptView> {
-        agent_doc_orchestration::project_controller::repair_projection(
+        agent_doc_controller_io::project_controller::repair_projection(
             root,
             document,
             projection,
@@ -585,7 +620,7 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
             actor.submit(
                 agent_doc_document_realtime::session_ops::SessionOpKind::FileWatch,
                 move |_ctx| -> anyhow::Result<()> {
-                    agent_doc_orchestration::project_controller::append_state_event(
+                    agent_doc_controller_io::project_controller::append_state_event(
                         &base_dir, &event,
                     )?;
                     Ok(())
@@ -2818,7 +2853,10 @@ fn main() -> anyhow::Result<()> {
 
     // `#orchver` — stamp the real top-level binary version into controller/supervisor
     // identities so the stale-binary warning reports the installed executable version.
-    agent_doc_orchestration::project_controller::set_binary_version(env!("CARGO_PKG_VERSION"));
+    agent_doc_controller_io::project_controller::set_binary_version(env!("CARGO_PKG_VERSION"));
+    agent_doc_controller_io::project_controller::install_runtime_effects(
+        &PROJECT_CONTROLLER_RUNTIME_EFFECTS,
+    );
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();
     let pending_alias_used = deprecated_pending_alias_used(&raw_args);
@@ -2952,8 +2990,8 @@ fn main() -> anyhow::Result<()> {
                 agent_doc_gc_io::GcControllerConfig {
                     stale_starting_after: Duration::from_secs(3600),
                     dead_actor_prune_after:
-                        agent_doc_orchestration::project_controller::DEAD_ACTOR_PRUNE_AFTER,
-                    stale_preparing_controller_after: agent_doc_orchestration::project_controller::stale_preparing_controller_threshold(),
+                        agent_doc_controller_io::project_controller::DEAD_ACTOR_PRUNE_AFTER,
+                    stale_preparing_controller_after: agent_doc_controller_io::project_controller::stale_preparing_controller_threshold(),
                 },
             )?;
             if dry_run {
@@ -3829,7 +3867,7 @@ fn main() -> anyhow::Result<()> {
             ControllerAction::Status {
                 project_root,
                 ensure,
-            } => agent_doc_orchestration::project_controller::run_status(
+            } => agent_doc_controller_io::project_controller::run_status(
                 project_root.as_deref(),
                 ensure,
             ),
@@ -3840,7 +3878,7 @@ fn main() -> anyhow::Result<()> {
                 controller_generation,
                 previous_controller_pid,
                 handoff_state,
-            } => agent_doc_orchestration::project_controller::run_serve(
+            } => agent_doc_controller_io::project_controller::run_serve(
                 project_root.as_deref(),
                 &launch_mode,
                 listen_socket.as_deref(),
@@ -3849,7 +3887,7 @@ fn main() -> anyhow::Result<()> {
                 &handoff_state,
             ),
             ControllerAction::Shutdown { project_root } => {
-                agent_doc_orchestration::project_controller::run_shutdown(project_root.as_deref())
+                agent_doc_controller_io::project_controller::run_shutdown(project_root.as_deref())
             }
         },
         Commands::Admin { action } => {
@@ -3898,9 +3936,9 @@ fn main() -> anyhow::Result<()> {
                         }
                     };
                     let threshold =
-                    agent_doc_orchestration::project_controller::stale_preparing_controller_threshold();
+                    agent_doc_controller_io::project_controller::stale_preparing_controller_threshold();
                     let (reaped, kept) =
-                    agent_doc_orchestration::project_controller::terminate_stale_preparing_controllers_for_caller(
+                    agent_doc_controller_io::project_controller::terminate_stale_preparing_controllers_for_caller(
                         &root, threshold, dry_run, "admin",
                     )?;
                     if dry_run {
@@ -3928,13 +3966,13 @@ fn main() -> anyhow::Result<()> {
                             );
                         }
                         let (recycled, skipped) =
-                        agent_doc_orchestration::project_controller::recycle_controllers_all_projects_force(force)?;
+                        agent_doc_controller_io::project_controller::recycle_controllers_all_projects_force(force)?;
                         // #recycle-supervisor-fanout: an explicit fleet recycle also schedules a
                         // recycle of every valid-state route-owned supervisor (they host the agent
                         // turns), honored at each supervisor's next idle boundary. Fail-open — a
                         // supervisor enumeration hiccup must not abort the controller recycle.
                         let (supervisors_marked, supervisors_skipped) =
-                        agent_doc_orchestration::project_controller::recycle_supervisors_all_projects_force(force)
+                        agent_doc_controller_io::project_controller::recycle_supervisors_all_projects_force(force)
                             .unwrap_or_else(|err| {
                                 eprintln!(
                                     "[agent-doc] warning: supervisor recycle fan-out failed: {err:#}"
@@ -3972,7 +4010,7 @@ fn main() -> anyhow::Result<()> {
                         let root_arg = project_root.as_deref().or(target.as_deref());
                         let root = agent_doc_project_root_io::project_root_from_arg(root_arg)?;
                         let recycled =
-                            agent_doc_orchestration::project_controller::recycle_controller_force(
+                            agent_doc_controller_io::project_controller::recycle_controller_force(
                                 &root, force,
                             )?;
                         // `#recycle-no-boundaries`: when NO live controller answered, this

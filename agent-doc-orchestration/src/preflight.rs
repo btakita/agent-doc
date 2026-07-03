@@ -1725,7 +1725,7 @@ enum ActorSweepOwner {
 }
 
 fn actor_sweep_owner(audit_file: &Path, root: &Path, doc_path: &Path) -> ActorSweepOwner {
-    match crate::project_controller::authoritative_actor_binding(root, doc_path) {
+    match agent_doc_controller_io::project_controller::authoritative_actor_binding(root, doc_path) {
         Ok(Some(record)) if record.state != agent_doc_sqlite::state_store::ActorState::Closed => {
             ActorSweepOwner::Active(SweepOwner {
                 pane: record.pane_id,

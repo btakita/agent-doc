@@ -608,7 +608,7 @@ fn queue_task_batch(file: &Path, doc: &str) -> Result<ResolvedTaskBatch> {
     })?;
     let document_hash = agent_doc_fs::document_state_hash(&canonical)?;
     let ledger =
-        agent_doc_orchestration::project_controller::load_state_event_ledger(&project_root)
+        agent_doc_controller_io::project_controller::load_state_event_ledger(&project_root)
             .with_context(|| {
                 format!(
                     "failed to load typed queue state ledger under {}",
@@ -1469,7 +1469,7 @@ mod tests {
                 hosting_epoch: None,
             },
         );
-        agent_doc_orchestration::project_controller::append_state_event(root, &event).unwrap();
+        agent_doc_controller_io::project_controller::append_state_event(root, &event).unwrap();
     }
 
     #[test]

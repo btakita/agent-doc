@@ -2900,7 +2900,7 @@ fn stale_supervisor_content_ours_adoption_warning(file: &Path) -> Option<String>
     }
 
     #[cfg(not(test))]
-    crate::project_controller::stale_supervisor_warning_for_doc(file)
+    agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
 }
 
 fn log_content_ours_adoption_refused_stale_supervisor(

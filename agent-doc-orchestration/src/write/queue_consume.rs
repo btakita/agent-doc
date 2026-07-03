@@ -161,7 +161,7 @@ impl QueueConsumptionProofEffects for QueueConsumptionProofRuntimeEffects {
         project_root: &Path,
         event: &agent_doc_state_backbone::StateEvent,
     ) -> Result<bool> {
-        crate::project_controller::append_state_event(project_root, event)
+        agent_doc_controller_io::project_controller::append_state_event(project_root, event)
     }
 
     fn log_op(&self, file: &Path, message: &str) {
@@ -1660,7 +1660,7 @@ mod core_tests {
             .expect("consumed queue head should carry a node op")
             .node_id
             .clone();
-        let state_ledger = crate::project_controller::load_state_event_ledger(root)
+        let state_ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(root)
             .expect("queue state events should reload from sqlite");
         let queue_events = state_ledger
             .events()
@@ -1758,7 +1758,7 @@ mod core_tests {
         let document_hash = agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(
             &doc.canonicalize().unwrap(),
         );
-        let state_ledger = crate::project_controller::load_state_event_ledger(root)
+        let state_ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(root)
             .expect("queue state events should reload from sqlite");
         let projection = state_ledger
             .project_document(&document_hash)
@@ -1824,7 +1824,7 @@ mod core_tests {
         let document_hash = agent_doc_queue_io::queue_consumption_proof::queue_state_document_hash(
             &doc.canonicalize().unwrap(),
         );
-        let state_ledger = crate::project_controller::load_state_event_ledger(root)
+        let state_ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(root)
             .expect("queue state events should reload from sqlite");
         let projection = state_ledger
             .project_document(&document_hash)

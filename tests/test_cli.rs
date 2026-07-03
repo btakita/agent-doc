@@ -417,7 +417,7 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
     );
 
     let current =
-        agent_doc_orchestration::project_controller::load_actor_record(root, &record.document_id)
+        agent_doc_controller_io::project_controller::load_actor_record(root, &record.document_id)
             .unwrap()
             .unwrap();
     if reaped == 1 {
@@ -3977,7 +3977,7 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         "response_guards must not route queue directive parsing through session_check"
     );
     let project_controller =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/project_controller.rs"))
             .unwrap();
     assert!(
         project_controller.contains("agent_doc_queue::queue_directive::first_directive_target_id"),
@@ -4065,7 +4065,7 @@ fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
         "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in [
@@ -8918,7 +8918,7 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
         "supervisor IO should own Path-based recycle-request scheduling"
     );
     let project_controller_rpc = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
     .unwrap();
     assert!(
@@ -12187,8 +12187,8 @@ fn test_agent_doc_fs_owns_process_inode_policy() {
     }
 
     for relative in [
-        "agent-doc-orchestration/src/project_controller.rs",
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in ["fn running_exe_inode_for_pid(", "fn inode_of_path("] {
@@ -12552,7 +12552,7 @@ fn test_session_actor_has_no_sqlite_state_facade() {
 fn test_project_controller_has_no_sqlite_status_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let project_controller_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/project_controller.rs"))
             .unwrap();
     let sqlite_state_store =
         fs::read_to_string(manifest_dir.join("agent-doc-sqlite/src/state_store.rs")).unwrap();
@@ -13316,8 +13316,8 @@ fn test_agent_doc_controller_owns_handoff_staleness_policy() {
     }
 
     for relative_path in [
-        "agent-doc-orchestration/src/project_controller.rs",
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         for forbidden in [
@@ -13336,10 +13336,10 @@ fn test_agent_doc_controller_owns_handoff_staleness_policy() {
     }
 
     let project_controller =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/project_controller.rs"))
             .unwrap();
     let project_controller_rpc = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
     .unwrap();
     assert!(
@@ -13357,6 +13357,10 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let controller_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/lib.rs")).unwrap();
+    let controller_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/lib.rs")).unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     let controller_paths =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/paths.rs")).unwrap();
     let controller_status =
@@ -13364,6 +13368,23 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
     assert!(
         controller_lib.contains("pub mod paths;"),
         "agent-doc-controller must expose focused controller path policy"
+    );
+    assert!(
+        controller_io_lib.contains("pub mod project_controller;"),
+        "agent-doc-controller-io must own the project-controller IO graph"
+    );
+    for removed in [
+        "agent-doc-orchestration/src/project_controller.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+    ] {
+        assert!(
+            !manifest_dir.join(removed).exists(),
+            "orchestration project-controller facade should be deleted: {removed}"
+        );
+    }
+    assert!(
+        !orchestration_lib.contains("pub mod project_controller;"),
+        "orchestration must not expose a project_controller root facade"
     );
     for required in [
         "pub const SOCKET_FILE",
@@ -13398,7 +13419,7 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
     }
 
     let project_controller =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/project_controller.rs"))
             .unwrap();
     for forbidden in [
         "const SOCKET_FILE",
@@ -13449,11 +13470,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     );
 
     let rpc_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
     .unwrap();
     let project_controller_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/project_controller.rs"))
             .unwrap();
     let command_line_source =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/command_line.rs")).unwrap();
@@ -13695,13 +13716,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     }
     assert!(
         project_controller_source
-            .contains("agent_doc_controller_io::process::process_start_age_secs(")
+            .contains("crate::process::process_start_age_secs(")
             && project_controller_source
-                .contains("agent_doc_controller_io::process::controller_serve_project_root(")
+                .contains("crate::process::controller_serve_project_root(")
             && project_controller_source
-                .contains("agent_doc_controller_io::process::cmdline_has_preparing_handoff(")
+                .contains("crate::process::cmdline_has_preparing_handoff(")
             && project_controller_source.contains(
-                "use agent_doc_controller_io::process::{is_same_project_controller_pid, process_is_alive};"
+                "use crate::process::{is_same_project_controller_pid, process_is_alive};"
             ),
         "project_controller should call focused controller process-scan helpers directly"
     );
@@ -14652,7 +14673,7 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
     assert!(
         cli_main.contains(
             "impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects"
-        ) && cli_main.contains("agent_doc_orchestration::project_controller::load_actor_store")
+        ) && cli_main.contains("agent_doc_controller_io::project_controller::load_actor_store")
             && cli_main.contains("agent_doc_session_registry_io::load_in")
             && cli_main.contains("tmux_router::Tmux::default_server")
             && cli_main.contains("agent_doc_admin_io::inspect(")
@@ -14665,10 +14686,10 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
             && cli_dashboard.contains("ActorListRegistryBinding")
             && cli_dashboard.contains("DashboardActorDiagnostics")
             && cli_dashboard
-                .contains("agent_doc_orchestration::project_controller::load_actor_store")
+                .contains("agent_doc_controller_io::project_controller::load_actor_store")
             && cli_dashboard.contains("agent_doc_session_registry_io::load_in")
             && cli_dashboard.contains("Tmux::default_server().pane_alive")
-            && cli_dashboard.contains("agent_doc_orchestration::project_controller::inspect_actor")
+            && cli_dashboard.contains("agent_doc_controller_io::project_controller::inspect_actor")
             && cli_dashboard.contains("agent_doc_controller_io::dashboard::dashboard(&EFFECTS"),
         "CLI dashboard should only adapt concrete actor/session/tmux/controller effects"
     );
@@ -14693,6 +14714,8 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
     }
     let controller_io_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-controller-io/Cargo.toml")).unwrap();
+    let controller_dashboard_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/dashboard.rs")).unwrap();
     let parsed: toml::Value = toml::from_str(&controller_io_manifest).unwrap();
     let dependencies = parsed["dependencies"].as_table().unwrap();
     for required in [
@@ -14706,17 +14729,21 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
             "agent-doc-controller-io dashboard adapter should depend on focused dependency {required}"
         );
     }
-    for forbidden in [
-        "agent-doc-orchestration",
-        "agent-doc-sqlite",
-        "interprocess",
-        "notify",
-        "rusqlite",
-        "tmux-router",
-    ] {
+    for forbidden in ["agent-doc-orchestration", "notify", "git2"] {
         assert!(
             !dependencies.contains_key(forbidden),
-            "agent-doc-controller-io dashboard adapter must not depend on orchestration-side systems: {forbidden}"
+            "agent-doc-controller-io must not depend on orchestration-side systems: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "agent_doc_sqlite",
+        "interprocess",
+        "notify",
+        "tmux_router",
+    ] {
+        assert!(
+            !controller_dashboard_source.contains(forbidden),
+            "agent-doc-controller-io dashboard adapter must not directly use controller runtime systems: {forbidden}"
         );
     }
 }
@@ -15275,7 +15302,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         ],
     );
     let project_controller =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/project_controller.rs"))
             .unwrap();
     for forbidden_snippet in [
         "fn resolve_agent_doc_binary_from_env(",
@@ -15302,7 +15329,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "start.rs should import focused binary launch resolution directly"
     );
     let controller_rpc_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
     .unwrap();
     assert!(
@@ -15513,7 +15540,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "orchestration must not keep a supervisor facade module"
     );
     let rpc_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
     .unwrap();
     let supervisor_config =
@@ -15759,7 +15786,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "start keeps focused supervisor protocol gating while IPC transport lives in supervisor-io"
     );
     for relative in [
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/sync.rs",
@@ -16244,7 +16271,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-harness/src/lib.rs",
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -16405,7 +16432,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     for relative in [
         "src/main.rs",
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -16756,7 +16783,7 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
             "agent_doc_supervisor_process::agent_doc_start_bin()",
         ),
         (
-            "agent-doc-orchestration/src/project_controller/rpc.rs",
+            "agent-doc-controller-io/src/project_controller/rpc.rs",
             "agent_doc_supervisor_process::agent_doc_start_bin()",
         ),
     ] {
@@ -16780,7 +16807,7 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
         }
     }
     for relative in [
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-watch-io/src/daemon.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -18398,7 +18425,7 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
         "src/rename.rs",
         "agent-doc-orchestration/src/sync.rs",
         "agent-doc-session-actor-io/src/lib.rs",
-        "agent-doc-orchestration/src/project_controller.rs",
+        "agent-doc-controller-io/src/project_controller.rs",
         "agent-doc-orchestration/src/sync/pane_repair.rs",
         "agent-doc-orchestration/src/sync/registry.rs",
         "agent-doc-orchestration/src/sync/layout.rs",
@@ -19738,7 +19765,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "agent-doc-project-root-io should own .agent-doc project-root resolution constrained by git toplevel"
     );
     let project_controller_rpc_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
     .unwrap();
     assert!(
@@ -19751,7 +19778,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "orchestration project-controller RPC should call focused project-root IO instead of owning CLI/stale-supervisor root resolution"
     );
     let project_controller_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-controller-io/src/project_controller.rs"))
             .unwrap();
     assert!(
         !project_controller_source.contains("agent_doc_fs::find_project_root(")
@@ -20435,7 +20462,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
     for relative in [
         "src/queue_dispatch.rs",
         "src/session_actor_cmd.rs",
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/dispatch.rs",
@@ -20462,7 +20489,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
     for relative in [
         "src/queue_dispatch.rs",
         "src/session_actor_cmd.rs",
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/route/dispatch.rs",
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-orchestration/src/sync/pane_repair.rs",
@@ -22631,7 +22658,7 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
         "CLI watch effects",
         &[
             "agent_doc_watch_io::observe_document_event",
-            "agent_doc_orchestration::project_controller::append_state_event",
+            "agent_doc_controller_io::project_controller::append_state_event",
             "document_actor_in",
         ],
     );
@@ -23942,7 +23969,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
 
     for relative_path in [
         "agent-doc-queue-io/src/queue_cmd.rs",
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
@@ -23957,7 +23984,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
         );
     }
     let rpc_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
     .unwrap();
     assert!(

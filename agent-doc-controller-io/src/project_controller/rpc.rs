@@ -1046,7 +1046,7 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
 /// document and is the common silent-stale offender. Fail-open — a missing project root,
 /// an unreachable controller, a missing lease, or any stat error yields `None` so the
 /// read-only check can never block a cycle.
-pub(crate) fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
+pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)?;
     if let Ok(controller_status) = status(&project_root) {
         let current_binary = current_binary_identity().ok();
@@ -1063,7 +1063,7 @@ pub(crate) fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
 /// recycles. A process must observe "wants-recycle AND idle" continuously for this
 /// long so a brief lull between queue items never triggers a recycle. Override with
 /// `AGENT_DOC_RECYCLE_IDLE_GRACE_SECS`.
-pub(crate) fn recycle_idle_grace() -> Duration {
+pub fn recycle_idle_grace() -> Duration {
     let secs = std::env::var(RECYCLE_IDLE_GRACE_SECS_ENV)
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
@@ -1075,7 +1075,7 @@ pub(crate) fn recycle_idle_grace() -> Duration {
 /// (an agent-doc session editing agent-doc's own source). A superproject may contain
 /// `src/agent-doc` while also hosting unrelated project documents; those documents must not
 /// inherit dogfood build/install policy just because the crate is nearby.
-pub(crate) fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
+pub fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
     let file = file.canonicalize().ok()?;
     let project_root = agent_doc_project_root_io::project_root_containing(&file)?;
     for candidate in [project_root.clone(), project_root.join("src/agent-doc")] {
@@ -1100,7 +1100,7 @@ pub(crate) fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
 /// drift. After it succeeds the installed binary is newer than the running
 /// supervisor process, so the existing `process_binary_is_stale` recycle path
 /// hot-reloads onto it. Returns `Err` naming the failed step.
-pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
+pub fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
     run_supervisor_auto_install_with_retry(
         crate_root,
         AUTO_INSTALL_MAX_ATTEMPTS,
@@ -1324,7 +1324,7 @@ fn clear_superseded_stale_supervisor_pause(
     let stale_pid_dead_after_reboot = stale_pid_dead
         && queue_pause_predates_boot(
             control.updated_at,
-            agent_doc_controller_io::process::system_boot_timestamp_secs(timestamp_secs()),
+            crate::process::system_boot_timestamp_secs(timestamp_secs()),
         );
     let superseded_by_actor_transition = record.last_transition.prior_generation
         < record.generation
@@ -1401,7 +1401,9 @@ fn repair_spent_preset_pause_before_dispatch(
         return Ok(true);
     }
 
-    let outcome = crate::write::consume_queue_prompt_force_disk(file).with_context(|| {
+    let outcome = runtime_effects()?
+        .consume_queue_prompt_force_disk(file)
+        .with_context(|| {
         format!(
             "spent-preset pause repair: failed to consume #{}",
             preset_id
@@ -1442,7 +1444,7 @@ pub(crate) fn discover_stale_duplicate_pids(
         }
     }
 
-    for pid in agent_doc_controller_io::process::project_controller_pids(project_root) {
+    for pid in crate::process::project_controller_pids(project_root) {
         if Some(pid) == authoritative_pid || pid == std::process::id() {
             continue;
         }
@@ -1459,9 +1461,9 @@ pub(crate) fn reap_verified_controller_pid(project_root: &Path, pid: u32, genera
     if pid == std::process::id() || !is_same_project_controller_pid(project_root, pid) {
         return;
     }
-    agent_doc_controller_io::process::send_signal(
+    crate::process::send_signal(
         pid,
-        agent_doc_controller_io::process::ProcessSignal::Term,
+        crate::process::ProcessSignal::Term,
     );
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(750) {
@@ -1471,9 +1473,9 @@ pub(crate) fn reap_verified_controller_pid(project_root: &Path, pid: u32, genera
         std::thread::sleep(Duration::from_millis(25));
     }
     if is_same_project_controller_pid(project_root, pid) {
-        agent_doc_controller_io::process::send_signal(
+        crate::process::send_signal(
             pid,
-            agent_doc_controller_io::process::ProcessSignal::Kill,
+            crate::process::ProcessSignal::Kill,
         );
         eprintln!(
             "[controller] reaped stale same-project controller pid={pid} generation={generation}"
@@ -1552,7 +1554,7 @@ pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
 /// force flag applied to every project's recycle (`agent-doc admin recycle
 /// --all-projects --force`). `force == false` is the prior defer-at-idle behavior.
 pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usize)> {
-    let roots = agent_doc_controller_io::process::controller_project_roots(std::process::id());
+    let roots = crate::process::controller_project_roots(std::process::id());
     let mut recycled = 0;
     let mut skipped = 0;
     for root in roots {
@@ -1584,7 +1586,7 @@ pub fn recycle_supervisors_all_projects() -> Result<(usize, usize)> {
 
 pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usize)> {
     let docs =
-        agent_doc_controller_io::process::route_owned_supervisor_documents(std::process::id());
+        crate::process::route_owned_supervisor_documents(std::process::id());
     let reason = if force {
         "install_fanout_force"
     } else {
@@ -1616,7 +1618,7 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
 /// plugin is wired for that project. The written broadcast file remains the
 /// authoritative fan-out that every plugin watches.
 pub fn editor_broadcast_project_root_count() -> usize {
-    agent_doc_controller_io::process::controller_project_roots(std::process::id())
+    crate::process::controller_project_roots(std::process::id())
         .into_iter()
         .filter(|root| root.join(".agent-doc").join("patches").is_dir())
         .count()
@@ -4570,14 +4572,14 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         return Ok(work.pane_id.clone());
     }
     let file_str = work.file.to_string_lossy().to_string();
-    crate::route::auto_start(&tmux, &work.file, &work.session_id, &file_str, None).with_context(
-        || {
+    runtime_effects()?
+        .route_auto_start(&tmux, &work.file, &work.session_id, &file_str, None)
+        .with_context(|| {
             format!(
                 "failed to cold-start replacement supervisor for {}",
                 work.file.display()
             )
-        },
-    )
+        })
 }
 
 pub(crate) fn handle_admin_operation(

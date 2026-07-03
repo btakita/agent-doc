@@ -390,7 +390,7 @@ fn run_pending_maintenance_with_options(
     // so there is one source of truth for "running supervisor is older than installed".
     // Idempotent: the marker is inserted once when stale and removed when fresh.
     let supervisor_binary_is_stale =
-        crate::project_controller::stale_supervisor_warning_for_doc(file).is_some();
+        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file).is_some();
     if let Some(reconciled) =
         agent_doc_document::status_projection::reconcile_stale_supervisor_status_content(
             &current_content,
@@ -851,7 +851,7 @@ fn record_selected_queue_head_state(
             hosting_epoch: None,
         },
     );
-    let inserted = crate::project_controller::append_state_event(&project_root, &event)?;
+    let inserted = agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -901,7 +901,7 @@ fn record_deferred_queue_head_state(
         },
     );
     let selected_inserted =
-        crate::project_controller::append_state_event(&project_root, &selected_event)?;
+        agent_doc_controller_io::project_controller::append_state_event(&project_root, &selected_event)?;
     let reason_hash = agent_doc_hash::content_hash(reason);
     let deferred_event = agent_doc_state_backbone::StateEvent::new(
         format!("queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"),
@@ -913,7 +913,7 @@ fn record_deferred_queue_head_state(
         },
     );
     let deferred_inserted =
-        crate::project_controller::append_state_event(&project_root, &deferred_event)?;
+        agent_doc_controller_io::project_controller::append_state_event(&project_root, &deferred_event)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -982,7 +982,7 @@ fn record_queue_worklist_state(
             hosting_epoch: None,
         },
     );
-    let inserted = crate::project_controller::append_state_event(&project_root, &event)?;
+    let inserted = agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -4900,7 +4900,7 @@ mod tests {
             .expect("deferred queue head should retain a node key")
             .node_key;
         let document_hash = agent_doc_hash::document_id_for_path(&doc);
-        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path()).unwrap();
         let projection = ledger
             .project_document(&document_hash)
             .expect("deferred queue state should project for document");
@@ -4920,7 +4920,7 @@ mod tests {
         assert!(!head.drainable);
 
         record_selected_queue_head_state(&doc, &updated, "do [#alpha]", true).unwrap();
-        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path()).unwrap();
         let projection = ledger
             .project_document(&document_hash)
             .expect("reselected queue state should project for document");
@@ -5233,7 +5233,7 @@ mod tests {
             .expect("active queue head should have a node key")
             .node_key;
         let document_hash = agent_doc_hash::document_id_for_path(&doc);
-        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path()).unwrap();
         let projection = ledger
             .project_document(&document_hash)
             .expect("selected queue state should project for document");
@@ -5313,7 +5313,7 @@ mod tests {
             .expect("ready queue head should have a node key")
             .node_key;
         let document_hash = agent_doc_hash::document_id_for_path(&doc);
-        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path()).unwrap();
         let projection = ledger
             .project_document(&document_hash)
             .expect("selected queue state should project for document");
@@ -5402,7 +5402,7 @@ mod tests {
             .node_key
             .clone();
         let document_hash = agent_doc_hash::document_id_for_path(&doc);
-        let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
+        let ledger = agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path()).unwrap();
         let projection = ledger
             .project_document(&document_hash)
             .expect("selected queue state should project for document");

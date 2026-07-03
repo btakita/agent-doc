@@ -436,7 +436,7 @@ pub fn run_with_reap_policy(
             format!("Generated session UUID: {session_id}"),
         );
     }
-    match crate::project_controller::close_stale_starting_actors_for_caller(
+    match agent_doc_controller_io::project_controller::close_stale_starting_actors_for_caller(
         &project_root,
         std::time::Duration::from_secs(3600),
         false,
@@ -454,7 +454,7 @@ pub fn run_with_reap_policy(
             format!("[start] actor gc warning: {e}"),
         ),
     }
-    match crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+    match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
         &project_root,
         false,
         "start",
@@ -721,7 +721,7 @@ pub fn run_with_reap_policy(
             start_generation
         ),
     );
-    crate::project_controller::ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    agent_doc_controller_io::project_controller::ensure_controller_running(&project_root, LaunchMode::Lazy)?;
     // `#jbdisprecycle` R2: a `start_session` that races a supervisor `execve`
     // hot-reload (lib-install auto-recycle / operator restart) fails because the
     // project controller is mid-teardown (the live repro's terminal
@@ -730,7 +730,7 @@ pub fn run_with_reap_policy(
     // instead of surfacing a terminal failure that strands the dispatch.
     let actor_record = {
         const MAX_START_SESSION_RECYCLE_RETRIES: usize = 2;
-        let start_request = crate::project_controller::StartSessionRequest {
+        let start_request = agent_doc_controller_io::project_controller::StartSessionRequest {
             file: canonical.clone(),
             session_id: session_id.clone(),
             pane_id: pane_id.clone(),
@@ -740,7 +740,7 @@ pub fn run_with_reap_policy(
         let file_path_str = file.to_string_lossy().to_string();
         let mut attempts_used = 0usize;
         loop {
-            match crate::project_controller::start_session(&project_root, start_request.clone()) {
+            match agent_doc_controller_io::project_controller::start_session(&project_root, start_request.clone()) {
                 Ok(record) => break record,
                 Err(err) => {
                     let recycle_pending =
@@ -790,7 +790,7 @@ pub fn run_with_reap_policy(
                         return Err(err);
                     }
                     // Re-ensure the freshly-recycled controller is reachable before retry.
-                    crate::project_controller::ensure_controller_running(
+                    agent_doc_controller_io::project_controller::ensure_controller_running(
                         &project_root,
                         LaunchMode::Lazy,
                     )?;
@@ -967,9 +967,9 @@ pub fn run_with_reap_policy(
     let supervisor_socket = agent_doc_supervisor_io::ipc::socket_path(&project_root, &session_id)
         .to_string_lossy()
         .to_string();
-    crate::project_controller::register_supervisor(
+    agent_doc_controller_io::project_controller::register_supervisor(
         &project_root,
-        crate::project_controller::SupervisorRegistration {
+        agent_doc_controller_io::project_controller::SupervisorRegistration {
             file: canonical.clone(),
             session_id: session_id.clone(),
             pane_id: pane_id.clone(),

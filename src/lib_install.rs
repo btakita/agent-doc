@@ -280,7 +280,7 @@ pub fn reload_lib(now_epoch_ms: u128) -> Result<ReloadLibReport> {
     };
     let broadcast_path = write_reload_broadcast(dir, &broadcast)?;
     let editor_projects =
-        agent_doc_orchestration::project_controller::editor_broadcast_project_root_count();
+        agent_doc_controller_io::project_controller::editor_broadcast_project_root_count();
     Ok(ReloadLibReport {
         broadcast_path,
         lib_version: version.to_string(),
@@ -370,7 +370,7 @@ fn auto_recycle_after_install() {
         );
         return;
     }
-    match agent_doc_orchestration::project_controller::recycle_controllers_all_projects() {
+    match agent_doc_controller_io::project_controller::recycle_controllers_all_projects() {
         Ok((recycled, skipped)) => {
             eprintln!(
                 "[lib-install] auto-recycle: {recycled} controller(s) marked to recycle at next idle boundary, {skipped} skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)"
@@ -387,7 +387,7 @@ fn auto_recycle_after_install() {
     // documents must also be marked to recycle onto the freshly-installed binary,
     // otherwise they keep serving the prior build until each independently
     // self-detects staleness.
-    match agent_doc_orchestration::project_controller::recycle_supervisors_all_projects() {
+    match agent_doc_controller_io::project_controller::recycle_supervisors_all_projects() {
         Ok((marked, skipped)) => {
             eprintln!(
                 "[lib-install] auto-recycle: {marked} route-owned supervisor(s) marked to recycle at next idle boundary, {skipped} skipped"

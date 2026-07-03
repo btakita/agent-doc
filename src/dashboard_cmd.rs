@@ -15,7 +15,7 @@ const EFFECTS: CliDashboardEffects = CliDashboardEffects;
 
 impl DashboardEffects for CliDashboardEffects {
     fn actor_records(&self, root: &Path) -> Result<Vec<ActorListRecord>> {
-        let actors = agent_doc_orchestration::project_controller::load_actor_store(root)?;
+        let actors = agent_doc_controller_io::project_controller::load_actor_store(root)?;
         Ok(actors
             .values()
             .map(|record| ActorListRecord {
@@ -47,7 +47,7 @@ impl DashboardEffects for CliDashboardEffects {
     }
 
     fn actor_diagnostics(&self, root: &Path, document: &Path) -> Result<DashboardActorDiagnostics> {
-        let inspection = agent_doc_orchestration::project_controller::inspect_actor(
+        let inspection = agent_doc_controller_io::project_controller::inspect_actor(
             root,
             Some(document),
             None,

@@ -9,16 +9,43 @@ repository = "https://github.com/btakita/agent-doc"
 [lib]
 name = "agent_doc_controller_io"
 
+[features]
+test-support = []
+
 [dependencies]
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.67" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
 agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.67" }
+agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.34.67" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.67" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.67" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.67" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.67" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.67" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 anyhow = "1"
 fs2 = "0.4"
+interprocess = { version = "2", default-features = false }
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+tracing = "0.1"
 
 [dev-dependencies]
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
+rusqlite = { version = "0.40", features = ["bundled"] }
 tempfile = "3"

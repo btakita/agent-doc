@@ -19,7 +19,7 @@ use agent_doc_controller::status::{
     preparing_controller_is_stale, resolve_controller_identity_version,
     stale_preparing_controller_threshold_from_env_value,
 };
-use agent_doc_controller_io::process::{is_same_project_controller_pid, process_is_alive};
+use crate::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use anyhow::{Context, Result};
@@ -82,6 +82,110 @@ const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CON
 /// short gap between queue items never triggers a recycle.
 const DEFAULT_RECYCLE_IDLE_GRACE_SECS: u64 = 5;
 const RECYCLE_IDLE_GRACE_SECS_ENV: &str = "AGENT_DOC_RECYCLE_IDLE_GRACE_SECS";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllerQueueConsumptionOutcome {
+    pub consumed_text: String,
+    pub remaining: usize,
+    pub drained: bool,
+}
+
+pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
+    fn consume_queue_prompt_force_disk(
+        &self,
+        file: &Path,
+    ) -> Result<Option<ControllerQueueConsumptionOutcome>>;
+
+    fn route_auto_start(
+        &self,
+        tmux: &tmux_router::Tmux,
+        file: &Path,
+        session_id: &str,
+        file_arg: &str,
+        window: Option<&str>,
+    ) -> Result<String>;
+}
+
+static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();
+
+pub fn install_runtime_effects(effects: &'static dyn ProjectControllerRuntimeEffects) {
+    let _ = RUNTIME_EFFECTS.set(effects);
+}
+
+pub(crate) fn runtime_effects() -> Result<&'static dyn ProjectControllerRuntimeEffects> {
+    if let Some(effects) = RUNTIME_EFFECTS.get().copied() {
+        return Ok(effects);
+    }
+    #[cfg(test)]
+    {
+        return Ok(&TEST_RUNTIME_EFFECTS);
+    }
+    #[cfg(not(test))]
+    {
+        Err(anyhow::anyhow!(
+            "project controller runtime effects were not installed by the binary"
+        ))
+    }
+}
+
+#[cfg(test)]
+struct TestProjectControllerRuntimeEffects;
+
+#[cfg(test)]
+impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
+    fn consume_queue_prompt_force_disk(
+        &self,
+        file: &Path,
+    ) -> Result<Option<ControllerQueueConsumptionOutcome>> {
+        let content = std::fs::read_to_string(file)
+            .context("project controller test queue consume: failed to read document")?;
+        let Some(consumed_text) = agent_doc_queue::queue_heads::active_queue_head_text(&content)?
+        else {
+            return Ok(None);
+        };
+        let node_keys = agent_doc_queue::queue_consume::queue_prompt_node_keys_for_texts(
+            &content,
+            std::slice::from_ref(&consumed_text),
+            &[],
+        )?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "project controller test queue consume: failed to derive active head node key"
+            )
+        })?;
+        let mut new_content =
+            agent_doc_queue::queue_consume::consume_queue_nodes_by_key(&content, &node_keys.keys)?;
+        let remaining = agent_doc_queue::queue_heads::active_queue_heads(&new_content).len();
+        if remaining == 0 {
+            new_content = agent_doc_frontmatter::frontmatter::merge_queue_state(
+                &new_content,
+                false,
+            )?;
+        }
+        std::fs::write(file, &new_content)
+            .context("project controller test queue consume: failed to write document")?;
+        Ok(Some(ControllerQueueConsumptionOutcome {
+            consumed_text,
+            remaining,
+            drained: remaining == 0,
+        }))
+    }
+
+    fn route_auto_start(
+        &self,
+        _tmux: &tmux_router::Tmux,
+        _file: &Path,
+        _session_id: &str,
+        _file_arg: &str,
+        _window: Option<&str>,
+    ) -> Result<String> {
+        anyhow::bail!("project controller test runtime does not route auto-start")
+    }
+}
+
+#[cfg(test)]
+static TEST_RUNTIME_EFFECTS: TestProjectControllerRuntimeEffects = TestProjectControllerRuntimeEffects;
+
 #[derive(Clone, Debug)]
 pub struct SessionsProjectionHint {
     pub session_id: String,
@@ -765,7 +869,7 @@ pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>
     })
 }
 
-pub(crate) fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
+pub fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
     let path = current_agent_doc_binary()?;
     let metadata = std::fs::metadata(&path)
         .with_context(|| format!("failed to stat current agent-doc binary {}", path.display()))?;
@@ -1644,14 +1748,14 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
         .unwrap_or(0);
     let mut reaped = 0;
     let mut kept = 0;
-    for pid in agent_doc_controller_io::process::project_controller_pids(project_root) {
+    for pid in crate::process::project_controller_pids(project_root) {
         if pid == std::process::id() {
             continue;
         }
-        if !agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid) {
+        if !crate::process::cmdline_has_preparing_handoff(pid) {
             continue;
         }
-        let age = agent_doc_controller_io::process::process_start_age_secs(pid).unwrap_or(0);
+        let age = crate::process::process_start_age_secs(pid).unwrap_or(0);
         if age <= stale_after.as_secs() {
             // Freshly-launched replacement still inside a healthy handoff window.
             kept += 1;
@@ -1710,18 +1814,18 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
 ) -> Result<(usize, usize)> {
     let mut reaped = 0;
     let mut kept = 0;
-    for pid in agent_doc_controller_io::process::process_pids() {
+    for pid in crate::process::process_pids() {
         if pid == std::process::id() {
             continue;
         }
-        let Some(root) = agent_doc_controller_io::process::controller_serve_project_root(pid)
+        let Some(root) = crate::process::controller_serve_project_root(pid)
         else {
             continue;
         };
-        if !agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid) {
+        if !crate::process::cmdline_has_preparing_handoff(pid) {
             continue;
         }
-        let age = agent_doc_controller_io::process::process_start_age_secs(pid).unwrap_or(0);
+        let age = crate::process::process_start_age_secs(pid).unwrap_or(0);
         if age <= stale_after.as_secs() {
             // Freshly-launched replacement still inside a healthy handoff window.
             kept += 1;
@@ -2211,7 +2315,7 @@ pub(crate) fn spawn_preparing_controller_sentinel(project_root: &Path) -> std::p
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(2)
         && !(is_same_project_controller_pid(project_root, pid)
-            && agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid))
+            && crate::process::cmdline_has_preparing_handoff(pid))
     {
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -2280,6 +2384,28 @@ mod tests {
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
     use rusqlite::params;
     use std::collections::BTreeMap;
+
+    struct TestPipelineFrontmatterEffects;
+
+    impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
+        for TestPipelineFrontmatterEffects
+    {
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current_content: &str,
+            target_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
+
+        fn log_op(&self, _file: &Path, _message: &str) {}
+    }
+
+    const TEST_PIPELINE_FRONTMATTER_EFFECTS: TestPipelineFrontmatterEffects =
+        TestPipelineFrontmatterEffects;
 
     #[test]
     fn controller_paths_are_project_local() {
@@ -3406,7 +3532,7 @@ mod tests {
 
         let conn = open_state_db(dir.path()).unwrap();
         let boot_timestamp =
-            agent_doc_controller_io::process::system_boot_timestamp_secs(timestamp_secs())
+            crate::process::system_boot_timestamp_secs(timestamp_secs())
                 .expect("/proc/uptime should be available in tests");
         let old_transition_timestamp = boot_timestamp.saturating_sub(2);
         let preboot_pause_timestamp = boot_timestamp.saturating_sub(1);
@@ -5086,7 +5212,7 @@ agent:queue\n\
         agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["stale-item".to_string()])
             .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(content),
@@ -5745,7 +5871,7 @@ agent:queue\n\
     #[test]
     fn process_start_age_secs_reports_for_self() {
         assert!(
-            agent_doc_controller_io::process::process_start_age_secs(std::process::id()).is_some(),
+            crate::process::process_start_age_secs(std::process::id()).is_some(),
             "process start age must resolve from /proc for a live pid"
         );
     }
@@ -5755,7 +5881,7 @@ agent:queue\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
         let pid = sentinel.id();
-        assert!(agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid));
+        assert!(crate::process::cmdline_has_preparing_handoff(pid));
 
         // Just-launched (age ~0s) ⇒ inside a healthy handoff window ⇒ keep.
         let (reaped, kept) =
@@ -5776,7 +5902,7 @@ agent:queue\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let mut sentinel = spawn_controller_sentinel(dir.path());
         let pid = sentinel.id();
-        assert!(!agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid));
+        assert!(!crate::process::cmdline_has_preparing_handoff(pid));
 
         // No `--handoff-state preparing` ⇒ not an orphaned handoff ⇒ never scanned.
         let (reaped, kept) =
@@ -5807,7 +5933,7 @@ agent:queue\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
         let pid = sentinel.id();
-        assert!(agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid));
+        assert!(crate::process::cmdline_has_preparing_handoff(pid));
 
         // Age strictly past the 1s threshold. Start age is whole seconds (/proc dir
         // mtime), and the reaper keeps when `age <= threshold`, so a ~1.1s-old
@@ -6161,9 +6287,9 @@ agent:queue\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
         let pid = sentinel.id();
-        assert!(agent_doc_controller_io::process::cmdline_has_preparing_handoff(pid));
+        assert!(crate::process::cmdline_has_preparing_handoff(pid));
         assert_eq!(
-            agent_doc_controller_io::process::controller_serve_project_root(pid).as_deref(),
+            crate::process::controller_serve_project_root(pid).as_deref(),
             Some(dir.path()),
             "the sweep must recover the sentinel's own --project-root from /proc"
         );

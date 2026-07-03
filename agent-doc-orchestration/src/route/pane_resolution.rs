@@ -3572,7 +3572,7 @@ mod tests {
         let session_id = "route-stale-starting-ready-prompt";
         sessions::register(session_id, &actor_pane, &file_path).unwrap();
 
-        crate::project_controller::store_actor_record(
+        agent_doc_controller_io::project_controller::store_actor_record(
             dir.path(),
             None,
             &agent_doc_sqlite::state_store::ActorRecord {
@@ -3657,7 +3657,7 @@ mod tests {
                 "unrelated panes in the split must remain visible"
             );
         }
-        let record = crate::project_controller::authoritative_actor_binding(dir.path(), &doc)
+        let record = agent_doc_controller_io::project_controller::authoritative_actor_binding(dir.path(), &doc)
             .unwrap()
             .unwrap();
         assert_eq!(record.pane_id, actor_pane);

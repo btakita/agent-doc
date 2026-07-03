@@ -43,7 +43,6 @@ pub mod flow;
 pub mod git;
 pub use agent_doc_run_context_io as graph;
 pub mod preflight;
-pub mod project_controller;
 pub use agent_doc_queue_io::queue_continuation;
 pub mod realtime_model;
 pub mod repair;

@@ -23,7 +23,7 @@ pub(crate) fn load_authoritative_actor_binding(
     }
 
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    let Some(record) = crate::project_controller::authoritative_actor_binding(&base_dir, file)?
+    let Some(record) = agent_doc_controller_io::project_controller::authoritative_actor_binding(&base_dir, file)?
     else {
         return Ok(None);
     };
@@ -231,9 +231,9 @@ pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
     }
 
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    match crate::project_controller::mark_lifecycle(
+    match agent_doc_controller_io::project_controller::mark_lifecycle(
         &base_dir,
-        crate::project_controller::LifecycleRequest {
+        agent_doc_controller_io::project_controller::LifecycleRequest {
             file: file.to_path_buf(),
             session_id: record.session_id.clone(),
             pane_id: record.pane_id.clone(),
@@ -322,9 +322,9 @@ pub(crate) fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
     }
 
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    match crate::project_controller::mark_lifecycle(
+    match agent_doc_controller_io::project_controller::mark_lifecycle(
         &base_dir,
-        crate::project_controller::LifecycleRequest {
+        agent_doc_controller_io::project_controller::LifecycleRequest {
             file: file.to_path_buf(),
             session_id: actor.record.session_id.clone(),
             pane_id: actor.record.pane_id.clone(),
@@ -420,7 +420,7 @@ pub(crate) fn authorize_controller_dispatch(
 ) -> Result<RouteDispatchAuthorization> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
     let generation = actor.record.generation;
-    let dispatch_request = || crate::project_controller::DispatchRequest {
+    let dispatch_request = || agent_doc_controller_io::project_controller::DispatchRequest {
         file: file.to_path_buf(),
         session_id: session_id.to_string(),
         pane_id: actor.record.pane_id.clone(),
@@ -428,7 +428,7 @@ pub(crate) fn authorize_controller_dispatch(
         command_kind: command_kind.to_string(),
         diagnostic_payload: diagnostic_payload.to_string(),
     };
-    match crate::project_controller::authorize_dispatch(&base_dir, dispatch_request()) {
+    match agent_doc_controller_io::project_controller::authorize_dispatch(&base_dir, dispatch_request()) {
         Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
         Err(err)
             if agent_doc_controller::dispatch::dispatch_error_is_coalesced(&err.to_string()) =>
@@ -477,7 +477,7 @@ fn recover_dispatch_via_supervisor_restart(
     base_dir: &Path,
     generation: u64,
     recovery: agent_doc_controller::dispatch::StaleQueuePauseRecovery,
-    dispatch_request: &dyn Fn() -> crate::project_controller::DispatchRequest,
+    dispatch_request: &dyn Fn() -> agent_doc_controller_io::project_controller::DispatchRequest,
     original_err: anyhow::Error,
 ) -> Result<RouteDispatchAuthorization> {
     let stale_pid = recovery.stale_pid;
@@ -495,7 +495,7 @@ fn recover_dispatch_via_supervisor_restart(
     // churn-stop. Pass the observed generation (the dispatch target's) so the resume is
     // not rejected as `missing_observed_generation`. A failed resume is non-fatal — the
     // re-dispatch below simply fails closed again if the pause somehow survives.
-    match crate::project_controller::control_queue(
+    match agent_doc_controller_io::project_controller::control_queue(
         base_dir,
         Some(file),
         "resume",
@@ -515,7 +515,7 @@ fn recover_dispatch_via_supervisor_restart(
             "route_dispatch_recovery action=restart_supervisor cause=churn_stop_stale_supervisor stale_pid={stale_pid} result=restarted {outcome_fields}"
         ),
     );
-    match crate::project_controller::authorize_dispatch(base_dir, dispatch_request()) {
+    match agent_doc_controller_io::project_controller::authorize_dispatch(base_dir, dispatch_request()) {
         Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
         Err(err)
             if agent_doc_controller::dispatch::dispatch_error_is_coalesced(&err.to_string()) =>
@@ -579,7 +579,7 @@ pub(crate) fn load_authoritative_actor_for_registered_pane(
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(&base_dir, file_path);
-    let record = crate::project_controller::load_actor_store(&base_dir)?
+    let record = agent_doc_controller_io::project_controller::load_actor_store(&base_dir)?
         .values()
         .find(|record| {
             record.document_id == document_id
@@ -644,9 +644,9 @@ pub(crate) fn mark_starting_actor_timeout_blocked(
     facts: &AuthoritativeActorReadyFacts,
 ) {
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    match crate::project_controller::mark_lifecycle(
+    match agent_doc_controller_io::project_controller::mark_lifecycle(
         &base_dir,
-        crate::project_controller::LifecycleRequest {
+        agent_doc_controller_io::project_controller::LifecycleRequest {
             file: file.to_path_buf(),
             session_id: session_id.to_string(),
             pane_id: facts.pane_id.clone(),

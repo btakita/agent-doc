@@ -505,10 +505,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // R3 (#ctlrecycle): capture this supervisor's launch binary identity (≈ the
             // installed binary at process start). A later `cargo install` makes
             // `current_binary_identity()` differ, marking this supervisor stale.
-            let recycle_launch_identity = crate::project_controller::current_binary_identity().ok();
+            let recycle_launch_identity = agent_doc_controller_io::project_controller::current_binary_identity().ok();
             let recycle_auto_enabled =
                 agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(&path);
-            let recycle_grace = crate::project_controller::recycle_idle_grace();
+            let recycle_grace = agent_doc_controller_io::project_controller::recycle_idle_grace();
             let mut recycle_stale_since: Option<std::time::Instant> = None;
             let mut recycle_detected_logged = false;
             // `#suprecyclestall` — set once a self-`execve` recycle has failed so we
@@ -543,7 +543,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let auto_install_enabled =
                 agent_doc_supervisor_io::config::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
-                crate::project_controller::dogfood_agent_doc_crate_root(&path)
+                agent_doc_controller_io::project_controller::dogfood_agent_doc_crate_root(&path)
             } else {
                 None
             };
@@ -1232,7 +1232,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_fs::install_freshness::newest_crate_source_mtime_secs(
                                 crate_root,
                             ),
-                            crate::project_controller::current_binary_identity().ok(),
+                            agent_doc_controller_io::project_controller::current_binary_identity().ok(),
                         ) {
                             (Some(src), Some(bin)) => {
                                 agent_doc_supervisor::config::source_newer_than_installed_binary(
@@ -1317,7 +1317,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 &shared,
                                 SupervisorAutoInstallPhase::Started,
                             );
-                            match crate::project_controller::run_supervisor_auto_install(crate_root) {
+                            match agent_doc_controller_io::project_controller::run_supervisor_auto_install(crate_root) {
                                 Ok(()) => {
                                     log_event(
                                         &mut session_log,
@@ -1366,7 +1366,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                     }
                 }
-                let current_recycle_identity = crate::project_controller::current_binary_identity().ok();
+                let current_recycle_identity = agent_doc_controller_io::project_controller::current_binary_identity().ok();
                 let supervisor_stale = agent_doc_controller::status::process_binary_is_stale(
                     recycle_launch_identity.as_ref(),
                     current_recycle_identity.as_ref(),

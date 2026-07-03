@@ -150,7 +150,7 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
         return Err(err);
     }
     timer.mark("session_check");
-    crate::project_controller::persist_session_actor_closeout(file)?;
+    agent_doc_controller_io::project_controller::persist_session_actor_closeout(file)?;
     timer.mark("session_actor_closeout");
     record_terminal_closeout_proof(file, did_commit)?;
     timer.mark("terminal_proof");
@@ -704,7 +704,7 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
         capture.as_ref(),
     )?;
     let editor_ipc = closeout_editor_ipc_evidence(file, &visible);
-    let binary_freshness = match crate::project_controller::stale_supervisor_warning_for_doc(file) {
+    let binary_freshness = match agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file) {
         Some(warning) => CloseoutBinaryFreshnessEvidence::Stale { warning },
         None => CloseoutBinaryFreshnessEvidence::NoStaleWarning,
     };

@@ -1019,7 +1019,7 @@ fn marker_fallback_continuation_response(
         crate::queue_continuation::pending_marker_continuation_for_roots_with_actor_binding(
             roots,
             current_pane.as_deref(),
-            crate::project_controller::authoritative_actor_binding,
+            agent_doc_controller_io::project_controller::authoritative_actor_binding,
         )?
     else {
         return Ok(None);

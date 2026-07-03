@@ -1,11 +1,12 @@
 //! Route target session, pane resolution, and startup I/O.
 //!
 //! This crate owns route tmux/session-registry resolution effects plus focused
-//! route startup helpers. It does not own command dispatch, document mutation,
-//! queue policy, or supervisor process startup.
+//! route startup and dispatch helpers. It does not own document mutation, queue
+//! policy, or supervisor process startup.
 
 pub mod busy_pane;
 pub mod direct_pane_dispatch;
+pub mod dispatch;
 pub mod dispatch_only;
 pub mod dispatch_recovery;
 pub mod dispatch_start;

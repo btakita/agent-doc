@@ -1105,7 +1105,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/route/dispatch_only.rs",
         "agent-doc-orchestration/src/route/authoritative_actor.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
-        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-route-io/src/startup_ready.rs",
         "agent-doc-route-io/src/startup_sync.rs",
@@ -1345,11 +1345,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // existing busy proof line before returning the typed queued outcome,
         // so an accepted trigger queued behind an active turn is auditable
         // without waiting through the full dispatch-start proof budget.
-        ("agent-doc-orchestration/src/route/dispatch.rs", "proof=") => 3,
+        ("agent-doc-route-io/src/dispatch.rs", "proof=") => 3,
         // 3 -> 0: dead-harness and auto-start reverify fail-closed reason
         // logging moved with the tmux-facing route dispatch IO graph into
         // `agent-doc-route-io`.
-        ("agent-doc-orchestration/src/route/dispatch.rs", "reason=") => 0,
+        ("agent-doc-route-io/src/dispatch.rs", "reason=") => 0,
         // +2 (#jbtsiftnosub
         // `reason=harness_not_dispatch_ready_before_auto_start_send`,
         // `reason=harness_exited_to_bare_shell_before_auto_start_send`): the
@@ -9091,7 +9091,7 @@ fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
     );
     for (relative, required) in [
         (
-            "agent-doc-orchestration/src/route/dispatch.rs",
+            "agent-doc-route-io/src/dispatch.rs",
             "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit",
         ),
         (
@@ -13101,8 +13101,7 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
     }
 
     let route_dispatch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch.rs")).unwrap();
     let route_dispatch_recovery =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_recovery.rs"))
             .unwrap();
@@ -13415,7 +13414,7 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
 
     for relative in [
         "agent-doc-orchestration/src/route/cycle_ack.rs",
-        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/start/detection.rs",
     ] {
@@ -13953,8 +13952,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     let route_dispatch_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch.rs")).unwrap();
     let route_direct_pane_dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
             .unwrap();
@@ -13995,6 +13993,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     let flow_types_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/route/dispatch.rs")
+            .exists()
+            && !route_source.contains("mod dispatch;")
+            && route_source.contains("use agent_doc_route_io::dispatch::{"),
+        "orchestration must not keep a route dispatch module after the dispatch transport/proof graph moves to agent-doc-route-io"
+    );
     assert!(
         authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
         "route authorization should call the focused controller dispatch classifier directly"
@@ -14076,11 +14082,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
-        route_source.contains("use agent_doc_route_io::dispatch_start::{")
-            && route_source.contains("RoutedDispatchStartTracker")
-            && route_source.contains("build_routed_dispatch_start_tracker")
-            && route_source.contains("wait_for_routed_dispatch_start"),
-        "route.rs should call focused route dispatch-start IO directly"
+        route_dispatch_source.contains("use crate::dispatch_start::{")
+            && route_dispatch_source.contains("RoutedDispatchStartTracker")
+            && route_dispatch_source.contains("build_routed_dispatch_start_tracker")
+            && route_dispatch_source.contains("wait_for_routed_dispatch_start"),
+        "agent-doc-route-io dispatch should call focused route dispatch-start IO directly"
     );
     for required_snippet in [
         "pub fn wait_for_dispatch_only_recycle_inflight_settle(",
@@ -14127,6 +14133,31 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_only_source.contains("require_dispatch_only_dispatch_start_proof("),
         "route/dispatch_only.rs should call focused dispatch-only route IO directly"
     );
+    for required_snippet in [
+        "pub struct RouteDispatchEffects",
+        "pub struct RouteDispatchBugReportFacts",
+        "pub struct BusyRouteQueuedDiagnosticFacts",
+        "pub fn dispatch_via_supervisor_ipc_with_mode(",
+        "pub fn dispatch_via_supervisor_ipc(",
+        "pub fn dispatch_existing_managed_reopen(",
+        "pub fn dispatch_routed_reopen(",
+        "pub fn dispatch_routed_reopen_with_mode(",
+        "pub fn send_command_checked(",
+        "pub struct SupervisorIpcDispatchOptions",
+        "pub struct DirectPaneDispatchOptions",
+        "agent_doc_supervisor_io::ipc::send_command(",
+        "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit(",
+        "agent_doc_tmux_io::input_diag::log_text_submit(",
+        "busy_dispatch_start_outcome(true, probe_proof)",
+        "routed_dispatch_start_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test))",
+        "(effects.file_route_dispatch_bug_report)(RouteDispatchBugReportFacts",
+        "(effects.emit_busy_route_queued_diagnostic)(BusyRouteQueuedDiagnosticFacts",
+    ] {
+        assert!(
+            route_dispatch_source.contains(required_snippet),
+            "agent-doc-route-io dispatch should own route dispatch transport/proof IO: {required_snippet}"
+        );
+    }
     for required_snippet in [
         "pub struct CommandDispatchResult",
         "pub struct DirectPaneAcceptance",
@@ -14186,13 +14217,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
-        route_dispatch_source.contains("agent_doc_route_io::direct_pane_dispatch::{")
+        route_dispatch_source.contains("use crate::direct_pane_dispatch::{")
             && route_dispatch_source.contains("send_command_unchecked")
             && route_dispatch_source
                 .contains("try_late_direct_pane_enter_resubmit_after_unproven_dispatch(")
             && route_dispatch_source.contains("log_route_submit_observation(")
             && route_dispatch_source.contains("log_route_latency("),
-        "route/dispatch.rs should call focused direct-pane route IO directly"
+        "agent-doc-route-io dispatch should call focused direct-pane route IO directly"
     );
     for required_snippet in [
         "pub enum DispatchActorState",
@@ -19031,8 +19062,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     }
 
     let dispatch_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch.rs")).unwrap();
     let startup_ready_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_ready.rs")).unwrap();
     for forbidden in [
@@ -19077,7 +19107,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     }
     for relative in [
         "agent-doc-orchestration/src/route.rs",
-        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
         "agent-doc-orchestration/src/route/startup.rs",
@@ -19600,8 +19630,7 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     );
 
     let route_dispatch_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch.rs")).unwrap();
     let route_direct_pane_dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
             .unwrap();
@@ -20866,7 +20895,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/route.rs",
-        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-session-registry-io/src/registration.rs",
         "agent-doc-sync-io/src/sync/pane_repair.rs",
@@ -20891,7 +20920,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "src/queue_dispatch.rs",
         "src/session_actor_cmd.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
-        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-sync-io/src/sync/pane_repair.rs",
         "agent-doc-orchestration/src/start.rs",

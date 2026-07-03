@@ -162,6 +162,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
         &dispatch_pane,
         file_path,
         harness,
+        route_dispatch_effects(),
     ) {
         Ok(proof) => proof,
         Err(_) => {

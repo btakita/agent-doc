@@ -890,6 +890,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                     &registered_pane,
                     file_path,
                     harness,
+                    route_dispatch_effects(),
                 )?;
                 require_routed_cycle_ack(
                     tmux,
@@ -1006,7 +1007,13 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         }
         register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
         let dispatch_start = dispatch_existing_managed_reopen(
-            tmux, file, session_id, &new_pane, file_path, harness,
+            tmux,
+            file,
+            session_id,
+            &new_pane,
+            file_path,
+            harness,
+            route_dispatch_effects(),
         )?;
         let ack_pane = require_routed_cycle_ack(
             tmux,
@@ -1335,8 +1342,15 @@ pub(crate) fn optimistic_busy_pane_dispatch(
         harness.binary
     );
     register_dispatch_target(tmux, session_id, pane, file_path)?;
-    let dispatch_start =
-        dispatch_existing_managed_reopen(tmux, file, session_id, pane, file_path, harness)?;
+    let dispatch_start = dispatch_existing_managed_reopen(
+        tmux,
+        file,
+        session_id,
+        pane,
+        file_path,
+        harness,
+        route_dispatch_effects(),
+    )?;
     let ack_pane = require_routed_cycle_ack(
         tmux,
         file,

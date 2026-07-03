@@ -215,11 +215,16 @@ pub(crate) use agent_doc_route_io::busy_pane::{
     ensure_existing_pane_ready_for_dispatch,
 };
 use agent_doc_route_io::direct_pane_dispatch::{editor_route_attempt_id, log_route_latency};
+#[cfg(test)]
+use agent_doc_route_io::dispatch::send_command_checked;
+use agent_doc_route_io::dispatch::{
+    BusyRouteQueuedDiagnosticFacts, DirectPaneDispatchOptions, RouteDispatchBugReportFacts,
+    RouteDispatchEffects, SupervisorIpcDispatchOptions, dispatch_existing_managed_reopen,
+    dispatch_routed_reopen, dispatch_routed_reopen_with_mode, dispatch_via_supervisor_ipc,
+    dispatch_via_supervisor_ipc_with_mode,
+};
 pub(crate) use agent_doc_route_io::dispatch_recovery::{
     resolve_fresh_dispatch_target_after_ready_wait, wait_for_starting_pane_recovery_target,
-};
-use agent_doc_route_io::dispatch_start::{
-    RoutedDispatchStartTracker, build_routed_dispatch_start_tracker, wait_for_routed_dispatch_start,
 };
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
 use agent_doc_route_io::pane_provenance::pane_route_provenance;
@@ -232,14 +237,13 @@ pub(crate) use agent_doc_route_io::startup_ready::{
 };
 use agent_doc_route_io::supervisor_runtime::{
     query_supervisor_health, query_supervisor_runtime, restart_via_supervisor,
-    restart_via_supervisor_with_mode, supervisor_socket_path,
+    restart_via_supervisor_with_mode,
 };
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::pane_registration_matches_file;
-use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_supervisor::route_runtime::{
     DeferToBoundaryRestartRecoveryFacts, RouteActorState, SupervisorHealth, SupervisorRuntime,
     authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason,
@@ -410,17 +414,11 @@ fn route_ops_log_path(file: &Path) -> Option<PathBuf> {
     Some(root.join(".agent-doc/logs/ops.log"))
 }
 
-#[derive(Debug, Clone, Copy)]
-struct RouteDispatchBugReportFacts<'a> {
-    file: &'a Path,
-    pane: &'a str,
-    harness: &'a HarnessConfig,
-    phase: &'a str,
-    issue: &'a str,
-    result: &'a str,
-    elapsed: Duration,
-    proof: Option<RoutedDispatchStartProof>,
-    diagnostic_path: Option<&'a Path>,
+fn route_dispatch_effects() -> RouteDispatchEffects {
+    RouteDispatchEffects {
+        file_route_dispatch_bug_report,
+        emit_busy_route_queued_diagnostic: emit_busy_route_queued_diagnostic_from_facts,
+    }
 }
 
 fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
@@ -532,6 +530,10 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
     }
 }
 
+fn emit_busy_route_queued_diagnostic_from_facts(facts: BusyRouteQueuedDiagnosticFacts<'_>) {
+    emit_busy_route_queued_diagnostic(facts.tmux, facts.pane, facts.file, facts.harness);
+}
+
 fn actor_dispatch_state(state: agent_doc_sqlite::state_store::ActorState) -> ActorDispatchState {
     match state {
         agent_doc_sqlite::state_store::ActorState::Ready => ActorDispatchState::Ready,
@@ -541,6 +543,20 @@ fn actor_dispatch_state(state: agent_doc_sqlite::state_store::ActorState) -> Act
         agent_doc_sqlite::state_store::ActorState::Blocked => ActorDispatchState::Blocked,
         agent_doc_sqlite::state_store::ActorState::Closed => ActorDispatchState::Closed,
     }
+}
+
+fn authoritative_actor_dispatch_recovery_hint(
+    state: agent_doc_sqlite::state_store::ActorState,
+    file: &Path,
+) -> String {
+    actor_recovery_hint(actor_dispatch_state(state), &file.display().to_string())
+}
+
+#[cfg(test)]
+fn authoritative_actor_dispatch_can_queue_optimistically(
+    state: agent_doc_sqlite::state_store::ActorState,
+) -> bool {
+    agent_doc_controller::dispatch::actor_can_queue_optimistically(actor_dispatch_state(state))
 }
 
 fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
@@ -2903,6 +2919,7 @@ fn route_via_authoritative_actor(
                 session_id,
                 file_path,
                 harness,
+                route_dispatch_effects(),
             )?;
             let ack_pane = require_routed_cycle_ack(
                 tmux,
@@ -3050,6 +3067,7 @@ fn route_via_authoritative_actor(
                 session_id,
                 file_path,
                 harness,
+                route_dispatch_effects(),
             )?;
 
             let ack_pane = require_routed_cycle_ack(
@@ -3071,9 +3089,6 @@ fn route_via_authoritative_actor(
 
 mod pane_resolution;
 pub(crate) use pane_resolution::*;
-
-mod dispatch;
-pub(crate) use dispatch::*;
 
 mod cycle_ack;
 pub(crate) use cycle_ack::*;

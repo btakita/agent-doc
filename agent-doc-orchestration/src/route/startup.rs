@@ -435,7 +435,14 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                     harness,
                     AUTO_START_DISPATCH_READY_REVERIFY_TIMEOUT,
                 )?;
-                dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)?
+                dispatch_routed_reopen(
+                    tmux,
+                    file,
+                    &dispatch_pane,
+                    file_path,
+                    harness,
+                    route_dispatch_effects(),
+                )?
             }
         } else {
             eprintln!(
@@ -457,7 +464,14 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                 )
                 .map(|_| RoutedDispatchStartProof::CommandAcceptedOnly)
             } else {
-                dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)
+                dispatch_routed_reopen(
+                    tmux,
+                    file,
+                    &dispatch_pane,
+                    file_path,
+                    harness,
+                    route_dispatch_effects(),
+                )
             };
             match dispatch_result {
                 Ok(proof) => {

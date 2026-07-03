@@ -22217,6 +22217,10 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         git_io_lib.contains("pub mod submodule;"),
         "agent-doc-git-io should expose submodule pointer drift IO helpers"
     );
+    assert!(
+        git_io_lib.contains("pub mod transaction;"),
+        "agent-doc-git-io should expose commit transaction IO helpers"
+    );
     let git_branch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/branch.rs")).unwrap();
     assert!(
@@ -22276,6 +22280,26 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             "agent-doc-git-io submodule module must own parent gitlink drift IO: {required}"
         );
     }
+    let git_transaction_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/transaction.rs")).unwrap();
+    for required in [
+        "pub struct CommitLock",
+        "pub fn update_parent_submodule_pointer(",
+        "pub enum CommitTransactionError",
+        "pub fn stage_and_commit_once(",
+        "crate::index::hash_object(git_root, &staged_content)",
+        "crate::index::update_index_cacheinfo(git_root, &cacheinfo)",
+        "crate::commit::commit_no_verify(git_root, msg)",
+    ] {
+        assert!(
+            git_transaction_source.contains(required),
+            "agent-doc-git-io transaction module must own commit transaction IO: {required}"
+        );
+    }
+    assert!(
+        !git_transaction_source.contains("agent_doc_orchestration::"),
+        "git transaction IO must not reach back through orchestration"
+    );
     let snapshot_source =
         fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
     assert!(
@@ -22355,8 +22379,9 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     let git_adapter_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     assert!(
-        git_adapter_source.contains("use agent_doc_git_io::dirs::{"),
-        "orchestration git adapter should import git directory/path helpers directly"
+        git_adapter_source.contains("dirs::{narrow_to_submodule, resolve_to_git_root}")
+            && git_adapter_source.contains("transaction::{"),
+        "orchestration git adapter should import focused git IO helpers directly"
     );
     let doctor_source =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/doctor.rs")).unwrap();
@@ -22420,6 +22445,11 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub fn last_commit_mtime",
         "pub fn show_head",
         "fn show_rev(",
+        "fn stage_snapshot_for_commit(",
+        "fn stage_and_commit_once(",
+        "fn update_parent_submodule_pointer(",
+        "enum CommitTransactionError",
+        "struct CommitLock",
         "pub(crate) fn tracked_side_effect_note(",
     ] {
         assert!(

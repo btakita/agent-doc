@@ -797,9 +797,11 @@ name = "agent-doc-git-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
+ "agent-doc-document",
  "agent-doc-git",
  "agent-doc-hash",
  "anyhow",
+ "fs2",
  "tempfile",
 ]
 

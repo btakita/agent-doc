@@ -11,3 +11,4 @@ pub mod sibling;
 pub mod squash;
 pub mod status;
 pub mod submodule;
+pub mod transaction;

@@ -85,11 +85,9 @@ use agent_doc_document::transient_markers::{
     repair_stale_agent_response_collapse_doc, strip_guard_markers, strip_head_markers,
 };
 use anyhow::{Context, Result};
-use fs2::FileExt;
 use std::collections::HashSet;
 #[cfg(test)]
 use std::fs;
-use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -101,11 +99,13 @@ use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
 use agent_doc_git::{
     PostCommitLocalDriftKind, agent_doc_commit_message_for_file, classify_post_commit_local_drift,
     commit_retry_backoff, has_blocking_non_exchange_component_drift,
-    is_safe_user_only_follow_up_after_committed_head, output_has_index_lock_contention,
-    parent_submodule_pointer_commit_message, relative_to_root, render_git_process_output,
+    is_safe_user_only_follow_up_after_committed_head,
 };
-use agent_doc_git_io::dirs::{
-    commit_lock_path_for_git_root, commit_lock_scope_path, narrow_to_submodule, resolve_to_git_root,
+use agent_doc_git_io::{
+    dirs::{narrow_to_submodule, resolve_to_git_root},
+    transaction::{
+        CommitLock, CommitTransactionError, stage_and_commit_once, update_parent_submodule_pointer,
+    },
 };
 use agent_doc_queue_io::queue_consume;
 
@@ -113,143 +113,6 @@ use agent_doc_queue_io::queue_consume;
 pub struct CommitOutcome {
     pub did_commit: bool,
     pub vcs_refresh_signaled: Option<bool>,
-}
-
-/// RAII guard for an exclusive advisory lock serializing `git::commit()` runs
-/// per git repo / submodule across concurrent sessions. Protects the short
-/// stage+commit critical section so two different docs in the same repo do not
-/// race on one shared git index.
-///
-/// Lock file lives under the resolved git dir (`git rev-parse
-/// --absolute-git-dir`) at `agent-doc-locks/commit-repo-<hash>.lock`. That
-/// means nested docs in the same repo/submodule all share one lock, while
-/// different repos do not block each other, and lock creation does not alter
-/// `.agent-doc` project-root discovery.
-///
-/// Best-effort: if the path cannot be resolved or opened, returns `None` and
-/// the caller proceeds unlocked. When the lock is already held, acquisition
-/// blocks for the short commit critical section instead of proceeding unlocked.
-struct CommitLock {
-    _file: File,
-}
-
-impl CommitLock {
-    fn acquire(git_root: &Path) -> Option<Self> {
-        let lock_path = commit_lock_path_for_git_root(git_root)?;
-        let scope = commit_lock_scope_path(git_root)?;
-        let lock_dir = lock_path.parent()?.to_path_buf();
-        if let Err(e) = std::fs::create_dir_all(&lock_dir) {
-            eprintln!(
-                "[commit] commit-lock dir create failed: {} (proceeding unlocked)",
-                e
-            );
-            return None;
-        }
-        let file = match OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)
-        {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!(
-                    "[commit] commit-lock open failed: {} (proceeding unlocked)",
-                    e
-                );
-                return None;
-            }
-        };
-        if let Err(e) = file.try_lock_exclusive() {
-            eprintln!(
-                "[commit] repo commit-lock contended for {}: {} (waiting)",
-                scope.display(),
-                e
-            );
-            if let Err(e) = file.lock_exclusive() {
-                eprintln!(
-                    "[commit] commit-lock wait failed for {}: {} (proceeding unlocked)",
-                    scope.display(),
-                    e
-                );
-                return None;
-            }
-        }
-        Some(Self { _file: file })
-    }
-}
-
-impl Drop for CommitLock {
-    fn drop(&mut self) {
-        let _ = self._file.unlock();
-    }
-}
-
-/// After a successful commit inside a submodule, stage and partial-commit the
-/// updated submodule pointer in the superproject. Uses an explicit pathspec on
-/// the commit so any other staged files in the parent index are preserved.
-fn update_parent_submodule_pointer(super_root: &Path, submodule_root: &Path, msg: &str) {
-    let _commit_lock = CommitLock::acquire(super_root);
-    let rel = match submodule_root.strip_prefix(super_root) {
-        Ok(r) => r,
-        Err(_) => {
-            eprintln!("[commit] cannot compute submodule relative path; skipping pointer update");
-            return;
-        }
-    };
-    let rel_str = rel.to_string_lossy().to_string();
-
-    let add = Command::new("git")
-        .current_dir(super_root)
-        .args(["add", "--", &rel_str])
-        .output();
-    match add {
-        Ok(o) if o.status.success() => {}
-        Ok(o) => {
-            eprintln!(
-                "[commit] parent git add for submodule pointer failed: {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
-            return;
-        }
-        Err(e) => {
-            eprintln!("[commit] parent git add error: {}", e);
-            return;
-        }
-    }
-
-    let parent_msg = parent_submodule_pointer_commit_message(msg);
-    let commit = Command::new("git")
-        .current_dir(super_root)
-        .args(["commit", "-m", &parent_msg, "--no-verify", "--", &rel_str])
-        .output();
-    match commit {
-        Ok(o) if o.status.success() => {
-            for line in String::from_utf8_lossy(&o.stdout).lines() {
-                let t = line.trim();
-                if t.starts_with('[') && t.contains(']') {
-                    eprintln!("{}", line);
-                }
-            }
-            eprintln!("[commit] parent submodule pointer updated for {}", rel_str);
-        }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            // "nothing to commit" / "no changes added" is fine — pointer was already current.
-            if stderr.contains("nothing to commit")
-                || stdout.contains("nothing to commit")
-                || stderr.contains("no changes added")
-            {
-                return;
-            }
-            eprintln!(
-                "[commit] parent submodule pointer commit failed: {}",
-                stderr.trim()
-            );
-        }
-        Err(e) => eprintln!("[commit] parent submodule pointer commit error: {}", e),
-    }
 }
 
 pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
@@ -1703,174 +1566,6 @@ fn refresh_live_closeout_sidecars(
             Ok(Some(false))
         }
     }
-}
-
-/// Write content to git's object database and return the blob hash.
-fn hash_object(git_root: &Path, content: &str) -> Result<String> {
-    let output = Command::new("git")
-        .current_dir(git_root)
-        .args(["hash-object", "-w", "--stdin"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            if let Some(ref mut stdin) = child.stdin {
-                stdin.write_all(content.as_bytes())?;
-            }
-            child.wait_with_output()
-        })?;
-    if !output.status.success() {
-        anyhow::bail!("git hash-object failed");
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-enum CommitTransactionError {
-    RetryableIndexLock { phase: &'static str, detail: String },
-    IgnoredPath { path: String },
-    Fatal(anyhow::Error),
-}
-
-fn git_path_is_tracked(
-    git_root: &Path,
-    rel_path: &Path,
-) -> std::result::Result<bool, CommitTransactionError> {
-    let output = Command::new("git")
-        .current_dir(git_root)
-        .args(["ls-files", "--error-unmatch", "--"])
-        .arg(rel_path)
-        .output()
-        .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
-    Ok(output.status.success())
-}
-
-fn git_path_is_ignored(
-    git_root: &Path,
-    rel_path: &Path,
-) -> std::result::Result<bool, CommitTransactionError> {
-    let output = Command::new("git")
-        .current_dir(git_root)
-        .args(["check-ignore", "--quiet", "--no-index", "--"])
-        .arg(rel_path)
-        .output()
-        .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err(CommitTransactionError::Fatal(anyhow::anyhow!(
-            "git check-ignore failed for {}: {}",
-            rel_path.display(),
-            render_git_process_output(&output)
-        ))),
-    }
-}
-
-fn git_path_is_ignored_untracked(
-    git_root: &Path,
-    rel_path: &Path,
-) -> std::result::Result<bool, CommitTransactionError> {
-    if git_path_is_tracked(git_root, rel_path)? {
-        return Ok(false);
-    }
-    git_path_is_ignored(git_root, rel_path)
-}
-
-fn git_add_force(
-    git_root: &Path,
-    resolved: &Path,
-) -> std::result::Result<(), CommitTransactionError> {
-    let rel_path = relative_to_root(resolved, git_root);
-    let output = Command::new("git")
-        .current_dir(git_root)
-        .args(["add", "-f", &rel_path.to_string_lossy()])
-        .output()
-        .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
-    if !output.status.success() {
-        let detail = render_git_process_output(&output);
-        if output_has_index_lock_contention(&output) {
-            return Err(CommitTransactionError::RetryableIndexLock {
-                phase: "git add",
-                detail,
-            });
-        }
-        return Err(CommitTransactionError::Fatal(anyhow::anyhow!(
-            "git add failed: {}",
-            detail
-        )));
-    }
-    Ok(())
-}
-
-fn stage_snapshot_for_commit(
-    git_root: &Path,
-    resolved: &Path,
-    snapshot_content: Option<&str>,
-) -> std::result::Result<(), CommitTransactionError> {
-    let rel_path = relative_to_root(resolved, git_root);
-    if git_path_is_ignored_untracked(git_root, &rel_path)? {
-        return Err(CommitTransactionError::IgnoredPath {
-            path: rel_path.to_string_lossy().into_owned(),
-        });
-    }
-
-    if let Some(snap) = snapshot_content {
-        // Stage a CLEAN copy of the snapshot — `(HEAD)` is transient metadata
-        // and must never appear in the committed blob. Post-commit cleanup also
-        // collapses the working tree/snapshot back to the same clean shape, so
-        // moving the boundary across cycles cannot produce phantom marker-only
-        // diffs on previously committed headings.
-        let staged_content = strip_guard_markers(&strip_head_markers(
-            &canonicalize_answered_prompt_prefixes(snap),
-        ));
-        if let Ok(hash) = hash_object(git_root, &staged_content) {
-            let cacheinfo = format!("100644,{},{}", hash, rel_path.to_string_lossy());
-            let output = Command::new("git")
-                .current_dir(git_root)
-                .args(["update-index", "--add", "--cacheinfo", &cacheinfo])
-                .output()
-                .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
-            if !output.status.success() {
-                if output_has_index_lock_contention(&output) {
-                    return Err(CommitTransactionError::RetryableIndexLock {
-                        phase: "update-index",
-                        detail: render_git_process_output(&output),
-                    });
-                }
-                eprintln!("[commit] update-index failed, falling back to git add");
-                return git_add_force(git_root, resolved);
-            }
-            return Ok(());
-        }
-    }
-
-    // No snapshot or hash-object fallback — stage the live file path.
-    git_add_force(git_root, resolved)
-}
-
-fn stage_and_commit_once(
-    git_root: &Path,
-    resolved: &Path,
-    snapshot_content: Option<&str>,
-    msg: &str,
-) -> std::result::Result<std::process::Output, CommitTransactionError> {
-    stage_snapshot_for_commit(git_root, resolved, snapshot_content)?;
-
-    // Commit — ignore failure (nothing to commit is fine).
-    // Use .output() to capture stdout (prevents git status leaking to stdout
-    // when called from `preflight` which reserves stdout for JSON).
-    let output = Command::new("git")
-        .current_dir(git_root)
-        .args(["commit", "-m", msg, "--no-verify"])
-        .output()
-        .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
-    if !output.status.success() && output_has_index_lock_contention(&output) {
-        return Err(CommitTransactionError::RetryableIndexLock {
-            phase: "git commit",
-            detail: render_git_process_output(&output),
-        });
-    }
-    Ok(output)
 }
 
 fn repair_stale_agent_response_collapse_worktree(

@@ -11,9 +11,11 @@ name = "agent_doc_git_io"
 
 [dependencies]
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
 agent-doc-git = { path = "../agent-doc-git", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 anyhow = "1"
+fs2 = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

@@ -69,7 +69,7 @@ mod tests {
 
     impl Drop for ScopedCurrentDir {
         fn drop(&mut self) {
-            std::env::set_current_dir(&self.previous).unwrap();
+            let _ = std::env::set_current_dir(&self.previous);
         }
     }
 

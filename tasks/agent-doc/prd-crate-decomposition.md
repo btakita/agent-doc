@@ -97,7 +97,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `e756b12c` | Claim command binding IO graph |
 | `7af46f2c` | Stream command writeback IO graph |
 | `6ea5c5a8` | Queue consume writeback IO graph |
-| `pending-current-round` | Route session target resolution IO graph |
+| `78e75cd1` | Route session target resolution IO graph |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod detached_child;
 pub mod in_process;
+pub mod io_threads;
 pub mod output_state;
 pub mod pty;
 pub mod resize;

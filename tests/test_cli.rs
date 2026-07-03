@@ -16174,6 +16174,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .unwrap();
     let supervisor_pty =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/pty.rs")).unwrap();
+    let supervisor_io_threads =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/io_threads.rs"))
+            .unwrap();
     let supervisor_in_process =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/in_process.rs"))
             .unwrap();
@@ -16833,10 +16836,11 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     assert!(
         start_source.contains("agent_doc_supervisor::input::{")
-            && start_source.contains("strip_stale_ctrl_d_before_prompt")
             && start_source.contains("normalize_supervisor_inject_bytes")
-            && start_source.contains("prompt_input_summary"),
-        "start.rs should call focused supervisor input byte policy directly"
+            && start_source.contains("prompt_input_summary")
+            && supervisor_io_threads
+                .contains("agent_doc_supervisor::input::strip_stale_ctrl_d_before_prompt"),
+        "start/supervisor process paths should call focused supervisor input byte policy directly"
     );
     for required_snippet in ["pub fn build_reexec_candidates("] {
         assert!(
@@ -17557,6 +17561,9 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
     let output_state_source =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/output_state.rs"))
             .unwrap();
+    let io_threads_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/io_threads.rs"))
+            .unwrap();
     assert!(
         supervisor_process_lib.contains("pub mod output_state;")
             && output_state_source.contains("use crate::screen::OwnedPtyScreen;")
@@ -17564,8 +17571,19 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
             && output_state_source.contains("terminal_screen: Mutex<OwnedPtyScreen>"),
         "agent-doc-supervisor-process should own terminal screen state through SupervisorOutputState"
     );
+    assert!(
+        supervisor_process_lib.contains("pub mod io_threads;")
+            && io_threads_source.contains("pub trait PtyReaderObserver")
+            && io_threads_source.contains("pub trait StdinForwardObserver")
+            && io_threads_source.contains("pub fn spawn_reader_thread")
+            && io_threads_source.contains("pub fn spawn_writer_thread"),
+        "agent-doc-supervisor-process should own PTY reader/stdin-forwarder thread loops behind callback traits"
+    );
     let start_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    let start_supervisor_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/supervisor_io.rs"))
+            .unwrap();
     assert!(
         start_source.contains("output_state::SupervisorOutputState")
             && start_source.contains("output: SupervisorOutputState")
@@ -17573,6 +17591,15 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
             && !start_source.contains("terminal_screen: Mutex<OwnedPtyScreen>")
             && !start_source.contains("recent_output: Mutex<Vec<u8>>"),
         "start.rs should depend on the supervisor-process output-state boundary, not own screen buffers"
+    );
+    assert!(
+        start_supervisor_io
+            .contains("impl agent_doc_supervisor_process::io_threads::PtyReaderObserver")
+            && start_supervisor_io
+                .contains("impl agent_doc_supervisor_process::io_threads::StdinForwardObserver")
+            && !start_supervisor_io.contains("pub(crate) fn spawn_reader_thread")
+            && !start_supervisor_io.contains("pub(crate) fn spawn_writer_thread"),
+        "start/supervisor_io.rs should implement supervisor-process thread callbacks instead of owning thread loops"
     );
     for forbidden in [
         "crate::supervisor::env",
@@ -21157,6 +21184,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",
+        "agent-doc-supervisor-process/src/io_threads.rs",
         "agent-doc-supervisor-process/src/pty.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -21180,6 +21208,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",
+        "agent-doc-supervisor-process/src/io_threads.rs",
         "agent-doc-supervisor-process/src/pty.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();

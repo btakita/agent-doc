@@ -2573,6 +2573,7 @@ mod pane_resolution;
 pub(crate) use pane_resolution::*;
 
 #[cfg(test)]
+#[cfg(test)]
 mod startup;
 
 #[cfg(test)]

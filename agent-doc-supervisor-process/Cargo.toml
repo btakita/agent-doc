@@ -11,6 +11,7 @@ name = "agent_doc_supervisor_process"
 
 [dependencies]
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.67" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.67" }

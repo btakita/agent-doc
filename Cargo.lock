@@ -1793,6 +1793,7 @@ name = "agent-doc-supervisor-process"
 version = "0.34.67"
 dependencies = [
  "agent-doc-harness",
+ "agent-doc-ops-log-io",
  "agent-doc-supervisor",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",

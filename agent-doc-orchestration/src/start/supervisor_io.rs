@@ -1,6 +1,46 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+pub(crate) use agent_doc_supervisor_process::io_threads::{
+    spawn_reader_thread, spawn_writer_thread,
+};
+
+impl agent_doc_supervisor_process::io_threads::PtyReaderObserver for SupervisorShared {
+    fn on_filtered_pty_output(&self, harness: &agent_doc_harness::HarnessConfig, bytes: &[u8]) {
+        record_terminal_screen(self, bytes);
+        record_recent_output(self, bytes);
+        if current_child_prompt_visible(self, harness) {
+            if prompt_visible_requires_ready_transition(self) {
+                self.transition_actor_state(
+                    agent_doc_sqlite::state_store::ActorState::Ready,
+                    "supervisor",
+                    "prompt_ready",
+                );
+            }
+            self.suppress_stale_ctrl_d_until_prompt
+                .store(false, Ordering::Relaxed);
+        }
+    }
+}
+
+impl agent_doc_supervisor_process::io_threads::StdinForwardObserver for SupervisorShared {
+    fn suppress_stale_ctrl_d_until_prompt(&self) -> bool {
+        self.suppress_stale_ctrl_d_until_prompt
+            .load(Ordering::Relaxed)
+    }
+
+    fn prompt_visible_once(&self) -> bool {
+        self.prompt_visible_once.load(Ordering::Relaxed)
+    }
+
+    fn normalize_permission_prompt_input(
+        &self,
+        harness: &agent_doc_harness::HarnessConfig,
+        data: &[u8],
+    ) -> Option<Vec<u8>> {
+        normalize_stdin_for_harness_permission_prompt(self, harness, data)
+    }
+}
 
 /// Shared delivery for injected text (pane submit or PTY write). Used by both
 /// the gated [`IpcMethod::Inject`] path and the gate-exempt
@@ -218,333 +258,6 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             agent_doc_supervisor_crdt_io::handle_replica_awareness(&file, &identity, &awareness_b64)
         }
     }
-}
-
-/// Spawn the master→stdout forwarding thread with escape sequence filtering.
-pub(crate) fn spawn_reader_thread(
-    shared: Arc<SupervisorShared>,
-    harness: agent_doc_harness::HarnessConfig,
-    mut reader: Box<dyn std::io::Read + Send>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("pty->stdout".into())
-        .spawn(move || {
-            let mut buf = [0u8; 8192];
-            let mut filtered = Vec::with_capacity(8192);
-            let stdout = std::io::stdout();
-            let debug_filter = std::env::var("AGENT_DOC_DEBUG_FILTER").is_ok();
-            // Stateful filter — carries partial escape sequences across reads.
-            let mut pty_filter =
-                agent_doc_supervisor_process::pty::PtyFilter::for_harness(&harness);
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if debug_filter {
-                            // Log raw bytes, showing escape sequences as hex
-                            let raw = &buf[..n];
-                            let mut display = String::new();
-                            for &b in raw {
-                                if b == 0x1b {
-                                    display.push_str("\\x1b");
-                                } else if b.is_ascii_graphic() || b == b' ' {
-                                    display.push(b as char);
-                                } else {
-                                    display.push_str(&format!("\\x{b:02x}"));
-                                }
-                            }
-                            eprintln!("[pty-filter] raw ({n} bytes): {display}");
-                        }
-                        filtered.clear();
-                        pty_filter.filter(&buf[..n], &mut filtered);
-                        if debug_filter {
-                            let mut display = String::new();
-                            for &b in &filtered {
-                                if b == 0x1b {
-                                    display.push_str("\\x1b");
-                                } else if b.is_ascii_graphic() || b == b' ' {
-                                    display.push(b as char);
-                                } else {
-                                    display.push_str(&format!("\\x{b:02x}"));
-                                }
-                            }
-                            eprintln!(
-                                "[pty-filter] filtered ({} bytes): {display}",
-                                filtered.len()
-                            );
-                        }
-                        if filtered.is_empty() {
-                            continue;
-                        }
-                        record_terminal_screen(&shared, &filtered);
-                        record_recent_output(&shared, &filtered);
-                        if current_child_prompt_visible(&shared, &harness) {
-                            if prompt_visible_requires_ready_transition(&shared) {
-                                shared.transition_actor_state(
-                                    agent_doc_sqlite::state_store::ActorState::Ready,
-                                    "supervisor",
-                                    "prompt_ready",
-                                );
-                            }
-                            shared
-                                .suppress_stale_ctrl_d_until_prompt
-                                .store(false, Ordering::Relaxed);
-                        }
-                        let mut lock = stdout.lock();
-                        if lock.write_all(&filtered).is_err() || lock.flush().is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        })
-        .expect("spawn pty->stdout thread")
-}
-
-/// Spawn the stdin→master forwarding thread using a shared writer.
-///
-/// Uses `poll()` on stdin + a stop pipe so the thread can be interrupted
-/// cleanly before the supervisor needs stdin for the restart prompt.
-#[cfg(unix)]
-pub(crate) fn spawn_writer_thread(
-    shared: Arc<SupervisorShared>,
-    harness: agent_doc_harness::HarnessConfig,
-    writer: Arc<Mutex<SharedPtyWriter>>,
-    stop_fd: std::os::unix::io::RawFd,
-    stop: Arc<AtomicBool>,
-    ctrl_c_flag: Option<Arc<AtomicBool>>,
-    ctrl_d_flag: Option<Arc<AtomicBool>>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("stdin->pty".into())
-        .spawn(move || {
-            let mut buf = [0u8; 4096];
-            let debug = std::env::var("AGENT_DOC_DEBUG_STDIN").is_ok();
-            if debug {
-                eprintln!("[stdin->pty] thread started");
-            }
-            loop {
-                // Poll stdin (fd 0) and the stop pipe
-                let mut fds = [
-                    libc::pollfd {
-                        fd: libc::STDIN_FILENO,
-                        events: libc::POLLIN,
-                        revents: 0,
-                    },
-                    libc::pollfd {
-                        fd: stop_fd,
-                        events: libc::POLLIN,
-                        revents: 0,
-                    },
-                ];
-                let ret = unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
-                if ret <= 0 {
-                    if debug {
-                        eprintln!("[stdin->pty] poll returned {ret}, exiting");
-                    }
-                    break; // poll error or signal interrupt
-                }
-                // Stop signal received
-                if fds[1].revents & libc::POLLIN != 0 {
-                    if debug {
-                        eprintln!("[stdin->pty] stop signal received, exiting");
-                    }
-                    break;
-                }
-                // stdin ready
-                if fds[0].revents & libc::POLLIN != 0 {
-                    let n = unsafe {
-                        libc::read(
-                            libc::STDIN_FILENO,
-                            buf.as_mut_ptr() as *mut libc::c_void,
-                            buf.len(),
-                        )
-                    };
-                    if n <= 0 {
-                        if debug {
-                            eprintln!("[stdin->pty] read returned {n}, exiting");
-                        }
-                        break; // EOF or error
-                    }
-                    let data = &buf[..n as usize];
-                    let maybe_filtered = strip_stale_ctrl_d_before_prompt(
-                        data,
-                        shared
-                            .suppress_stale_ctrl_d_until_prompt
-                            .load(Ordering::Relaxed),
-                        shared.prompt_visible_once.load(Ordering::Relaxed),
-                    );
-                    if let Some(filtered) = maybe_filtered.as_deref() {
-                        agent_doc_tmux_io::input_diag::log_transform_event(
-                            agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                                None,
-                                agent_doc_ops_log_io::log_op,
-                            ),
-                            "supervisor.stdin",
-                            "child_pty",
-                            "drop_stale_ctrl_d_before_prompt",
-                            data,
-                            filtered,
-                            Some(&harness.binary),
-                        );
-                    }
-                    let data = maybe_filtered.as_deref().unwrap_or(data);
-                    if data.is_empty() {
-                        if debug {
-                            eprintln!(
-                                "[stdin->pty] suppressed stale Ctrl+D before keepalive prompt"
-                            );
-                        }
-                        continue;
-                    }
-                    let maybe_translated =
-                        normalize_stdin_for_harness_permission_prompt(&shared, &harness, data);
-                    if let Some(translated) = maybe_translated.as_deref() {
-                        agent_doc_tmux_io::input_diag::log_prompt_detection(
-                            agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                                None,
-                                agent_doc_ops_log_io::log_op,
-                            ),
-                            "supervisor.stdin",
-                            "child_pty",
-                            &harness.binary,
-                            "active permission prompt",
-                            "active",
-                        );
-                        agent_doc_tmux_io::input_diag::log_transform_event(
-                            agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                                None,
-                                agent_doc_ops_log_io::log_op,
-                            ),
-                            "supervisor.stdin",
-                            "child_pty",
-                            "opencode_permission_arrow_translation",
-                            data,
-                            translated,
-                            Some(&harness.binary),
-                        );
-                    }
-                    let data = maybe_translated.as_deref().unwrap_or(data);
-                    if agent_doc_tmux_commands::input_diag::verbose_enabled() {
-                        agent_doc_tmux_io::input_diag::log_byte_events(
-                            agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                                None,
-                                agent_doc_ops_log_io::log_op,
-                            ),
-                            "supervisor.stdin",
-                            "child_pty",
-                            "raw_forward",
-                            data,
-                            Some(&harness.binary),
-                        );
-                    }
-                    // Detect Ctrl+D (\x04) — in raw mode this is a byte, not EOF.
-                    // The pty slave's line discipline interprets it as EOF for the child.
-                    if let Some(ref flag) = ctrl_d_flag
-                        && data.contains(&0x04)
-                    {
-                        if debug {
-                            eprintln!("[stdin->pty] Ctrl+D (\\x04) detected in forwarded data");
-                        }
-                        flag.store(true, Ordering::Relaxed);
-                    }
-                    if let Some(ref flag) = ctrl_c_flag
-                        && data.contains(&0x03)
-                    {
-                        if debug {
-                            eprintln!("[stdin->pty] Ctrl+C (\\x03) detected in forwarded data");
-                        }
-                        flag.store(true, Ordering::Relaxed);
-                    }
-                    let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
-                        if debug {
-                            eprintln!("[stdin->pty] stop requested while waiting for writer");
-                        }
-                        break;
-                    };
-                    if let Err(err) = w.write_all_interruptibly(data, stop.as_ref()) {
-                        if debug {
-                            eprintln!("[stdin->pty] pty write failed, exiting: {err}");
-                        }
-                        break;
-                    }
-                }
-                // stdin hangup/error
-                if fds[0].revents & (libc::POLLHUP | libc::POLLERR) != 0 {
-                    if debug {
-                        eprintln!(
-                            "[stdin->pty] stdin hangup/error (revents=0x{:x}), exiting",
-                            fds[0].revents
-                        );
-                    }
-                    break;
-                }
-            }
-            if debug {
-                eprintln!("[stdin->pty] thread exiting");
-            }
-        })
-        .expect("spawn stdin->pty thread")
-}
-
-/// Non-Unix fallback: blocking stdin read (no stop signal support).
-#[cfg(not(unix))]
-pub(crate) fn spawn_writer_thread(
-    _shared: Arc<SupervisorShared>,
-    _harness: agent_doc_harness::HarnessConfig,
-    writer: Arc<Mutex<SharedPtyWriter>>,
-    _stop_fd: (),
-    stop: Arc<AtomicBool>,
-    ctrl_c_flag: Option<Arc<AtomicBool>>,
-    ctrl_d_flag: Option<Arc<AtomicBool>>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("stdin->pty".into())
-        .spawn(move || {
-            let mut buf = [0u8; 4096];
-            let stdin = std::io::stdin();
-            loop {
-                let mut lock = stdin.lock();
-                match std::io::Read::read(&mut lock, &mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        drop(lock);
-                        if let Some(ref flag) = ctrl_d_flag {
-                            if buf[..n].contains(&0x04) {
-                                flag.store(true, Ordering::Relaxed);
-                            }
-                        }
-                        if let Some(ref flag) = ctrl_c_flag {
-                            if buf[..n].contains(&0x03) {
-                                flag.store(true, Ordering::Relaxed);
-                            }
-                        }
-                        if agent_doc_tmux_commands::input_diag::verbose_enabled() {
-                            agent_doc_tmux_io::input_diag::log_byte_events(
-                                agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                                    None,
-                                    agent_doc_ops_log_io::log_op,
-                                ),
-                                "supervisor.stdin",
-                                "child_pty",
-                                "raw_forward",
-                                &buf[..n],
-                                None,
-                            );
-                        }
-                        let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
-                            break;
-                        };
-                        if w.write_all_interruptibly(&buf[..n], stop.as_ref()).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        })
-        .expect("spawn stdin->pty thread")
 }
 
 #[cfg(test)]
@@ -957,156 +670,5 @@ mod tests {
         let response = handle_ipc(IpcMethod::Stop { graceful: false }, &shared);
         assert!(response.ok, "{response:?}");
         assert!(shared.stop_requested.load(Ordering::Relaxed));
-    }
-    #[cfg(unix)]
-    #[test]
-    fn writer_thread_exits_on_stop_signal() {
-        // Create a pipe to act as the "pty writer" — we just need something
-        // that accepts writes without blocking
-        let mut pty_fds = [0i32; 2];
-        unsafe { libc::pipe(pty_fds.as_mut_ptr()) };
-        let pty_write_fd = pty_fds[1];
-
-        // Wrap the write end in a Box<dyn Write + Send> for spawn_writer_thread
-        struct FdWriter(i32);
-        impl Write for FdWriter {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                let n =
-                    unsafe { libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len()) };
-                if n < 0 {
-                    Err(std::io::Error::last_os_error())
-                } else {
-                    Ok(n as usize)
-                }
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-
-        let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_write_fd));
-        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(writer)));
-
-        let stop = StopSignal::new().unwrap();
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let shared = Arc::new(SupervisorShared::new("test", "writer-stop".to_string()));
-        let handle = spawn_writer_thread(
-            shared,
-            agent_doc_harness::HarnessConfig::codex(),
-            writer_arc,
-            stop.read_fd(),
-            stop_flag.clone(),
-            None,
-            None,
-        );
-
-        // Writer thread should be alive, blocked in poll()
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        // Signal stop — thread should exit promptly
-        stop_flag.store(true, Ordering::Relaxed);
-        stop.signal();
-        let result = handle.join();
-        assert!(
-            result.is_ok(),
-            "writer thread should exit cleanly on stop signal"
-        );
-
-        // Clean up pipe fds
-        unsafe {
-            libc::close(pty_fds[0]);
-            libc::close(pty_fds[1]);
-        }
-    }
-    #[cfg(unix)]
-    #[test]
-    fn writer_thread_exits_on_pty_write_failure() {
-        // Create a pipe as the "pty writer", then close the read end so
-        // writes fail with EPIPE — simulating Claude exit closing the PTY
-        let mut pty_fds = [0i32; 2];
-        unsafe { libc::pipe(pty_fds.as_mut_ptr()) };
-        // Close read end immediately so writes produce EPIPE
-        unsafe { libc::close(pty_fds[0]) };
-
-        struct FdWriter(i32);
-        impl Write for FdWriter {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                let n =
-                    unsafe { libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len()) };
-                if n < 0 {
-                    Err(std::io::Error::last_os_error())
-                } else {
-                    Ok(n as usize)
-                }
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-
-        let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_fds[1]));
-        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(writer)));
-
-        let stop = StopSignal::new().unwrap();
-        let stop_fd = stop.read_fd();
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let shared = Arc::new(SupervisorShared::new("test", "writer-epipe".to_string()));
-        let handle = spawn_writer_thread(
-            shared,
-            agent_doc_harness::HarnessConfig::codex(),
-            writer_arc,
-            stop_fd,
-            stop_flag.clone(),
-            None,
-            None,
-        );
-
-        // Inject a byte into stdin to trigger a write attempt.
-        // The write will fail (EPIPE) and the thread should exit.
-        // We use the stop signal as a fallback timeout.
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        stop_flag.store(true, Ordering::Relaxed);
-        stop.signal();
-
-        let result = handle.join();
-        assert!(
-            result.is_ok(),
-            "writer thread should exit on write failure or stop"
-        );
-
-        unsafe { libc::close(pty_fds[1]) };
-    }
-    #[cfg(unix)]
-    #[test]
-    fn reader_thread_exits_on_eof() {
-        // Create a pipe as mock pty reader. Closing the write end
-        // should cause the reader thread to see EOF and exit.
-        let mut fds = [0i32; 2];
-        unsafe { libc::pipe(fds.as_mut_ptr()) };
-
-        struct FdReader(i32);
-        impl std::io::Read for FdReader {
-            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-                let n =
-                    unsafe { libc::read(self.0, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-                if n < 0 {
-                    Err(std::io::Error::last_os_error())
-                } else {
-                    Ok(n as usize)
-                }
-            }
-        }
-
-        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-        let reader: Box<dyn std::io::Read + Send> = Box::new(FdReader(fds[0]));
-        let handle = spawn_reader_thread(shared, agent_doc_harness::HarnessConfig::codex(), reader);
-
-        // Close the write end → reader sees EOF → thread exits
-        unsafe { libc::close(fds[1]) };
-
-        let result = handle.join();
-        assert!(result.is_ok(), "reader thread should exit cleanly on EOF");
-
-        unsafe { libc::close(fds[0]) };
     }
 }

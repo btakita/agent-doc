@@ -152,7 +152,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // it provably holds unsaved edits ahead of disk, so a stale buffer or
     // agent-doc's own just-written disk content can never override disk here.
     // With no editor attached (the common/CI case) this returns disk unchanged.
-    let content = crate::realtime_model::resolve_current_doc(file, &disk).content;
+    let content = agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content;
     let pre_mutation_unresolved_exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
     let rc = crate::graph::RunContext::new(file.to_path_buf());

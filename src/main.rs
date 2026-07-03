@@ -347,8 +347,7 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
         _project_root: &Path,
     ) -> anyhow::Result<Option<bool>> {
         Ok(Some(
-            agent_doc_orchestration::realtime_model::durable_buffer_state(file, disk_content)
-                .is_some(),
+            agent_doc_document_realtime_io::durable_buffer_state(file, disk_content).is_some(),
         ))
     }
 }
@@ -3683,7 +3682,7 @@ fn main() -> anyhow::Result<()> {
             let output = agent_doc_cycle_state_io::admit_with_current_resolver(
                 &file,
                 |file, disk| {
-                    agent_doc_orchestration::realtime_model::resolve_current_doc(file, disk).content
+                    agent_doc_document_realtime_io::resolve_current_doc(file, disk).content
                 },
                 agent_doc_snapshot_io::load,
                 agent_doc_ops_log_io::log_op,

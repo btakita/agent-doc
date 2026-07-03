@@ -91,6 +91,7 @@ members = [
     "agent-doc-sync-io",
     "agent-doc-document",
     "agent-doc-document-realtime",
+    "agent-doc-document-realtime-io",
     "agent-doc-workflow",
     "agent-doc-workflow-io",
     "agent-doc-work-graph",
@@ -161,6 +162,7 @@ agent-doc-diff = { path = "agent-doc-diff", version = "0.34.67" }
 agent-doc-diff-io = { path = "agent-doc-diff-io", version = "0.34.67" }
 agent-doc-document = { path = "agent-doc-document", version = "0.34.67" }
 agent-doc-document-realtime = { path = "agent-doc-document-realtime", version = "0.34.67" }
+agent-doc-document-realtime-io = { path = "agent-doc-document-realtime-io", version = "0.34.67" }
 agent-doc-element = { path = "agent-doc-element", version = "0.34.67" }
 agent-doc-element-backlog = { path = "agent-doc-element-backlog", version = "0.34.67" }
 agent-doc-element-backlog-io = { path = "agent-doc-element-backlog-io", version = "0.34.67" }

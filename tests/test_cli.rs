@@ -8575,8 +8575,7 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
         );
     }
     let realtime_model =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/realtime_model.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     assert!(
         realtime_model.contains("agent_doc_plugin_owner::plugin_owner_pid_is_live(pid)")
             && !realtime_model.contains("crate::hooks::pid_is_live"),
@@ -9627,7 +9626,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         })
         .collect();
     assert!(
-        coverage_lines.len() >= 35,
+        coverage_lines.len() >= 36,
         "coarse extraction commit coverage should include prior large-chunk rounds and current rounds; found {} rows",
         coverage_lines.len()
     );
@@ -9651,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 39,
+        ledger_rows.len() >= 40,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -9857,9 +9856,10 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("5dc7c322", "Session registration and projection IO"),
         ("0f90f7cf", "Project controller runtime IO"),
         ("d6387afa", "Sync and resync runtime IO graph"),
+        ("c65b9260", "Compact command archive/write IO graph"),
         (
-            "c65b9260",
-            "Compact command archive/write IO graph",
+            "pending-current-round",
+            "Document realtime authority IO graph",
         ),
     ] {
         assert!(
@@ -9908,6 +9908,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split archive file creation/indexing into `agent-doc-archive-io`",
         ),
         (
+            "Document realtime authority IO graph",
+            "agent-doc-orchestration/src/realtime_model.rs",
+            "agent-doc-document-realtime-io/src/lib.rs",
+            "Split durable live-buffer feed",
+        ),
+        (
             "Legacy supervisor/agent runtime IO wave",
             "agent-doc-orchestration/src/{supervisor/*,agent/{claude.rs,codex.rs},start/*}",
             "agent-doc-supervisor-process",
@@ -9953,7 +9959,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Realtime admission cycle opener",
             "agent-doc-orchestration/src/admit.rs",
             "agent-doc-cycle-state-io/src/lib.rs",
-            "extract current-document authority from `agent-doc-orchestration::realtime_model`",
+            "keep snapshot and ops-log adapters injected until their dependency graph is acyclic",
         ),
         (
             "Workflow doctor/autofix IO",
@@ -12053,7 +12059,7 @@ fn test_agent_doc_frontmatter_owns_raw_frontmatter_yaml_policy() {
     );
 
     for relative in [
-        "agent-doc-orchestration/src/realtime_model.rs",
+        "agent-doc-document-realtime-io/src/lib.rs",
         "agent-doc-orchestration/src/write/converge.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -19843,8 +19849,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "ops-log IO should call focused project-root IO instead of owning .agent-doc root discovery"
     );
     let realtime_model_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/realtime_model.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     assert!(
         !realtime_model_source.contains("agent_doc_fs::find_project_root(")
             && realtime_model_source
@@ -21254,7 +21259,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-orchestration/src/flow/closeout.rs",
         "agent-doc-run-context-io/src/lib.rs",
-        "agent-doc-orchestration/src/realtime_model.rs",
+        "agent-doc-document-realtime-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-cycle-state-io/src/lib.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
@@ -22936,6 +22941,10 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/Cargo.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&realtime_manifest).unwrap();
     let dependencies = parsed["dependencies"].as_table().unwrap();
+    let realtime_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/Cargo.toml")).unwrap();
+    let realtime_io: toml::Value = toml::from_str(&realtime_io_manifest).unwrap();
+    let realtime_io_dependencies = realtime_io["dependencies"].as_table().unwrap();
 
     assert!(
         manifest_dir
@@ -23029,8 +23038,27 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .exists()
     );
     let orchestration_realtime =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/realtime_model.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/realtime_model.rs")
+            .exists(),
+        "orchestration must not keep a realtime_model source-file facade"
+    );
+    for required_dependency in [
+        "agent-doc-debounce",
+        "agent-doc-document-realtime",
+        "agent-doc-fs",
+        "agent-doc-git-io",
+        "agent-doc-ipc-io",
+        "agent-doc-plugin-owner",
+        "agent-doc-project-root-io",
+    ] {
+        assert!(
+            realtime_io_dependencies.contains_key(required_dependency),
+            "agent-doc-document-realtime-io must own realtime authority side-effect dependency: {required_dependency}"
+        );
+    }
     for forbidden_snippet in [
         "pub enum DocAuthority",
         "pub struct BufferState",
@@ -23285,6 +23313,12 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .any(|member| member.as_str() == Some("agent-doc-crdt-relay-io")),
         "workspace must include agent-doc-crdt-relay-io"
     );
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-document-realtime-io")),
+        "workspace must include agent-doc-document-realtime-io"
+    );
     let orchestration_manifest_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
     let orchestration_manifest: toml::Value =
@@ -23293,6 +23327,10 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     assert!(
         orchestration_dependencies.contains_key("agent-doc-crdt-relay-io"),
         "orchestration should depend on the focused CRDT relay host IO crate"
+    );
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-document-realtime-io"),
+        "orchestration should depend on the focused document realtime IO crate"
     );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -23317,6 +23355,10 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     assert!(
         !orchestration_lib.contains("pub mod crdt_relay_host;"),
         "orchestration must not export a CRDT relay host source-file facade"
+    );
+    assert!(
+        !orchestration_lib.contains("pub mod realtime_model;"),
+        "orchestration must not export a realtime_model source-file facade"
     );
     assert!(
         orchestration_lib.contains("pub use agent_doc_crdt_relay_io as crdt_relay_host;"),

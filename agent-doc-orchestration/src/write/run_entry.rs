@@ -81,7 +81,8 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     // returns disk unchanged.
     let disk_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
-    let content_current = crate::realtime_model::resolve_current_doc(file, &disk_current).content;
+    let content_current =
+        agent_doc_document_realtime_io::resolve_current_doc(file, &disk_current).content;
 
     let final_content = if content_current == base {
         // No edits — use our version directly
@@ -1261,7 +1262,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     // attached returns disk unchanged.
     let disk = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let mut current_content = crate::realtime_model::resolve_current_doc(file, &disk).content;
+    let mut current_content =
+        agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     guard_no_stale_snapshot_reset_drift(
         file,

@@ -6748,7 +6748,9 @@ impl SimEditor {
     fn resolve(&self) -> Result<Reconciliation> {
         let disk = std::fs::read_to_string(&self.path)
             .map_err(|err| anyhow!("SimEditor resolve read {}: {err}", self.path.display()))?;
-        Ok(agent_doc_orchestration::realtime_model::resolve_current_doc(&self.path, &disk))
+        Ok(agent_doc_document_realtime_io::resolve_current_doc(
+            &self.path, &disk,
+        ))
     }
 
     fn record_buffer(&self) -> Result<()> {
@@ -6900,7 +6902,7 @@ fn simeditor_save_then_close_falls_back_to_disk_authority() {
     assert_eq!(editor.resolve().unwrap().authority, DocAuthority::Disk);
 
     editor.close().unwrap();
-    let closed = agent_doc_orchestration::realtime_model::resolve_current_doc(&doc, &disk_now);
+    let closed = agent_doc_document_realtime_io::resolve_current_doc(&doc, &disk_now);
     assert_eq!(closed.authority, DocAuthority::Disk);
     assert_eq!(
         closed.reason, "editor_absent",
@@ -6996,10 +6998,9 @@ fn multi_editor_crdt_broadcast_converges_without_file_cache_conflict() {
 
     // A's edit queues a targeted patch for B through the production broadcast
     // writer. A ignores the peer-targeted file; B applies and ACK-deletes it.
-    let deliveries = agent_doc_orchestration::realtime_model::broadcast_editor_change(
-        &doc, "editor-A", &buffer_a,
-    )
-    .unwrap();
+    let deliveries =
+        agent_doc_document_realtime_io::broadcast_editor_change(&doc, "editor-A", &buffer_a)
+            .unwrap();
     assert_eq!(deliveries.len(), 1);
     assert_eq!(deliveries[0].editor_id, "editor-B");
     assert!(
@@ -7037,8 +7038,7 @@ fn multi_editor_crdt_broadcast_converges_without_file_cache_conflict() {
     // B now rebroadcasts the converged buffer to A. Echo suppression again skips
     // the originator and targets only the stale peer buffer.
     let rebroadcast =
-        agent_doc_orchestration::realtime_model::broadcast_editor_change(&doc, "editor-B", &merged)
-            .unwrap();
+        agent_doc_document_realtime_io::broadcast_editor_change(&doc, "editor-B", &merged).unwrap();
     assert_eq!(rebroadcast.len(), 1);
     assert_eq!(rebroadcast[0].editor_id, "editor-A");
     assert!(

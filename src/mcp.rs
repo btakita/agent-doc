@@ -385,9 +385,7 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
     let file = required_path_arg(args, "file")?;
     let admit = agent_doc_cycle_state_io::admit_with_current_resolver(
         &file,
-        |file, disk| {
-            agent_doc_orchestration::realtime_model::resolve_current_doc(file, disk).content
-        },
+        |file, disk| agent_doc_document_realtime_io::resolve_current_doc(file, disk).content,
         agent_doc_snapshot_io::load,
         agent_doc_ops_log_io::log_op,
     )?;

@@ -30,10 +30,10 @@
 //!   editor's last save — a drift signal the caller logs).
 //!
 //! Per the Shared Foundation pattern (`CLAUDE.md` — FFI-first for editor
-//! integration; all deterministic behavior in the binary), orchestration owns
-//! only the durable editor-buffer feed and ops-log adapter. Cycle read sites
-//! (`preflight.rs` / `write.rs` / `session_check.rs`) source current-doc through
-//! [`resolve_current_doc`], which delegates to the focused pure policy.
+//! integration; all deterministic behavior in the binary), this crate owns the
+//! durable editor-buffer feed and ops-log/IPC side-effect adapter. Cycle read
+//! sites (`preflight.rs` / `write.rs` / `session_check.rs`) source current-doc
+//! through [`resolve_current_doc`], which delegates to the focused pure policy.
 //!
 //! ## Evals
 //! - `durable_buffer_state_none_when_buffer_in_sync_with_disk`
@@ -170,7 +170,7 @@ fn stale_behind_committed_buffer(
 /// safety predicate both the READ auto-heal ([`stale_behind_committed_buffer`])
 /// and the WRITE/FINALIZE capability gate key off of. It never consults
 /// timestamps.
-pub(crate) fn content_matches_recent_committed_blob(
+pub fn content_matches_recent_committed_blob(
     file: &std::path::Path,
     content: &str,
     limit: usize,
@@ -424,7 +424,10 @@ pub fn broadcast_editor_change(
         if let Some(frontmatter) = delta.frontmatter {
             payload["frontmatter"] = serde_json::Value::String(frontmatter);
         }
-        crate::write::atomic_write_pub(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
+        agent_doc_fs::write_atomic(
+            &patch_file,
+            serde_json::to_string_pretty(&payload)?.as_bytes(),
+        )?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

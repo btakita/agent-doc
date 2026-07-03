@@ -40,6 +40,7 @@ dependencies = [
  "agent-doc-diff-io",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",
@@ -463,6 +464,28 @@ dependencies = [
  "serde",
  "sha2 0.11.0",
  "similar",
+]
+
+[[package]]
+name = "agent-doc-document-realtime-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-debounce",
+ "agent-doc-document",
+ "agent-doc-document-realtime",
+ "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-hash",
+ "agent-doc-ipc-io",
+ "agent-doc-ipc-protocol",
+ "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
+ "agent-doc-project-root-io",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -946,6 +969,7 @@ dependencies = [
  "agent-doc-diff-io",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",

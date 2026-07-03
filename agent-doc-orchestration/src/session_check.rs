@@ -469,7 +469,9 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         // provably holds unsaved edits ahead of disk; no editor attached returns
         // disk unchanged.
         let disk = std::fs::read_to_string(file)?;
-        rc.set_doc_content(crate::realtime_model::resolve_current_doc(file, &disk).content);
+        rc.set_doc_content(
+            agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content,
+        );
         match check_dropped_exchange_prompt_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),

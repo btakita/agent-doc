@@ -394,11 +394,7 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor(
         Err(_) => return,
     };
     agent_doc_debounce::document_changed_with_content_for_editor(path, text, Some(editor));
-    match agent_doc_orchestration::realtime_model::broadcast_editor_change(
-        Path::new(path),
-        editor,
-        text,
-    ) {
+    match agent_doc_document_realtime_io::broadcast_editor_change(Path::new(path), editor, text) {
         Ok(deliveries) if !deliveries.is_empty() => {
             eprintln!(
                 "[ffi] realtime broadcast queued {} peer patch(es) for editor_id {}",
@@ -474,11 +470,7 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2
     {
         eprintln!("[ffi] live-buffer v2 write failed for {path}: {err}");
     }
-    match agent_doc_orchestration::realtime_model::broadcast_editor_change(
-        Path::new(path),
-        editor,
-        text,
-    ) {
+    match agent_doc_document_realtime_io::broadcast_editor_change(Path::new(path), editor, text) {
         Ok(deliveries) if !deliveries.is_empty() => {
             eprintln!(
                 "[ffi] realtime broadcast queued {} peer patch(es) for editor_id {}",
@@ -560,11 +552,7 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3
     {
         eprintln!("[ffi] live-buffer v3 write failed for {path}: {err}");
     }
-    match agent_doc_orchestration::realtime_model::broadcast_editor_change(
-        Path::new(path),
-        editor,
-        text,
-    ) {
+    match agent_doc_document_realtime_io::broadcast_editor_change(Path::new(path), editor, text) {
         Ok(deliveries) if !deliveries.is_empty() => {
             eprintln!(
                 "[ffi] realtime broadcast queued {} peer patch(es) for editor_id {}",

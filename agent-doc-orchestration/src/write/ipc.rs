@@ -2117,7 +2117,11 @@ fn redelivery_missing_operator_text_authority(
     // recent COMMITTED blob of this file, it holds no unsaved work (a committed
     // blob was previously saved and is recoverable) — so refusing here is a false
     // block. Auto-heal the editor from current disk and let the write proceed.
-    if crate::realtime_model::content_matches_recent_committed_blob(file, expected_bad_state, 15) {
+    if agent_doc_document_realtime_io::content_matches_recent_committed_blob(
+        file,
+        expected_bad_state,
+        15,
+    ) {
         let stale_hash = agent_doc_hash::content_hash(expected_bad_state);
         // Best-effort heal, mirroring the write/converge.rs send_refresh_content
         // shape: push CURRENT DISK content, keyed on the stale buffer hash/len as

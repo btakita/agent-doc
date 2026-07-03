@@ -188,179 +188,35 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
             shared.kill_child();
             IpcResponse::ok_empty()
         }
-        IpcMethod::ReplicaRegister { file, identity } => handle_replica_register(&file, &identity),
+        IpcMethod::ReplicaRegister { file, identity } => {
+            agent_doc_supervisor_crdt_io::handle_replica_register(&file, &identity)
+        }
         IpcMethod::ReplicaDeregister { file, identity } => {
-            handle_replica_deregister(&file, &identity)
+            agent_doc_supervisor_crdt_io::handle_replica_deregister(&file, &identity)
         }
         IpcMethod::ReplicaUpdate {
             file,
             identity,
             update_b64,
-        } => handle_replica_update(&file, &identity, &update_b64),
-        IpcMethod::ReplicaPull { file, identity } => handle_replica_pull(&file, &identity),
+        } => agent_doc_supervisor_crdt_io::handle_replica_update(&file, &identity, &update_b64),
+        IpcMethod::ReplicaPull { file, identity } => {
+            agent_doc_supervisor_crdt_io::handle_replica_pull(&file, &identity)
+        }
         IpcMethod::ReplicaAck {
             file,
             identity,
             patch_id,
             generation,
-        } => handle_replica_ack(&file, &identity, &patch_id, generation),
+        } => agent_doc_supervisor_crdt_io::handle_replica_ack(
+            &file, &identity, &patch_id, generation,
+        ),
         IpcMethod::ReplicaAwareness {
             file,
             identity,
             awareness_b64,
-        } => handle_replica_awareness(&file, &identity, &awareness_b64),
-    }
-}
-
-// --- CRDT live multi-editor delta fan-out IPC handlers (`#crdtauth5`) ---------
-//
-// Each handler routes the new editor-replica IPC family through the per-document
-// `crdt_relay_host` hub registry. The hub-host functions resolve the document's
-// `CrdtAuthority` first and refuse (return `None`/`false`, allocate no hub) when
-// the document has no live editor (Detached / `GitAuthoritative`), so this whole
-// family is inert on the headless control-plane path. Per-document isolation is
-// structural: the hub is keyed by the document hash, never shared across docs.
-
-use agent_doc_document_realtime::crdt_relay::AwarenessState;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-
-fn handle_replica_register(file: &str, identity: &str) -> IpcResponse {
-    match crate::crdt_relay_host::register_replica_for_file(std::path::Path::new(file), identity) {
-        Ok(Some((client_id, bootstrap))) => IpcResponse::ok(serde_json::json!({
-            "client_id": client_id,
-            "bootstrap_b64": BASE64_STANDARD.encode(&bootstrap),
-        })),
-        // Detached / no live editor: refuse so a headless document never spins up
-        // a multi-replica session. NOT an error — the editor falls back to the
-        // existing patch-file path.
-        Ok(None) => {
-            IpcResponse::err("crdt replica register refused: document is not editor-attached")
+        } => {
+            agent_doc_supervisor_crdt_io::handle_replica_awareness(&file, &identity, &awareness_b64)
         }
-        Err(e) => IpcResponse::err(format!("crdt replica register failed: {e}")),
-    }
-}
-
-fn handle_replica_deregister(file: &str, identity: &str) -> IpcResponse {
-    match crate::crdt_relay_host::deregister_replica_for_file(std::path::Path::new(file), identity)
-    {
-        Ok(removed) => IpcResponse::ok(serde_json::json!({ "removed": removed })),
-        Err(e) => IpcResponse::err(format!("crdt replica deregister failed: {e}")),
-    }
-}
-
-fn handle_replica_update(file: &str, identity: &str, update_b64: &str) -> IpcResponse {
-    let update = match BASE64_STANDARD.decode(update_b64) {
-        Ok(bytes) => bytes,
-        Err(e) => return IpcResponse::err(format!("crdt replica update: bad base64: {e}")),
-    };
-    match crate::crdt_relay_host::relay_replica_update_for_file(
-        std::path::Path::new(file),
-        identity,
-        &update,
-    ) {
-        Ok(Some(fan_out)) => {
-            // The per-target deltas are relayed back so the requester (or the
-            // supervisor's socket fan-out) can deliver them to the peers' FFI
-            // nodes. The hub already applied them to the hub-side mirrors.
-            let targets: Vec<serde_json::Value> = fan_out
-                .targets
-                .iter()
-                .map(|target| {
-                    serde_json::json!({
-                        "client_id": target,
-                        "update_b64": BASE64_STANDARD.encode(&fan_out.update),
-                    })
-                })
-                .collect();
-            IpcResponse::ok(serde_json::json!({
-                "origin": fan_out.origin,
-                "canonical_len": fan_out.canonical_len,
-                "targets": targets,
-            }))
-        }
-        Ok(None) => {
-            IpcResponse::err("crdt replica update refused: document is not editor-attached")
-        }
-        Err(e) => IpcResponse::err(format!("crdt replica update failed: {e}")),
-    }
-}
-
-fn handle_replica_pull(file: &str, identity: &str) -> IpcResponse {
-    match crate::crdt_relay_host::pull_replica_updates_for_file(
-        std::path::Path::new(file),
-        identity,
-    ) {
-        Ok(Some(pull)) => {
-            let updates: Vec<serde_json::Value> = pull
-                .updates
-                .iter()
-                .map(|update| {
-                    serde_json::json!({
-                        "patch_id": update.patch_id,
-                        "origin": update.origin,
-                        "target": update.target,
-                        "generation": update.generation,
-                        "update_b64": BASE64_STANDARD.encode(&update.update),
-                    })
-                })
-                .collect();
-            IpcResponse::ok(serde_json::json!({
-                "client_id": pull.client_id,
-                "updates": updates,
-                "current_generation": pull.delivery.current_generation,
-                "last_ack_generation": pull.delivery.last_ack_generation,
-                "pending_updates": pull.delivery.pending_updates,
-            }))
-        }
-        Ok(None) => IpcResponse::err("crdt replica pull refused: document is not editor-attached"),
-        Err(e) => IpcResponse::err(format!("crdt replica pull failed: {e}")),
-    }
-}
-
-fn handle_replica_ack(file: &str, identity: &str, patch_id: &str, generation: u64) -> IpcResponse {
-    match crate::crdt_relay_host::ack_replica_update_for_file(
-        std::path::Path::new(file),
-        identity,
-        patch_id,
-        generation,
-    ) {
-        Ok(Some(acknowledged)) => IpcResponse::ok(serde_json::json!({
-            "acknowledged": acknowledged,
-        })),
-        Ok(None) => IpcResponse::err("crdt replica ack refused: document is not editor-attached"),
-        Err(e) => IpcResponse::err(format!("crdt replica ack failed: {e}")),
-    }
-}
-
-fn handle_replica_awareness(file: &str, identity: &str, awareness_b64: &str) -> IpcResponse {
-    let json = match BASE64_STANDARD.decode(awareness_b64) {
-        Ok(bytes) => bytes,
-        Err(e) => return IpcResponse::err(format!("crdt awareness: bad base64: {e}")),
-    };
-    let state: AwarenessState = match serde_json::from_slice(&json) {
-        Ok(state) => state,
-        Err(e) => return IpcResponse::err(format!("crdt awareness: bad json: {e}")),
-    };
-    match crate::crdt_relay_host::set_replica_awareness_for_file(
-        std::path::Path::new(file),
-        identity,
-        state,
-    ) {
-        Ok(Some(snapshot)) => {
-            let presence: Vec<serde_json::Value> = snapshot
-                .iter()
-                .map(|(client_id, state)| {
-                    serde_json::json!({
-                        "client_id": client_id,
-                        "awareness_b64": BASE64_STANDARD
-                            .encode(serde_json::to_vec(state).unwrap_or_default()),
-                    })
-                })
-                .collect();
-            IpcResponse::ok(serde_json::json!({ "presence": presence }))
-        }
-        Ok(None) => IpcResponse::err("crdt awareness refused: document is not editor-attached"),
-        Err(e) => IpcResponse::err(format!("crdt awareness failed: {e}")),
     }
 }
 

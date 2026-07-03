@@ -15955,6 +15955,15 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
 #[test]
 fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-supervisor-crdt-io")),
+        "agent-doc-supervisor-crdt-io must stay a first-class workspace crate"
+    );
     assert!(
         manifest_dir
             .join("agent-doc-supervisor/src/lifecycle.rs")
@@ -16076,6 +16085,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor-io must own supervisor IPC socket transport IO"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor-crdt-io/src/lib.rs")
+            .exists(),
+        "agent-doc-supervisor-crdt-io must own CRDT replica IPC response adapters"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -16098,6 +16113,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
     let supervisor_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/lib.rs")).unwrap();
+    let supervisor_crdt_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-crdt-io/src/lib.rs")).unwrap();
+    let supervisor_crdt_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-crdt-io/Cargo.toml")).unwrap();
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/supervisor/mod.rs")
@@ -16150,6 +16169,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/cwd.rs")).unwrap();
     let supervisor_io_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/ipc.rs")).unwrap();
+    let orchestration_supervisor_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/supervisor_io.rs"))
+            .unwrap();
     let supervisor_pty =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/pty.rs")).unwrap();
     let supervisor_in_process =
@@ -16330,6 +16352,68 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     assert!(
         supervisor_io_lib.contains("pub mod ipc;"),
         "agent-doc-supervisor-io must expose supervisor IPC transport through its owning module"
+    );
+    assert!(
+        !supervisor_io_lib.contains("pub mod crdt_replica;"),
+        "agent-doc-supervisor-io must not own CRDT relay adapters because that creates a relay/supervisor IO cycle"
+    );
+    for required_snippet in [
+        "pub fn handle_replica_register(",
+        "pub fn handle_replica_deregister(",
+        "pub fn handle_replica_update(",
+        "pub fn handle_replica_pull(",
+        "pub fn handle_replica_ack(",
+        "pub fn handle_replica_awareness(",
+        "agent_doc_crdt_relay_io::register_replica_for_file(",
+        "agent_doc_crdt_relay_io::deregister_replica_for_file(",
+        "agent_doc_crdt_relay_io::relay_replica_update_for_file(",
+        "agent_doc_crdt_relay_io::pull_replica_updates_for_file(",
+        "agent_doc_crdt_relay_io::ack_replica_update_for_file(",
+        "agent_doc_crdt_relay_io::set_replica_awareness_for_file(",
+        "IpcResponse::ok(",
+        "IpcResponse::err(",
+    ] {
+        assert!(
+            supervisor_crdt_io_lib.contains(required_snippet),
+            "agent-doc-supervisor-crdt-io must own CRDT replica IPC adapter graph: {required_snippet}"
+        );
+    }
+    for required_dependency in [
+        "agent-doc-crdt-relay-io",
+        "agent-doc-document-realtime",
+        "agent-doc-supervisor",
+    ] {
+        assert!(
+            supervisor_crdt_io_manifest.contains(required_dependency),
+            "agent-doc-supervisor-crdt-io must own its CRDT IPC adapter dependency: {required_dependency}"
+        );
+    }
+    assert!(
+        !supervisor_crdt_io_manifest.contains("agent-doc-orchestration"),
+        "agent-doc-supervisor-crdt-io must stay independent of orchestration"
+    );
+    for forbidden_snippet in [
+        "fn handle_replica_register(",
+        "fn handle_replica_deregister(",
+        "fn handle_replica_update(",
+        "fn handle_replica_pull(",
+        "fn handle_replica_ack(",
+        "fn handle_replica_awareness(",
+        "agent_doc_crdt_relay_io::register_replica_for_file(",
+        "agent_doc_crdt_relay_io::relay_replica_update_for_file(",
+        "agent_doc_crdt_relay_io::set_replica_awareness_for_file(",
+    ] {
+        assert!(
+            !orchestration_supervisor_io.contains(forbidden_snippet),
+            "orchestration supervisor IPC dispatch must not re-own CRDT replica handler graph: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_supervisor_io
+            .contains("agent_doc_supervisor_crdt_io::handle_replica_register(&file, &identity)")
+            && orchestration_supervisor_io
+                .contains("agent_doc_supervisor_crdt_io::handle_replica_awareness("),
+        "orchestration supervisor IPC dispatch should call the focused CRDT adapter crate directly"
     );
     for required_snippet in [
         "use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};",

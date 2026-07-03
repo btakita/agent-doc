@@ -1097,6 +1097,7 @@ dependencies = [
  "agent-doc-state-observer-io",
  "agent-doc-status-io",
  "agent-doc-supervisor",
+ "agent-doc-supervisor-crdt-io",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
  "agent-doc-sync",
@@ -1756,6 +1757,17 @@ dependencies = [
  "agent-doc-tmux-commands",
  "lazily 0.13.1",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "agent-doc-supervisor-crdt-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-crdt-relay-io",
+ "agent-doc-document-realtime",
+ "agent-doc-supervisor",
+ "base64 0.22.1",
  "serde_json",
 ]
 

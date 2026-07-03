@@ -110,6 +110,7 @@ members = [
     "agent-doc-turn-status-io",
     "agent-doc-watch-io",
     "agent-doc-supervisor",
+    "agent-doc-supervisor-crdt-io",
     "agent-doc-supervisor-io",
     "agent-doc-supervisor-process",
     "agent-doc-controller",

@@ -112,7 +112,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `ae620145` | Route authoritative actor controller IO graph |
 | `99eeab7c` | Route cycle acknowledgment IO graph |
 | `359f2a09` | Route launch contract reuse IO graph; Route dispatch-only send/retry IO graph |
-| `pending-current-round` | Route startup/provision IO graph |
+| `8706e30c` | Route startup/provision IO graph |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

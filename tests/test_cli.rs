@@ -9650,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 47,
+        ledger_rows.len() >= 48,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -25420,6 +25420,50 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             && route_dispatch_only
                 .contains("agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source"),
         "route/preflight should call route-dispatch queue policy through focused effect adapters and agent-doc-queue directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_route_io_owns_route_document_prep() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let document_prep =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/document_prep.rs")).unwrap();
+
+    for forbidden_snippet in [
+        "agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)",
+        "agent_doc_snapshot_io::load(file).ok().flatten()",
+        "agent_doc_git_io::revision::show_head(file).ok().flatten()",
+        "fn scrub_duplicate_prompt_comments_for_route(",
+        "agent_doc_template::remove_duplicate_answered_exchange_prompt_tail",
+        "agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs",
+        "agent_doc_template::guard_no_duplicate_prompt_residue_outside_exchange",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own route document preparation after it moves to route IO: {forbidden_snippet}"
+        );
+    }
+
+    assert!(
+        document_prep.contains("pub struct RouteDocumentPrepEffects")
+            && document_prep.contains("pub struct RouteDocumentPreparation")
+            && document_prep.contains("pub fn prepare_route_document(")
+            && document_prep.contains("pub fn scrub_duplicate_prompt_comments_for_route(")
+            && document_prep
+                .contains("agent_doc_frontmatter_io::session::require_agent_doc_document")
+            && document_prep
+                .contains("agent_doc_frontmatter_io::session::ensure_session_for_file")
+            && document_prep.contains("agent_doc_snapshot_io::load(file)")
+            && document_prep.contains("agent_doc_git_io::revision::show_head(file)")
+            && document_prep
+                .contains("agent_doc_template::remove_duplicate_answered_exchange_prompt_tail")
+            && document_prep.contains(
+                "agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs",
+            )
+            && route_source.contains("prepare_route_document(file, route_document_prep_effects())"),
+        "route document preparation should live in agent-doc-route-io while orchestration injects only write authority"
     );
 }
 

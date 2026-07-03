@@ -42,6 +42,7 @@ agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34
 agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.67" }
 agent-doc-sync = { path = "../agent-doc-sync", version = "0.34.67" }
 agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.34.67" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.67" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.67" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }

@@ -1470,6 +1470,7 @@ dependencies = [
  "agent-doc-supervisor-process",
  "agent-doc-sync",
  "agent-doc-sync-io",
+ "agent-doc-template",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",

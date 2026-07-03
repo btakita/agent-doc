@@ -1391,8 +1391,12 @@ dependencies = [
 name = "agent-doc-repair-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-capture-io",
+ "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-project-root-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-template-io",
  "anyhow",
  "serde",
  "serde_json",

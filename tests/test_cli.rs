@@ -3291,7 +3291,7 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
 }
 
 #[test]
-fn test_agent_doc_repair_io_owns_blocked_repair_payload_sidecar() {
+fn test_agent_doc_repair_io_owns_repair_sidecars() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
@@ -3322,22 +3322,22 @@ fn test_agent_doc_repair_io_owns_blocked_repair_payload_sidecar() {
     let repair_io_manifest: toml::Value = toml::from_str(&repair_io_manifest).unwrap();
     let repair_io_dependencies = repair_io_manifest["dependencies"].as_table().unwrap();
     for required in [
+        "agent-doc-capture-io",
+        "agent-doc-fs",
         "agent-doc-hash",
         "agent-doc-project-root-io",
+        "agent-doc-snapshot-io",
+        "agent-doc-template-io",
         "anyhow",
         "serde",
         "serde_json",
     ] {
         assert!(
             repair_io_dependencies.contains_key(required),
-            "agent-doc-repair-io should depend on blocked-repair sidecar dependency: {required}"
+            "agent-doc-repair-io should depend on repair sidecar dependency: {required}"
         );
     }
-    for forbidden in [
-        "agent-doc-fs",
-        "agent-doc-orchestration",
-        "agent-doc-tmux-io",
-    ] {
+    for forbidden in ["agent-doc-orchestration", "agent-doc-tmux-io"] {
         assert!(
             !repair_io_dependencies.contains_key(forbidden),
             "agent-doc-repair-io must stay focused on repair sidecars: {forbidden}"
@@ -3358,6 +3358,27 @@ fn test_agent_doc_repair_io_owns_blocked_repair_payload_sidecar() {
             "agent-doc-repair-io should own blocked repair sidecar persistence: {required}"
         );
     }
+    assert!(
+        repair_io.contains("pub mod pending;")
+            && repair_io.contains("pub use pending::{clear_pending, save_pending};"),
+        "agent-doc-repair-io should expose pending response sidecar IO"
+    );
+    let pending_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/pending.rs")).unwrap();
+    for required in [
+        "pub fn save_pending(",
+        "pub fn clear_pending(",
+        "agent_doc_template_io::canonicalize_response_for_capture(",
+        "agent_doc_capture_io::capture_response(",
+        "agent_doc_fs::pending_response_path_for(",
+        "agent_doc_snapshot_io::delete_pre_response(",
+        "agent_doc_capture_io::mark_write_applied(",
+    ] {
+        assert!(
+            pending_io.contains(required),
+            "agent-doc-repair-io pending module should own pending response sidecar IO: {required}"
+        );
+    }
 
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
@@ -3367,15 +3388,25 @@ fn test_agent_doc_repair_io_owns_blocked_repair_payload_sidecar() {
         "resolve project root for blocked repair payload",
         "write blocked repair payload",
         "agent_doc_fs::find_project_root(",
+        "canonicalize_response_for_capture(",
+        "agent_doc_capture_io::capture_response(file",
+        "std::fs::write(&pending_path",
+        "agent_doc_snapshot_io::delete_pre_response(file",
+        "agent_doc_capture_io::mark_write_applied(file",
     ] {
         assert!(
             !repair.contains(forbidden),
-            "repair.rs must not re-own blocked repair sidecar persistence: {forbidden}"
+            "repair.rs must not re-own repair sidecar persistence: {forbidden}"
         );
     }
     assert!(
         repair.contains("agent_doc_repair_io::save_blocked_repair_payload("),
         "repair.rs should call focused repair IO directly"
+    );
+    assert!(
+        repair.contains("agent_doc_repair_io::pending::save_pending(file, response)")
+            && repair.contains("agent_doc_repair_io::pending::clear_pending(file)"),
+        "repair.rs should delegate pending response sidecar IO to focused repair IO"
     );
 }
 
@@ -5933,8 +5964,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
     );
 
     let session_check =
-        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     let closeout_guards =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/closeout_guards.rs"))
             .unwrap();
@@ -6663,8 +6693,7 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
         "preflight must consume focused drain-stall marker IO directly"
     );
     let session_check_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     let idle_watch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
             .unwrap();
@@ -10251,8 +10280,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         );
     }
     let session_check_command =
-        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     assert!(
         session_check_command.contains("crate::check_shadow_backlog_guard")
             && session_check_command.contains("crate::check_free_text_queue_head_provenance")
@@ -17745,8 +17773,7 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
     let session_check =
-        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     assert!(
         preflight_run
             .contains("agent_doc_queue::queue_continuation::effective_continuation_output"),
@@ -18313,8 +18340,7 @@ fn test_extracted_pure_layers_keep_focused_owners() {
     let detect =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
     let session_check =
-        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     for forbidden in [
         "fn short_oid(",
         "fn parent_pointer_recovery_hint(",
@@ -22313,8 +22339,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     let detect_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
     let session_check_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let preflight_run_source =

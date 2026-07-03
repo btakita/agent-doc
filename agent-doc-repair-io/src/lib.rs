@@ -1,8 +1,12 @@
 //! Repair sidecar I/O.
 
+pub mod pending;
+
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+
+pub use pending::{clear_pending, save_pending};
 
 #[derive(Debug, Serialize)]
 struct BlockedRepairPayloadRecord<'a> {

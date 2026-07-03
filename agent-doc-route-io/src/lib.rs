@@ -4,6 +4,7 @@
 //! route startup and dispatch helpers. It does not own document mutation, queue
 //! policy, or supervisor process startup.
 
+pub mod authoritative_actor;
 pub mod busy_pane;
 pub mod direct_pane_dispatch;
 pub mod dispatch;

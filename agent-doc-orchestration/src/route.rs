@@ -161,9 +161,8 @@ use std::time::{Duration, Instant};
 
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
-    AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixOutcome,
-    CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts,
-    DegradedAuthoritativeActorDirectSubmit, DegradedAuthoritativeActorFacts, DispatchActorState,
+    AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixOutcome, CloseoutBlockDispatchDecision,
+    CloseoutBlockDispatchFacts, DegradedAuthoritativeActorDirectSubmit, DispatchActorState,
     DispatchDrainRetryDecision, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyBusyRefusalFacts,
     DispatchOnlyReopenDelivery, DispatchOnlyStartingPaneActorReadyFacts,
     DispatchOnlyStartingPaneNotReadyMessageFacts, DispatchRuntimeHealth,
@@ -171,14 +170,13 @@ use agent_doc_controller::dispatch::{
     RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
     RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts,
     RoutedCycleAckFacts, RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
-    STARTING_ACTOR_TIMEOUT_REASON, StartingActorLogFacts, StartingTimeoutActorFacts,
-    StartupMissRouteFacts, actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
-    actor_recovery_hint, authoritative_actor_ready_retry_budget,
-    busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
-    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
-    classify_closeout_block_dispatch, decide_authoritative_reopen,
-    degraded_authoritative_actor_direct_submit_log_message, dispatch_drain_retry_decision,
-    dispatch_only_blocked_guard_reason, dispatch_only_blocker_recovery_hint,
+    StartingTimeoutActorFacts, StartupMissRouteFacts, actor_blocked_by_starting_timeout,
+    actor_dispatch_blocker_reason, authoritative_actor_ready_retry_budget,
+    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
+    classify_authoritative_prompt_ready_barrier, classify_closeout_block_dispatch,
+    decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
+    dispatch_drain_retry_decision, dispatch_only_blocked_guard_reason,
+    dispatch_only_blocker_recovery_hint,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_print_unproven_progress,
@@ -191,11 +189,15 @@ use agent_doc_controller::dispatch::{
     route_closeout_user_outcome_fields, route_dispatch_bug_report_item,
     route_startup_miss_diagnostic_message, routed_cycle_ack_timeout,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
-    starting_actor_not_ready_log_line, starting_actor_ready_log_line,
-    starting_actor_terminal_log_line, starting_actor_timeout_coalesced_log_line,
-    starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
+    starting_actor_ready_log_line, starting_actor_terminal_log_line,
+    starting_actor_timeout_coalesced_log_line, startup_miss_requires_fresh_start,
     startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
     startup_miss_superseded_by_later_open_start,
+};
+#[cfg(test)]
+use agent_doc_controller::dispatch::{
+    AuthoritativeActorReadyFacts, STARTING_ACTOR_TIMEOUT_REASON,
+    starting_timeout_blocked_actor_can_recover,
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
@@ -209,6 +211,22 @@ use agent_doc_controller_io::starting_actor_timeout::{
 };
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
+use agent_doc_route_io::authoritative_actor::{
+    AuthoritativeActorDispatchTarget, ManagedCapabilityProofStatus, RouteDispatchAuthorization,
+    actor_dispatch_state, authoritative_actor_dispatch_recovery_hint,
+    authoritative_actor_ready_facts_from_target, authorize_controller_dispatch,
+    current_generation_ready_prompt_proven, dispatch_only_can_use_degraded_authoritative_actor,
+    load_authoritative_actor_binding, load_authoritative_actor_dispatch_target,
+    load_authoritative_actor_for_registered_pane, managed_capability_proof_status,
+    mark_starting_actor_timeout_blocked, promote_starting_authoritative_actor_if_dispatch_ready,
+    recover_starting_timeout_blocked_actor_if_dispatch_ready, route_dispatch_deduped_pane,
+    route_starting_actor_not_ready_log_line, tracked_harness_clear_requires_fresh_restart,
+};
+#[cfg(test)]
+use agent_doc_route_io::authoritative_actor::{
+    authoritative_actor_dispatch_can_queue_optimistically,
+    authoritative_actor_start_wait_terminal_state,
+};
 pub(crate) use agent_doc_route_io::busy_pane::{
     BusyPaneInterruptRecoveryOutcome, ExistingPaneDispatchReadiness,
     attempt_busy_existing_pane_auto_fix, attempt_busy_existing_pane_interrupt_recovery,
@@ -244,11 +262,12 @@ use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_mat
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::pane_registration_matches_file;
+#[cfg(test)]
+use agent_doc_supervisor::route_runtime::{RouteActorState, SupervisorRuntime};
 use agent_doc_supervisor::route_runtime::{
-    DeferToBoundaryRestartRecoveryFacts, RouteActorState, SupervisorHealth, SupervisorRuntime,
+    SupervisorHealth,
     authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason,
     authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
-    defer_to_boundary_restart_recovery_hint, effective_authoritative_actor_state,
 };
 use agent_doc_supervisor::startup_miss::StartingPaneRecoveryTarget;
 use agent_doc_tmux::is_first_column;
@@ -346,47 +365,6 @@ fn wait_for_ready_override() -> Option<Duration> {
 pub enum RouteMode {
     Managed,
     DispatchOnly,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AuthoritativeActorDispatchTarget {
-    record: agent_doc_sqlite::state_store::ActorRecord,
-    runtime: SupervisorRuntime,
-}
-
-impl AuthoritativeActorDispatchTarget {
-    fn actor_state(&self) -> agent_doc_sqlite::state_store::ActorState {
-        sqlite_actor_state_from_route(effective_authoritative_actor_state(
-            route_actor_state_from_sqlite(self.record.state),
-            self.runtime.actor_state,
-        ))
-    }
-}
-
-fn route_actor_state_from_sqlite(
-    state: agent_doc_sqlite::state_store::ActorState,
-) -> RouteActorState {
-    match state {
-        agent_doc_sqlite::state_store::ActorState::Starting => RouteActorState::Starting,
-        agent_doc_sqlite::state_store::ActorState::Ready => RouteActorState::Ready,
-        agent_doc_sqlite::state_store::ActorState::Busy => RouteActorState::Busy,
-        agent_doc_sqlite::state_store::ActorState::WaitingInput => RouteActorState::WaitingInput,
-        agent_doc_sqlite::state_store::ActorState::Closed => RouteActorState::Closed,
-        agent_doc_sqlite::state_store::ActorState::Blocked => RouteActorState::Blocked,
-    }
-}
-
-fn sqlite_actor_state_from_route(
-    state: RouteActorState,
-) -> agent_doc_sqlite::state_store::ActorState {
-    match state {
-        RouteActorState::Starting => agent_doc_sqlite::state_store::ActorState::Starting,
-        RouteActorState::Ready => agent_doc_sqlite::state_store::ActorState::Ready,
-        RouteActorState::Busy => agent_doc_sqlite::state_store::ActorState::Busy,
-        RouteActorState::WaitingInput => agent_doc_sqlite::state_store::ActorState::WaitingInput,
-        RouteActorState::Closed => agent_doc_sqlite::state_store::ActorState::Closed,
-        RouteActorState::Blocked => agent_doc_sqlite::state_store::ActorState::Blocked,
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -534,31 +512,6 @@ fn emit_busy_route_queued_diagnostic_from_facts(facts: BusyRouteQueuedDiagnostic
     emit_busy_route_queued_diagnostic(facts.tmux, facts.pane, facts.file, facts.harness);
 }
 
-fn actor_dispatch_state(state: agent_doc_sqlite::state_store::ActorState) -> ActorDispatchState {
-    match state {
-        agent_doc_sqlite::state_store::ActorState::Ready => ActorDispatchState::Ready,
-        agent_doc_sqlite::state_store::ActorState::Starting => ActorDispatchState::Starting,
-        agent_doc_sqlite::state_store::ActorState::Busy => ActorDispatchState::Busy,
-        agent_doc_sqlite::state_store::ActorState::WaitingInput => ActorDispatchState::WaitingInput,
-        agent_doc_sqlite::state_store::ActorState::Blocked => ActorDispatchState::Blocked,
-        agent_doc_sqlite::state_store::ActorState::Closed => ActorDispatchState::Closed,
-    }
-}
-
-fn authoritative_actor_dispatch_recovery_hint(
-    state: agent_doc_sqlite::state_store::ActorState,
-    file: &Path,
-) -> String {
-    actor_recovery_hint(actor_dispatch_state(state), &file.display().to_string())
-}
-
-#[cfg(test)]
-fn authoritative_actor_dispatch_can_queue_optimistically(
-    state: agent_doc_sqlite::state_store::ActorState,
-) -> bool {
-    agent_doc_controller::dispatch::actor_can_queue_optimistically(actor_dispatch_state(state))
-}
-
 fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
     match health {
         SupervisorHealth::Healthy => DispatchRuntimeHealth::Healthy,
@@ -569,30 +522,6 @@ fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
         SupervisorHealth::Unreachable => DispatchRuntimeHealth::Unreachable,
         SupervisorHealth::NoSocket => DispatchRuntimeHealth::NoSocket,
     }
-}
-
-fn authoritative_actor_ready_facts_from_target(
-    target: &AuthoritativeActorDispatchTarget,
-    prompt_ready: bool,
-) -> AuthoritativeActorReadyFacts {
-    AuthoritativeActorReadyFacts {
-        pane_id: target.record.pane_id.clone(),
-        generation: target.record.generation,
-        actor_state: actor_dispatch_state(target.actor_state()),
-        supervisor_health: target.runtime.health.label(),
-        runtime_state: target.runtime.actor_state_label().to_string(),
-        prompt_ready,
-        last_transition_reason: target.record.last_transition.reason.clone(),
-        last_transition_caller: target.record.last_transition.caller.clone(),
-    }
-}
-
-fn tracked_harness_clear_requires_fresh_restart(
-    harness: &HarnessConfig,
-    latest_prompt: Option<&str>,
-) -> bool {
-    matches!(harness.binary.as_str(), "codex" | "opencode")
-        && latest_prompt.is_some_and(agent_doc_codex_hook_io::prompt_requests_clear)
 }
 
 fn reapply_harness_launch_contract_after_clear(
@@ -664,86 +593,6 @@ fn reapply_harness_launch_contract_after_clear(
     }
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
     Ok(dispatch_pane)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ManagedCapabilityProofStatus {
-    NotRequired,
-    Pending,
-    Proven,
-    Failed,
-    Missing,
-}
-
-fn managed_capability_proof_status(
-    file: &Path,
-    session_id: &str,
-    harness: &HarnessConfig,
-) -> Result<ManagedCapabilityProofStatus> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let fm = agent_doc_frontmatter_io::session::parse_for_file_with_context(
-        &content,
-        file,
-        &rc.ssh_context(),
-    )
-    .map(|(fm, _)| fm)?;
-    #[cfg(test)]
-    let global_config = agent_doc_config::Config::default();
-    #[cfg(not(test))]
-    let global_config = rc.global_config();
-    if !agent_doc_agent_io::agent::codex::managed_capability_contract_required_for_doc_and_harness(
-        file,
-        &fm,
-        &global_config,
-        &harness.binary,
-    ) {
-        return Ok(ManagedCapabilityProofStatus::NotRequired);
-    }
-    let prefix = format!("{}_capability_proof status=", harness.binary);
-    let expected_writable_contract = if harness.binary == "codex" {
-        agent_doc_agent_io::agent::codex::managed_writable_root_contract_id_for_doc(
-            file,
-            &fm,
-            &global_config,
-        )
-    } else {
-        None
-    };
-    let proven_prefix = format!("{}proven", prefix);
-    let proven = if let Some(contract) = expected_writable_contract.as_deref() {
-        agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start_containing(
-            file,
-            session_id,
-            &proven_prefix,
-            &format!("writable_root_contract={contract}"),
-        )?
-    } else {
-        agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
-            file,
-            session_id,
-            &proven_prefix,
-        )?
-    };
-    if proven {
-        return Ok(ManagedCapabilityProofStatus::Proven);
-    }
-    if agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
-        file,
-        session_id,
-        &format!("{}failed", prefix),
-    )? {
-        return Ok(ManagedCapabilityProofStatus::Failed);
-    }
-    if agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
-        file,
-        session_id,
-        &format!("{}pending", prefix),
-    )? {
-        return Ok(ManagedCapabilityProofStatus::Pending);
-    }
-    Ok(ManagedCapabilityProofStatus::Missing)
 }
 
 fn reapply_capability_contract_before_reuse(
@@ -1844,9 +1693,6 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
 
 mod dispatch_only;
 pub(crate) use dispatch_only::*;
-
-mod authoritative_actor;
-pub(crate) use authoritative_actor::*;
 
 /// `#jb-run-agent-doc-busy-wait-deadlock`: the `wait_for_ready` override exists
 /// for a slow-`starting` supervisor (JB `Run Agent Doc` passes `--wait-for-ready

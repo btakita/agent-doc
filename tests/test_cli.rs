@@ -1103,7 +1103,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/dispatch_only.rs",
-        "agent-doc-orchestration/src/route/authoritative_actor.rs",
+        "agent-doc-route-io/src/authoritative_actor.rs",
         "agent-doc-orchestration/src/route/pane_resolution.rs",
         "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-route-io/src/session_resolution.rs",
@@ -1338,7 +1338,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // logs the benign in-flight dedup before returning deduped-success without a
         // re-send. Routed through the `RouteDispatchAuthorization::CoalescedDeduped`
         // outcome so every dispatch site handles the coalesce at compile time.
-        ("agent-doc-orchestration/src/route/authoritative_actor.rs", "reason=") => 2,
+        ("agent-doc-route-io/src/authoritative_actor.rs", "reason=") => 2,
         ("agent-doc-orchestration/src/route/pane_resolution.rs", "guard_") => 1,
         ("agent-doc-orchestration/src/route/pane_resolution.rs", "reason=") => 4,
         // +1 (#kjw0 / #jbrunautobug): the busy-pane short-circuit logs the
@@ -3673,7 +3673,7 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     );
     for relative in [
         "agent-doc-orchestration/src/session_check.rs",
-        "agent-doc-orchestration/src/route/authoritative_actor.rs",
+        "agent-doc-route-io/src/authoritative_actor.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
     ] {
@@ -9146,10 +9146,9 @@ fn test_agent_doc_supervisor_owns_route_runtime_policy() {
 
     let route =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
-    let route_authoritative_actor = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/route/authoritative_actor.rs"),
-    )
-    .unwrap();
+    let route_authoritative_actor =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_actor.rs"))
+            .unwrap();
     for forbidden in [
         "pub enum RouteActorState",
         "enum SupervisorHealth",
@@ -9165,9 +9164,10 @@ fn test_agent_doc_supervisor_owns_route_runtime_policy() {
         );
     }
     assert!(
-        route.contains("use agent_doc_supervisor::route_runtime::{")
-            && route.contains("effective_authoritative_actor_state")
-            && route.contains("DeferToBoundaryRestartRecoveryFacts")
+        route.contains("supervisor_authoritative_actor_dispatch_target_eligible")
+            && route_authoritative_actor.contains("use agent_doc_supervisor::route_runtime::{")
+            && route_authoritative_actor.contains("effective_authoritative_actor_state")
+            && route_authoritative_actor.contains("DeferToBoundaryRestartRecoveryFacts")
             && route.contains("supervisor_authoritative_actor_dispatch_target_eligible")
             && route_authoritative_actor.contains("defer_to_boundary_restart_recovery_hint("),
         "route should call focused supervisor route runtime policy directly"
@@ -13945,10 +13945,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "sync.rs should adapt tmux panes into focused process-owner IO directly"
     );
 
-    let authoritative_actor = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/route/authoritative_actor.rs"),
-    )
-    .unwrap();
+    let authoritative_actor =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_actor.rs"))
+            .unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     let route_dispatch_source =
@@ -14002,6 +14001,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "orchestration must not keep a route dispatch module after the dispatch transport/proof graph moves to agent-doc-route-io"
     );
     assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/route/authoritative_actor.rs")
+            .exists()
+            && !route_source.contains("mod authoritative_actor;")
+            && route_source.contains("use agent_doc_route_io::authoritative_actor::{"),
+        "orchestration must not keep a route authoritative-actor module after the actor/controller IO graph moves to agent-doc-route-io"
+    );
+    assert!(
         authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
         "route authorization should call the focused controller dispatch classifier directly"
     );
@@ -14037,7 +14044,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .contains("pub(crate) use agent_doc_controller_io::starting_actor_timeout")
             && authoritative_actor
                 .contains("use agent_doc_controller_io::starting_actor_timeout::clear_starting_actor_timeout_record;"),
-        "route/authoritative_actor.rs should call starting-actor timeout IO without re-exporting it"
+        "agent-doc-route-io/authoritative_actor.rs should call starting-actor timeout IO without re-exporting it"
     );
     assert!(
         route_source.contains("use agent_doc_controller_io::starting_actor_timeout::{")
@@ -14508,7 +14515,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("prompt_ready_barrier_failed_event")
             && route_source.contains("agent_doc_flow_io::log_flow_event")
             && route_source.contains("dispatch_only_blocked_guard_reason")
-            && route_source.contains("effective_authoritative_actor_state")
+            && authoritative_actor.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("RoutedDispatchStartProof")
             && route_source.contains("RetryBudget")
@@ -14522,10 +14529,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("dispatch_only_starting_pane_recovery_timeout_for_binary")
             && route_dispatch_recovery_source
                 .contains("dispatch_only_starting_pane_recovery_retry_budget")
-            && route_source.contains("STARTING_ACTOR_TIMEOUT_REASON")
+            && authoritative_actor.contains("STARTING_ACTOR_TIMEOUT_REASON")
             && route_source.contains("StartingTimeoutActorFacts")
             && route_source.contains("actor_blocked_by_starting_timeout")
-            && route_source.contains("starting_timeout_blocked_actor_can_recover")
+            && authoritative_actor.contains("starting_timeout_blocked_actor_can_recover")
             && route_source.contains("StartupMissRouteFacts")
             && route_source.contains("startup_miss_requires_fresh_start")
             && route_source.contains("startup_miss_superseded_by_later_open_start")
@@ -16425,10 +16432,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let start_idle_watch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
             .unwrap();
-    let route_authoritative_actor = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/route/authoritative_actor.rs"),
-    )
-    .unwrap();
+    let route_authoritative_actor =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_actor.rs"))
+            .unwrap();
     let write_converge =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
             .unwrap();

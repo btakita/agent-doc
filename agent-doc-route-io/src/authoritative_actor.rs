@@ -1,10 +1,200 @@
-//! Extracted from `write.rs` (large-module split). See parent module for context.
+//! Authoritative actor dispatch target and controller authorization I/O.
 
-use super::*;
+use anyhow::{Context, Result};
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use agent_doc_controller::dispatch::{
+    ActorDispatchState, AuthoritativeActorReadyFacts, DegradedAuthoritativeActorFacts,
+    STARTING_ACTOR_TIMEOUT_REASON, StartingActorLogFacts, StartingTimeoutActorFacts,
+    actor_blocked_by_starting_timeout, actor_recovery_hint, authoritative_actor_ready_retry_budget,
+    can_use_degraded_authoritative_actor, starting_actor_not_ready_log_line,
+    starting_timeout_blocked_actor_can_recover,
+};
 use agent_doc_controller_io::starting_actor_timeout::clear_starting_actor_timeout_record;
+use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry::registry_base_dir_for_dispatch;
+use agent_doc_supervisor::route_runtime::{
+    DeferToBoundaryRestartRecoveryFacts, RouteActorState, SupervisorHealth, SupervisorRuntime,
+    authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
+    defer_to_boundary_restart_recovery_hint, effective_authoritative_actor_state,
+};
+use tmux_router::Tmux;
 
-pub(crate) fn load_authoritative_actor_binding(
+use crate::supervisor_runtime::{query_supervisor_runtime, restart_via_supervisor};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoritativeActorDispatchTarget {
+    pub record: agent_doc_sqlite::state_store::ActorRecord,
+    pub runtime: SupervisorRuntime,
+}
+
+impl AuthoritativeActorDispatchTarget {
+    pub fn actor_state(&self) -> agent_doc_sqlite::state_store::ActorState {
+        sqlite_actor_state_from_route(effective_authoritative_actor_state(
+            route_actor_state_from_sqlite(self.record.state),
+            self.runtime.actor_state,
+        ))
+    }
+}
+
+pub fn route_actor_state_from_sqlite(
+    state: agent_doc_sqlite::state_store::ActorState,
+) -> RouteActorState {
+    match state {
+        agent_doc_sqlite::state_store::ActorState::Starting => RouteActorState::Starting,
+        agent_doc_sqlite::state_store::ActorState::Ready => RouteActorState::Ready,
+        agent_doc_sqlite::state_store::ActorState::Busy => RouteActorState::Busy,
+        agent_doc_sqlite::state_store::ActorState::WaitingInput => RouteActorState::WaitingInput,
+        agent_doc_sqlite::state_store::ActorState::Closed => RouteActorState::Closed,
+        agent_doc_sqlite::state_store::ActorState::Blocked => RouteActorState::Blocked,
+    }
+}
+
+pub fn sqlite_actor_state_from_route(
+    state: RouteActorState,
+) -> agent_doc_sqlite::state_store::ActorState {
+    match state {
+        RouteActorState::Starting => agent_doc_sqlite::state_store::ActorState::Starting,
+        RouteActorState::Ready => agent_doc_sqlite::state_store::ActorState::Ready,
+        RouteActorState::Busy => agent_doc_sqlite::state_store::ActorState::Busy,
+        RouteActorState::WaitingInput => agent_doc_sqlite::state_store::ActorState::WaitingInput,
+        RouteActorState::Closed => agent_doc_sqlite::state_store::ActorState::Closed,
+        RouteActorState::Blocked => agent_doc_sqlite::state_store::ActorState::Blocked,
+    }
+}
+
+pub fn actor_dispatch_state(
+    state: agent_doc_sqlite::state_store::ActorState,
+) -> ActorDispatchState {
+    match state {
+        agent_doc_sqlite::state_store::ActorState::Ready => ActorDispatchState::Ready,
+        agent_doc_sqlite::state_store::ActorState::Starting => ActorDispatchState::Starting,
+        agent_doc_sqlite::state_store::ActorState::Busy => ActorDispatchState::Busy,
+        agent_doc_sqlite::state_store::ActorState::WaitingInput => ActorDispatchState::WaitingInput,
+        agent_doc_sqlite::state_store::ActorState::Blocked => ActorDispatchState::Blocked,
+        agent_doc_sqlite::state_store::ActorState::Closed => ActorDispatchState::Closed,
+    }
+}
+
+pub fn authoritative_actor_dispatch_recovery_hint(
+    state: agent_doc_sqlite::state_store::ActorState,
+    file: &Path,
+) -> String {
+    actor_recovery_hint(actor_dispatch_state(state), &file.display().to_string())
+}
+
+pub fn authoritative_actor_dispatch_can_queue_optimistically(
+    state: agent_doc_sqlite::state_store::ActorState,
+) -> bool {
+    agent_doc_controller::dispatch::actor_can_queue_optimistically(actor_dispatch_state(state))
+}
+
+pub fn authoritative_actor_ready_facts_from_target(
+    target: &AuthoritativeActorDispatchTarget,
+    prompt_ready: bool,
+) -> AuthoritativeActorReadyFacts {
+    AuthoritativeActorReadyFacts {
+        pane_id: target.record.pane_id.clone(),
+        generation: target.record.generation,
+        actor_state: actor_dispatch_state(target.actor_state()),
+        supervisor_health: target.runtime.health.label(),
+        runtime_state: target.runtime.actor_state_label().to_string(),
+        prompt_ready,
+        last_transition_reason: target.record.last_transition.reason.clone(),
+        last_transition_caller: target.record.last_transition.caller.clone(),
+    }
+}
+
+pub fn tracked_harness_clear_requires_fresh_restart(
+    harness: &HarnessConfig,
+    latest_prompt: Option<&str>,
+) -> bool {
+    matches!(harness.binary.as_str(), "codex" | "opencode")
+        && latest_prompt.is_some_and(agent_doc_codex_hook_io::prompt_requests_clear)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedCapabilityProofStatus {
+    NotRequired,
+    Pending,
+    Proven,
+    Failed,
+    Missing,
+}
+
+pub fn managed_capability_proof_status(
+    file: &Path,
+    session_id: &str,
+    harness: &HarnessConfig,
+) -> Result<ManagedCapabilityProofStatus> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let fm = agent_doc_frontmatter_io::session::parse_for_file_with_context(
+        &content,
+        file,
+        &rc.ssh_context(),
+    )
+    .map(|(fm, _)| fm)?;
+    #[cfg(test)]
+    let global_config = agent_doc_config::Config::default();
+    #[cfg(not(test))]
+    let global_config = rc.global_config();
+    if !agent_doc_agent_io::agent::codex::managed_capability_contract_required_for_doc_and_harness(
+        file,
+        &fm,
+        &global_config,
+        &harness.binary,
+    ) {
+        return Ok(ManagedCapabilityProofStatus::NotRequired);
+    }
+    let prefix = format!("{}_capability_proof status=", harness.binary);
+    let expected_writable_contract = if harness.binary == "codex" {
+        agent_doc_agent_io::agent::codex::managed_writable_root_contract_id_for_doc(
+            file,
+            &fm,
+            &global_config,
+        )
+    } else {
+        None
+    };
+    let proven_prefix = format!("{}proven", prefix);
+    let proven = if let Some(contract) = expected_writable_contract.as_deref() {
+        agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start_containing(
+            file,
+            session_id,
+            &proven_prefix,
+            &format!("writable_root_contract={contract}"),
+        )?
+    } else {
+        agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
+            file,
+            session_id,
+            &proven_prefix,
+        )?
+    };
+    if proven {
+        return Ok(ManagedCapabilityProofStatus::Proven);
+    }
+    if agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
+        file,
+        session_id,
+        &format!("{}failed", prefix),
+    )? {
+        return Ok(ManagedCapabilityProofStatus::Failed);
+    }
+    if agent_doc_supervisor_io::startup_miss::session_log_has_event_after_latest_start(
+        file,
+        session_id,
+        &format!("{}pending", prefix),
+    )? {
+        return Ok(ManagedCapabilityProofStatus::Pending);
+    }
+    Ok(ManagedCapabilityProofStatus::Missing)
+}
+
+pub fn load_authoritative_actor_binding(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
@@ -202,7 +392,7 @@ fn document_declares_expected_harness(file: &Path, expected_harness: &str) -> bo
     agent_doc_harness::normalize_harness_name(agent) == expected_harness
 }
 
-pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
+pub fn promote_starting_authoritative_actor_if_dispatch_ready(
     tmux: &Tmux,
     file: &Path,
     file_path: &str,
@@ -281,7 +471,7 @@ pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
 /// pane recover automatically. Busy panes never satisfy
 /// `current_generation_ready_prompt_proven` (the harness busy cue short-circuits it),
 /// so this preserves the "promote only proven idle panes" fail-closed invariant.
-pub(crate) fn poll_starting_timeout_blocked_actor_dispatch_ready(
+pub fn poll_starting_timeout_blocked_actor_dispatch_ready(
     tmux: &Tmux,
     actor: &AuthoritativeActorDispatchTarget,
     harness: &HarnessConfig,
@@ -311,7 +501,7 @@ pub(crate) fn poll_starting_timeout_blocked_actor_dispatch_ready(
     }
 }
 
-pub(crate) fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
+pub fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
     tmux: &Tmux,
     file: &Path,
     file_path: &str,
@@ -367,7 +557,7 @@ pub(crate) fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
     }
 }
 
-pub(crate) fn current_generation_ready_prompt_proven(
+pub fn current_generation_ready_prompt_proven(
     tmux: &Tmux,
     target: &AuthoritativeActorDispatchTarget,
     harness: &HarnessConfig,
@@ -406,12 +596,12 @@ pub(crate) fn current_generation_ready_prompt_proven(
 /// as a distinct variant forces every dispatch site to handle the deduped case at
 /// compile time, so no send path can accidentally fire on a coalesce and a coalesce
 /// can never surface as an exit-1 to the operator.
-pub(crate) enum RouteDispatchAuthorization {
+pub enum RouteDispatchAuthorization {
     Authorized,
     CoalescedDeduped { detail: String },
 }
 
-pub(crate) fn authorize_controller_dispatch(
+pub fn authorize_controller_dispatch(
     file: &Path,
     session_id: &str,
     file_path: &str,
@@ -537,7 +727,7 @@ fn recover_dispatch_via_supervisor_restart(
 
 /// Shared deduped-success handler for every route dispatch site: log the dedup and
 /// hand back the already-running dispatch pane without re-sending the trigger.
-pub(crate) fn route_dispatch_deduped_pane(
+pub fn route_dispatch_deduped_pane(
     file: &Path,
     command_kind: &str,
     dispatch_pane: String,
@@ -556,7 +746,7 @@ pub(crate) fn route_dispatch_deduped_pane(
     dispatch_pane
 }
 
-pub(crate) fn load_authoritative_actor_dispatch_target(
+pub fn load_authoritative_actor_dispatch_target(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
@@ -577,7 +767,7 @@ pub(crate) fn load_authoritative_actor_dispatch_target(
     .filter(|target| supervisor_authoritative_actor_dispatch_target_eligible(&target.runtime)))
 }
 
-pub(crate) fn load_authoritative_actor_for_registered_pane(
+pub fn load_authoritative_actor_for_registered_pane(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
@@ -606,7 +796,7 @@ pub(crate) fn load_authoritative_actor_for_registered_pane(
     }))
 }
 
-pub(crate) fn dispatch_only_can_use_degraded_authoritative_actor(
+pub fn dispatch_only_can_use_degraded_authoritative_actor(
     actor: &AuthoritativeActorDispatchTarget,
     registered: Option<&str>,
     live_owner: Option<&str>,
@@ -620,14 +810,13 @@ pub(crate) fn dispatch_only_can_use_degraded_authoritative_actor(
     })
 }
 
-#[cfg(test)]
-pub(crate) fn authoritative_actor_start_wait_terminal_state(
+pub fn authoritative_actor_start_wait_terminal_state(
     state: agent_doc_sqlite::state_store::ActorState,
 ) -> bool {
     agent_doc_controller::dispatch::actor_start_wait_terminal_state(actor_dispatch_state(state))
 }
 
-pub(crate) fn route_starting_actor_not_ready_log_line(
+pub fn route_starting_actor_not_ready_log_line(
     file: &Path,
     harness: &HarnessConfig,
     timeout: Duration,
@@ -644,7 +833,7 @@ pub(crate) fn route_starting_actor_not_ready_log_line(
     })
 }
 
-pub(crate) fn mark_starting_actor_timeout_blocked(
+pub fn mark_starting_actor_timeout_blocked(
     file: &Path,
     file_path: &str,
     session_id: &str,
@@ -691,9 +880,61 @@ pub(crate) fn mark_starting_actor_timeout_blocked(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     use agent_doc_supervisor_io::ipc::SupervisorIpc;
+    use tmux_router::IsolatedTmux;
+
+    fn test_cwd() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    struct ScopedCurrentDir {
+        prev_cwd: std::path::PathBuf,
+    }
+
+    impl ScopedCurrentDir {
+        fn set(path: &std::path::Path) -> Self {
+            let prev_cwd = std::env::current_dir().unwrap_or_else(|_| test_cwd());
+            std::env::set_current_dir(path).unwrap();
+            Self { prev_cwd }
+        }
+    }
+
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prev_cwd);
+        }
+    }
+
+    fn test_actor_record(pane_id: &str) -> agent_doc_sqlite::state_store::ActorRecord {
+        agent_doc_sqlite::state_store::ActorRecord {
+            document_id: "test-doc".to_string(),
+            session_id: "test-session".to_string(),
+            generation: 1,
+            pane_id: pane_id.to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "test".to_string(),
+                timestamp: 0,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        }
+    }
+
+    fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTarget {
+        AuthoritativeActorDispatchTarget {
+            record: test_actor_record(pane_id),
+            runtime: SupervisorRuntime {
+                health: SupervisorHealth::NoSocket,
+                actor_state: None,
+            },
+        }
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity() {

@@ -718,7 +718,7 @@ fn mcp_finalize_close_after_capture_recovers_on_next_preflight_once() {
 
     let response =
         "<!-- patch:exchange -->\n### Re: MCP finalize - gpt-5\nbody\n<!-- /patch:exchange -->\n";
-    agent_doc_orchestration::repair::save_pending(&doc, response).unwrap();
+    agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
     assert_eq!(
         read_cycle_phase(root, &doc).as_deref(),
         Some("response_captured")
@@ -3393,6 +3393,8 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "std::fs::write(&pending_path",
         "agent_doc_snapshot_io::delete_pre_response(file",
         "agent_doc_capture_io::mark_write_applied(file",
+        "pub fn save_pending(",
+        "pub fn clear_pending(",
     ] {
         assert!(
             !repair.contains(forbidden),
@@ -3404,10 +3406,34 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "repair.rs should call focused repair IO directly"
     );
     assert!(
-        repair.contains("agent_doc_repair_io::pending::save_pending(file, response)")
-            && repair.contains("agent_doc_repair_io::pending::clear_pending(file)"),
-        "repair.rs should delegate pending response sidecar IO to focused repair IO"
+        repair.contains("agent_doc_repair_io::pending::clear_pending(&canonical)"),
+        "repair.rs should clear pending response sidecars through focused repair IO"
     );
+    for relative in [
+        "agent-doc-orchestration/src/codex_hook.rs",
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        "src/main.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert_source_mentions_all(
+            &source,
+            relative,
+            &["agent_doc_repair_io::pending::save_pending("],
+        );
+        assert_source_omits_all(
+            &source,
+            relative,
+            &[
+                "crate::repair::save_pending(",
+                "crate::repair::clear_pending(",
+                "repair::save_pending(",
+                "repair::clear_pending(",
+                "agent_doc_orchestration::repair::save_pending(",
+                "agent_doc_orchestration::repair::clear_pending(",
+            ],
+        );
+    }
 }
 
 #[test]

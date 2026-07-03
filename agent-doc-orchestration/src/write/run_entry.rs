@@ -62,7 +62,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
-    repair::save_pending(file, &response)?;
+    agent_doc_repair_io::pending::save_pending(file, &response)?;
 
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
@@ -114,7 +114,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
             Some(&content_current),
         );
         drop(doc_lock);
-        repair::clear_pending(file)?;
+        agent_doc_repair_io::pending::clear_pending(file)?;
         return Ok(());
     }
 
@@ -203,7 +203,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     drop(doc_lock);
 
     // Clear pending response after successful write
-    repair::clear_pending(file)?;
+    agent_doc_repair_io::pending::clear_pending(file)?;
 
     eprintln!("[write] Response appended to {}", file.display());
     Ok(())
@@ -310,7 +310,7 @@ pub fn run_template(
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
-    repair::save_pending(file, &response)?;
+    agent_doc_repair_io::pending::save_pending(file, &response)?;
 
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
@@ -434,7 +434,7 @@ pub fn run_template(
             Some(&content_current),
         );
         drop(doc_lock);
-        repair::clear_pending(file)?;
+        agent_doc_repair_io::pending::clear_pending(file)?;
         return Ok(());
     }
 
@@ -526,7 +526,7 @@ pub fn run_template(
     drop(doc_lock);
 
     // Clear pending response after successful write
-    repair::clear_pending(file)?;
+    agent_doc_repair_io::pending::clear_pending(file)?;
 
     eprintln!(
         "[write] Template patches applied to {} ({} components patched)",
@@ -681,7 +681,7 @@ pub fn run_stream(
     }
 
     // Save response to pending store (survives context compaction)
-    repair::save_pending(file, &response)?;
+    agent_doc_repair_io::pending::save_pending(file, &response)?;
 
     // Warn when patches target a file with no template components
     if patches.is_empty() && !unmatched.trim().is_empty() {
@@ -822,7 +822,7 @@ pub fn run_stream(
             {
                 log_dedup(file, "no changes after merge, skipping write");
                 drop(doc_lock);
-                repair::clear_pending(file)?;
+                agent_doc_repair_io::pending::clear_pending(file)?;
                 return Ok(());
             }
 
@@ -849,7 +849,7 @@ pub fn run_stream(
                     eprintln!("[perf] run_stream total: {}ms", elapsed_total);
                 }
                 drop(doc_lock);
-                repair::clear_pending(file)?;
+                agent_doc_repair_io::pending::clear_pending(file)?;
                 return Ok(());
             }
             if ipc_result.success {
@@ -882,7 +882,7 @@ pub fn run_stream(
                 );
                 agent_doc_hooks_io::fire_doc_event(file, "post_write");
                 drop(doc_lock);
-                repair::clear_pending(file)?;
+                agent_doc_repair_io::pending::clear_pending(file)?;
                 return Ok(());
             }
             eprintln!(
@@ -1123,7 +1123,7 @@ pub fn run_stream(
             Some(&content_current),
         );
         drop(doc_lock);
-        repair::clear_pending(file)?;
+        agent_doc_repair_io::pending::clear_pending(file)?;
         let elapsed_total = t_total.elapsed().as_millis();
         if elapsed_total > 0 {
             eprintln!("[perf] run_stream total: {}ms", elapsed_total);
@@ -1259,7 +1259,7 @@ pub fn run_stream(
     drop(doc_lock);
 
     // Clear pending response after successful write
-    repair::clear_pending(file)?;
+    agent_doc_repair_io::pending::clear_pending(file)?;
 
     let elapsed_disk = t_disk.elapsed().as_millis();
     if elapsed_disk > 0 {
@@ -1351,7 +1351,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let unmatched = normalized.unmatched;
 
     // Save response to pending store (survives context compaction)
-    repair::save_pending(file, &response)?;
+    agent_doc_repair_io::pending::save_pending(file, &response)?;
 
     // Enforcement: reject tracked-work full-replacement blocks unless allowed.
     template_io::enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
@@ -1537,7 +1537,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&content);
             agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), &content)?;
             drop(doc_lock);
-            repair::clear_pending(file)?;
+            agent_doc_repair_io::pending::clear_pending(file)?;
             eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
             return Ok(());
         }
@@ -1590,7 +1590,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         );
         cleanup_fallback_patch_files(file);
         drop(doc_lock);
-        repair::clear_pending(file)?;
+        agent_doc_repair_io::pending::clear_pending(file)?;
         return Ok(());
     }
 

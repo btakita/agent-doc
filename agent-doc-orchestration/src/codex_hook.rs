@@ -675,7 +675,7 @@ fn try_recover_repeated_queue_head_response(
         .into_iter()
         .collect::<Vec<_>>();
 
-    crate::repair::save_pending(file, &response_to_write)?;
+    agent_doc_repair_io::pending::save_pending(file, &response_to_write)?;
     agent_doc_ops_log_io::log_op(file, "codex_stop_repeated_queue_response_saved");
     let mut note = format!(
         " The hook replayed the last assistant response into `agent:exchange` for repeated queue head {:?}.",
@@ -1157,7 +1157,7 @@ fn attempt_stop_closeout(
     let mut note = String::new();
     match payload {
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-            crate::repair::save_pending(file, response.as_ref())?;
+            agent_doc_repair_io::pending::save_pending(file, response.as_ref())?;
             agent_doc_ops_log_io::log_op(file, "codex_stop_capture_saved");
             note.push_str(
                 " The latest assistant text was captured into the pending/capture ledger before auto-close.",
@@ -1236,7 +1236,7 @@ fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) 
             capture_missing_stop_response(file, Some(state.last_prompt.as_str()))
         }
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-            match crate::repair::save_pending(file, response.as_ref()) {
+            match agent_doc_repair_io::pending::save_pending(file, response.as_ref()) {
                 Ok(()) => {
                     agent_doc_ops_log_io::log_op(file, "codex_stop_capture_saved");
                     " The latest assistant text was captured into the pending/capture ledger before the turn stopped.".to_string()

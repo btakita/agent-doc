@@ -2930,7 +2930,7 @@ mod tests {
             "Recovered once.\n",
             "<!-- /patch:exchange -->\n"
         );
-        crate::repair::save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
         let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         let pending_path = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(
@@ -4750,7 +4750,7 @@ mod tests {
         let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-        crate::repair::save_pending(&doc, "Recovered answer.").unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "Recovered answer.").unwrap();
         let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         std::fs::remove_file(&pending).unwrap();
 

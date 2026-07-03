@@ -825,7 +825,7 @@ fn run_once(
     };
     enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;
     record_run_progress(file, "response_capture", agent_name, None);
-    crate::repair::save_pending(file, &response_text)?;
+    agent_doc_repair_io::pending::save_pending(file, &response_text)?;
 
     record_run_progress(file, "response_write", agent_name, None);
     match run_mode {
@@ -844,7 +844,7 @@ fn run_once(
         mark_run_write_applied(file, "run_write_applied_resume")?;
     }
 
-    crate::repair::clear_pending(file)?;
+    agent_doc_repair_io::pending::clear_pending(file)?;
     maybe_abort_after_write_applied_for_test()?;
 
     let mut queue_consumption = None;

@@ -207,7 +207,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
-        agent_doc_orchestration::repair::save_pending(file, response)
+        agent_doc_repair_io::pending::save_pending(file, response)
     }
 
     fn session_check_inspect(
@@ -787,11 +787,11 @@ impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
-        agent_doc_orchestration::repair::save_pending(file, response)
+        agent_doc_repair_io::pending::save_pending(file, response)
     }
 
     fn clear_pending(&self, file: &Path) -> anyhow::Result<()> {
-        agent_doc_orchestration::repair::clear_pending(file)
+        agent_doc_repair_io::pending::clear_pending(file)
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {

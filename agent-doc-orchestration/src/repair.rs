@@ -39,8 +39,8 @@
 //!   template drift such as a stale `agent:boundary` marker left before an already-answered
 //!   exchange turn; the repair repositions the boundary to the true end of the completed turn
 //!   and advances the snapshot through the same binary-owned path.
-//! - `save_pending(file, response)` — writes the response to the pending store, creating parent directories as needed.
-//! - `clear_pending(file)` — removes the pending file; no-op if it does not exist.
+//! - Pending response sidecar storage is owned by `agent-doc-repair-io`; this module consumes it
+//!   when replaying or cleaning up interrupted writes.
 //! - Response replay/application matching is owned by `agent-doc-turn::response_replay`; this module supplies file-backed repair adapters.
 //!
 //! ## Agentic Contracts
@@ -1225,7 +1225,7 @@ pub(crate) fn run_with_queue_completion_ids(
         {
             eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
         }
-        clear_pending(&canonical)?;
+        agent_doc_repair_io::pending::clear_pending(&canonical)?;
         return Ok(RepairOutcome::AlreadyApplied);
     }
 
@@ -1310,7 +1310,7 @@ pub(crate) fn run_with_queue_completion_ids(
     // Remove the pending file only after the repaired document proves the
     // captured response materialized. A malformed/partial replay must leave the
     // capture available for retry instead of closing a false-success cycle.
-    clear_pending(&canonical)?;
+    agent_doc_repair_io::pending::clear_pending(&canonical)?;
 
     // #repair-strike-consumed-head: finalize strikes the consumed queue head, but
     // repair's recovery path historically left it live. `do [#id]` heads are
@@ -1536,17 +1536,6 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
         anyhow::bail!(message);
     }
     Ok(outcome)
-}
-
-/// Save a response to the pending store before attempting write-back.
-/// This makes the response durable across context compaction.
-pub fn save_pending(file: &Path, response: &str) -> Result<()> {
-    agent_doc_repair_io::pending::save_pending(file, response)
-}
-
-/// Remove the pending file after a successful write-back.
-pub fn clear_pending(file: &Path) -> Result<()> {
-    agent_doc_repair_io::pending::clear_pending(file)
 }
 
 #[cfg(test)]
@@ -1786,7 +1775,7 @@ mod tests {
         );
         std::fs::write(&doc, current_content).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
-        save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::AlreadyApplied);
@@ -1836,11 +1825,11 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "content").unwrap();
 
-        save_pending(&doc, "response text").unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "response text").unwrap();
         let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(pending.exists());
 
-        clear_pending(&doc).unwrap();
+        agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
         assert!(!pending.exists());
     }
 
@@ -2026,7 +2015,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
 
         // Save a pending response
-        save_pending(&doc, "This is the recovered response.").unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "This is the recovered response.")
+            .unwrap();
 
         // Recover it
         let recovered = run(&doc).unwrap();
@@ -2062,7 +2052,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        save_pending(
+        agent_doc_repair_io::pending::save_pending(
             &doc,
             "<!-- patch:exchange -->\n### Re: improve the docs — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
         )
@@ -2099,7 +2089,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        save_pending(
+        agent_doc_repair_io::pending::save_pending(
             &doc,
             "<!-- patch:exchange -->\n```\nresponse body\n```\n<!-- /patch:exchange -->\n",
         )
@@ -2146,7 +2136,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        save_pending(
+        agent_doc_repair_io::pending::save_pending(
             &doc,
             "<!-- patch:exchange -->\n### Re: do [#widget] — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
         )
@@ -2178,7 +2168,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        save_pending(
+        agent_doc_repair_io::pending::save_pending(
             &doc,
             "Exchange compacted. No new work was run in this turn.",
         )
@@ -2227,7 +2217,7 @@ mod tests {
             "- [ ] [#bbbb] add regression coverage\n",
             "<!-- /replace:pending -->\n"
         );
-        save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::ReplayedResponse);
@@ -2245,7 +2235,7 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "content").unwrap();
 
-        save_pending(&doc, "").unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "").unwrap();
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::Noop);
 
@@ -2266,7 +2256,7 @@ mod tests {
         std::fs::write(&doc, &content).unwrap();
 
         // Pending file still exists (clear_pending was never called after IPC write)
-        save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         // run should detect the content is already present and skip
         let recovered = run(&doc).unwrap();
@@ -2290,8 +2280,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
 
-        save_pending(&doc, "Recovered from capture.").unwrap();
-        clear_pending(&doc).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "Recovered from capture.").unwrap();
+        agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
         let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(!pending.exists());
         // Re-arm capture as if the write never happened.
@@ -2329,7 +2319,7 @@ mod tests {
         std::fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
-        save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::AlreadyApplied);
@@ -2384,7 +2374,7 @@ mod tests {
         );
         std::fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::AlreadyApplied);
@@ -2505,7 +2495,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        save_pending(&doc, "Recovered from capture.").unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "Recovered from capture.").unwrap();
         let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         std::fs::remove_file(&pending).unwrap();
         std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello again\n").unwrap();
@@ -2716,7 +2706,7 @@ mod tests {
         std::fs::write(&doc, malformed).unwrap();
         agent_doc_snapshot_io::save(&doc, malformed, agent_doc_ops_log_io::log_op).unwrap();
 
-        save_pending(&doc, "Escaped answer.").unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "Escaped answer.").unwrap();
 
         let repaired = concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -2775,7 +2765,7 @@ mod tests {
         let content = "---\nsession: test\n---\n\n<!-- agent:exchange -->\n### Re: topic — opus-4-6 (HEAD)\n\n**Details:**\n- Item one\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
 
-        save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(
@@ -3329,7 +3319,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        save_pending(&doc, "Recovered answer.").unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "Recovered answer.").unwrap();
         let recovered = run(&doc).unwrap();
         assert_eq!(
             recovered,
@@ -3368,7 +3358,7 @@ mod tests {
             "<!-- agent:boundary:def456 -->\n",
             "<!-- /agent:exchange -->\n"
         );
-        save_pending(&doc, transcript_dump).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, transcript_dump).unwrap();
 
         let err = run(&doc).unwrap_err();
         assert!(
@@ -3414,7 +3404,7 @@ mod tests {
             "Recovered body.\n",
             "<!-- /patch:exchange -->\n"
         );
-        save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::ReplayedResponse);
@@ -3437,7 +3427,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
 
-        save_pending(&doc, "This is the recovered response.").unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "This is the recovered response.")
+            .unwrap();
 
         let outcome = repair(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::ReplayedResponse);
@@ -3488,7 +3479,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
         init_git_repo(dir.path(), &doc);
 
-        save_pending(&doc, "Recovered answer.").unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "Recovered answer.").unwrap();
 
         let outcome = repair(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::AlreadyApplied);
@@ -3667,7 +3658,7 @@ mod tests {
             "Recovered through direct patch.\n",
             "<!-- /patch:exchange -->\n"
         );
-        save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let outcome = repair(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::AlreadyApplied);
@@ -3722,7 +3713,7 @@ mod tests {
             "Recovered answer.\n",
             "<!-- /patch:exchange -->\n"
         );
-        save_pending(&doc, response).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::ReplayedResponse);

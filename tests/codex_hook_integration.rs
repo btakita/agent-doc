@@ -285,7 +285,7 @@ fn codex_hook_cli_does_not_replay_over_editor_convergence_block() {
     .unwrap();
     agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
     let retained_response = "<!-- patch:exchange -->\n### Re: retained — gpt-5\nRetained patch.\n<!-- /patch:exchange -->\n";
-    agent_doc_orchestration::repair::save_pending(&doc, retained_response).unwrap();
+    agent_doc_repair_io::pending::save_pending(&doc, retained_response).unwrap();
     agent_doc_cycle_state_io::record_editor_convergence_required(
         &doc,
         "try_editor_converge",

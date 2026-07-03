@@ -227,7 +227,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
 
     if raw_hashes_match || normalized_hashes_match {
         if !head_already_matches_current_doc(file, &file_content)?
-            && let Some(marker) = crate::session_check::detect_bypassed_response_write(file)?
+            && let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)?
         {
             crate::flow::closeout::log_closeout_guard_event(
                 file,
@@ -307,7 +307,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         return Ok(RepairOutcome::StalePreflightLockRepaired);
     }
 
-    if let Some(marker) = crate::session_check::detect_bypassed_response_write(file)? {
+    if let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)? {
         crate::flow::closeout::log_closeout_guard_event(
             file,
             agent_doc_flow::types::FlowStage::TerminalGuard,

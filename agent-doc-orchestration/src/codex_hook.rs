@@ -334,7 +334,7 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
     if !is_committed_prompt_diff_interruption(reason) {
         return Ok(None);
     }
-    let prompt = crate::session_check::unresolved_exchange_prompt(file)?
+    let prompt = agent_doc_session_check_io::unresolved_exchange_prompt(file)?
         .or_else(|| prompt_target_from_interruption_reason(reason))
         .unwrap_or_else(|| "the unresolved exchange prompt".to_string());
     Ok(Some(StopResponse::Block {
@@ -371,7 +371,7 @@ fn active_session_prompt_requires_writeback(
 }
 
 fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
-    if let Some(prompt) = crate::session_check::unresolved_exchange_prompt(file)? {
+    if let Some(prompt) = agent_doc_session_check_io::unresolved_exchange_prompt(file)? {
         return Ok(Some(prompt));
     }
     let content = match std::fs::read_to_string(file) {
@@ -1094,7 +1094,7 @@ fn attempt_stop_closeout(
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
     );
     let has_bypassed_patchback =
-        crate::session_check::detect_bypassed_response_write(file)?.is_some();
+        agent_doc_session_check_io::detect_bypassed_response_write(file)?.is_some();
     if !has_response && !has_bypassed_patchback {
         return Ok(match payload {
             agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {

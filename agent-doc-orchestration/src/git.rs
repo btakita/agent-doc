@@ -478,7 +478,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         .zip(head_doc.as_deref())
         .is_some_and(|(snapshot, head)| strip_head_markers(snapshot) == head);
     let bypassed_response_write = snapshot_matched_head_before_absorb
-        .then(|| crate::session_check::detect_bypassed_response_write(file))
+        .then(|| agent_doc_session_check_io::detect_bypassed_response_write(file))
         .transpose()?
         .flatten();
     let safe_out_of_band_mutation = snapshot_content

@@ -1121,11 +1121,11 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-session-check-io/src/partial_staging.rs",
         "agent-doc-session-check-io/src/pending_guards.rs",
-        "agent-doc-orchestration/src/session_check/closeout_guards.rs",
+        "agent-doc-session-check-io/src/closeout_guards.rs",
         "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
         "agent-doc-session-check-io/src/guard_modes.rs",
         "agent-doc-session-check-io/src/queue_head_guards.rs",
-        "agent-doc-orchestration/src/session_check/response_guards.rs",
+        "agent-doc-session-check-io/src/response_guards.rs",
         "agent-doc-session-check-io/src/detect.rs",
         "agent-doc-workflow/src/session_check.rs",
         "agent-doc-orchestration/src/write.rs",
@@ -1488,7 +1488,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // IO/proof collection and calls the focused workflow guard-result
         // builders directly for blocked closeout, gated split, and queue-audit
         // diagnostics.
-        ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 7,
+        ("agent-doc-session-check-io/src/closeout_guards.rs", "guard_") => 7,
         // +3 (#samplequeuepreserve): the audited
         // `queue_head_removal_guard_proof` diagnostic plus two regression test
         // names proving removed id-backed/free-text queue heads log their proof
@@ -1536,7 +1536,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // contamination, completed reap residue, snapshot mismatch, and
         // committed-without-response diagnostics. These are adapter references
         // to the owning policy crate, not new local guard branches.
-        ("agent-doc-orchestration/src/session_check/response_guards.rs", "guard_") => 14,
+        ("agent-doc-session-check-io/src/response_guards.rs", "guard_") => 14,
         // 1 -> 2 (#prompt-tail-workflow-extract): the prompt-only exchange tail
         // message moved to `agent-doc-workflow`; this adapter now names the
         // focused guard message builder directly.
@@ -4004,10 +4004,9 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         !preflight_run.contains("crate::session_check::do_directive_target_ids"),
         "preflight/run.rs must not route queue directive parsing through session_check"
     );
-    let response_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
-    )
-    .unwrap();
+    let response_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/response_guards.rs"))
+            .unwrap();
     assert!(
         response_guards
             .contains("agent_doc_turn::closeout_signal::still_missing_dropped_queue_prompts"),
@@ -4492,10 +4491,9 @@ fn test_agent_doc_queue_owns_queue_command_classification() {
         );
     }
 
-    let response_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
-    )
-    .unwrap();
+    let response_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/response_guards.rs"))
+            .unwrap();
     for forbidden in [
         "pub(crate) fn is_queue_directive_prompt",
         "pub(crate) fn mentions_slash_command",
@@ -4755,10 +4753,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "agent-doc-turn must own closeout guard policy: {required}"
         );
     }
-    let response_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
-    )
-    .unwrap();
+    let response_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/response_guards.rs"))
+            .unwrap();
     for forbidden in [
         "if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed)",
         "if state.capture_id.is_some() || state.response_sha256.is_some()",
@@ -5166,10 +5163,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
 
-    let closeout_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
-    )
-    .unwrap();
+    let closeout_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/closeout_guards.rs"))
+            .unwrap();
     for forbidden in [
         "pub fn is_exchange_response_heading",
         "pub fn is_queue_continuation_response_heading",
@@ -5279,10 +5275,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "session-check detect IO should route prompt-only exchange-tail checks through workflow while workflow calls focused turn policy"
     );
 
-    let response_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
-    )
-    .unwrap();
+    let response_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/response_guards.rs"))
+            .unwrap();
     for forbidden in [
         "pub(crate) fn normalized_prompt_for_match",
         "pub(crate) fn exchange_contains_prompt_line",
@@ -5949,10 +5944,9 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
     let session_check =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
             .unwrap();
-    let closeout_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
-    )
-    .unwrap();
+    let closeout_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/closeout_guards.rs"))
+            .unwrap();
     let ops_log_io_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-ops-log-io/Cargo.toml")).unwrap();
     let ops_log_io_manifest: toml::Value = toml::from_str(&ops_log_io_manifest).unwrap();
@@ -10212,6 +10206,8 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
         "agent-doc-orchestration/src/session_check/detect.rs",
         "agent-doc-orchestration/src/session_check/pending_guards.rs",
+        "agent-doc-orchestration/src/session_check/closeout_guards.rs",
+        "agent-doc-orchestration/src/session_check/response_guards.rs",
     ] {
         assert!(
             !manifest_dir.join(old_path).exists(),
@@ -10229,6 +10225,8 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-session-check-io/src/detect.rs",
         "agent-doc-session-check-io/src/pending_capture.rs",
         "agent-doc-session-check-io/src/pending_guards.rs",
+        "agent-doc-session-check-io/src/closeout_guards.rs",
+        "agent-doc-session-check-io/src/response_guards.rs",
     ] {
         assert!(
             manifest_dir.join(new_path).exists(),
@@ -10246,23 +10244,24 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "mod queue_head_provenance_guards;",
         "mod detect;",
         "mod pending_guards;",
+        "mod closeout_guards;",
+        "mod response_guards;",
     ] {
         assert!(
             !session_check.contains(forbidden),
             "orchestration session_check.rs must not retain moved guard module facade: {forbidden}"
         );
     }
-    let closeout_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
-    )
-    .unwrap();
+    let closeout_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/closeout_guards.rs"))
+            .unwrap();
     for forbidden in [
         "pub fn first_unstarted_prompt_bearing_change(",
         "pub fn detect_unstarted_prompt_bearing_diff(",
     ] {
         assert!(
             !closeout_guards.contains(forbidden),
-            "orchestration closeout guards must not retain moved prompt-bearing IO adapter: {forbidden}"
+            "session-check closeout guards must not retain moved prompt-bearing IO adapter: {forbidden}"
         );
     }
     assert!(
@@ -10275,6 +10274,10 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
                 .contains("agent_doc_session_check_io::check_prompt_only_exchange_tail_guard")
             && session_check.contains("agent_doc_session_check_io::check_pending_capture_guard")
             && session_check.contains("agent_doc_session_check_io::check_pending_done_guard")
+            && session_check
+                .contains("agent_doc_session_check_io::check_blocked_closeout_followup_guard")
+            && session_check
+                .contains("agent_doc_session_check_io::check_dropped_exchange_prompt_guard")
             && session_check.contains("first_unstarted_prompt_bearing_change"),
         "session_check.rs should call the focused guard IO crate directly"
     );
@@ -11017,10 +11020,9 @@ fn test_agent_doc_workflow_owns_session_check_response_messages() {
         );
     }
 
-    let response_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
-    )
-    .unwrap();
+    let response_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/response_guards.rs"))
+            .unwrap();
     for forbidden in [
         "user-authored agent:queue edit(s) were dropped during an IPC",
         "agent:queue contains assistant response prose copied",
@@ -11307,10 +11309,9 @@ fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
         );
     }
 
-    let closeout_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
-    )
-    .unwrap();
+    let closeout_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/closeout_guards.rs"))
+            .unwrap();
     let prompt_bearing_io =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/prompt_bearing.rs"))
             .unwrap();
@@ -11675,10 +11676,9 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         );
     }
 
-    let closeout_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
-    )
-    .unwrap();
+    let closeout_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/closeout_guards.rs"))
+            .unwrap();
     assert!(
         !closeout_guards.contains("pub(crate) fn first_bare_prompt_prefix_target_before_marker"),
         "session_check closeout guards must not re-own marker-scoped prompt-prefix diff slicing"
@@ -17092,10 +17092,9 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
         );
     }
 
-    let response_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
-    )
-    .unwrap();
+    let response_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/response_guards.rs"))
+            .unwrap();
     for forbidden in [
         "pub(crate) fn normalized_queue_line_for_match(",
         "pub(crate) fn queue_contains_prompt_line(",
@@ -18188,10 +18187,9 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_reap_policy() {
         "preflight maintenance should import tracked-surface/completion policy from agent-doc-element-backlog"
     );
 
-    let response_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
-    )
-    .unwrap();
+    let response_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/response_guards.rs"))
+            .unwrap();
     for forbidden in [
         "pub(crate) fn completed_pending_items",
         "fn completed_pending_items",
@@ -21788,7 +21786,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-session-check-io/src/detect.rs",
-        "agent-doc-orchestration/src/session_check/closeout_guards.rs",
+        "agent-doc-session-check-io/src/closeout_guards.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/converge.rs",
         "agent-doc-orchestration/src/write/materialize.rs",
@@ -22434,7 +22432,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
 
     for relative in [
         "agent-doc-orchestration/src/flow/closeout.rs",
-        "agent-doc-orchestration/src/session_check/closeout_guards.rs",
+        "agent-doc-session-check-io/src/closeout_guards.rs",
         "agent-doc-orchestration/src/write/converge.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-document-realtime/src/write_policy.rs",

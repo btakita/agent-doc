@@ -1189,7 +1189,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         && after.is_open()
     {
         let marker_note = if matches!(after.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
-            crate::session_check::detect_bypassed_response_write(file)?
+            agent_doc_session_check_io::detect_bypassed_response_write(file)?
                 .map(|marker| format!("; found likely direct response patchback: {}", marker))
                 .unwrap_or_default()
         } else {

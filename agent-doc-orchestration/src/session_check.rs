@@ -84,9 +84,6 @@ pub use agent_doc_session_check_io::{
     detect_unstarted_prompt_bearing_diff, first_unstarted_prompt_bearing_change,
 };
 
-mod response_guards;
-pub(crate) use response_guards::*;
-
 fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
     let file_key = file.to_string_lossy();
     let heading = heading.trim();
@@ -130,6 +127,20 @@ pub enum SessionCheckStatus {
 pub struct SessionCheckReport {
     pub status: SessionCheckStatus,
     pub warnings: Vec<String>,
+}
+
+fn closeout_recovery_hint(file: &Path) -> String {
+    // `#closeout-repair-churn`: render one typed recovery instruction for the
+    // classified state instead of a single static "try write --commit" line.
+    let state = crate::flow::closeout::classify_closeout_recovery_state_for_file(file);
+    match crate::flow::closeout::closeout_recovery_command_for_file(file, state) {
+        Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
+        None => format!(
+            "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",
+            file.display(),
+            file.display()
+        ),
+    }
 }
 
 /// CLI entry: check the end-of-cycle write invariant for `file`.
@@ -222,7 +233,9 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // baselined into the snapshot. Defer the queue (do not force the
                 // Codex final-gate) while such a prompt exists so the next cycle
                 // answers it instead of skipping to the queue head.
-                if let Some(unresolved) = unresolved_exchange_prompt(file)? {
+                if let Some(unresolved) =
+                    agent_doc_session_check_io::unresolved_exchange_prompt(file)?
+                {
                     let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
                         agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
                     )
@@ -417,8 +430,9 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 && cycle.capture_id.is_none()
                 && cycle.response_sha256.is_none()
             {
-                let has_visible_response = unresolved_exchange_prompt(file)?.is_none()
-                    && exchange_tail_has_response_heading(file);
+                let has_visible_response =
+                    agent_doc_session_check_io::unresolved_exchange_prompt(file)?.is_none()
+                        && agent_doc_session_check_io::exchange_tail_has_response_heading(file);
                 if has_visible_response {
                     eprintln!(
                         "[session-check] codex-final-gate: recursive direct invocation was blocked for {} but the response is already visible in agent:exchange — adopting the manual patchback idempotently.",
@@ -481,7 +495,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         rc.set_doc_content(
             agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content,
         );
-        match check_dropped_exchange_prompt_guard(file, &rc)? {
+        match agent_doc_session_check_io::check_dropped_exchange_prompt_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -489,7 +503,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_dropped_queue_prompt_guard(file, &rc)? {
+        match agent_doc_session_check_io::check_dropped_queue_prompt_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -497,7 +511,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_queue_response_contamination_guard(file, &rc)? {
+        match agent_doc_session_check_io::check_queue_response_contamination_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -505,7 +519,9 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        if let Some(message) = check_completed_pending_reap_guard(file, &rc)? {
+        if let Some(message) =
+            agent_doc_session_check_io::check_completed_pending_reap_guard(file, &rc)?
+        {
             report.status = SessionCheckStatus::Interrupted(message);
             return Ok(report);
         }
@@ -533,7 +549,11 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_snapshot_committed_guard(file, &rc)? {
+        match agent_doc_session_check_io::check_snapshot_committed_guard(
+            file,
+            &rc,
+            closeout_recovery_hint,
+        )? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -549,7 +569,10 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_committed_without_response_body_guard(file)? {
+        match agent_doc_session_check_io::check_committed_without_response_body_guard(
+            file,
+            closeout_recovery_hint,
+        )? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -587,9 +610,9 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             agent_doc_session_check_io::check_expect_done_or_gate_guard(file, &rc)?,
             agent_doc_session_check_io::check_partial_closeout_state_guard(file)?,
             agent_doc_session_check_io::check_partial_staging_closeout_guard(file)?,
-            check_blocked_closeout_followup_guard(file, &rc)?,
-            check_gated_phase_split_guard(file, &rc)?,
-            check_queue_audit_partial_completion_guard(file)?,
+            agent_doc_session_check_io::check_blocked_closeout_followup_guard(file, &rc)?,
+            agent_doc_session_check_io::check_gated_phase_split_guard(file, &rc)?,
+            agent_doc_session_check_io::check_queue_audit_partial_completion_guard(file)?,
             agent_doc_session_check_io::check_queue_head_removal_guard(file, &rc)?,
             agent_doc_session_check_io::check_free_text_queue_head_provenance(file, &rc)?,
         ] {
@@ -720,7 +743,7 @@ pub fn detect_uncommitted_closeout_drift_with_context(
     if detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
         return Ok(None);
     }
-    if let Some(marker) = detect_bypassed_response_write(file)? {
+    if let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)? {
         return Ok(Some(format!(
             "found likely direct response patchback without agent-doc cycle: {}{} {}",
             marker,
@@ -728,7 +751,7 @@ pub fn detect_uncommitted_closeout_drift_with_context(
             closeout_recovery_hint(file)
         )));
     }
-    if let Some(marker) = detect_uncommitted_exchange_drift(file)? {
+    if let Some(marker) = agent_doc_session_check_io::detect_uncommitted_exchange_drift(file)? {
         if detect_unstarted_prompt_bearing_diff(file)?.is_some() {
             return Ok(None);
         }
@@ -828,12 +851,14 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     reason
                 )));
             }
-            if let Some(message) = open_cycle_manual_patchback_message(file, &state)? {
+            if let Some(message) =
+                agent_doc_session_check_io::open_cycle_manual_patchback_message(file, &state)?
+            {
                 return Ok(SessionCheckStatus::Interrupted(message));
             }
-            return Ok(SessionCheckStatus::Interrupted(open_cycle_message(
-                file, &state,
-            )?));
+            return Ok(SessionCheckStatus::Interrupted(
+                agent_doc_session_check_io::open_cycle_message(file, &state)?,
+            ));
         }
         // #codex-owned-pane-prompt-miss: a recursive same-pane direct invocation
         // that abandoned its empty cycle is terminal, but that abandon is NOT
@@ -847,7 +872,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             && state
                 .last_event
                 .starts_with("recursive_direct_invocation_blocked")
-            && let Some(unresolved) = unresolved_exchange_prompt(file)?
+            && let Some(unresolved) = agent_doc_session_check_io::unresolved_exchange_prompt(file)?
         {
             let excerpt: String = unresolved
                 .lines()
@@ -886,7 +911,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 reason
             )));
         }
-        if let Some(marker) = detect_bypassed_response_write(file)? {
+        if let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)? {
             if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(
@@ -965,7 +990,9 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 ),
             ));
         }
-        if let Some(marker) = detect_active_session_post_commit_drift(file)? {
+        if let Some(marker) =
+            agent_doc_session_check_io::detect_active_session_post_commit_drift(file)?
+        {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                 state.cycle_id,
@@ -974,7 +1001,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 marker
             )));
         }
-        if let Some(marker) = detect_uncommitted_exchange_drift(file)? {
+        if let Some(marker) = agent_doc_session_check_io::detect_uncommitted_exchange_drift(file)? {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document has uncommitted exchange changes beyond the committed snapshot: {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle before reporting success.",
                 state.cycle_id,
@@ -1016,7 +1043,8 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     reason
                 )));
             }
-            if let Some(marker) = detect_bypassed_response_write(file)? {
+            if let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)?
+            {
                 if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)?
                 {
                     if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
@@ -1037,13 +1065,17 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     closeout_recovery_hint(file)
                 )));
             }
-            if let Some(marker) = detect_active_session_post_commit_drift(file)? {
+            if let Some(marker) =
+                agent_doc_session_check_io::detect_active_session_post_commit_drift(file)?
+            {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                     marker
                 )));
             }
-            if let Some(marker) = detect_uncommitted_exchange_drift(file)? {
+            if let Some(marker) =
+                agent_doc_session_check_io::detect_uncommitted_exchange_drift(file)?
+            {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: document has uncommitted exchange changes beyond the committed snapshot (no cycle state): {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle.",
                     marker,
@@ -1110,7 +1142,8 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     event, reason
                 )));
             }
-            if let Some(marker) = detect_bypassed_response_write(file)? {
+            if let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)?
+            {
                 if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)?
                 {
                     if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
@@ -1131,13 +1164,17 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     closeout_recovery_hint(file)
                 )));
             }
-            if let Some(marker) = detect_active_session_post_commit_drift(file)? {
+            if let Some(marker) =
+                agent_doc_session_check_io::detect_active_session_post_commit_drift(file)?
+            {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: last ops.log event is terminal, but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                     marker
                 )));
             }
-            if let Some(marker) = detect_uncommitted_exchange_drift(file)? {
+            if let Some(marker) =
+                agent_doc_session_check_io::detect_uncommitted_exchange_drift(file)?
+            {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: last ops.log event is terminal, but the document has uncommitted exchange changes beyond the committed snapshot: {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle.",
                     marker,
@@ -1224,9 +1261,6 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
 /// the blocker but the active backlog no longer drives the remaining work.
 ///
 /// Satisfied by any of: keeping the id open in `agent:backlog`
-mod closeout_guards;
-pub use closeout_guards::*;
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -1255,10 +1289,19 @@ mod tests {
     // `RunContext` the guards now require, so existing single-arg call sites keep
     // working (same shadowing pattern as the `inspect` wrappers above).
     fn check_blocked_closeout_followup_guard(file: &std::path::Path) -> Result<GuardResult> {
-        super::check_blocked_closeout_followup_guard(file, &test_rc(file))
+        agent_doc_session_check_io::check_blocked_closeout_followup_guard(file, &test_rc(file))
     }
     fn check_gated_phase_split_guard(file: &std::path::Path) -> Result<GuardResult> {
-        super::check_gated_phase_split_guard(file, &test_rc(file))
+        agent_doc_session_check_io::check_gated_phase_split_guard(file, &test_rc(file))
+    }
+    fn check_queue_audit_partial_completion_guard(file: &std::path::Path) -> Result<GuardResult> {
+        agent_doc_session_check_io::check_queue_audit_partial_completion_guard(file)
+    }
+    fn check_committed_without_response_body_guard(file: &std::path::Path) -> Result<GuardResult> {
+        agent_doc_session_check_io::check_committed_without_response_body_guard(
+            file,
+            super::closeout_recovery_hint,
+        )
     }
     fn check_expect_done_or_gate_guard(file: &std::path::Path) -> Result<GuardResult> {
         agent_doc_session_check_io::check_expect_done_or_gate_guard(file, &test_rc(file))
@@ -1273,7 +1316,7 @@ mod tests {
         agent_doc_session_check_io::check_free_text_queue_head_provenance(file, rc)
     }
     fn check_queue_response_contamination_guard(file: &std::path::Path) -> Result<GuardResult> {
-        super::check_queue_response_contamination_guard(file, &test_rc(file))
+        agent_doc_session_check_io::check_queue_response_contamination_guard(file, &test_rc(file))
     }
     struct EnvGuard {
         key: &'static str,
@@ -3344,7 +3387,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, format!("{snapshot}### Re: test — gpt-5\n\nBody\n")).unwrap();
 
-        let marker = detect_bypassed_response_write(&doc).unwrap();
+        let marker = agent_doc_session_check_io::detect_bypassed_response_write(&doc).unwrap();
         assert_eq!(marker.as_deref(), Some("### Re: test — gpt-5"));
     }
     #[test]
@@ -3356,7 +3399,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, format!("{snapshot}\n## Assistant\n\nResponse\n")).unwrap();
 
-        let marker = detect_bypassed_response_write(&doc).unwrap();
+        let marker = agent_doc_session_check_io::detect_bypassed_response_write(&doc).unwrap();
         assert_eq!(marker.as_deref(), Some("## Assistant"));
     }
     #[test]
@@ -3368,7 +3411,11 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, format!("{snapshot}\nWhy is this still dirty?\n")).unwrap();
 
-        assert!(detect_bypassed_response_write(&doc).unwrap().is_none());
+        assert!(
+            agent_doc_session_check_io::detect_bypassed_response_write(&doc)
+                .unwrap()
+                .is_none()
+        );
     }
     #[test]
     fn detect_bypassed_response_write_exempts_binary_recovery_diagnostic() {
@@ -3391,7 +3438,11 @@ Body\n\
         )
         .unwrap();
 
-        assert!(detect_bypassed_response_write(&doc).unwrap().is_none());
+        assert!(
+            agent_doc_session_check_io::detect_bypassed_response_write(&doc)
+                .unwrap()
+                .is_none()
+        );
     }
     #[test]
     fn detect_bypassed_response_write_reports_bare_prompt_target() {
@@ -3407,7 +3458,9 @@ Body\n\
         )
         .unwrap();
 
-        let marker = detect_bypassed_response_write(&doc).unwrap().unwrap();
+        let marker = agent_doc_session_check_io::detect_bypassed_response_write(&doc)
+            .unwrap()
+            .unwrap();
         assert!(marker.contains("### Re: test — gpt-5"));
         assert!(marker.contains("Why was this missed?"));
     }
@@ -3425,7 +3478,9 @@ Body\n\
         )
         .unwrap();
 
-        let marker = detect_bypassed_response_write(&doc).unwrap().unwrap();
+        let marker = agent_doc_session_check_io::detect_bypassed_response_write(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(marker, "### Re: test — gpt-5");
     }
     #[test]
@@ -4330,7 +4385,9 @@ Body\n\
             "snapshot should advance to the committed historical response:\n{repaired_snapshot}"
         );
         assert!(
-            detect_bypassed_response_write(&doc).unwrap().is_none(),
+            agent_doc_session_check_io::detect_bypassed_response_write(&doc)
+                .unwrap()
+                .is_none(),
             "snapshot repair should clear the interrupted marker"
         );
     }
@@ -7859,7 +7916,7 @@ Body\n\
         .unwrap();
         fs::write(&doc, current).unwrap();
 
-        let drift = detect_uncommitted_exchange_drift(&doc)
+        let drift = agent_doc_session_check_io::detect_uncommitted_exchange_drift(&doc)
             .unwrap()
             .expect("prompt+response append should count as exchange drift");
         assert!(

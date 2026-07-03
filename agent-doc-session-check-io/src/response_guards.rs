@@ -1,6 +1,8 @@
-//! Extracted from `write.rs` (large-module split). See parent module for context.
+use std::path::Path;
 
-use super::*;
+use agent_doc_run_context_io::RunContext;
+use agent_doc_workflow::session_check::GuardResult;
+use anyhow::Result;
 
 /// `#queue-user-edit-overwrite`: fail closed when this cycle recorded a
 /// user-authored `agent:queue` edit dropped during a `content_ours` IPC adoption
@@ -9,10 +11,7 @@ use super::*;
 /// lifecycle outcome this cycle). A preserved queue line (reached HEAD's queue
 /// or exchange) or a consumed head clears the marker; a silently-deleted user
 /// queue edit fails closed.
-pub(crate) fn check_dropped_queue_prompt_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+pub fn check_dropped_queue_prompt_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
@@ -64,9 +63,9 @@ pub(crate) fn check_dropped_queue_prompt_guard(
 /// (copied from a `### Re:` body) to `agent:queue auto`. Detect a free-text
 /// queue prompt whose text appears inside an assistant response body and fail
 /// closed naming the contaminating candidate.
-pub(crate) fn check_queue_response_contamination_guard(
+pub fn check_queue_response_contamination_guard(
     file: &Path,
-    rc: &crate::graph::RunContext,
+    rc: &RunContext,
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached content + parsed components.
     let content = rc.doc_content();
@@ -104,10 +103,7 @@ pub(crate) fn check_queue_response_contamination_guard(
 /// persisted at adoption time, so this guard catches the silent-loss class even
 /// when the editor overwrote the disk prompt via IPC buffer convergence before
 /// the post-commit disk diff could observe it.
-pub(crate) fn check_dropped_exchange_prompt_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+pub fn check_dropped_exchange_prompt_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
@@ -145,10 +141,7 @@ pub(crate) fn check_dropped_exchange_prompt_guard(
     )
 }
 
-pub(crate) fn check_completed_pending_reap_guard(
-    _file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<Option<String>> {
+pub fn check_completed_pending_reap_guard(_file: &Path, rc: &RunContext) -> Result<Option<String>> {
     // Phase 6 (#lr-content-6): cached content + parsed components.
     let content = rc.doc_content();
     let components = rc.components();
@@ -169,9 +162,10 @@ pub(crate) fn check_completed_pending_reap_guard(
     ))
 }
 
-pub(crate) fn check_snapshot_committed_guard(
+pub fn check_snapshot_committed_guard(
     file: &Path,
-    rc: &crate::graph::RunContext,
+    rc: &RunContext,
+    recovery_hint: impl FnOnce(&Path) -> String,
 ) -> Result<GuardResult> {
     use agent_doc_snapshot_io::SnapshotCommitStatus;
     match rc.snapshot_commit_status() {
@@ -190,13 +184,11 @@ pub(crate) fn check_snapshot_committed_guard(
             // skip, the guard would still bail with the misleading "cycle
             // state is committed but the snapshot does not match HEAD"
             // message that masks the JB cache-conflict cancel root cause.
-            if agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable_with_context(
-                file, rc,
-            )? {
+            if crate::detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
                 return Ok(GuardResult::None);
             }
             let side_effects = agent_doc_git_io::status::tracked_side_effect_note(file)?;
-            let recovery_hint = closeout_recovery_hint(file);
+            let recovery_hint = recovery_hint(file);
             let msg = agent_doc_workflow::session_check::snapshot_committed_guard_message(
                 snapshot_len,
                 head_len,
@@ -215,20 +207,6 @@ pub(crate) fn check_snapshot_committed_guard(
             );
             Ok(GuardResult::Error(msg))
         }
-    }
-}
-
-pub(crate) fn closeout_recovery_hint(file: &Path) -> String {
-    // `#closeout-repair-churn`: render one typed recovery instruction for the
-    // classified state instead of a single static "try write --commit" line.
-    let state = crate::flow::closeout::classify_closeout_recovery_state_for_file(file);
-    match crate::flow::closeout::closeout_recovery_command_for_file(file, state) {
-        Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
-        None => format!(
-            "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",
-            file.display(),
-            file.display()
-        ),
     }
 }
 
@@ -257,13 +235,16 @@ pub(crate) fn closeout_recovery_hint(file: &Path) -> String {
 /// rather than only mutating status/queue/backlog. A doc with no exchange
 /// component, or an exchange holding only a compacted `### Session Summary`,
 /// returns false.
-pub(crate) fn committed_exchange_has_response_body(file: &Path) -> Result<bool> {
+pub fn committed_exchange_has_response_body(file: &Path) -> Result<bool> {
     let content = std::fs::read_to_string(file)?;
     agent_doc_element::element::parse(&content)?;
     Ok(agent_doc_turn::closeout_guard::exchange_has_assistant_response_body(&content))
 }
 
-pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResult> {
+pub fn check_committed_without_response_body_guard(
+    file: &Path,
+    recovery_hint: impl FnOnce(&Path) -> String,
+) -> Result<GuardResult> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
@@ -300,7 +281,7 @@ pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result
         agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyDecision::Interrupt => {}
     }
     let side_effects = agent_doc_git_io::status::tracked_side_effect_note(file)?;
-    let recovery_hint = closeout_recovery_hint(file);
+    let recovery_hint = recovery_hint(file);
     let msg = agent_doc_workflow::session_check::committed_without_response_body_guard_message(
         &state.cycle_id,
         &state.last_event,
@@ -321,98 +302,4 @@ pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result
         ),
     );
     Ok(GuardResult::Error(msg))
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(unused_imports)]
-    use super::*;
-    use std::fs;
-    use std::io::Write;
-    use std::process::Command;
-    #[test]
-    fn committed_without_response_body_guard_passes_recovered_exchange_body_without_capture_metadata()
-     {
-        // Recovery may commit a visible `### Re:` after the original queue-drain
-        // cycle lost its capture metadata. The committed exchange body is still
-        // sufficient proof that the missing-response closeout has been repaired.
-        let _lock = crate::test_support::env_lock();
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
-        let doc = root.join("doc.md");
-        let content = concat!(
-            "---\nagent_doc_session: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Session Summary\n\nCompacted.\n\n",
-            "### Re: do [#ipc1] / do [#39c5]\n\nRecovered.\n",
-            "<!-- /agent:exchange -->\n"
-        )
-        .to_string();
-        fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
-        agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
-        agent_doc_cycle_state_io::record_pending_done_ids(
-            &doc,
-            &["ipc1".to_string(), "39c5".to_string()],
-        )
-        .unwrap();
-        agent_doc_cycle_state_io::record_active_queue_heads(
-            &doc,
-            &["do [#ipc1]".to_string(), "do [#39c5]".to_string()],
-        )
-        .unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "commit_success",
-            Some(&content),
-            Some(&content),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            check_committed_without_response_body_guard(&doc).unwrap(),
-            GuardResult::None
-        ));
-    }
-    #[test]
-    fn committed_without_response_body_guard_skips_noop_commit_reap_only_cycle() {
-        // Deadlock repro (tsift.md cycle-1780257680821): a `finalize --done X` whose
-        // only effect was reaping an item already reflected in HEAD commits a no-op
-        // (`commit_already_current`) and sets `had_pending_mutations`, but writes no
-        // response body. The guard must NOT fire — a no-op commit committed no
-        // binary-owned work this turn, so there is nothing a response would
-        // accompany; firing wedges the cycle in an infinite
-        // session-check-interrupted loop because the `write --commit` recovery is
-        // itself a no-op. A real side-effect commit (`commit_success`) still fires.
-        let _lock = crate::test_support::env_lock();
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
-        let doc = root.join("doc.md");
-        let current =
-            "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
-        fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &current, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
-        agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
-        agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["nsga4verify".to_string()])
-            .unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "commit_already_current",
-            Some(&current),
-            Some(&current),
-        )
-        .unwrap();
-        assert!(matches!(
-            check_committed_without_response_body_guard(&doc).unwrap(),
-            GuardResult::None
-        ));
-    }
 }

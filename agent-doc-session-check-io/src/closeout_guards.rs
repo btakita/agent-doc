@@ -1,15 +1,16 @@
-use super::*;
+use std::path::Path;
+
+use agent_doc_run_context_io::RunContext;
 use agent_doc_turn::document_drift::{
     active_session_drift_is_only_exchange_or_backlog_metadata, exchange_has_new_appended_content,
     exchange_only_promptless_content_drift, promptless_comment_only_drift,
 };
+use agent_doc_workflow::session_check::GuardResult;
+use anyhow::Result;
 
-pub(crate) fn check_blocked_closeout_followup_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+pub fn check_blocked_closeout_followup_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
-    let mode = agent_doc_session_check_io::resolve_pending_done_guard_mode_with_context(file, rc)?;
+    let mode = crate::resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
@@ -81,10 +82,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
 ///
 /// Warn-first advisory only — it never blocks closeout. Suppressible via a
 /// `<!-- no-gated-phase-split-guard -->` response marker.
-pub(crate) fn check_gated_phase_split_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+pub fn check_gated_phase_split_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
@@ -168,7 +166,7 @@ pub(crate) fn check_gated_phase_split_guard(
 /// judgment that lives in the skill/spec contract, per the binary-vs-skill rule),
 /// so the binary only flags the unambiguous collapse rather than trying to
 /// classify free-text rows itself.
-pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardResult> {
+pub fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardResult> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
@@ -203,7 +201,7 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
     Ok(agent_doc_workflow::session_check::queue_audit_partial_completion_guard_result())
 }
 
-pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {
+pub fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {
     let Some(session) = agent_doc_codex_hook_io::load_active_session_for_current_file(file)? else {
         return Ok(None);
     };
@@ -225,7 +223,7 @@ pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Opt
         return Ok(None);
     }
 
-    let prompt_marker = detect_unstarted_prompt_bearing_diff(file)?;
+    let prompt_marker = crate::detect_unstarted_prompt_bearing_diff(file)?;
     if prompt_marker.is_none()
         && active_session_drift_is_only_exchange_or_backlog_metadata(&snapshot, &current)
     {
@@ -257,7 +255,7 @@ pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Opt
     Ok(Some(detail))
 }
 
-pub(crate) fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> {
+pub fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> {
     let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
         return Ok(None);
     };
@@ -278,7 +276,7 @@ pub(crate) fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<St
     if !exchange_has_new_appended_content(&norm_snapshot, &norm_current) {
         return Ok(None);
     }
-    let prompt_marker = detect_unstarted_prompt_bearing_diff(file)?;
+    let prompt_marker = crate::detect_unstarted_prompt_bearing_diff(file)?;
     let detail = match prompt_marker {
         Some(marker) => format!(
             "uncommitted working tree drift beyond snapshot with exchange changes; {}",
@@ -289,7 +287,7 @@ pub(crate) fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<St
     Ok(Some(detail))
 }
 
-pub(crate) fn open_cycle_message(
+pub fn open_cycle_message(
     file: &Path,
     state: &agent_doc_cycle_state_io::CycleState,
 ) -> Result<String> {
@@ -307,7 +305,7 @@ pub(crate) fn open_cycle_message(
     ))
 }
 
-pub(crate) fn open_cycle_manual_patchback_message(
+pub fn open_cycle_manual_patchback_message(
     file: &Path,
     state: &agent_doc_cycle_state_io::CycleState,
 ) -> Result<Option<String>> {
@@ -355,7 +353,7 @@ pub fn unresolved_exchange_prompt(file: &Path) -> Result<Option<String>> {
     Ok(agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content))
 }
 
-pub(crate) fn exchange_tail_has_response_heading(file: &Path) -> bool {
+pub fn exchange_tail_has_response_heading(file: &Path) -> bool {
     let Ok(content) = std::fs::read_to_string(file) else {
         return false;
     };

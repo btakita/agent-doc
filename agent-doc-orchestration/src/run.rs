@@ -646,7 +646,7 @@ fn run_once(
     // strict subset of the recursive-guard case, so non-recursive runs are
     // unaffected.
     if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
-        && let Some(unresolved) = crate::session_check::unresolved_exchange_prompt(file)?
+        && let Some(unresolved) = agent_doc_session_check_io::unresolved_exchange_prompt(file)?
     {
         let document = file.display().to_string();
         let diagnostic = prompt_miss_message(&document, &detail, &unresolved);
@@ -1356,7 +1356,7 @@ pub(crate) fn owned_pane_self_invocation_detail(
 /// owner-pane self-invocation, or when there is no unresolved exchange work.
 ///
 /// `unresolved_prompt` is supplied by the caller because the boundary-keyed
-/// [`crate::session_check::unresolved_exchange_prompt`] detector only sees a
+/// [`agent_doc_session_check_io::unresolved_exchange_prompt`] detector only sees a
 /// prompt *before* the cycle's commit inserts a trailing boundary. The run path
 /// passes that pre-commit detector's result; preflight (which runs after commit)
 /// passes the diff-derived unresolved prompt so the contract survives the

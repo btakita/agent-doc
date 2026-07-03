@@ -893,7 +893,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !diff_has_prompt_bearing_changes {
         let unresolved_exchange_prompt = match pre_mutation_unresolved_exchange_prompt.clone() {
             Some(prompt) => Some(prompt),
-            None => match crate::session_check::unresolved_exchange_prompt(file) {
+            None => match agent_doc_session_check_io::unresolved_exchange_prompt(file) {
                 Ok(prompt) => prompt,
                 Err(err) => {
                     warnings.push(PreflightWarning {

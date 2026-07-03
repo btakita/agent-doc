@@ -1159,7 +1159,7 @@ pub fn classify_closeout_recovery_state_for_file(file: &Path) -> CloseoutRecover
     input.direct_response_patchback =
         !agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(file)
             .unwrap_or(false)
-            && crate::session_check::detect_bypassed_response_write(file)
+            && agent_doc_session_check_io::detect_bypassed_response_write(file)
                 .ok()
                 .flatten()
                 .is_some();

@@ -194,8 +194,36 @@ What I changed:
 
 One judgment call: I kept the budget question because it anchors the number and pairs naturally with "lower rate." If you'd rather lead with a concrete rate or a specific first slice of plumbing (e.g. the derived-data consistency engine) instead of asking his budget, say which and I'll swap it in.
 
-Want me to drop this into `corky`/LinkedIn as a draft (no auto-send)?
-<!-- agent:boundary:6bc242c1 -->
+
+### Re: Signal availability + rate flexibility — but don't telegraph "I need the money" — opus-4-8
+
+Good instinct on the rate, but keep the *reason* to yourself. "I need the money right now" is exactly the leverage a budget-conscious founder will use to anchor you low and slow-walk the close. The move is to convey the **upside** of the same fact — you're available now and flexible on rate — without the part that weakens your position. Ready + flexible reads as a deal worth moving on; needy reads as a discount to squeeze.
+
+So I only changed the closing. One line signals immediate availability and rate flexibility; the budget question stays so *he* names the number first:
+
+```
+Hi Artur,
+
+Happy 4th — hope you're getting a bit of a break for the holiday.
+
+I wanted to reach out anyway. REItrades is something I'd genuinely like to work on. I'm a generalist, and the work I enjoy most is keeping systems correct as the data underneath them changes — the OM and teaser staying consistent when a listing's numbers change, the buyer-facing pieces staying accurate as people act on them. The AI side is part of that too: your "100% accurate" content is what's easiest to lose trust on, and making AI output reliable in production is the kind of problem I like solving.
+
+Here's a way to make it easy on the budget. I'd take a share of the work — the non-differentiating pieces, the plumbing and general libraries any product like yours needs but that aren't your edge — at a lower rate. A lot of it overlaps tooling I already build and maintain in Rust, so it drops straight into your stack and I can share it open-source or license it royalty-free. You keep your schemas, templates, and business rules as your own; I handle the reusable engine underneath.
+
+I've got availability now and I'm flexible on rate, so I can move quickly. If you give me a rough idea of your budget for this phase, I'll shape something that fits. Happy to jump on a quick call.
+
+Brian
+```
+
+Only the last paragraph changed: "I've got availability now and I'm flexible on rate, so I can move quickly" — that carries the "willing to work cheap" signal as *readiness*, not *need*.
+
+Two options if you want to lean in harder:
+- **Name a rate to close faster.** If you'd rather not wait for him to reveal a budget, I can swap the budget question for a concrete low anchor — e.g. "I can do the plumbing work at $X/hr to get started" — which trades negotiating room for speed. Tell me the number and I'll drop it in.
+- **Add a "start this week" nudge.** If the urgency is real, "I could start on a first slice this week" creates momentum without mentioning money. Say the word and I'll add it.
+
+My recommendation: send it as-is (availability + flexible, budget question intact). It gets you a fast reply and a number to work from, and you can go lower in the actual negotiation without having pre-committed to a floor. Want me to drop this into `corky`/LinkedIn as a draft (no auto-send)?
+I need the money right now. So I'm willing to work at a lower rate.
+<!-- agent:boundary:7d02b5de -->
 <!-- /agent:exchange -->
 
 ## Queue

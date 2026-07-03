@@ -70,6 +70,25 @@ Deployed the advance-lender change to EFS production.
 - **Live:** https://equityfundingsource.brian-takita.workers.dev/ → HTTP 200; new worker **Version ID `56d33654-631b-4096-ad23-c1a8db55a22b`**.
 
 The Advance-lender dialog now serves the annual accreditation questionnaire in place of the document-upload checklist in production.
+
+
+### Re: Realtime pipeline events + notifications — reuse the existing bus, not `deal_pipeline_bus` — opus-4-8
+
+Short answer: **no — don't create `deal_pipeline_bus`.** That bus already exists as the `AdminEventsRoom` Durable Object (`admin-events` hub / `notify_admin_event_` / #7djh); a second one would just duplicate it. Your three triggers are `type` values on that existing bus.
+
+Where each trigger stands today:
+
+| Trigger | Today | Work |
+|---|---|---|
+| Borrower completes an application | `application_submitted` already fires | none (verify) |
+| Lender interested in a deal | fires on the admin-edit path; the investor **self-service** "express interest" path only emits `deal_interest_document_request_created` | add a `lender_interest_created` event at the self-service site |
+| Borrower fills out a preapproval | **no `preapproval` concept exists in the codebase yet** | blocked — define what "preapproval" is (new form? prequal lead?) before wiring it |
+
+The realtime transport is already there — admin sessions hold a WebSocket at `/api/admin/events/ws` and refetch on each tick. The genuinely new piece for your ask is the **client-side desktop notification**: today the admin page only refetches on a tick, it never raises an OS notification. So net-new work is (1) `Notification.requestPermission()` + `new Notification(...)` + a toast on the pipeline event types, (2) emit `lender_interest_created` on the investor self-service path, (3) define "preapproval" before adding its trigger.
+
+Captured as backlog **#pipe-rt-notify**, full plan at `src/equityfundingsource-dev/prds/admin-pipeline-realtime-notifications.md` (committed to EFS `44895ab`). Queue's paused — unpause or say the word and I'll do 1 + 2; 3 needs your definition of "preapproval."
+
+One flag: the queue line `/goal Implement backlog item(s): #3q3g` points at `#3q3g`, which isn't a backlog id — did you mean **#pipe-rt-notify**?
 <!-- agent:boundary:a8c27d7b -->
 <!-- /agent:exchange -->
 ###

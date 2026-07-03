@@ -1110,11 +1110,11 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/route/busy_pane.rs",
         "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-orchestration/src/session_check.rs",
-        "agent-doc-orchestration/src/session_check/partial_staging.rs",
+        "agent-doc-session-check-io/src/partial_staging.rs",
         "agent-doc-orchestration/src/session_check/closeout_guards.rs",
-        "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
-        "agent-doc-orchestration/src/session_check/pending_guards.rs",
-        "agent-doc-orchestration/src/session_check/queue_head_guards.rs",
+        "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
+        "agent-doc-session-check-io/src/guard_modes.rs",
+        "agent-doc-session-check-io/src/queue_head_guards.rs",
         "agent-doc-orchestration/src/session_check/response_guards.rs",
         "agent-doc-orchestration/src/session_check/detect.rs",
         "agent-doc-workflow/src/session_check.rs",
@@ -1484,7 +1484,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `free_text_queue_completed_residue_guard_fired` diagnostic plus two
         // regression test names proving answered free-text heads cannot remain
         // active queue residue.
-        ("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs", "guard_") => {
+        ("agent-doc-session-check-io/src/queue_head_provenance_guards.rs", "guard_") => {
             // 12 baseline + 2 (#qimpstrike) for the new `residue_guard_exempts_recurring_imperative_deploy_head`
             // regression test name and its `free_text_queue_completed_residue_guard_fired`
             // negative-assertion substring. Both are test-only `guard_` substrings, not
@@ -1509,11 +1509,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // only direct calls to the focused builders and no longer owns the
         // message strings.
         ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 19,
-        ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,
+        // Guard-mode resolution moved out of orchestration as an IO adapter
+        // batch. These `guard_` tokens are resolver names, not new flow guards.
+        ("agent-doc-session-check-io/src/guard_modes.rs", "guard_") => 10,
+        ("agent-doc-session-check-io/src/queue_head_guards.rs", "guard_") => 2,
         // 2 -> 4 (#partial-staging-workflow-extract): this adapter now calls
         // the focused workflow partial closeout and partial-staging result
         // builders directly.
-        ("agent-doc-orchestration/src/session_check/partial_staging.rs", "guard_") => 4,
+        ("agent-doc-session-check-io/src/partial_staging.rs", "guard_") => 4,
         // 8 -> 14 (#session-check-response-guard-message-extract):
         // response_guards now calls the focused workflow result/message
         // builders directly for dropped queue/exchange prompts, queue-response
@@ -4006,7 +4009,7 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         "preflight run should call focused queue directive lifecycle expectation policy directly"
     );
     let queue_head_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/queue_head_guards.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/queue_head_guards.rs"),
     )
     .unwrap();
     assert!(
@@ -4014,8 +4017,7 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         "queue_head_guards should consume queue_closeout_guard policy instead of parsing queue directives directly"
     );
     let queue_head_provenance_guards = fs::read_to_string(
-        manifest_dir
-            .join("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/queue_head_provenance_guards.rs"),
     )
     .unwrap();
     assert!(
@@ -4265,7 +4267,7 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
 
     for relative in [
         "agent-doc-orchestration/src/write/queue_consume.rs",
-        "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
+        "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -5107,7 +5109,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
 
     let queue_head_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/queue_head_guards.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/queue_head_guards.rs"),
     )
     .unwrap();
     for required in [
@@ -5260,8 +5262,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
 
     let provenance_guards = fs::read_to_string(
-        manifest_dir
-            .join("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/queue_head_provenance_guards.rs"),
     )
     .unwrap();
     for forbidden in [
@@ -5302,10 +5303,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "queue_head_provenance_guards should call focused queue provenance policy directly"
     );
 
-    let partial_staging = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
-    )
-    .unwrap();
+    let partial_staging =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/partial_staging.rs"))
+            .unwrap();
     for forbidden in [
         "pub(crate) const PARTIAL_CLOSEOUT_REMAINING_PHRASES",
         "pub(crate) fn text_has_shipped_signal",
@@ -5430,10 +5430,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
 
-    let backlog_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/backlog_guards.rs"),
-    )
-    .unwrap();
+    let backlog_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/backlog_guards.rs"))
+            .unwrap();
     let backlog_guard_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/guard_policy.rs"))
             .unwrap();
@@ -9651,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 32,
+        ledger_rows.len() >= 33,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -9769,6 +9768,8 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("8dce5536", "Legacy supervisor/agent runtime IO wave"),
         ("5bcfc07b", "Legacy supervisor/agent runtime IO wave"),
         ("664504cd", "Legacy supervisor/agent runtime IO wave"),
+        ("c95eced6", "Legacy supervisor/agent runtime IO wave"),
+        ("e24a3fca", "Legacy supervisor/agent runtime IO wave"),
         ("1c57b988", "Legacy memory/queue/harness adapter wave"),
         ("41b388ab", "Legacy memory/queue/harness adapter wave"),
         ("b4c9f10c", "Legacy memory/queue/harness adapter wave"),
@@ -10013,6 +10014,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-element-backlog-io/src/{backlog_cmd.rs,done_archive.rs}",
             "Split command rendering from document mutation adapters",
         ),
+        (
+            "Session-check guard IO adapter batch",
+            "agent-doc-orchestration/src/session_check/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs}",
+            "agent-doc-session-check-io/src/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs,guard_modes.rs}",
+            "Split durable fact readers from guard-result assembly",
+        ),
     ] {
         let row_text = ledger_rows
             .iter()
@@ -10025,6 +10032,89 @@ fn test_coarse_orchestration_extractions_are_tracked() {
                 "coarse extraction tracker is missing {required:?} for {graph}"
             );
         }
+    }
+}
+
+#[test]
+fn test_agent_doc_session_check_io_owns_guard_adapters() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-session-check-io")),
+        "agent-doc-session-check-io must stay a first-class workspace crate"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    assert!(
+        orchestration["dependencies"]
+            .as_table()
+            .unwrap()
+            .contains_key("agent-doc-session-check-io"),
+        "orchestration should depend on the focused session-check IO crate"
+    );
+
+    for old_path in [
+        "agent-doc-orchestration/src/session_check/backlog_guards.rs",
+        "agent-doc-orchestration/src/session_check/partial_staging.rs",
+        "agent-doc-orchestration/src/session_check/queue_head_guards.rs",
+        "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
+    ] {
+        assert!(
+            !manifest_dir.join(old_path).exists(),
+            "orchestration must not keep moved session-check guard adapter source: {old_path}"
+        );
+    }
+
+    for new_path in [
+        "agent-doc-session-check-io/src/backlog_guards.rs",
+        "agent-doc-session-check-io/src/partial_staging.rs",
+        "agent-doc-session-check-io/src/queue_head_guards.rs",
+        "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
+        "agent-doc-session-check-io/src/guard_modes.rs",
+    ] {
+        assert!(
+            manifest_dir.join(new_path).exists(),
+            "focused session-check IO crate must own moved guard adapter source: {new_path}"
+        );
+    }
+
+    let session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+            .unwrap();
+    for forbidden in [
+        "mod backlog_guards;",
+        "mod partial_staging;",
+        "mod queue_head_guards;",
+        "mod queue_head_provenance_guards;",
+    ] {
+        assert!(
+            !session_check.contains(forbidden),
+            "orchestration session_check.rs must not retain moved guard module facade: {forbidden}"
+        );
+    }
+    assert!(
+        session_check.contains("agent_doc_session_check_io::check_shadow_backlog_guard")
+            && session_check
+                .contains("agent_doc_session_check_io::check_free_text_queue_head_provenance"),
+        "session_check.rs should call the focused guard IO crate directly"
+    );
+
+    for relative_path in [
+        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/write/pending_checks.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains("agent_doc_session_check_io::resolve_")
+                && !source.contains("crate::session_check::resolve_"),
+            "{relative_path} should call guard-mode resolvers from the focused session-check IO crate"
+        );
     }
 }
 
@@ -10784,10 +10874,9 @@ fn test_agent_doc_workflow_owns_session_check_response_messages() {
         );
     }
 
-    let partial_staging = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
-    )
-    .unwrap();
+    let partial_staging =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/partial_staging.rs"))
+            .unwrap();
     for forbidden in [
         "[session-check] warn: partial `do [#id]` closeout",
         "[session-check] hint: narrow the backlog item",
@@ -10831,10 +10920,9 @@ fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
         );
     }
 
-    let partial_staging = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
-    )
-    .unwrap();
+    let partial_staging =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/partial_staging.rs"))
+            .unwrap();
     for forbidden in [
         "pub(crate) fn is_partial_staging_relevant_path",
         "pub(crate) fn partial_staging_paths_look_related",
@@ -11333,7 +11421,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-orchestration/src/route/session_resolution.rs",
         "agent-doc-orchestration/src/resync.rs",
         "agent-doc-orchestration/src/sync.rs",
-        "agent-doc-orchestration/src/session_check/pending_guards.rs",
+        "agent-doc-session-check-io/src/guard_modes.rs",
         "agent-doc-supervisor-io/src/config.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/run.rs",
@@ -17545,10 +17633,9 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         );
     }
 
-    let backlog_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/backlog_guards.rs"),
-    )
-    .unwrap();
+    let backlog_guards =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/backlog_guards.rs"))
+            .unwrap();
     for forbidden in [
         "pub fn malformed_tracked_item_refs",
         "pub(crate) fn malformed_tracked_item_refs_in",
@@ -19265,7 +19352,7 @@ fn test_agent_doc_archive_io_owns_head_compact_archive_reads() {
     );
 
     let queue_head_guards_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/queue_head_guards.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/queue_head_guards.rs"),
     )
     .unwrap();
     assert!(
@@ -21266,10 +21353,9 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "git.rs should call focused non-exchange component drift policy directly"
     );
 
-    let partial_staging = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
-    )
-    .unwrap();
+    let partial_staging =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/partial_staging.rs"))
+            .unwrap();
     let git_io_partial_staging =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/partial_staging.rs")).unwrap();
     for required in [
@@ -23749,7 +23835,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
     for relative_path in [
         "agent-doc-queue-io/src/queue_cmd.rs",
         "agent-doc-orchestration/src/project_controller/rpc.rs",
-        "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
+        "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
     ] {
@@ -23959,12 +24045,11 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     }
 
     let queue_head_guards = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/queue_head_guards.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/queue_head_guards.rs"),
     )
     .unwrap();
     let provenance_guards = fs::read_to_string(
-        manifest_dir
-            .join("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/queue_head_provenance_guards.rs"),
     )
     .unwrap();
     for forbidden_snippet in [

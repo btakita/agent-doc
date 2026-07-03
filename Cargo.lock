@@ -91,6 +91,7 @@ dependencies = [
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
+ "agent-doc-session-check-io",
  "agent-doc-session-registry",
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
@@ -930,6 +931,7 @@ dependencies = [
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
+ "agent-doc-session-check-io",
  "agent-doc-session-registry",
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
@@ -1277,6 +1279,30 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-session-check-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-archive-io",
+ "agent-doc-capture-io",
+ "agent-doc-cycle-state-io",
+ "agent-doc-document",
+ "agent-doc-element-backlog",
+ "agent-doc-element-backlog-io",
+ "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-config-io",
+ "agent-doc-queue",
+ "agent-doc-run-context-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-turn",
+ "agent-doc-workflow",
+ "anyhow",
  "tempfile",
 ]
 

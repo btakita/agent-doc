@@ -1,9 +1,12 @@
-use super::*;
+use std::path::Path;
 
-pub(crate) fn check_no_response_active_queue_head(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+use agent_doc_run_context_io::RunContext;
+use agent_doc_workflow::session_check::GuardResult;
+use anyhow::Result;
+
+use crate::resolve_pending_done_guard_mode_with_context;
+
+pub fn check_no_response_active_queue_head(file: &Path, rc: &RunContext) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
@@ -89,9 +92,9 @@ pub(crate) fn check_no_response_active_queue_head(
 /// legitimate prior-cycle reap (the id was answered in an earlier cycle and only
 /// reaped now) is filtered out by [`reaped_directive_ids_without_response`], which
 /// finds the `### Re: ... #id` heading in the live exchange or a HEAD compact archive.
-pub(crate) fn check_reaped_queue_head_without_response(
+pub fn check_reaped_queue_head_without_response(
     file: &Path,
-    rc: &crate::graph::RunContext,
+    rc: &RunContext,
 ) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {

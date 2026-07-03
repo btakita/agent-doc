@@ -1,9 +1,12 @@
-use super::*;
+use std::path::Path;
 
-pub(crate) fn check_expect_done_or_gate_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+use agent_doc_run_context_io::RunContext;
+use agent_doc_workflow::session_check::GuardResult;
+use anyhow::Result;
+
+use crate::resolve_pending_done_guard_mode_with_context;
+
+pub fn check_expect_done_or_gate_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
@@ -75,10 +78,7 @@ pub(crate) fn check_expect_done_or_gate_guard(
 /// cycle never targeted it, fail closed and name each lost id so the queue can
 /// be restored. Suppress an intentional user removal with
 /// `<!-- no-queue-removal-guard -->`.
-pub(crate) fn check_queue_head_removal_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+pub fn check_queue_head_removal_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
@@ -178,10 +178,7 @@ pub(crate) fn check_queue_head_removal_guard(
 /// or (b) a committed `### Re:` response exists that plausibly answers it. A
 /// binary consume marker by itself is not proof: the answer must be visible in
 /// committed `agent:exchange` history, normally via the queue-prompt echo.
-pub(crate) fn check_free_text_queue_head_provenance(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+pub fn check_free_text_queue_head_provenance(file: &Path, rc: &RunContext) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
@@ -293,6 +290,27 @@ mod tests {
     use super::*;
     use std::{fs, path::PathBuf};
 
+    struct NoopPipelineFrontmatterEffects;
+
+    impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
+        for NoopPipelineFrontmatterEffects
+    {
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current_content: &str,
+            target_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            fs::write(file, target_content)?;
+            Ok(())
+        }
+
+        fn log_op(&self, file: &Path, message: &str) {
+            agent_doc_ops_log_io::log_op(file, message);
+        }
+    }
+
     fn make_doc(root: &Path, content: &str) -> PathBuf {
         fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("doc.md");
@@ -306,7 +324,7 @@ mod tests {
         fs::write(doc, committed).unwrap();
         agent_doc_snapshot_io::save(doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &NoopPipelineFrontmatterEffects,
             doc,
             "commit_success",
             Some(committed),
@@ -315,8 +333,8 @@ mod tests {
         .unwrap();
     }
 
-    fn run_context(doc: &Path, content: &str) -> crate::graph::RunContext {
-        let rc = crate::graph::RunContext::new(doc.to_path_buf());
+    fn run_context(doc: &Path, content: &str) -> RunContext {
+        let rc = RunContext::new(doc.to_path_buf());
         rc.set_doc_content(content.to_string());
         rc
     }

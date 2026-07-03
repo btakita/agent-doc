@@ -673,7 +673,7 @@ fn resolve_commit_mode(
 }
 
 fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
-    let mode = crate::session_check::resolve_review_done_guard_mode(file)?;
+    let mode = agent_doc_session_check_io::resolve_review_done_guard_mode(file)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(());
     }

@@ -1,29 +1,24 @@
-use super::*;
+use std::path::Path;
+
 use agent_doc_element_backlog::guard_policy::{
     dropped_from_history_guard, malformed_tracked_item_guard, shadow_backlog_guard,
 };
+use agent_doc_run_context_io::RunContext;
+use agent_doc_workflow::session_check::GuardResult;
+use anyhow::Result;
 
 /// Where a reaped `do #id` directive's `### Re: ... #id` response heading
-pub(crate) fn check_shadow_backlog_guard(
-    _file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+pub fn check_shadow_backlog_guard(_file: &Path, rc: &RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached document content.
     Ok(shadow_backlog_guard(&rc.doc_content())?.into())
 }
 
-pub(crate) fn check_malformed_tracked_item_guard(
-    _file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+pub fn check_malformed_tracked_item_guard(_file: &Path, rc: &RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached content + parsed components.
     Ok(malformed_tracked_item_guard(&rc.doc_content(), &rc.components()).into())
 }
 
-pub(crate) fn check_backlog_replay_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+pub fn check_backlog_replay_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached document content.
     let current_content = rc.doc_content();
 

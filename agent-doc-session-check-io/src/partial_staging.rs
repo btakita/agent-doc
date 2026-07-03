@@ -1,6 +1,9 @@
-use super::*;
+use std::path::Path;
 
-pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
+use agent_doc_workflow::session_check::GuardResult;
+use anyhow::Result;
+
+pub fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(GuardResult::None);
     };
@@ -51,7 +54,7 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
 /// This guard is WARN-only and narrow: it requires a latest-commit source/test
 /// path relationship plus overlapping changed string literals in tracked
 /// uncommitted or staged companion changes.
-pub(crate) fn check_partial_staging_closeout_guard(file: &Path) -> Result<GuardResult> {
+pub fn check_partial_staging_closeout_guard(file: &Path) -> Result<GuardResult> {
     let findings = agent_doc_git_io::partial_staging::companion_findings(file)?;
     if findings.is_empty() {
         return Ok(GuardResult::None);

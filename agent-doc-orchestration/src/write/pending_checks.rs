@@ -316,7 +316,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
+    let mode = agent_doc_session_check_io::resolve_pending_capture_guard_mode(file)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -520,7 +520,7 @@ pub(crate) fn prewrite_pending_capture_check(
         return Ok(());
     }
 
-    let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
+    let mode = agent_doc_session_check_io::resolve_pending_capture_guard_mode(file)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -584,7 +584,7 @@ pub(crate) fn precommit_pending_done_check_with_options(
     file: &Path,
     options: PendingDoneCheckOptions,
 ) -> Result<()> {
-    let mode = crate::session_check::resolve_pending_done_guard_mode(file)?;
+    let mode = agent_doc_session_check_io::resolve_pending_done_guard_mode(file)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -630,7 +630,7 @@ pub(crate) fn precommit_pending_done_check_with_options(
         return Ok(());
     }
 
-    if crate::session_check::resolve_auto_done(file)? {
+    if agent_doc_session_check_io::resolve_auto_done(file)? {
         agent_doc_element_backlog_io::with_backlog_command_effects(
             &crate::BACKLOG_COMMAND_EFFECTS,
             || {
@@ -695,7 +695,7 @@ pub(crate) fn prewrite_pending_done_check(
         return Ok(());
     }
 
-    let mode = crate::session_check::resolve_pending_done_guard_mode(file)?;
+    let mode = agent_doc_session_check_io::resolve_pending_done_guard_mode(file)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -789,7 +789,7 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
     flags: &WriteFlags,
     current_content: &mut String,
 ) -> Result<()> {
-    if !flags.strict_closeout || !crate::session_check::resolve_auto_done(file)? {
+    if !flags.strict_closeout || !agent_doc_session_check_io::resolve_auto_done(file)? {
         return Ok(());
     }
     if agent_doc_turn::closeout_signal::pending_done_suppressed(response_body) {

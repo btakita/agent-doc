@@ -77,8 +77,6 @@ mod response_guards;
 pub(crate) use response_guards::*;
 mod detect;
 pub use detect::*;
-mod partial_staging;
-pub(crate) use partial_staging::*;
 
 fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
     let file_key = file.to_string_lossy();
@@ -500,7 +498,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             report.status = SessionCheckStatus::Interrupted(message);
             return Ok(report);
         }
-        match check_shadow_backlog_guard(file, &rc)? {
+        match agent_doc_session_check_io::check_shadow_backlog_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -508,7 +506,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_malformed_tracked_item_guard(file, &rc)? {
+        match agent_doc_session_check_io::check_malformed_tracked_item_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -516,7 +514,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_backlog_replay_guard(file, &rc)? {
+        match agent_doc_session_check_io::check_backlog_replay_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -548,7 +546,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_no_response_active_queue_head(file, &rc)? {
+        match agent_doc_session_check_io::check_no_response_active_queue_head(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -556,7 +554,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_reaped_queue_head_without_response(file, &rc)? {
+        match agent_doc_session_check_io::check_reaped_queue_head_without_response(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -575,14 +573,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         for guard in [
             check_pending_capture_guard(file, &rc)?,
             check_pending_done_guard(file, &rc)?,
-            check_expect_done_or_gate_guard(file, &rc)?,
-            check_partial_closeout_state_guard(file)?,
-            check_partial_staging_closeout_guard(file)?,
+            agent_doc_session_check_io::check_expect_done_or_gate_guard(file, &rc)?,
+            agent_doc_session_check_io::check_partial_closeout_state_guard(file)?,
+            agent_doc_session_check_io::check_partial_staging_closeout_guard(file)?,
             check_blocked_closeout_followup_guard(file, &rc)?,
             check_gated_phase_split_guard(file, &rc)?,
             check_queue_audit_partial_completion_guard(file)?,
-            check_queue_head_removal_guard(file, &rc)?,
-            check_free_text_queue_head_provenance(file, &rc)?,
+            agent_doc_session_check_io::check_queue_head_removal_guard(file, &rc)?,
+            agent_doc_session_check_io::check_free_text_queue_head_provenance(file, &rc)?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -639,18 +637,6 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
     Ok(report)
 }
 
-/// `#nochange-after-stall-breadth`: a no-response repair/reap-only closeout
-/// must not make an active queue head look complete. The missing-response guard
-/// intentionally skips no-op bookkeeping commits to avoid deadlocking ordinary
-/// `--done` repairs, but when the same cycle recorded a runnable `agent:queue`
-/// head and that head is still both queued and open in `agent:backlog`, the
-/// turn made no durable progress on executable work. Fail closed so the next
-/// actor runs the head instead of reporting a plain no-change/clean closeout.
-mod queue_head_guards;
-pub(crate) use queue_head_guards::*;
-
-mod backlog_guards;
-pub(crate) use backlog_guards::*;
 ///
 /// Kept out of the read-only `inspect*` path on purpose: only the mutating
 /// command entrypoints (`enforce_clean_closeout` on the finalize boundary,
@@ -1146,13 +1132,6 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
 mod pending_guards;
 pub(crate) use pending_guards::*;
 
-/// `#do-id-closeout-open-backlog`: a resolved `do [#id]` directive must end with
-/// an explicit lifecycle outcome for its target id. If the cycle committed a
-/// response (queue cleared, status updated) but the target id is still open in
-/// `agent:backlog` and was not recorded as done / kept-open / reaped this cycle,
-/// fail closed so the directive cannot silently leave its target `[ ]`.
-mod queue_head_provenance_guards;
-pub(crate) use queue_head_provenance_guards::*;
 /// (`--pending-edit <id>=...`), adding a new follow-up item (`--pending-add*`),
 /// or an explicit no-follow-up justification phrase in the response. A
 /// `<!-- no-blocked-followup-guard -->` marker also suppresses it.
@@ -1170,6 +1149,7 @@ pub use closeout_guards::*;
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+    use agent_doc_session_check_io::resolve_pending_done_guard_mode_with_context;
     use std::fs;
     use std::io::Write;
     use std::process::Command;
@@ -1199,7 +1179,16 @@ mod tests {
         super::check_gated_phase_split_guard(file, &test_rc(file))
     }
     fn check_expect_done_or_gate_guard(file: &std::path::Path) -> Result<GuardResult> {
-        super::check_expect_done_or_gate_guard(file, &test_rc(file))
+        agent_doc_session_check_io::check_expect_done_or_gate_guard(file, &test_rc(file))
+    }
+    fn check_partial_closeout_state_guard(file: &std::path::Path) -> Result<GuardResult> {
+        agent_doc_session_check_io::check_partial_closeout_state_guard(file)
+    }
+    fn check_free_text_queue_head_provenance(
+        file: &std::path::Path,
+        rc: &crate::graph::RunContext,
+    ) -> Result<GuardResult> {
+        agent_doc_session_check_io::check_free_text_queue_head_provenance(file, rc)
     }
     fn check_queue_response_contamination_guard(file: &std::path::Path) -> Result<GuardResult> {
         super::check_queue_response_contamination_guard(file, &test_rc(file))

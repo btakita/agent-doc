@@ -9,7 +9,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
-    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
+    let mode = agent_doc_session_check_io::resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }

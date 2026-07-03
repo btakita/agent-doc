@@ -5,7 +5,8 @@ pub(crate) fn check_pending_capture_guard(
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
-    let mode = resolve_pending_capture_guard_mode_with_context(file, rc)?;
+    let mode =
+        agent_doc_session_check_io::resolve_pending_capture_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
@@ -120,93 +121,12 @@ pub(crate) fn check_pending_capture_guard(
     )
 }
 
-pub(crate) fn resolve_pending_capture_guard_mode(
-    file: &Path,
-) -> Result<agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode> {
-    let content = std::fs::read_to_string(file)?;
-    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
-    let project_config = agent_doc_project_config_io::load_project_for_doc(file);
-    Ok(
-        agent_doc_frontmatter::project_config::resolve_pending_capture_guard_mode(
-            &fm,
-            &project_config,
-        ),
-    )
-}
-
-pub(crate) fn resolve_pending_capture_guard_mode_with_context(
-    _file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode> {
-    // Phase 6 (#lr-content-6): read frontmatter from the cached `FrontmatterSlot`
-    // instead of re-reading + re-parsing the document. The slot already parsed
-    // `DocContentCell` (set once per inspect cycle); these guard-mode fields are
-    // SSH-resolution-independent so the resolved value is identical.
-    let fm = rc.frontmatter();
-    let project_config = rc.project_config();
-    Ok(
-        agent_doc_frontmatter::project_config::resolve_pending_capture_guard_mode(
-            &fm,
-            &project_config,
-        ),
-    )
-}
-
-pub(crate) fn resolve_pending_done_guard_mode(
-    file: &Path,
-) -> Result<agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode> {
-    let content = std::fs::read_to_string(file)?;
-    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
-    let project_config = agent_doc_project_config_io::load_project_for_doc(file);
-    Ok(
-        agent_doc_frontmatter::project_config::resolve_pending_done_guard_mode(
-            &fm,
-            &project_config,
-        ),
-    )
-}
-
-pub(crate) fn resolve_pending_done_guard_mode_with_context(
-    _file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode> {
-    // Phase 6 (#lr-content-6): frontmatter from the cached slot, project config
-    // from the cached `ProjectConfigSlot`.
-    let fm = rc.frontmatter();
-    let project_config = rc.project_config();
-    Ok(
-        agent_doc_frontmatter::project_config::resolve_pending_done_guard_mode(
-            &fm,
-            &project_config,
-        ),
-    )
-}
-
-pub(crate) fn resolve_review_done_guard_mode(
-    file: &Path,
-) -> Result<agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode> {
-    let content = std::fs::read_to_string(file)?;
-    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
-    let project_config = agent_doc_project_config_io::load_project_for_doc(file);
-    Ok(agent_doc_frontmatter::project_config::resolve_review_done_guard_mode(&fm, &project_config))
-}
-
-pub(crate) fn resolve_auto_done(file: &Path) -> Result<bool> {
-    let content = std::fs::read_to_string(file)?;
-    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
-    let project_config = agent_doc_project_config_io::load_project_for_doc(file);
-    Ok(agent_doc_frontmatter::project_config::resolve_auto_done(
-        &fm,
-        &project_config,
-    ))
-}
-
 pub(crate) fn check_pending_done_guard(
     file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
-    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
+    let mode = agent_doc_session_check_io::resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }

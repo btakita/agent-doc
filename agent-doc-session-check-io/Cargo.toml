@@ -1,0 +1,32 @@
+[package]
+name = "agent-doc-session-check-io"
+version = "0.34.67"
+edition = "2024"
+description = "Session-check guard IO adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_session_check_io"
+
+[dependencies]
+agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.34.67" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.67" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.67" }
+agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.34.67" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.67" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
+agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.67" }
+anyhow = "1"
+
+[dev-dependencies]
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
+tempfile = "3"

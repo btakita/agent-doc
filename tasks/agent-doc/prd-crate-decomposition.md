@@ -92,7 +92,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `5dc7c322` | Session registration and projection IO |
 | `0f90f7cf` | Project controller runtime IO |
 | `d6387afa` | Sync and resync runtime IO graph |
-| `pending-current-round` | Compact command archive/write IO graph |
+| `c65b9260` | Compact command archive/write IO graph |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

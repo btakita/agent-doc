@@ -9858,7 +9858,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ("0f90f7cf", "Project controller runtime IO"),
         ("d6387afa", "Sync and resync runtime IO graph"),
         (
-            "pending-current-round",
+            "c65b9260",
             "Compact command archive/write IO graph",
         ),
     ] {

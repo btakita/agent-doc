@@ -4801,8 +4801,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     let closeout_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/closeout.rs")).unwrap();
     let flow_types_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
     let flow_outcome_source =
@@ -4883,7 +4882,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     ] {
         assert!(
             !closeout_source.contains(forbidden),
-            "flow::closeout must not re-own or facade focused closeout guard policy: {forbidden}"
+            "agent-doc-flow-io closeout must not re-own focused closeout guard policy: {forbidden}"
         );
     }
     assert!(
@@ -4893,11 +4892,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     assert!(
         closeout_source.contains("use agent_doc_turn::closeout_guard::CloseoutGuardReason;")
             && closeout_source.contains("agent_doc_turn::closeout_guard::closeout_guard_event"),
-        "flow::closeout should adapt focused closeout guard events through an injected ops-log sink"
+        "agent-doc-flow-io closeout should adapt focused closeout guard events through an injected ops-log sink"
     );
     assert!(
         closeout_source.contains("closeout::closeout_latency_message"),
-        "flow::closeout should call focused flow latency formatting directly"
+        "agent-doc-flow-io closeout should call focused flow latency formatting directly"
     );
     for relative in [
         "agent-doc-orchestration/src/flow/mod.rs",
@@ -5783,7 +5782,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     );
     for relative in [
         "agent-doc-capture-io/src/lib.rs",
-        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-flow-io/src/closeout.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -19993,8 +19992,7 @@ fn test_agent_doc_archive_io_owns_head_compact_archive_reads() {
     );
 
     let closeout_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/closeout.rs")).unwrap();
     for forbidden in [
         "pub(crate) fn compact_archive_pointers(",
         "pub(crate) fn read_head_compact_archive(",
@@ -20420,8 +20418,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "write should call focused project-root IO instead of owning write-authority root discovery"
     );
     let flow_closeout_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/closeout.rs")).unwrap();
     assert!(
         !flow_closeout_source.contains("agent_doc_fs::find_project_root(")
             && flow_closeout_source.contains("agent_doc_project_root_io::project_root_containing("),
@@ -21474,7 +21471,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
         "src/undo.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/run.rs",
-        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/repair.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -21581,7 +21578,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         "agent-doc-compact-io/src/lib.rs",
         "agent-doc-stream-io/src/lib.rs",
         "agent-doc-orchestration/src/run.rs",
-        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/git.rs",
         "agent-doc-orchestration/src/write/converge.rs",
@@ -21784,7 +21781,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
-        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-document-realtime-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
@@ -22317,8 +22314,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     let doctor_source =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/doctor.rs")).unwrap();
     let closeout_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/closeout.rs")).unwrap();
     let detect_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
     let session_check_source =
@@ -22423,7 +22419,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     );
 
     for relative in [
-        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-session-check-io/src/closeout_guards.rs",
         "agent-doc-orchestration/src/write/converge.rs",
         "agent-doc-orchestration/src/repair.rs",
@@ -23951,7 +23947,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     }
     for relative in [
         "agent-doc-crdt-relay-io/src/lib.rs",
-        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",
     ] {

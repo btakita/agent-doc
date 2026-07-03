@@ -1067,13 +1067,14 @@ fn classify_route_closeout_block(
     reason: String,
     has_prompt_context: bool,
 ) -> (CloseoutRecoveryDecision, CloseoutBlockDispatchDecision) {
-    let recovery_decision = crate::flow::closeout::decide_closeout_recovery(
+    let recovery_decision = agent_doc_flow_io::closeout::decide_closeout_recovery(
         file,
         CloseoutRecoveryDecisionInput {
             prompt_context_available: has_prompt_context,
             blocker_reason: Some(&reason),
             stale_capture_supersession_proof: None,
         },
+        &crate::flow::closeout_effects(),
     );
     let recovery_queues_prompt_for_after_closeout = matches!(
         recovery_decision,

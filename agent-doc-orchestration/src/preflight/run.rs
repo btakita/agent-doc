@@ -135,9 +135,10 @@ fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool)
     else {
         return;
     };
-    if let Err(err) =
-        agent_doc_controller_io::project_controller::persist_session_actor_closeout(file)
-            .and_then(|_| crate::flow::closeout::record_terminal_closeout_proof(file, did_commit))
+    if let Err(err) = agent_doc_controller_io::project_controller::persist_session_actor_closeout(
+        file,
+    )
+    .and_then(|_| agent_doc_flow_io::closeout::record_terminal_closeout_proof(file, did_commit))
     {
         eprintln!("[preflight] terminal proof warning: {err}");
     }
@@ -374,7 +375,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // false-positive stuck warning. After this, `stuck_captured_cycle` sees a
     // discarded capture and returns None for the same case.
     if !options.probe {
-        match crate::flow::closeout::reconcile_compacted_committed_capture(file) {
+        match agent_doc_flow_io::closeout::reconcile_compacted_committed_capture(file) {
             Ok(true) => {
                 eprintln!(
                     "[preflight] reconciled compacted committed capture for {}",
@@ -390,7 +391,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             }
         }
     }
-    if let Some(info) = crate::flow::closeout::stuck_captured_cycle(file) {
+    if let Some(info) = agent_doc_flow_io::closeout::stuck_captured_cycle(file) {
         warnings.push(PreflightWarning {
             code: "stuck_captured_cycle".to_string(),
             message: format!(

@@ -2993,17 +2993,17 @@ pub enum FileIpcRepositionResult {
 /// Prevents late file-watcher or plugin recovery from re-applying a stale patch
 /// to an already-committed document.
 pub fn cleanup_fallback_patch_files(file: &Path) {
-    crate::flow::closeout::cleanup_fallback_patch_files(file);
+    agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
 }
 
 /// Check if the current cycle for `file` is already in Committed phase.
 /// Returns `Some(cycle_id)` if committed, `None` if no cycle or cycle is open.
 pub(crate) fn cycle_already_committed(file: &Path) -> Option<String> {
-    crate::flow::closeout::cycle_already_committed(file)
+    agent_doc_flow_io::closeout::cycle_already_committed(file)
 }
 
 pub(crate) fn write_claimed_patch_sentinel(project_root: &Path, patch_id: &str) {
-    crate::flow::closeout::write_claimed_patch_sentinel(project_root, patch_id);
+    agent_doc_flow_io::closeout::write_claimed_patch_sentinel(project_root, patch_id);
 }
 
 mod transport;

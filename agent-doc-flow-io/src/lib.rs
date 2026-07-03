@@ -8,6 +8,8 @@
 use agent_doc_flow::types::{FlowEvent, flow_event_log_message};
 use std::path::Path;
 
+pub mod closeout;
+
 /// Best-effort logger shape used by orchestration's ops log.
 pub type FlowEventLogger = fn(&Path, &str);
 

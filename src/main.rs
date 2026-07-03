@@ -3827,8 +3827,11 @@ fn main() -> anyhow::Result<()> {
             apply_recovery,
         } => {
             if apply_recovery {
-                use agent_doc_orchestration::flow::closeout::RecoveryApplication;
-                match agent_doc_orchestration::flow::closeout::apply_closeout_recovery(&file)? {
+                use agent_doc_flow_io::closeout::RecoveryApplication;
+                match agent_doc_flow_io::closeout::apply_closeout_recovery(
+                    &file,
+                    &agent_doc_orchestration::flow::closeout_effects(),
+                )? {
                     RecoveryApplication::NothingToDo => {
                         eprintln!("[repair] {} is clean — no recovery needed", file.display());
                     }

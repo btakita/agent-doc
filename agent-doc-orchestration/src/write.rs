@@ -1656,7 +1656,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
 }
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
-    crate::flow::closeout::complete_required_closeout(file)
+    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::flow::closeout_effects())
 }
 
 fn log_closeout_guard(
@@ -1665,7 +1665,7 @@ fn log_closeout_guard(
     outcome: agent_doc_flow::types::FlowOutcome,
     reason: agent_doc_turn::closeout_guard::CloseoutGuardReason,
 ) {
-    crate::flow::closeout::log_closeout_guard_event(file, stage, outcome, reason);
+    agent_doc_flow_io::closeout::log_closeout_guard_event(file, stage, outcome, reason);
 }
 
 fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -> Result<bool> {

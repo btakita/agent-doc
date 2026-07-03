@@ -690,7 +690,30 @@ dependencies = [
 name = "agent-doc-flow-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-archive-io",
+ "agent-doc-capture-io",
+ "agent-doc-controller-io",
+ "agent-doc-crdt-relay-io",
+ "agent-doc-cycle-state-io",
+ "agent-doc-debounce",
+ "agent-doc-element",
  "agent-doc-flow",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-hash",
+ "agent-doc-merge",
+ "agent-doc-merge-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
+ "agent-doc-preflight-io",
+ "agent-doc-project-root-io",
+ "agent-doc-run-context-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-turn",
+ "agent-doc-workflow",
+ "agent-doc-workflow-io",
+ "anyhow",
+ "serde_json",
 ]
 
 [[package]]

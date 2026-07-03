@@ -268,15 +268,14 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
             .ok()
             .flatten()
             .map(|s| phase_str(s.phase));
-        let recovery_state =
-            agent_doc_orchestration::flow::closeout::classify_closeout_recovery_state_for_file(
-                doc_path,
-            );
-        let recovery_command =
-            agent_doc_orchestration::flow::closeout::closeout_recovery_command_for_file(
-                doc_path,
-                recovery_state,
-            );
+        let recovery_state = agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
+            doc_path,
+            &agent_doc_orchestration::flow::closeout_effects(),
+        );
+        let recovery_command = agent_doc_flow_io::closeout::closeout_recovery_command_for_file(
+            doc_path,
+            recovery_state,
+        );
         let mut value = serde_json::to_value(record).unwrap_or(serde_json::Value::Null);
         if let serde_json::Value::Object(map) = &mut value {
             map.insert(

@@ -2041,7 +2041,7 @@ fn ensure_active_capture_materialized_for_commit(
             basis
         ),
     );
-    crate::flow::closeout::log_closeout_guard_event(
+    agent_doc_flow_io::closeout::log_closeout_guard_event(
         file,
         agent_doc_flow::types::FlowStage::TerminalGuard,
         agent_doc_flow::types::FlowOutcome::FailedClosed,
@@ -2119,7 +2119,7 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
             file_content.len()
         ),
     );
-    crate::flow::closeout::log_closeout_guard_event(
+    agent_doc_flow_io::closeout::log_closeout_guard_event(
         file,
         agent_doc_flow::types::FlowStage::PreCommitGuard,
         agent_doc_flow::types::FlowOutcome::Blocked,

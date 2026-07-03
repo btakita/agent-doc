@@ -230,7 +230,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         if !head_already_matches_current_doc(file, &file_content)?
             && let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)?
         {
-            crate::flow::closeout::log_closeout_guard_event(
+            agent_doc_flow_io::closeout::log_closeout_guard_event(
                 file,
                 agent_doc_flow::types::FlowStage::TerminalGuard,
                 agent_doc_flow::types::FlowOutcome::FailedClosed,
@@ -260,7 +260,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
                 state.cycle_id
             ),
         );
-        crate::flow::closeout::log_closeout_guard_event(
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
             file,
             agent_doc_flow::types::FlowStage::TerminalGuard,
             agent_doc_flow::types::FlowOutcome::Completed,
@@ -293,7 +293,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
                 reason
             ),
         );
-        crate::flow::closeout::log_closeout_guard_event(
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
             file,
             agent_doc_flow::types::FlowStage::TerminalGuard,
             agent_doc_flow::types::FlowOutcome::Completed,
@@ -309,7 +309,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
     }
 
     if let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)? {
-        crate::flow::closeout::log_closeout_guard_event(
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
             file,
             agent_doc_flow::types::FlowStage::TerminalGuard,
             agent_doc_flow::types::FlowOutcome::FailedClosed,
@@ -352,7 +352,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
                     preview
                 ),
             );
-            crate::flow::closeout::log_closeout_guard_event(
+            agent_doc_flow_io::closeout::log_closeout_guard_event(
                 file,
                 agent_doc_flow::types::FlowStage::TerminalGuard,
                 agent_doc_flow::types::FlowOutcome::FailedClosed,
@@ -366,7 +366,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
             );
             return Ok(RepairOutcome::StalePreflightCycleAbandoned);
         }
-        crate::flow::closeout::log_closeout_guard_event(
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
             file,
             agent_doc_flow::types::FlowStage::TerminalGuard,
             agent_doc_flow::types::FlowOutcome::Blocked,
@@ -400,7 +400,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
                 age_secs
             ),
         );
-        crate::flow::closeout::log_closeout_guard_event(
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
             file,
             agent_doc_flow::types::FlowStage::TerminalGuard,
             agent_doc_flow::types::FlowOutcome::Completed,
@@ -478,7 +478,7 @@ pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Optio
             reason
         ),
     );
-    crate::flow::closeout::log_closeout_guard_event(
+    agent_doc_flow_io::closeout::log_closeout_guard_event(
         file,
         agent_doc_flow::types::FlowStage::TerminalGuard,
         agent_doc_flow::types::FlowOutcome::Completed,
@@ -922,15 +922,16 @@ fn fail_closed_on_blocked_template_replay(file: &Path, response: &str, reason: &
 }
 
 fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> Result<()> {
-    crate::flow::closeout::apply_closeout_recovery_mutation(
+    agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
         file,
-        crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
+        agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
             content: Some(current_doc),
             clear_pending_response: true,
             delete_pre_response: true,
             mark_cycle_committed_event: Some("repair_respect_manual_exchange_tail_removal"),
             reason: CloseoutRecoveryMutationReason::RespectManualTailRemoval,
         },
+        &crate::flow::closeout_effects(),
     )?;
     agent_doc_ops_log_io::log_op(
         file,
@@ -975,15 +976,16 @@ fn retire_stale_capture_if_drifted(
     match decision {
         StaleCaptureRetirementDecision::Keep => Ok(false),
         StaleCaptureRetirementDecision::RetireWedgedWriteApplied => {
-            crate::flow::closeout::apply_closeout_recovery_mutation(
+            agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
                 file,
-                crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
+                agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
                     content: Some(doc_content),
                     clear_pending_response: true,
                     delete_pre_response: true,
                     mark_cycle_committed_event: Some("repair_retire_wedged_write_applied_capture"),
                     reason: CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
                 },
+                &crate::flow::closeout_effects(),
             )?;
             agent_doc_ops_log_io::log_op(
                 file,
@@ -1001,15 +1003,16 @@ fn retire_stale_capture_if_drifted(
             Ok(true)
         }
         StaleCaptureRetirementDecision::RetireSupersededCapturedOnlyOrphan => {
-            crate::flow::closeout::apply_closeout_recovery_mutation(
+            agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
                 file,
-                crate::flow::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
+                agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
                     content: None,
                     clear_pending_response: true,
                     delete_pre_response: true,
                     mark_cycle_committed_event: None,
                     reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
                 },
+                &crate::flow::closeout_effects(),
             )?;
             agent_doc_ops_log_io::log_op(
                 file,
@@ -1525,7 +1528,7 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
         && let crate::session_check::SessionCheckStatus::Interrupted(message) =
             crate::session_check::inspect(file)?
     {
-        crate::flow::closeout::log_closeout_guard_event(
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
             file,
             agent_doc_flow::types::FlowStage::SessionCheck,
             agent_doc_flow::types::FlowOutcome::FailedClosed,

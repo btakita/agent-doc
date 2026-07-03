@@ -17,6 +17,7 @@ pub mod launch_contract;
 pub mod pane_provenance;
 pub mod restart_handoff;
 pub mod session_resolution;
+pub mod startup;
 pub mod startup_debounce;
 pub mod startup_harness;
 pub mod startup_locks;

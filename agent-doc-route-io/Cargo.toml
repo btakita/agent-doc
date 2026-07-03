@@ -22,6 +22,7 @@ agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
@@ -37,6 +38,7 @@ agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", ver
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.67" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.67" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.67" }
 agent-doc-sync = { path = "../agent-doc-sync", version = "0.34.67" }
 agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.34.67" }
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.67" }

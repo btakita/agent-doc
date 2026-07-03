@@ -164,28 +164,27 @@ use agent_doc_controller::dispatch::{
     AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixOutcome, CloseoutBlockDispatchDecision,
     CloseoutBlockDispatchFacts, DegradedAuthoritativeActorDirectSubmit, DispatchActorState,
     DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts, DispatchOnlyReopenDelivery,
-    DispatchRuntimeHealth, DuplicatePanePolicyErrorFacts, PromptReadyBarrierDecision, ReopenMode,
-    RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
-    RouteCloseoutDrainOutcome, RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts,
-    RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
-    StartingTimeoutActorFacts, StartupMissRouteFacts, actor_blocked_by_starting_timeout,
-    actor_dispatch_blocker_reason, authoritative_actor_ready_retry_budget,
-    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
-    classify_authoritative_prompt_ready_barrier, classify_closeout_block_dispatch,
-    decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
-    dispatch_drain_retry_decision,
+    DispatchRuntimeHealth, PromptReadyBarrierDecision, ReopenMode, RetryBudget,
+    RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts, RouteCloseoutDrainOutcome,
+    RouteDispatchBugReportItemFacts, RouteStartupMissDiagnosticFacts, RoutedDispatchStartProof,
+    RoutedReopenFacts, RoutedReopenGuardReason, StartingTimeoutActorFacts, StartupMissRouteFacts,
+    actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
+    authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
+    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
+    classify_closeout_block_dispatch, decide_authoritative_reopen,
+    degraded_authoritative_actor_direct_submit_log_message, dispatch_drain_retry_decision,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_ready_timeout_for_binary,
-    dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
-    failclosed_wait_context, fresh_route_start_ack_timeout, prompt_ready_barrier_failed_event,
-    route_busy_diagnostic_message, route_busy_queued_diagnostic_message,
-    route_closeout_user_outcome_fields, route_dispatch_bug_report_item,
-    route_startup_miss_diagnostic_message, starting_actor_ready_log_line,
-    starting_actor_terminal_log_line, starting_actor_timeout_coalesced_log_line,
-    startup_miss_requires_fresh_start, startup_miss_should_fail_closed,
-    startup_miss_should_restart_live_owner, startup_miss_superseded_by_later_open_start,
+    dispatch_only_starting_pane_recovery_timeout_for_binary, failclosed_wait_context,
+    prompt_ready_barrier_failed_event, route_busy_diagnostic_message,
+    route_busy_queued_diagnostic_message, route_closeout_user_outcome_fields,
+    route_dispatch_bug_report_item, route_startup_miss_diagnostic_message,
+    starting_actor_ready_log_line, starting_actor_terminal_log_line,
+    starting_actor_timeout_coalesced_log_line, startup_miss_requires_fresh_start,
+    startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
+    startup_miss_superseded_by_later_open_start,
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
@@ -227,14 +226,13 @@ pub(crate) use agent_doc_route_io::busy_pane::{
 };
 pub(crate) use agent_doc_route_io::cycle_ack::{
     RouteCycleAckEffects, pending_prompt_bearing_context_for_route, require_routed_cycle_ack,
-    wait_for_start_ack,
 };
 use agent_doc_route_io::direct_pane_dispatch::editor_route_attempt_id;
 #[cfg(test)]
 use agent_doc_route_io::dispatch::send_command_checked;
 use agent_doc_route_io::dispatch::{
     BusyRouteQueuedDiagnosticFacts, RouteDispatchBugReportFacts, RouteDispatchEffects,
-    dispatch_existing_managed_reopen, dispatch_routed_reopen, dispatch_via_supervisor_ipc,
+    dispatch_existing_managed_reopen, dispatch_via_supervisor_ipc,
 };
 pub(crate) use agent_doc_route_io::dispatch_only::{
     DispatchOnlyQueuedPromptOutcome, DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions,

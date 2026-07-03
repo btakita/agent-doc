@@ -165,8 +165,37 @@ What changed from the prior draft:
 
 One caveat on the 4th: if Artur or REItrades is primarily overseas, the holiday nod may not land — it reads as a warm US-centric aside. If he's US-based (the CRE market suggests he is), keep it. If you're unsure, I can swap it for a neutral "hope you're having a good week" instead.
 
+❯ Want me to drop this into `corky`/LinkedIn as a draft (no auto-send)?
+❯ I'd like to tighten this up. Make it simpler and offer what I can work on. Perhaps as a share of the work for plumbing + general libraries...non-differentiating for his REI. I can offer lower rates.
+❯ > I wanted to reach out anyway. REItrades is something I'd genuinely like to work on. I'm a generalist, and the work I enjoy most is keeping systems correct as the data underneath them changes. In your case that's things like the OM and teaser staying consistent when a listing's numbers change, and the buyer-facing pieces staying accurate as people act on them. The AI side is part of that too. Your "100% accurate" content is what's easiest to lose trust on, and making AI output reliable in production is the kind of problem I like solving.
+### Re: Tightened — simpler, framed as a share of the non-differentiating plumbing — opus-4-8
+
+Cut it from six paragraphs to four. Kept your generalist/keep-systems-correct paragraph as the anchor, folded the trustworthy-AI detail into one line, and made the offer explicit: **you take a share of the work — the plumbing and general libraries that aren't REItrades' edge — at a lower rate.** Paste-ready:
+
+```
+Hi Artur,
+
+Happy 4th — hope you're getting a bit of a break for the holiday.
+
+I wanted to reach out anyway. REItrades is something I'd genuinely like to work on. I'm a generalist, and the work I enjoy most is keeping systems correct as the data underneath them changes — the OM and teaser staying consistent when a listing's numbers change, the buyer-facing pieces staying accurate as people act on them. The AI side is part of that too: your "100% accurate" content is what's easiest to lose trust on, and making AI output reliable in production is the kind of problem I like solving.
+
+Here's a way to make it easy on the budget. I'd take a share of the work — the non-differentiating pieces, the plumbing and general libraries any product like yours needs but that aren't your edge — at a lower rate. A lot of it overlaps tooling I already build and maintain in Rust, so it drops straight into your stack and I can share it open-source or license it royalty-free. You keep your schemas, templates, and business rules as your own; I handle the reusable engine underneath.
+
+If you can give me a rough idea of your budget for this phase, I'll put something together that fits. Happy to jump on a quick call.
+
+Brian
+```
+
+What I changed:
+- **Four paragraphs, not six.** Dropped the standalone "how I'd keep the AI trustworthy" paragraph — compressed it into one clause in the generalist paragraph. Merged the two "hope" lines into the Happy-4th open.
+- **The offer is now the spine of the note.** "I'd take a share of the work — the non-differentiating pieces, the plumbing and general libraries ... at a lower rate." That's the explicit ask you wanted: a partial scope, priced low, on the parts that aren't his product.
+- **"Non-differentiating" made concrete without jargon:** "any product like yours needs but that aren't your edge," reinforced by "you keep your schemas, templates, and business rules as your own; I handle the reusable engine underneath." Says *what's his* vs *what's shared* in plain terms.
+- **Rust stays a stack-fit benefit** ("already ... in Rust, so it drops straight into your stack"), never a personal preference.
+
+One judgment call: I kept the budget question because it anchors the number and pairs naturally with "lower rate." If you'd rather lead with a concrete rate or a specific first slice of plumbing (e.g. the derived-data consistency engine) instead of asking his budget, say which and I'll swap it in.
+
 Want me to drop this into `corky`/LinkedIn as a draft (no auto-send)?
-<!-- agent:boundary:12ddb942 -->
+<!-- agent:boundary:981b1f2b -->
 <!-- /agent:exchange -->
 
 ## Queue

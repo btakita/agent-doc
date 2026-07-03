@@ -9583,6 +9583,60 @@ fn test_coarse_orchestration_extractions_are_tracked() {
 
     for (graph, moved_from, moved_to, follow_up) in [
         (
+            "Focused IO crate wave",
+            "agent-doc-orchestration/src/{snapshot.rs,diff_io.rs,template_io.rs,status_cmd.rs,startup_miss.rs,supervisor/ipc.rs,flow/*.rs}",
+            "agent-doc-{archive,codex-hook,controller,diff,flow,git,hooks,ipc,lease,lint,memory,merge,ops-log,prompt-context,repair,response-replay,session-registry,snapshot,status,sync,template,workflow}-io",
+            "Split the broad IO wave by durable domain once call sites settle",
+        ),
+        (
+            "Agent backend process adapters",
+            "agent-doc-orchestration/src/agent/{claude.rs,codex.rs,junie.rs,opencode.rs}",
+            "agent-doc-agent-io/src/agent/*",
+            "Split CLI-specific stream/protocol parsing from process spawning",
+        ),
+        (
+            "Supervisor process runtime adapters",
+            "agent-doc-orchestration/src/supervisor/{in_process.rs,pty.rs}",
+            "agent-doc-supervisor-process/src/{in_process.rs,pty.rs,session_liveness.rs}",
+            "Split Unix raw child operations, PTY plumbing, and pure reattach/tick decisions",
+        ),
+        (
+            "Orchestration facade deletion sweep",
+            "agent-doc-orchestration/src/{agent.rs,commit_integrity.rs}",
+            "agent-doc-agent-io",
+            "Keep no-facade guard tests current",
+        ),
+        (
+            "Cycle state sidecar IO",
+            "agent-doc-orchestration/src/cycle_state.rs",
+            "agent-doc-cycle-state-io/src/lib.rs",
+            "Split schema/pathing/atomic writes from higher-level lifecycle bookkeeping",
+        ),
+        (
+            "Session accretion IO adapter",
+            "agent-doc-orchestration/src/session_accretion.rs",
+            "agent-doc-session-accretion-io/src/lib.rs",
+            "Move more deterministic metric reduction into `agent-doc-session-accretion`",
+        ),
+        (
+            "Response capture IO adapter",
+            "agent-doc-orchestration/src/capture.rs",
+            "agent-doc-capture-io/src/lib.rs",
+            "Split capture path/schema helpers from atomic store operations",
+        ),
+        (
+            "Prompt and state observer IO",
+            "agent-doc-orchestration/src/prompt.rs",
+            "agent-doc-prompt-io/src/lib.rs",
+            "Keep pure prompt parsing/navigation in `agent-doc-turn-executor-tmux`",
+        ),
+        (
+            "Watch daemon IO",
+            "agent-doc-orchestration/src/document_watcher.rs",
+            "agent-doc-watch-io/src/daemon.rs",
+            "Split PID/process control, session discovery, file-watch delivery",
+        ),
+        (
             "GC IO host",
             "agent-doc-orchestration/src/gc.rs",
             "agent-doc-gc-io/src/lib.rs",

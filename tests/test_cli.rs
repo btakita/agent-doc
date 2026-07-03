@@ -10080,6 +10080,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split the remaining root effects providers and delete them once git/write/repair callbacks are focused",
         ),
         (
+            "Write visible-guard re-export facade deletion",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-document-realtime-io",
+            "Move the remaining visible-write convergence sequencing out of `write.rs`",
+        ),
+        (
             "Tracked-work command and done-archive IO",
             "agent-doc-orchestration/src/backlog_cmd.rs",
             "agent-doc-element-backlog-io/src/{backlog_cmd.rs,done_archive.rs}",
@@ -24017,11 +24023,15 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             && realtime_io_source.contains("agent_doc_debounce::await_idle_via_file"),
         "agent-doc-document-realtime-io must own the visible-write guard effect adapter"
     );
+    let run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
     assert!(
-        write_source.contains("agent_doc_document_realtime_io::guard_visible_write_idle")
+        !write_source.contains("pub use agent_doc_document_realtime_io::guard_visible_write_idle")
             && write_source.contains("pub(crate) use agent_doc_document_realtime_io::{")
-            && write_source.contains("guard_visible_write_reconcile_with_target"),
-        "orchestration write path should import focused realtime IO guard adapters directly"
+            && write_source.contains("guard_visible_write_reconcile_with_target")
+            && run_source.contains("use agent_doc_document_realtime_io::guard_visible_write_idle")
+            && !run_source.contains("write::guard_visible_write_idle"),
+        "orchestration write path must not re-export focused realtime IO guard adapters"
     );
     let write_ipc_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();

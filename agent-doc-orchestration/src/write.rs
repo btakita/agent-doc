@@ -232,7 +232,6 @@ use agent_doc_document::write_normalization::{
 use agent_doc_document_realtime::write_policy::{
     reconcile_visible_write, response_already_in_current,
 };
-pub use agent_doc_document_realtime_io::guard_visible_write_idle;
 pub(crate) use agent_doc_document_realtime_io::{
     VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS, guard_visible_write_idle_and_current,
     guard_visible_write_idle_current_or_target, guard_visible_write_reconcile_with_target,

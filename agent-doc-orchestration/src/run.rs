@@ -127,6 +127,7 @@ use agent_doc_element::element;
 
 use agent_doc_config::Config;
 use agent_doc_diff as diff;
+use agent_doc_document_realtime_io::guard_visible_write_idle;
 use agent_doc_frontmatter::frontmatter;
 #[cfg(test)]
 use agent_doc_prompt_cache::{PROMPT_CACHE_BOUNDARY, PROMPT_CACHE_CONTROL};
@@ -1728,7 +1729,7 @@ fn apply_append_response(file: &Path, baseline: &str, response: &str) -> Result<
         agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?
     };
 
-    write::guard_visible_write_idle(file, "direct_run_append")?;
+    guard_visible_write_idle(file, "direct_run_append")?;
     agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
     atomic_write(file, &final_content)?;
     drop(doc_lock);
@@ -1828,7 +1829,7 @@ fn apply_template_response(
         &final_content,
     )?;
 
-    write::guard_visible_write_idle(file, "direct_run_template")?;
+    guard_visible_write_idle(file, "direct_run_template")?;
     agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
     if let Some(state) = crdt_state {
         agent_doc_merge_io::save_document_crdt(file, &state, &final_content)?;
@@ -1867,7 +1868,7 @@ fn normalize_direct_run_prompt_prefixes(
         file,
     );
     if normalized != content {
-        write::guard_visible_write_idle(file, "direct_run_prefix_normalize")?;
+        guard_visible_write_idle(file, "direct_run_prefix_normalize")?;
         atomic_write(file, &normalized)?;
         eprintln!("[run] normalized direct-run user prompt prefixes");
     }
@@ -1891,7 +1892,7 @@ fn normalize_direct_run_template_content(
 fn update_resume_id(file: &Path, session_id: &str) -> Result<()> {
     let current = std::fs::read_to_string(file)?;
     let updated = frontmatter::set_resume_id(&current, session_id)?;
-    write::guard_visible_write_idle(file, "direct_run_update_resume_id")?;
+    guard_visible_write_idle(file, "direct_run_update_resume_id")?;
     atomic_write(file, &updated)?;
     agent_doc_snapshot_io::save(file, &updated, agent_doc_ops_log_io::log_op)?;
     Ok(())

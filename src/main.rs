@@ -51,6 +51,7 @@ mod crash_resilience;
 mod dashboard_cmd;
 mod dedupe_cmd;
 mod describe_image;
+mod exchange;
 mod extract;
 mod focus_effects;
 mod history;
@@ -955,6 +956,53 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
     }
 }
 
+/// Structural node operations for `agent-doc exchange` (Phase 4 of the
+/// exchange-tree plan). Each op mutates the exchange as a tree of distinct
+/// response/prompt nodes, so it cannot bleed one node's content into another.
+#[derive(Subcommand)]
+enum ExchangeAction {
+    /// List exchange nodes (id, kind, label) as JSON
+    List {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Remove one exchange node by its stable id
+    Remove {
+        /// Path to the session document
+        file: PathBuf,
+        /// Node id (from `exchange list`)
+        #[arg(long)]
+        id: String,
+    },
+    /// Append an agent response turn; the body is read from stdin
+    AddResponse {
+        /// Path to the session document
+        file: PathBuf,
+        /// Response heading text (rendered as `### Re: <header>`)
+        #[arg(long)]
+        header: String,
+    },
+    /// Append a user prompt turn; the text is read from stdin
+    AddPrompt {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Move a node immediately before/after an anchor node
+    Move {
+        /// Path to the session document
+        file: PathBuf,
+        /// Node id to move
+        #[arg(long)]
+        id: String,
+        /// Anchor node id
+        #[arg(long)]
+        anchor: String,
+        /// Insert before the anchor (default: after)
+        #[arg(long)]
+        before: bool,
+    },
+}
+
 /// Turn lifecycle actions for `agent-doc turn-status`
 /// (#claude-busy-status-during-active-turn).
 #[derive(Subcommand)]
@@ -1496,6 +1544,12 @@ enum Commands {
         to: Option<String>,
     },
     /// Clear session ID and delete or rebuild snapshot state
+    /// Structural operations on the agent:exchange component (node-safe: no
+    /// cross-response merge bleed; re-baselines snapshot + CRDT)
+    Exchange {
+        #[command(subcommand)]
+        action: ExchangeAction,
+    },
     Reset {
         /// Path to the session document
         file: PathBuf,
@@ -3381,6 +3435,20 @@ fn main() -> anyhow::Result<()> {
                 )
             }
         }
+        Commands::Exchange { action } => match action {
+            ExchangeAction::List { file } => exchange::list(&file),
+            ExchangeAction::Remove { file, id } => exchange::remove(&file, &id),
+            ExchangeAction::AddResponse { file, header } => {
+                exchange::add_response(&file, &header)
+            }
+            ExchangeAction::AddPrompt { file } => exchange::add_prompt(&file),
+            ExchangeAction::Move {
+                file,
+                id,
+                anchor,
+                before,
+            } => exchange::move_node(&file, &id, &anchor, before),
+        },
         Commands::Reset {
             file,
             from_current,

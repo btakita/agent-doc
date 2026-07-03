@@ -397,6 +397,7 @@ mod tests {
     #[test]
     fn close_open_preflight_handoff_cycle_snapshots_before_injection() {
         let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         Command::new("git")
             .current_dir(dir.path())

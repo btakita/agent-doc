@@ -878,6 +878,7 @@ version = "0.34.67"
 name = "agent-doc-markdown-ast"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-hash",
  "serde_json",
  "tree-sitter",
  "tree-sitter-md",
@@ -1041,6 +1042,7 @@ dependencies = [
  "agent-doc-owner-pane-io",
  "agent-doc-plugin-owner",
  "agent-doc-plugin-owner-io",
+ "agent-doc-preflight-io",
  "agent-doc-process-owner-io",
  "agent-doc-project-config-io",
  "agent-doc-project-root-io",
@@ -1152,6 +1154,48 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-fs",
  "agent-doc-plugin-owner",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-preflight-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-config",
+ "agent-doc-controller-io",
+ "agent-doc-cycle-state-io",
+ "agent-doc-debounce",
+ "agent-doc-diff",
+ "agent-doc-document",
+ "agent-doc-element",
+ "agent-doc-element-backlog",
+ "agent-doc-element-backlog-io",
+ "agent-doc-element-done",
+ "agent-doc-element-queue",
+ "agent-doc-element-review",
+ "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-harness",
+ "agent-doc-hash",
+ "agent-doc-ipc-io",
+ "agent-doc-markdown-ast",
+ "agent-doc-memory",
+ "agent-doc-memory-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-config-io",
+ "agent-doc-project-root-io",
+ "agent-doc-queue",
+ "agent-doc-queue-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-sqlite",
+ "agent-doc-state-backbone",
+ "agent-doc-template",
+ "agent-doc-turn",
+ "agent-doc-workflow",
+ "anyhow",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

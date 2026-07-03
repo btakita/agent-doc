@@ -3,6 +3,11 @@
 use super::*;
 use agent_doc_diff as diff;
 use agent_doc_diff::semantic::semantic_diff_summary;
+use agent_doc_preflight_io::{
+    PendingMaintenanceReport, QueueState, enforce_no_dropped_backlog,
+    enforce_no_shadow_open_backlog, inspect_queue_state, resolve_pipeline_state, run_gate_verify,
+    run_pending_maintenance, run_queue_maintenance,
+};
 use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_strings};
 use agent_doc_queue::queue_convergence::{
     queue_body_diff_is_non_selected_future_state, realign_baseline_to_converged_queue,
@@ -455,7 +460,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let pending_report = if options.probe {
         PendingMaintenanceReport::default()
     } else {
-        run_pending_maintenance(file)?
+        run_pending_maintenance(file, &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)?
     };
     let backlog_reordered = pending_report.reordered;
     let backlog_gated_count = pending_report.backlog_gated_count;
@@ -471,7 +476,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let gate_verify_results = if options.probe {
         Vec::new()
     } else {
-        match run_gate_verify(file, gate_autoverify_optin) {
+        match run_gate_verify(
+            file,
+            gate_autoverify_optin,
+            &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+        ) {
             Ok(results) => results,
             Err(e) => {
                 eprintln!("[preflight] optverify: scan skipped: {}", e);
@@ -492,7 +501,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         });
     }
     enforce_no_shadow_open_backlog(file)?;
-    enforce_no_dropped_backlog(file, &rc)?;
+    enforce_no_dropped_backlog(file, rc.head_content().as_deref().map(String::as_str))?;
     if !options.probe && remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
         recovered = true;
     }

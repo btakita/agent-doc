@@ -106,6 +106,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_preflight_io::{
+    GateVerifyResult, PreflightMaintenanceWriteEffects, PreflightWarning,
+};
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
@@ -113,9 +116,6 @@ use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 
 use crate::{git, repair};
 use agent_doc_document::write_normalization::editor_buffer_preserved_head_exchange;
-use agent_doc_element::element::{
-    is_backlog_component, is_review_component, is_tracked_work_component,
-};
 
 /// A change detected in a related document since the last cycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,50 +126,6 @@ pub struct RelatedDocChange {
     pub summary: String,
     /// Whether the related document exists on disk.
     pub exists: bool,
-}
-
-/// A non-blocking preflight warning intended for skill/user visibility.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PreflightWarning {
-    /// Stable machine-readable warning code.
-    pub code: String,
-    /// Human-readable warning message.
-    pub message: String,
-    /// Optional document-declared agent/harness value from frontmatter.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub document_agent: Option<String>,
-    /// Optional active harness detected from the current process environment.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active_harness: Option<String>,
-}
-
-impl From<agent_doc_workflow::preflight_policy::PreflightPolicyWarning> for PreflightWarning {
-    fn from(warning: agent_doc_workflow::preflight_policy::PreflightPolicyWarning) -> Self {
-        Self {
-            code: warning.code,
-            message: warning.message,
-            document_agent: None,
-            active_harness: None,
-        }
-    }
-}
-
-/// Per-item opportunistic gated-review verification result (`#optverify`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GateVerifyResult {
-    /// Review item id (no `#` prefix).
-    pub id: String,
-    /// Scan status: `provable`, `failed`, or `pending`.
-    pub status: String,
-    /// The matched proof/disproof substring (absent when pending).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub marker: Option<String>,
-    /// Epoch seconds of the matched marker line (absent when pending).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub at: Option<u64>,
-    /// True when the opt-in auto-flipped this gate to `[x]` this cycle.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub auto_resolved: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1844,63 +1800,34 @@ fn log_and_skip_foreign_owned_sweep_if_needed(
 mod run;
 pub use run::*;
 
-mod maintenance;
-pub use maintenance::*;
+pub(crate) struct OrchestrationPreflightMaintenanceWriteEffects;
 
-fn collect_agent_done_ids_with_root(
-    content: &str,
-    project_root: Option<&Path>,
-) -> std::collections::HashSet<String> {
-    let mut ids = std::collections::HashSet::new();
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return ids;
-    };
-    for comp in &components {
-        if !agent_doc_element::element::is_backlog_done_component(&comp.name) {
-            continue;
-        }
-        for id in agent_doc_element_done::collect_done_component_own_ids(content, comp) {
-            ids.insert(id);
-        }
-        if let Some(archive) = comp.attrs.get("archive")
-            && let Some(root) = project_root
-        {
-            let archive_path = root.join(archive);
-            if let Ok(archive_content) = std::fs::read_to_string(&archive_path) {
-                for id in agent_doc_element_done::collect_done_item_own_ids(&archive_content) {
-                    ids.insert(id);
-                }
-            }
-        }
-    }
-    ids
-}
+pub(crate) static PREFLIGHT_MAINTENANCE_WRITE_EFFECTS:
+    OrchestrationPreflightMaintenanceWriteEffects = OrchestrationPreflightMaintenanceWriteEffects;
 
-fn snapshot_proves_queue_was_active(file: &Path) -> bool {
-    let Ok(Some(snapshot_content)) = agent_doc_snapshot_io::load(file) else {
-        return false;
-    };
-    let Ok((fm, _)) = frontmatter::parse(&snapshot_content) else {
-        return false;
-    };
-    if fm.queue_active.unwrap_or(false) {
-        return true;
+impl PreflightMaintenanceWriteEffects for OrchestrationPreflightMaintenanceWriteEffects {
+    fn record_document_write_provenance(&self, file: &Path, content: &str) {
+        crate::write::record_document_write_provenance(file, content);
     }
-    let Ok(components) = agent_doc_element::element::parse(&snapshot_content) else {
-        return false;
-    };
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return false;
-    };
-    let body = &snapshot_content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
-        return false;
-    };
-    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
-    agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, false).active
+
+    fn guard_visible_write_idle_and_current(
+        &self,
+        file: &Path,
+        source: &str,
+        expected_current: &str,
+    ) -> Result<()> {
+        crate::write::guard_visible_write_idle_and_current(file, source, expected_current)
+    }
+
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        current_content: &str,
+        target_content: &str,
+        source: &str,
+    ) -> Result<()> {
+        crate::write::converge_or_disk_write(file, current_content, target_content, source)
+    }
 }
 
 fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {
@@ -2355,25 +2282,6 @@ mod th {
     // #opsproof-falsepos: never auto-archive an item on the same cycle it is
     // added. A brand-new add is absent from the cycle-start snapshot, so even a
     // leading-status completion marker must not reap it this cycle.
-    pub(crate) fn write_optverify_doc(
-        dir: &TempDir,
-        predicate_annotation: &str,
-    ) -> std::path::PathBuf {
-        let doc = dir.path().join("session.md");
-        let file_content = format!(
-            concat!(
-                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-                "## Review\n\n",
-                "<!-- agent:review -->\n",
-                "- [/] [#saev] early-ack live verify {}\n",
-                "<!-- /agent:review -->\n"
-            ),
-            predicate_annotation
-        );
-        std::fs::write(&doc, &file_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &file_content, agent_doc_ops_log_io::log_op).unwrap();
-        doc
-    }
     pub(crate) fn write_ops_log(dir: &TempDir, body: &str) {
         let logs = dir.path().join(".agent-doc/logs");
         std::fs::create_dir_all(&logs).unwrap();
@@ -2559,32 +2467,6 @@ mod tests {
         let round_trip: PreflightOutput = serde_json::from_str(&json).unwrap();
         assert_eq!(round_trip.claims, vec!["claimed pane %1".to_string()]);
         assert_eq!(round_trip.layout_issues, vec!["stash overflow".to_string()]);
-    }
-    #[test]
-    fn collect_agent_done_ids_reads_archive_attr_when_present() {
-        let dir = TempDir::new().unwrap();
-        let archive_rel = "tasks/done-archive.md";
-        let archive_path = dir.path().join(archive_rel);
-        std::fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &archive_path,
-            "- [x] [#archived1] First archived item\n- [x] [#archived2] Second\n",
-        )
-        .unwrap();
-        let content = format!(
-            "<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
-            archive_rel
-        );
-        let ids = super::collect_agent_done_ids_with_root(&content, Some(dir.path()));
-        assert!(
-            ids.contains("archived1"),
-            "expected ids to include archived1 from archive file: {:?}",
-            ids
-        );
-        assert!(ids.contains("archived2"));
-        // Without the root, the archive path cannot be resolved → empty.
-        let ids_no_root = super::collect_agent_done_ids_with_root(&content, None);
-        assert!(ids_no_root.is_empty());
     }
     #[test]
     fn preflight_detects_diff() {

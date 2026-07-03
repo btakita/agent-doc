@@ -84,9 +84,15 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
         agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
             .editor_attached();
     let pending_maintenance = if editor_attached {
-        crate::preflight::run_pending_maintenance(file)
+        agent_doc_preflight_io::run_pending_maintenance(
+            file,
+            &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+        )
     } else {
-        crate::preflight::run_pending_maintenance_force_disk(file)
+        agent_doc_preflight_io::run_pending_maintenance_force_disk(
+            file,
+            &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+        )
     };
     match pending_maintenance {
         Ok(_) => {

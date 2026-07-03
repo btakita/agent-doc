@@ -1,15 +1,18 @@
-//! Extracted from `write.rs` (large-module split). See parent module for context.
+//! Preflight maintenance I/O adapters.
 
-use super::*;
 use agent_doc_document::queue_projection::{
     set_in_progress_work_item_markers, strip_in_progress_marker, strip_priority_markers,
     sync_in_progress_marker_regions,
+};
+use agent_doc_element::element::{
+    is_backlog_component, is_review_component, is_tracked_work_component,
 };
 use agent_doc_element_backlog::backlog::{
     component_matches_tracked_surface, ensure_no_completed_tracked_items, format_dropped_refs,
     format_shadow_refs, maintenance_surface_label, review_counts, should_reap_already_done_mirrors,
     should_reap_ops_proof_completions, tracked_body_for_reorder,
 };
+use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
     backlog_sync::AutoBacklogQueueSyncPolicy,
     control_binding::{
@@ -28,13 +31,69 @@ use agent_doc_queue::{
     queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
 };
 use agent_doc_workflow::preflight_policy::ResolvedFreeTextExecution;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PreflightWarning {
+    pub code: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_harness: Option<String>,
+}
+
+impl From<agent_doc_workflow::preflight_policy::PreflightPolicyWarning> for PreflightWarning {
+    fn from(warning: agent_doc_workflow::preflight_policy::PreflightPolicyWarning) -> Self {
+        Self {
+            code: warning.code,
+            message: warning.message,
+            document_agent: None,
+            active_harness: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GateVerifyResult {
+    pub id: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marker: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_resolved: bool,
+}
+
+pub trait PreflightMaintenanceWriteEffects {
+    fn record_document_write_provenance(&self, file: &Path, content: &str);
+
+    fn guard_visible_write_idle_and_current(
+        &self,
+        file: &Path,
+        source: &str,
+        expected_current: &str,
+    ) -> Result<()>;
+
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        current_content: &str,
+        target_content: &str,
+        source: &str,
+    ) -> Result<()>;
+}
 
 /// Resolve the live finalize-pipeline view surfaced in preflight output
 /// (`#fmrunid-wire`). Cycle-state is authoritative; the document
 /// `agent_doc_pipeline:` frontmatter block is only a fallback hint when no live
 /// cycle-state exists (e.g. a crash that wiped `.agent-doc/state` but left the
 /// document mirror behind). Returns `None` when neither is present.
-pub(crate) fn resolve_pipeline_state(
+pub fn resolve_pipeline_state(
     file: &Path,
 ) -> Result<Option<agent_doc_frontmatter::frontmatter::AgentDocPipeline>> {
     if let Some(state) = agent_doc_cycle_state_io::load(file)? {
@@ -70,17 +129,28 @@ struct GateVerifyOptions {
 ///
 /// Any write-through (backfill / reap) is persisted and committed in the same pass.
 /// Silent no-op when the document has no tracked-work component.
-pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> {
-    run_pending_maintenance_with_options(file, PendingMaintenanceOptions::default())
+pub fn run_pending_maintenance(
+    file: &Path,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+) -> Result<PendingMaintenanceReport> {
+    run_pending_maintenance_with_options(file, PendingMaintenanceOptions::default(), write_effects)
 }
 
-pub(crate) fn run_pending_maintenance_force_disk(file: &Path) -> Result<PendingMaintenanceReport> {
-    run_pending_maintenance_with_options(file, PendingMaintenanceOptions { force_disk: true })
+pub fn run_pending_maintenance_force_disk(
+    file: &Path,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+) -> Result<PendingMaintenanceReport> {
+    run_pending_maintenance_with_options(
+        file,
+        PendingMaintenanceOptions { force_disk: true },
+        write_effects,
+    )
 }
 
 fn run_pending_maintenance_with_options(
     file: &Path,
     options: PendingMaintenanceOptions,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
 ) -> Result<PendingMaintenanceReport> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
@@ -439,6 +509,7 @@ fn run_pending_maintenance_with_options(
             &current_content,
             "pending_maintenance",
             options.force_disk,
+            write_effects,
         )?;
     }
     if (mutated || snapshot_mutated)
@@ -528,17 +599,85 @@ fn run_pending_maintenance_with_options(
     })
 }
 
+fn collect_agent_done_ids_with_root(
+    content: &str,
+    project_root: Option<&Path>,
+) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return ids;
+    };
+    for comp in &components {
+        if !agent_doc_element::element::is_backlog_done_component(&comp.name) {
+            continue;
+        }
+        for id in agent_doc_element_done::collect_done_component_own_ids(content, comp) {
+            ids.insert(id);
+        }
+        if let Some(archive) = comp.attrs.get("archive")
+            && let Some(root) = project_root
+        {
+            let archive_path = root.join(archive);
+            if let Ok(archive_content) = std::fs::read_to_string(&archive_path) {
+                for id in agent_doc_element_done::collect_done_item_own_ids(&archive_content) {
+                    ids.insert(id);
+                }
+            }
+        }
+    }
+    ids
+}
+
+fn snapshot_proves_queue_was_active(file: &Path) -> bool {
+    let Ok(Some(snapshot_content)) = agent_doc_snapshot_io::load(file) else {
+        return false;
+    };
+    let Ok((fm, _)) = frontmatter::parse(&snapshot_content) else {
+        return false;
+    };
+    if fm.queue_active.unwrap_or(false) {
+        return true;
+    }
+    let Ok(components) = agent_doc_element::element::parse(&snapshot_content) else {
+        return false;
+    };
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    let body = &snapshot_content[queue_component.open_end..queue_component.close_start];
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
+        return false;
+    };
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
+    agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, false).active
+}
+
+fn preflight_debounce_ms(file: &Path) -> u64 {
+    std::fs::read_to_string(file)
+        .ok()
+        .and_then(|content| {
+            frontmatter::parse(&content)
+                .ok()
+                .and_then(|(fm, _)| fm.debounce_ms)
+        })
+        .unwrap_or(2000)
+}
+
 fn persist_pending_maintenance_doc(
     file: &Path,
     current: &str,
     target: &str,
     source: &str,
     force_disk: bool,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
 ) -> Result<()> {
     if force_disk {
         std::fs::write(file, target)
             .with_context(|| format!("{source}: failed to write {}", file.display()))?;
-        crate::write::record_document_write_provenance(file, target);
+        write_effects.record_document_write_provenance(file, target);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -551,8 +690,8 @@ fn persist_pending_maintenance_doc(
         return Ok(());
     }
 
-    crate::write::guard_visible_write_idle_and_current(file, source, current)?;
-    crate::write::converge_or_disk_write(file, current, target, source)
+    write_effects.guard_visible_write_idle_and_current(file, source, current)?;
+    write_effects.converge_or_disk_write(file, current, target, source)
 }
 
 /// Opportunistic gated-review auto-verification (`#optverify` / `#optv3`).
@@ -566,19 +705,38 @@ fn persist_pending_maintenance_doc(
 ///
 /// Returns the per-item results for the preflight output. Best-effort: a missing
 /// `ops.log`, no review component, or no predicates yields an empty vector.
-pub(crate) fn run_gate_verify(file: &Path, autoverify: bool) -> Result<Vec<GateVerifyResult>> {
-    run_gate_verify_with_options(file, autoverify, GateVerifyOptions::default())
+pub fn run_gate_verify(
+    file: &Path,
+    autoverify: bool,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+) -> Result<Vec<GateVerifyResult>> {
+    run_gate_verify_with_options(
+        file,
+        autoverify,
+        GateVerifyOptions::default(),
+        write_effects,
+    )
 }
 
 #[cfg(test)]
-fn run_gate_verify_force_disk(file: &Path, autoverify: bool) -> Result<Vec<GateVerifyResult>> {
-    run_gate_verify_with_options(file, autoverify, GateVerifyOptions { force_disk: true })
+fn run_gate_verify_force_disk(
+    file: &Path,
+    autoverify: bool,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+) -> Result<Vec<GateVerifyResult>> {
+    run_gate_verify_with_options(
+        file,
+        autoverify,
+        GateVerifyOptions { force_disk: true },
+        write_effects,
+    )
 }
 
 fn run_gate_verify_with_options(
     file: &Path,
     autoverify: bool,
     options: GateVerifyOptions,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
 ) -> Result<Vec<GateVerifyResult>> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
@@ -700,6 +858,7 @@ fn run_gate_verify_with_options(
             &new_content,
             "optverify_resolve",
             options.force_disk,
+            write_effects,
         )?;
         // Keep the snapshot in lockstep so the upcoming commit stages the flip.
         if let Some(snap) = agent_doc_snapshot_io::load(file)?
@@ -719,7 +878,7 @@ fn run_gate_verify_with_options(
     Ok(results)
 }
 
-pub(crate) fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
+pub fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
     let content = std::fs::read_to_string(file).with_context(|| {
         format!(
             "failed to inspect backlog shadow state in {}",
@@ -742,8 +901,8 @@ pub(crate) fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunContext) -> Result<()> {
-    let head_content = match rc.head_content() {
+pub fn enforce_no_dropped_backlog(file: &Path, head_content: Option<&str>) -> Result<()> {
+    let head_content = match head_content {
         Some(content) => content,
         None => return Ok(()),
     };
@@ -762,7 +921,7 @@ pub(crate) fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunCont
     let report =
         agent_doc_element_backlog::backlog::detect_dropped_from_history_with_extra_current_ids(
             &current_content,
-            &head_content,
+            head_content,
             &resolved_ids,
             &external_done_ids,
         )?;
@@ -780,33 +939,33 @@ pub(crate) fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunCont
 /// Returned by `run_queue_maintenance` for later composition into `PreflightOutput`.
 /// The `queue_prompts` are only populated when the queue is active.
 #[derive(Debug, Default)]
-pub(crate) struct QueueState {
-    pub(crate) queue_prompts: Vec<String>,
-    pub(crate) selected_queue_prompts: Vec<String>,
-    pub(crate) queue_active: Option<bool>,
-    pub(crate) queue_deferred: bool,
-    pub(crate) queue_start_at: Option<String>,
-    pub(crate) queue_trigger: Option<agent_doc_queue::document_queue::QueueTrigger>,
-    pub(crate) queue_halted: Option<String>,
+pub struct QueueState {
+    pub queue_prompts: Vec<String>,
+    pub selected_queue_prompts: Vec<String>,
+    pub queue_active: Option<bool>,
+    pub queue_deferred: bool,
+    pub queue_start_at: Option<String>,
+    pub queue_trigger: Option<agent_doc_queue::document_queue::QueueTrigger>,
+    pub queue_halted: Option<String>,
     /// `#qpausego`: true when an accepted controller `admin queue pause` is the
     /// effective queue-control state. Surfaced for visibility and consumed by the
     /// supervisor idle-watch auto-injection guard; it does NOT gate
     /// `queue_continuation_required` / `queue_drainable_head_count` (the attended
     /// in-session `/loop` keeps draining real work). Cleared by `admin queue resume`.
-    pub(crate) queue_paused: bool,
+    pub queue_paused: bool,
     /// `#qpausemix`: the controller-recorded pause reason when `queue_paused` is
     /// true (empty string when the pause carried none); `None` when not paused.
     /// Surfaced so the agent can see *why* the queue was paused instead of reading
     /// `queue_paused` + `queue_continuation_required` as a contradictory "mixed
     /// signal". Feeds the pause-aware `queue_continuation_guidance`.
-    pub(crate) queue_pause_reason: Option<String>,
+    pub queue_pause_reason: Option<String>,
     /// `#cleardrainsignal`: count of agent-drainable heads (not deferred/noise) in
     /// the active queue. 0 while `queue_active` is `Some(true)` means a no-op churn
     /// cycle — the agent/auto-loop must NOT loop.
-    pub(crate) queue_drainable_head_count: usize,
+    pub queue_drainable_head_count: usize,
     /// `#cleardrainsignal`: whether the queue has agent-drainable continuation work
     /// this session. False when inactive OR every remaining head is deferred/noise.
-    pub(crate) queue_continuation_required: bool,
+    pub queue_continuation_required: bool,
     /// `#rt83`: whether the active queue head is drainable in the SUPERVISOR scope
     /// (defers `[operator-verify]`/noise only; `[focused-cycle]`/`[clean-session]`
     /// stay drainable because the supervisor force-`/clear`s + re-dispatches them).
@@ -814,9 +973,9 @@ pub(crate) struct QueueState {
     /// the in-session `/loop` nor the supervisor) will act on must NOT synthesize a
     /// phantom `+:pushpin: do [#id]` prompt diff, which previously kept
     /// `no_changes:false` every preflight and sustained the qchurn flood.
-    pub(crate) queue_supervisor_drainable: bool,
-    pub(crate) synced_queue_ids: Vec<String>,
-    pub(crate) warnings: Vec<PreflightWarning>,
+    pub queue_supervisor_drainable: bool,
+    pub synced_queue_ids: Vec<String>,
+    pub warnings: Vec<PreflightWarning>,
 }
 
 fn record_selected_queue_head_state(
@@ -1085,7 +1244,7 @@ fn adopt_live_buffer_queue_deletions(file: &Path, disk_content: &mut String) -> 
 /// This intentionally does not run queue convergence, backlog mirroring,
 /// in-progress marker updates, journals, or snapshot/frontmatter writes. It only
 /// computes the queue facts needed for preflight JSON from the current document.
-pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState> {
+pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     let content = match std::fs::read_to_string(file) {
         Ok(content) => content,
         Err(_) => return Ok(QueueState::default()),
@@ -1262,7 +1421,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     })
 }
 
-pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
+pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
     // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
     // `queue consume` in flight). Round-tripping a torn intermediate queue through
@@ -2963,7 +3122,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 /// queue consumption, appending only ids that were explicitly recorded as
 /// same-cycle pending additions. It never applies a full priority/sync recompute,
 /// so it cannot move the head that the current response just consumed.
-pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<Vec<String>> {
+pub fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<Vec<String>> {
     let added_this_cycle = agent_doc_cycle_state_io::pending_added_ids(file);
     if added_this_cycle.is_empty() {
         return Ok(Vec::new());
@@ -3308,12 +3467,175 @@ mod tests {
     use super::*;
     use agent_doc_document::queue_projection::IN_PROGRESS_MARKER;
     use std::io::Write;
+    use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
 
+    struct TestPreflightMaintenanceWriteEffects;
+
+    static TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS: TestPreflightMaintenanceWriteEffects =
+        TestPreflightMaintenanceWriteEffects;
+
+    impl PreflightMaintenanceWriteEffects for TestPreflightMaintenanceWriteEffects {
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+
+        fn guard_visible_write_idle_and_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected_current: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current_content: &str,
+            target_content: &str,
+            _source: &str,
+        ) -> Result<()> {
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
+    }
+
+    struct TestQueueConsumeWriteEffects;
+
+    static TEST_QUEUE_CONSUME_WRITE_EFFECTS: TestQueueConsumeWriteEffects =
+        TestQueueConsumeWriteEffects;
+
+    impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for TestQueueConsumeWriteEffects {
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            std::fs::write(file, content)?;
+            Ok(())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
+    }
+
+    fn setup_project() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["init"])
+            .output()
+            .ok();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .ok();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.name", "Test"])
+            .output()
+            .ok();
+
+        dir
+    }
+
+    fn write_optverify_doc(dir: &TempDir, predicate_annotation: &str) -> PathBuf {
+        let doc = dir.path().join("session.md");
+        let file_content = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Review\n\n",
+                "<!-- agent:review -->\n",
+                "- [/] [#saev] early-ack live verify {}\n",
+                "<!-- /agent:review -->\n"
+            ),
+            predicate_annotation
+        );
+        std::fs::write(&doc, &file_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &file_content, agent_doc_ops_log_io::log_op).unwrap();
+        doc
+    }
+
+    fn write_ops_log(dir: &TempDir, body: &str) {
+        let logs = dir.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("ops.log"), body).unwrap();
+    }
+
+    #[test]
+    fn collect_agent_done_ids_reads_archive_attr_when_present() {
+        let dir = TempDir::new().unwrap();
+        let archive_rel = "tasks/done-archive.md";
+        let archive_path = dir.path().join(archive_rel);
+        std::fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &archive_path,
+            "- [x] [#archived1] First archived item\n- [x] [#archived2] Second\n",
+        )
+        .unwrap();
+        let content = format!(
+            "<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
+            archive_rel
+        );
+        let ids = collect_agent_done_ids_with_root(&content, Some(dir.path()));
+        assert!(
+            ids.contains("archived1"),
+            "expected ids to include archived1 from archive file: {:?}",
+            ids
+        );
+        assert!(ids.contains("archived2"));
+        let ids_no_root = collect_agent_done_ids_with_root(&content, None);
+        assert!(ids_no_root.is_empty());
+    }
+
+    fn start_ack_without_content_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown");
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
+    }
+
+    fn wait_for_live_prompt_drift_listener(project_root: &Path) {
+        for _ in 0..100 {
+            if agent_doc_ipc_io::is_listener_active(project_root) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("fake socket listener did not start within 1s");
+    }
+
+    fn test_preflight_debounce_ms(file: &Path) -> u64 {
+        std::fs::read_to_string(file)
+            .ok()
+            .and_then(|content| {
+                frontmatter::parse(&content)
+                    .ok()
+                    .and_then(|(fm, _)| fm.debounce_ms)
+            })
+            .unwrap_or(2000)
+    }
+
     fn wait_for_typing_indicator(file: &std::path::Path) {
         let file_str = file.to_string_lossy();
-        let debounce_ms = crate::preflight::preflight_debounce_ms(file);
+        let debounce_ms = test_preflight_debounce_ms(file);
         for _ in 0..50 {
             if agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms) {
                 return;
@@ -4512,8 +4834,8 @@ mod tests {
 
         // Fake editor listener that acks patches but never writes the file, so any
         // change to the on-disk doc could only have come from the binary itself.
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = start_ack_without_content_listener(dir.path());
+        wait_for_live_prompt_drift_listener(dir.path());
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -5639,7 +5961,7 @@ mod tests {
             agent_doc_queue_io::queue_consume::consume_queue_prompts_for_done_ids_force_disk_with_outcome(
                 &doc,
                 &done_ids,
-                &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                &TEST_QUEUE_CONSUME_WRITE_EFFECTS,
             )
         .unwrap()
         .expect("newly activated queue head should be consumable");
@@ -6227,7 +6549,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        run_pending_maintenance_force_disk(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -6263,7 +6586,9 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let report = run_pending_maintenance_force_disk(&doc).unwrap();
+        let report =
+            run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert!(!report.reordered);
         assert_eq!(report.backlog_gated_count, 0);
 
@@ -6318,7 +6643,9 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let report = run_pending_maintenance_force_disk(&doc).unwrap();
+        let report =
+            run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert_eq!(report.backlog_gated_count, 0);
         assert_eq!(report.review_count, 1);
         assert_eq!(report.review_gated_count, 1);
@@ -6383,7 +6710,8 @@ mod tests {
         agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["freshgate".to_string()])
             .unwrap();
 
-        run_pending_maintenance_force_disk(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         // The freshly added gated item survives — not reaped on its first cycle.
@@ -6413,7 +6741,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        run_pending_maintenance_force_disk(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let backlog_after = agent_doc_element::element::parse(&file_after)
@@ -6448,7 +6777,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        run_pending_maintenance_force_disk(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -6489,7 +6819,8 @@ mod tests {
         std::fs::write(&doc, file_content).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
-        run_pending_maintenance_force_disk(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let backlog_after = agent_doc_element::element::parse(&file_after)
@@ -6533,7 +6864,9 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let report = run_pending_maintenance_force_disk(&doc).unwrap();
+        let report =
+            run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert_eq!(report.backlog_gated_count, 0);
         assert_eq!(report.review_count, 1);
         assert_eq!(report.review_gated_count, 1);
@@ -6606,7 +6939,9 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let report = run_pending_maintenance_force_disk(&doc).unwrap();
+        let report =
+            run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert_eq!(report.review_count, 1);
         assert_eq!(report.review_gated_count, 1);
 
@@ -6675,11 +7010,13 @@ mod tests {
         std::fs::write(&doc, current).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(current)).unwrap();
 
-        let report = run_pending_maintenance_force_disk(&doc).unwrap();
+        let report =
+            run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert!(!report.reordered);
         assert_eq!(report.backlog_gated_count, 0);
-        let rc = crate::graph::RunContext::new(doc.clone());
-        enforce_no_dropped_backlog(&doc, &rc)
+        let head_content = agent_doc_git_io::revision::show_head(&doc).unwrap();
+        enforce_no_dropped_backlog(&doc, head_content.as_deref())
             .expect("same-cycle reap should count as intentional completion");
     }
     #[test]
@@ -6701,7 +7038,9 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let report = run_pending_maintenance_force_disk(&doc).unwrap();
+        let report =
+            run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert!(!report.reordered);
         assert_eq!(report.backlog_gated_count, 0);
 
@@ -6768,7 +7107,8 @@ mod tests {
         std::fs::write(&doc, file_content).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
-        run_pending_maintenance_force_disk(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
 
         let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         let comps = agent_doc_element::element::parse(&snapshot_after).unwrap();
@@ -6808,7 +7148,8 @@ mod tests {
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
 
-        let results = run_gate_verify(&doc, false).unwrap();
+        let results =
+            run_gate_verify(&doc, false, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "saev");
         assert_eq!(results[0].status, "provable");
@@ -6834,7 +7175,9 @@ mod tests {
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
 
-        let results = run_gate_verify_force_disk(&doc, true).unwrap();
+        let results =
+            run_gate_verify_force_disk(&doc, true, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "provable");
         assert!(results[0].auto_resolved);
@@ -6867,7 +7210,9 @@ mod tests {
             "[150] early_ack_pending emitted\n[160] looks like a manual cleanup\n",
         );
 
-        let results = run_gate_verify_force_disk(&doc, true).unwrap();
+        let results =
+            run_gate_verify_force_disk(&doc, true, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert_eq!(results[0].status, "failed", "disproof wins");
         assert!(!results[0].auto_resolved);
         let after = std::fs::read_to_string(&doc).unwrap();
@@ -6881,7 +7226,9 @@ mod tests {
         let dir = setup_project();
         let doc = write_optverify_doc(&dir, "");
         write_ops_log(&dir, "[150] early_ack_pending emitted\n");
-        let results = run_gate_verify_force_disk(&doc, true).unwrap();
+        let results =
+            run_gate_verify_force_disk(&doc, true, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert!(results.is_empty(), "no predicate → no results");
     }
     #[test]
@@ -6902,7 +7249,8 @@ mod tests {
             "[150] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"expect early_ack_pending emitted before apply\"] queue_head=\"[#saev]\"\n",
         );
 
-        let results = run_gate_verify(&doc, true).unwrap();
+        let results =
+            run_gate_verify(&doc, true, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "pending", "quoted prose must not prove");
         assert!(!results[0].auto_resolved);
@@ -6930,7 +7278,8 @@ mod tests {
             "[150] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"PASS requires [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\"] queue_head=\"[#ktw8]\"\n",
         );
 
-        let results = run_gate_verify(&doc, true).unwrap();
+        let results =
+            run_gate_verify(&doc, true, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "pending", "quoted prose must not prove");
         assert!(!results[0].auto_resolved);
@@ -6956,7 +7305,9 @@ mod tests {
             "[150] [s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true\n",
         );
 
-        let results = run_gate_verify_force_disk(&doc, true).unwrap();
+        let results =
+            run_gate_verify_force_disk(&doc, true, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+                .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "provable");
         assert!(results[0].auto_resolved);
@@ -6982,7 +7333,8 @@ mod tests {
         std::fs::write(&doc, file_content).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let err = run_pending_maintenance(&doc).unwrap_err();
+        let err =
+            run_pending_maintenance(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap_err();
         assert!(
             err.to_string()
                 .contains("snapshot is missing the backlog component")
@@ -7008,7 +7360,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        run_pending_maintenance_force_disk(&doc).unwrap();
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         let high = updated.find("[#high]").unwrap();

@@ -1099,7 +1099,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "src/orchestrate/dag.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
-        "agent-doc-orchestration/src/preflight/maintenance.rs",
+        "agent-doc-preflight-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-route-io/src/dispatch_only.rs",
@@ -1264,12 +1264,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the binary-owned closeout boundary (#pzjy closeout recovery).
         // 5 -> 6 (`reason={}`): typed deferred queue-head projection records the
         // owning defer reason for stop/time-gated heads.
-        ("agent-doc-orchestration/src/preflight/maintenance.rs", "reason=") => 6,
-        // +1 (#pm-live-buffer-guard): pending maintenance now reuses the shared
-        // visible-write idle/current guard before it can send queue/backlog/status
-        // convergence through editor IPC. This prevents a maintenance reap from
-        // touching an unsaved operator-visible buffer ahead of disk.
-        ("agent-doc-orchestration/src/preflight/maintenance.rs", "guard_") => 1,
+        ("agent-doc-preflight-io/src/lib.rs", "reason=") => 6,
+        // 1 -> 3 after extracting preflight maintenance into
+        // agent-doc-preflight-io: the moved graph now owns an explicit
+        // visible-write guard effect port, its production call, and the test
+        // adapter.
+        ("agent-doc-preflight-io/src/lib.rs", "guard_") => 3,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,
@@ -3681,7 +3681,7 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-route-io/src/authoritative_actor.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
-        "agent-doc-orchestration/src/preflight/maintenance.rs",
+        "agent-doc-preflight-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -3689,10 +3689,8 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             "{relative} should call controller pause IO from agent-doc-queue-io directly"
         );
     }
-    let preflight_maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let preflight_maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub(crate) struct UndrainableSkip",
         "struct UndrainableSkip",
@@ -3895,10 +3893,8 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
             && preflight_run.contains("queue_body_diff_is_non_selected_future_state"),
         "preflight/run.rs should call focused queue convergence policy directly"
     );
-    let preflight_maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let preflight_maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "fn selected_queue_head_unchanged_in_snapshot(",
         "fn queue_region_differs_from_snapshot(",
@@ -3907,7 +3903,7 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
     ] {
         assert!(
             !preflight_maintenance.contains(forbidden_snippet),
-            "preflight/maintenance.rs must not re-own queue snapshot convergence policy: {forbidden_snippet}"
+            "agent-doc-preflight-io/src/lib.rs must not re-own queue snapshot convergence policy: {forbidden_snippet}"
         );
     }
     assert!(
@@ -3916,7 +3912,7 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
             && preflight_maintenance.contains("queue_region_differs_from_snapshot(")
             && preflight_maintenance.contains("inactive_queue_changed_vs_snapshot(")
             && preflight_maintenance.contains("queue_entries_are_drained_residue("),
-        "preflight/maintenance.rs should adapt snapshot IO into focused queue convergence policy directly"
+        "agent-doc-preflight-io/src/lib.rs should adapt snapshot IO into focused queue convergence policy directly"
     );
 }
 
@@ -4045,10 +4041,8 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         queue_closeout_guard.contains("queue_directive::do_directive_target_ids"),
         "queue closeout guard policy should call focused queue directive parsing directly"
     );
-    let preflight_maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let preflight_maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     assert!(
         !preflight_maintenance.contains("fn filter_expect_done_or_gate_ids"),
         "preflight maintenance must not re-own queue directive lifecycle expectation policy"
@@ -4114,7 +4108,7 @@ fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
     for relative in [
         "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/preflight/maintenance.rs",
+        "agent-doc-preflight-io/src/lib.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
     ] {
@@ -4193,10 +4187,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
     let orchestration_preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
-    let orchestration_preflight_maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let orchestration_preflight_maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden in [
         "pub(crate) fn first_n_queue_prompt_texts",
         "pub(crate) fn queue_consume_count_for_done_ids",
@@ -4319,7 +4311,7 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
     for relative in [
         "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
-        "agent-doc-orchestration/src/preflight/maintenance.rs",
+        "agent-doc-preflight-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in [
@@ -4391,10 +4383,8 @@ fn test_agent_doc_queue_owns_free_text_admission_policy() {
         );
     }
 
-    let maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden in [
         "enum QueueFreeTextAdmissionScope",
         "fn normalize_admitted_free_text",
@@ -4544,10 +4534,8 @@ fn test_agent_doc_queue_owns_queue_control_binding_policy() {
         );
     }
 
-    let maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let run = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
     let free_text_admission =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/free_text_admission.rs"))
@@ -4587,10 +4575,8 @@ fn test_agent_doc_harness_owns_opencode_goal_extension_detection() {
         "agent-doc-harness must own OpenCode goal extension detection"
     );
 
-    let maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     assert!(
         !maintenance.contains("fn opencode_goal_extension_available"),
         "preflight maintenance must not own OpenCode goal extension detection"
@@ -8764,10 +8750,8 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
     let preflight_run =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
-    let preflight_maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let preflight_maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     assert!(
         preflight_run.contains("agent_doc_memory::format_semantic_completion_warning(")
             && preflight_maintenance.contains("agent_doc_memory::QUEUE_STRIKE_THRESHOLD")
@@ -17150,10 +17134,8 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
         "agent-doc-queue modules should import marker projection helpers directly instead of through document_queue"
     );
 
-    let maintenance_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let maintenance_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden in [
         "type QueueDeleteCounts =",
         "fn queue_entry_delete_key(",
@@ -17561,10 +17543,8 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         );
     }
 
-    let preflight_maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let preflight_maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub(crate) struct BacklogQueueSyncRequest",
         "struct BacklogQueueSyncRequest",
@@ -17979,10 +17959,8 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
             .unwrap();
     let preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
-    let preflight_maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let preflight_maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
@@ -18176,10 +18154,8 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_reap_policy() {
         "compact should call tracked component preservation policy from agent-doc-element-backlog"
     );
 
-    let preflight_maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let preflight_maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden in [
         "pub(crate) fn component_matches_tracked_surface",
         "fn component_matches_tracked_surface",
@@ -18560,10 +18536,8 @@ fn test_agent_doc_element_backlog_owns_ops_proof_completion_policy() {
         );
     }
 
-    let preflight_maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let preflight_maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden in [
         "pub(crate) struct OpsProofCompletion",
         "struct OpsProofCompletion",
@@ -20409,10 +20383,8 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && preflight_run_source.contains("agent_doc_project_root_io::project_root_containing("),
         "preflight/run should call focused project-root IO instead of owning actor cleanup/sweep root discovery"
     );
-    let preflight_maintenance_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let preflight_maintenance_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     assert!(
         !preflight_maintenance_source.contains("agent_doc_fs::find_project_root(")
             && preflight_maintenance_source
@@ -21236,7 +21208,7 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         "agent-doc-compact-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-element-backlog-io/src/backlog_cmd.rs",
-        "agent-doc-orchestration/src/preflight/maintenance.rs",
+        "agent-doc-preflight-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -22601,10 +22573,8 @@ fn test_agent_doc_document_owns_queue_in_progress_projection_policy() {
         );
     }
 
-    let maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn set_in_progress_work_item_markers(",
         "fn sync_in_progress_marker_regions(",
@@ -24655,7 +24625,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
         "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
         "agent-doc-orchestration/src/repair.rs",
-        "agent-doc-orchestration/src/preflight/maintenance.rs",
+        "agent-doc-preflight-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
@@ -24962,10 +24932,8 @@ fn test_agent_doc_queue_owns_queue_worklist_projection_policy() {
         "agent-doc-queue should expose queue projection/worklist policy through its owning module"
     );
 
-    let maintenance = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
-    )
-    .unwrap();
+    let maintenance =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub(crate) fn queue_entry_do_id(",
         "fn queue_prompt_projection_rows(",

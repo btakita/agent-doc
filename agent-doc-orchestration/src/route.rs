@@ -959,9 +959,15 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
         // failed; repeat succeeded" report). run_pending_maintenance is
         // idempotent, so this is safe even when there is nothing to reap.
         let maintenance_result = if FORCE_DISK_ROUTE_WRITES.with(Cell::get) {
-            crate::preflight::run_pending_maintenance_force_disk(file)
+            agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                file,
+                &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            )
         } else {
-            crate::preflight::run_pending_maintenance(file)
+            agent_doc_preflight_io::run_pending_maintenance(
+                file,
+                &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            )
         };
         if let Err(e) = maintenance_result {
             agent_doc_ops_log_io::log_op(

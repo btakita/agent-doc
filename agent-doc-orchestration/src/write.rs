@@ -1172,9 +1172,17 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             options.force_disk,
             |file, force_disk| {
                 if force_disk {
-                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 } else {
-                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 }
             },
         )?;
@@ -1354,9 +1362,17 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             options.force_disk,
             |file, force_disk| {
                 if force_disk {
-                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 } else {
-                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 }
             },
         )?;
@@ -1524,7 +1540,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         match commit_mode {
             CommitMode::None => {}
             CommitMode::BestEffort => {
-                if let Err(e) = crate::preflight::sync_same_cycle_pending_adds_into_go_queue(file) {
+                if let Err(e) =
+                    agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(file)
+                {
                     eprintln!(
                         "[queue] warning: same-cycle pending-add queue sync failed: {}",
                         e
@@ -1532,7 +1550,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 }
             }
             CommitMode::Required => {
-                crate::preflight::sync_same_cycle_pending_adds_into_go_queue(file)?;
+                agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(file)?;
             }
         }
     }
@@ -2956,9 +2974,17 @@ mod tests {
             false,
             |file, force_disk| {
                 if force_disk {
-                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 } else {
-                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 }
             },
         )
@@ -2980,9 +3006,17 @@ mod tests {
             true,
             |file, force_disk| {
                 if force_disk {
-                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 } else {
-                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 }
             },
         )
@@ -3059,9 +3093,17 @@ mod tests {
             false,
             |file, force_disk| {
                 if force_disk {
-                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 } else {
-                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 }
             },
         )
@@ -3118,9 +3160,17 @@ mod tests {
             false,
             |file, force_disk| {
                 if force_disk {
-                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance_force_disk(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 } else {
-                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                    agent_doc_preflight_io::run_pending_maintenance(
+                        file,
+                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                    )
+                    .map(|_| ())
                 }
             },
         )

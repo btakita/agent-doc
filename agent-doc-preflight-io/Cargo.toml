@@ -1,0 +1,50 @@
+[package]
+name = "agent-doc-preflight-io"
+version = "0.34.67"
+edition = "2024"
+description = "Preflight maintenance I/O adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_preflight_io"
+
+[dependencies]
+agent-doc-config = { path = "../agent-doc-config", version = "0.34.67" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.67" }
+agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.34.67" }
+agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.34.67" }
+agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.34.67" }
+agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.34.67" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.67" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.67" }
+agent-doc-memory = { path = "../agent-doc-memory", version = "0.34.67" }
+agent-doc-memory-io = { path = "../agent-doc-memory-io", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.67" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
+agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.67" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.67" }
+tempfile = "3"

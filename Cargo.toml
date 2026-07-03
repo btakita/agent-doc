@@ -49,6 +49,7 @@ members = [
     "agent-doc-ipc-protocol",
     "agent-doc-plugin-owner",
     "agent-doc-plugin-owner-io",
+    "agent-doc-preflight-io",
     "agent-doc-project-config-io",
     "agent-doc-project-root-io",
     "agent-doc-prompt-cache",

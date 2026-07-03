@@ -96,7 +96,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `af54bb9f` | Document realtime authority IO graph |
 | `e756b12c` | Claim command binding IO graph |
 | `7af46f2c` | Stream command writeback IO graph |
-| `pending-current-round` | Queue consume writeback IO graph |
+| `6ea5c5a8` | Queue consume writeback IO graph |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

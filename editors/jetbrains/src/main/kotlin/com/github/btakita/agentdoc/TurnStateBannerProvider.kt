@@ -3,10 +3,15 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.fileEditor.FileEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.ui.EditorNotificationPanel
 import com.intellij.ui.EditorNotificationProvider
+import com.intellij.ui.JBColor
+import com.intellij.ui.components.JBLabel
+import com.intellij.util.ui.JBUI
+import java.awt.BorderLayout
+import java.awt.Dimension
 import java.util.function.Function
 import javax.swing.JComponent
+import javax.swing.JPanel
 
 /**
  * Editor banner that surfaces the CPC's authoritative turn phase across the top of
@@ -31,9 +36,31 @@ class TurnStateBannerProvider : EditorNotificationProvider {
         val label = TurnStateBridge.presentationForFile(file.path).label
         if (label.isEmpty()) return null
         return Function { _ ->
-            EditorNotificationPanel().apply {
-                text(label)
+            // A very thin single-line strip instead of the full-height
+            // EditorNotificationPanel, so it barely consumes document space.
+            JPanel(BorderLayout()).apply {
+                isOpaque = true
+                background = STRIP_BG
+                border = JBUI.Borders.empty(0, 8)
+                add(
+                    JBLabel(label).apply {
+                        font = JBUI.Fonts.smallFont()
+                        foreground = STRIP_FG
+                    },
+                    BorderLayout.WEST,
+                )
+                val h = JBUI.scale(STRIP_HEIGHT_DP)
+                minimumSize = Dimension(0, h)
+                preferredSize = Dimension(0, h)
+                maximumSize = Dimension(Int.MAX_VALUE, h)
             }
         }
+    }
+
+    private companion object {
+        private const val STRIP_HEIGHT_DP = 18
+        // Subtle info-tone strip that reads on both light and dark themes.
+        private val STRIP_BG = JBColor(0xEAF1FB, 0x2A3A4A)
+        private val STRIP_FG = JBColor(0x3B5273, 0xA9C7EA)
     }
 }

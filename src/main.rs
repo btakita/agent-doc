@@ -750,47 +750,6 @@ fn cli_stream_effects() -> Arc<dyn agent_doc_stream_io::StreamRuntimeEffects> {
     Arc::new(CliStreamRuntimeEffects)
 }
 
-fn load_active_capture_for_hooks(
-    file: &Path,
-) -> Result<Option<agent_doc_hooks_io::PostResponseCapture>, String> {
-    agent_doc_capture_io::load_active(file)
-        .map(|capture| {
-            capture.map(|capture| agent_doc_hooks_io::PostResponseCapture {
-                capture_id: capture.capture_id,
-                response_sha256: capture.response_sha256,
-                response_body: capture.response_body,
-            })
-        })
-        .map_err(|err| err.to_string())
-}
-
-fn capture_tsift_memory_closeout_for_hooks(file: &Path, response_body: &str) {
-    let _ = agent_doc_memory_io::closeout::capture_tsift_memory_closeout(file, response_body);
-}
-
-fn reap_local_model_leases_for_hooks(file: &Path) {
-    let _ = agent_doc_lease_io::local_model::reap_local_model_leases(file);
-}
-
-fn reap_stale_editor_consumers_for_hooks(
-    file: &Path,
-) -> agent_doc_hooks_io::StaleConsumerReapCounts {
-    let counts = agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file(file);
-    agent_doc_hooks_io::StaleConsumerReapCounts {
-        consumer_patches: counts.consumer_patches,
-        live_buffers: counts.live_buffers,
-    }
-}
-
-fn cli_post_response_hook_effects() -> impl agent_doc_hooks_io::PostResponseHookEffects {
-    agent_doc_hooks_io::post_response_hook_effects(
-        load_active_capture_for_hooks,
-        capture_tsift_memory_closeout_for_hooks,
-        reap_local_model_leases_for_hooks,
-        reap_stale_editor_consumers_for_hooks,
-    )
-}
-
 impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
     fn commit(&self, file: &Path) -> anyhow::Result<bool> {
         agent_doc_orchestration::git::commit(file)
@@ -821,7 +780,7 @@ impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
     }
 
     fn fire_post_write(&self, file: &Path, session_id: &str) {
-        let hook_effects = cli_post_response_hook_effects();
+        let hook_effects = agent_doc_hooks_io::default_post_response_hook_effects();
         agent_doc_hooks_io::fire_post_write_with_effects(&hook_effects, file, session_id, 1);
         agent_doc_hooks_io::fire_doc_event(file, "post_write");
     }

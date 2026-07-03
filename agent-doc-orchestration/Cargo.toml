@@ -56,7 +56,6 @@ agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.67" }
 agent-doc-ipc-forensics-io = { path = "../agent-doc-ipc-forensics-io", version = "0.34.67" }
 agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.67" }
 agent-doc-lease = { path = "../agent-doc-lease", version = "0.34.67" }
-agent-doc-lease-io = { path = "../agent-doc-lease-io", version = "0.34.67" }
 agent-doc-lint-io = { path = "../agent-doc-lint-io", version = "0.34.67" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.67" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.67" }
@@ -69,7 +68,6 @@ agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.34
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-owner-pane-io = { path = "../agent-doc-owner-pane-io", version = "0.34.67" }
 agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
-agent-doc-plugin-owner-io = { path = "../agent-doc-plugin-owner-io", version = "0.34.67" }
 agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.67" }
 agent-doc-process-owner-io = { path = "../agent-doc-process-owner-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }

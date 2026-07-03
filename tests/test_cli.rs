@@ -2296,7 +2296,6 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-hooks-io",
         "agent-doc-ipc-io",
         "agent-doc-ipc-forensics-io",
-        "agent-doc-lease-io",
         "agent-doc-lint-io",
         "agent-doc-memory-io",
         "agent-doc-merge",
@@ -2305,7 +2304,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-ops-log-io",
         "agent-doc-owner-pane-io",
         "agent-doc-orchestration",
-        "agent-doc-plugin-owner-io",
+        "agent-doc-plugin-owner",
         "agent-doc-project-config-io",
         "agent-doc-prompt-context-io",
         "agent-doc-prompt-contract",
@@ -2412,7 +2411,15 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
         fs::read_to_string(manifest_dir.join("agent-doc-hooks-io/Cargo.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&hooks_io_manifest).unwrap();
     let dependencies = parsed["dependencies"].as_table().unwrap();
-    for required in ["agent-doc-frontmatter", "agent-doc-model-tier", "agent-kit"] {
+    for required in [
+        "agent-doc-capture-io",
+        "agent-doc-frontmatter",
+        "agent-doc-lease-io",
+        "agent-doc-memory-io",
+        "agent-doc-model-tier",
+        "agent-doc-plugin-owner-io",
+        "agent-kit",
+    ] {
         assert!(
             dependencies.contains_key(required),
             "agent-doc-hooks-io should depend on hook/frontmatter/model focused crate: {required}"
@@ -2481,29 +2488,24 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
     for required in [
         "pub struct PostResponseHookEffectFns",
         "pub fn post_response_hook_effects",
+        "pub fn default_post_response_hook_effects",
         "impl<Load, Memory, Lease, Stale> PostResponseHookEffects",
-    ] {
-        assert!(
-            hooks_io.contains(required),
-            "agent-doc-hooks-io must own the function-backed hook effects adapter: {required}"
-        );
-    }
-    for required in [
-        "pub(crate) fn post_response_hook_effects() -> impl agent_doc_hooks_io::PostResponseHookEffects",
         "agent_doc_capture_io::load_active(file)",
         "agent_doc_memory_io::closeout::capture_tsift_memory_closeout",
         "agent_doc_lease_io::local_model::reap_local_model_leases",
         "agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file",
     ] {
         assert!(
-            orchestration_lib.contains(required),
-            "orchestration hook bridge should only supply remaining local effects: {required}"
+            hooks_io.contains(required),
+            "agent-doc-hooks-io must own the post-response hook effects adapter: {required}"
         );
     }
     for forbidden in [
         "agent_kit::hooks",
         "HookRegistry",
         "std::process::Command::new(\"sh\")",
+        "post_response_hook_effects() -> impl agent_doc_hooks_io::PostResponseHookEffects",
+        "default_post_response_hook_effects()",
         "pub fn fire_doc_hooks(",
         "pub fn fire_doc_event(",
         "pub fn fire_claim(",
@@ -5755,6 +5757,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let hooks_io = fs::read_to_string(manifest_dir.join("agent-doc-hooks-io/src/lib.rs")).unwrap();
     let memory_io_closeout =
         fs::read_to_string(manifest_dir.join("agent-doc-memory-io/src/closeout.rs")).unwrap();
     let codex_hook_source =
@@ -5766,9 +5769,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "memory IO closeout should call focused response text projection directly"
     );
     assert!(
-        orchestration_lib.contains("agent_doc_memory_io::closeout::capture_tsift_memory_closeout")
-            && !orchestration_lib.contains("agent_doc_turn::response_text::{"),
-        "orchestration hook bridge should delegate tsift-memory closeout IO instead of owning response projection"
+        hooks_io.contains("agent_doc_memory_io::closeout::capture_tsift_memory_closeout")
+            && !hooks_io.contains("agent_doc_turn::response_text::{"),
+        "hook IO should delegate tsift-memory closeout IO instead of owning response projection"
     );
     assert!(
         codex_hook_source.contains("use agent_doc_turn::response_text::{")
@@ -8208,7 +8211,7 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             "{relative_manifest} should depend on the versioned lease crate"
         );
     }
-    for relative_manifest in ["Cargo.toml", "agent-doc-orchestration/Cargo.toml"] {
+    for relative_manifest in ["agent-doc-hooks-io/Cargo.toml"] {
         let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
         let parsed: toml::Value = toml::from_str(&manifest).unwrap();
         let dependencies = parsed["dependencies"].as_table().unwrap();
@@ -8320,8 +8323,10 @@ fn test_agent_doc_lease_is_freshness_boundary() {
         );
     }
     assert!(
-        orchestration_lib.contains("agent_doc_lease_io::local_model::reap_local_model_leases"),
-        "orchestration hook bridge should call focused lease IO for local-model reap"
+        fs::read_to_string(manifest_dir.join("agent-doc-hooks-io/src/lib.rs"))
+            .unwrap()
+            .contains("agent_doc_lease_io::local_model::reap_local_model_leases"),
+        "hook IO should call focused lease IO for local-model reap"
     );
 }
 
@@ -8355,6 +8360,11 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
             package_version,
             "{relative_manifest} should depend on the versioned plugin-owner crate"
         );
+    }
+    for relative_manifest in ["agent-doc-hooks-io/Cargo.toml"] {
+        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
+        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+        let dependencies = parsed["dependencies"].as_table().unwrap();
         let dependency = dependencies["agent-doc-plugin-owner-io"]
             .as_table()
             .unwrap();
@@ -8526,13 +8536,14 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
             && !orchestration_lib.contains("pub use agent_doc_plugin_owner"),
         "orchestration must not expose a plugin-owner facade"
     );
+    let hooks_io = fs::read_to_string(manifest_dir.join("agent-doc-hooks-io/src/lib.rs")).unwrap();
+    assert!(
+        hooks_io
+            .contains("agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file"),
+        "hook IO should call plugin-owner file-level cleanup IO directly"
+    );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
-    assert!(
-        orchestration_lib
-            .contains("agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file"),
-        "orchestration hook bridge should call plugin-owner file-level cleanup IO directly"
-    );
     for forbidden in [
         "fn jetbrains_consumer_pid(",
         "fn jetbrains_live_buffer_pid(",
@@ -8778,8 +8789,10 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         );
     }
     assert!(
-        orchestration_lib.contains("agent_doc_memory_io::closeout::capture_tsift_memory_closeout"),
-        "orchestration hook bridge should call focused memory IO closeout adapter"
+        fs::read_to_string(manifest_dir.join("agent-doc-hooks-io/src/lib.rs"))
+            .unwrap()
+            .contains("agent_doc_memory_io::closeout::capture_tsift_memory_closeout"),
+        "hook IO should call focused memory IO closeout adapter"
     );
 }
 
@@ -9637,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 43,
+        ledger_rows.len() >= 44,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );

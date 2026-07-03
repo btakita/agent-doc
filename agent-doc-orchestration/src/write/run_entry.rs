@@ -873,7 +873,7 @@ pub fn run_stream(
                 // Fire post_write hook for cross-session coordination
                 let session_id =
                     agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_default();
-                let hook_effects = crate::post_response_hook_effects();
+                let hook_effects = agent_doc_hooks_io::default_post_response_hook_effects();
                 agent_doc_hooks_io::fire_post_write_with_effects(
                     &hook_effects,
                     file,

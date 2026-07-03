@@ -912,6 +912,55 @@ pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> i32 {
     agent_doc_debounce::is_busy(path) as i32
 }
 
+/// Return the `agent:exchange` nodes of `file_path` as a JSON array
+/// (`[{"id","kind","label"}, …]`), or `[]` on any error or when the document has no
+/// exchange component. This is the Phase 4 read surface of the exchange document-tree
+/// (`tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md`): editors use it to
+/// show the exchange's distinct per-response / per-prompt structure.
+///
+/// Read-only by design — mutating operations go through the binary-owned
+/// `agent-doc exchange {remove,add-response,add-prompt,move}` CLI so the snapshot +
+/// CRDT re-baseline runs correctly (editors stay thin; the binary owns document
+/// mutation).
+///
+/// Caller must free with `agent_doc_free_string`.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_exchange_nodes(file_path: *const c_char) -> *mut c_char {
+    fn empty() -> *mut c_char {
+        CString::new("[]").unwrap().into_raw()
+    }
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return empty(),
+    };
+    let Ok(doc) = std::fs::read_to_string(path) else {
+        return empty();
+    };
+    let Ok(components) = agent_doc_element::element::parse(&doc) else {
+        return empty();
+    };
+    let Some(comp) = components.into_iter().find(|c| c.name == "exchange") else {
+        return empty();
+    };
+    let nodes = agent_doc_markdown_ast::exchange_tree::list_exchange_nodes(comp.content(&doc));
+    let json = serde_json::to_string(
+        &nodes
+            .iter()
+            .map(|n| {
+                serde_json::json!({ "id": n.node_id, "kind": n.kind, "label": n.label })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".to_string());
+    CString::new(json)
+        .unwrap_or_else(|_| CString::new("[]").unwrap())
+        .into_raw()
+}
+
 /// Check whether a `.md` file is an opted-in agent-doc session document.
 ///
 /// Returns `1` when the file carries agent-doc frontmatter, matches a

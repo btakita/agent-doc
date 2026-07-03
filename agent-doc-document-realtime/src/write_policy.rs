@@ -389,6 +389,44 @@ pub fn response_converged_in_visible_target(base: &str, candidate: &str, target:
         .all(|heading| response_heading_has_body(&target_exchange, heading))
 }
 
+/// One decision step of the bounded reconcile-before-accept loop (Phase 2,
+/// `#adoc-live-prompt-drift-operator-edit`). The realtime model owns the decision;
+/// the caller owns the IO (reading the operator live buffer and settling between
+/// rounds).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OperatorReconcileStep {
+    /// The operator buffer is stable (unchanged since the previous read) and still
+    /// presents the response — adopt this content as the reconciled snapshot.
+    Accept(String),
+    /// The operator is still editing (buffer changed since the previous read) —
+    /// keep looping until it settles or the caller's bound is hit.
+    Continue,
+    /// The settled buffer no longer carries the response — fail closed; the
+    /// existing point-in-time proof stays authoritative rather than committing a
+    /// buffer that dropped the agent's turn.
+    FailClosed,
+}
+
+/// Decide one reconcile step. Given the proven response `reference` and two
+/// consecutive operator live-buffer reads (`prev`, `curr`): an unchanged buffer
+/// (`curr == prev`) that still presents the response is accepted; an unchanged
+/// buffer that dropped the response fails closed; a changed buffer means the
+/// operator is still editing, so continue the loop.
+pub fn operator_reconcile_step(
+    reference: &str,
+    prev: Option<&str>,
+    curr: &str,
+) -> OperatorReconcileStep {
+    if prev != Some(curr) {
+        return OperatorReconcileStep::Continue;
+    }
+    if buffer_presents_reference_response(reference, curr) {
+        OperatorReconcileStep::Accept(curr.to_string())
+    } else {
+        OperatorReconcileStep::FailClosed
+    }
+}
+
 /// True when `buffer` still presents the latest `### Re:` response block found in
 /// `reference` — matched by heading with a non-empty body — even if the operator
 /// edited the body. `reference` is the proven ack content (which carries the
@@ -2720,6 +2758,45 @@ Same content.
         let newer = doc_with_exchange("❯ prompt\n", "");
 
         assert!(!buffer_presents_reference_response(&reference, &newer));
+    }
+
+    #[test]
+    fn operator_reconcile_step_continues_while_buffer_still_changing() {
+        let reference = doc_with_exchange("❯ p\n### Re: t — opus\n\nBody.\n", "");
+        let prev = doc_with_exchange("❯ p\n### Re: t — opus\n\nBod.\n", "");
+        let curr = doc_with_exchange("❯ p\n### Re: t — opus\n\nBody edited.\n", "");
+        assert_eq!(
+            operator_reconcile_step(&reference, Some(&prev), &curr),
+            OperatorReconcileStep::Continue,
+            "a changed buffer means the operator is still editing"
+        );
+        // First read (no prev) is never stable.
+        assert_eq!(
+            operator_reconcile_step(&reference, None, &curr),
+            OperatorReconcileStep::Continue
+        );
+    }
+
+    #[test]
+    fn operator_reconcile_step_accepts_stable_buffer_presenting_response() {
+        let reference = doc_with_exchange("❯ p\n### Re: t — opus\n\nAgent body.\n", "");
+        let settled = doc_with_exchange("❯ p\n### Re: t — opus\n\nOperator body, 4th.\n", "");
+        assert_eq!(
+            operator_reconcile_step(&reference, Some(&settled), &settled),
+            OperatorReconcileStep::Accept(settled.clone()),
+            "a stable buffer still presenting the response is adopted"
+        );
+    }
+
+    #[test]
+    fn operator_reconcile_step_fails_closed_when_stable_buffer_dropped_response() {
+        let reference = doc_with_exchange("❯ p\n### Re: t — opus\n\nAgent body.\n", "");
+        let dropped = doc_with_exchange("❯ p\n", "");
+        assert_eq!(
+            operator_reconcile_step(&reference, Some(&dropped), &dropped),
+            OperatorReconcileStep::FailClosed,
+            "a stable buffer that dropped the response must not be adopted"
+        );
     }
 
     #[test]

@@ -3,12 +3,11 @@
 use super::*;
 use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;
 use agent_doc_document_realtime::write_policy::{
-    WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
-    WholeBufferDeliveryAction, ack_content_contains_latest_response,
-    buffer_presents_reference_response, decide_whole_buffer_delivery,
+    OperatorReconcileStep, WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
+    WholeBufferDeliveryAction, ack_content_contains_latest_response, decide_whole_buffer_delivery,
     dropped_prompt_lines_after_content_ours, first_response_heading,
     ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, new_agent_response_headings,
-    response_already_in_current, response_converged_in_visible_target,
+    operator_reconcile_step, response_already_in_current, response_converged_in_visible_target,
     response_target_disjoint_from_user_edit,
 };
 #[cfg(test)]
@@ -504,24 +503,10 @@ pub(crate) fn ack_content_disk_write_proof(
     }
 }
 
-/// `#adoc-live-prompt-drift-operator-edit`: reconcile the ack-content snapshot the
-/// closeout is about to persist FORWARD to the operator's *newer* live buffer when
-/// the operator kept editing past the ack capture (so the ack is stale relative to
-/// the live buffer). The newer operator-authoritative buffer is adopted as the
-/// snapshot — provided it still presents this cycle's response and is structurally
-/// clean — so the disk-write-through proof matches the live buffer instead of
-/// wedging on `stale_source_buffer`, and disk/snapshot/CRDT all persist the
-/// operator's latest edits consistently. Returns true when a forward reconcile
-/// happened. Never regresses to an older or non-authoritative buffer.
-pub(crate) fn reconcile_ack_snapshot_to_newer_operator_buffer(
-    file: &Path,
-    editor_id: Option<&str>,
-    decision: &mut IpcRepairDecision,
-) -> bool {
-    let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
-        return false;
-    };
-    let Some(newer) = live_buffer_file_keys(file)
+/// Newest operator-authoritative live-buffer content for `editor_id`, or `None`
+/// when no live operator buffer is present.
+fn newest_operator_authoritative_buffer(file: &Path, editor_id: &str) -> Option<String> {
+    live_buffer_file_keys(file)
         .into_iter()
         .flat_map(|file_key| agent_doc_debounce::live_buffer_snapshots(&file_key))
         .filter(|snapshot| {
@@ -535,40 +520,110 @@ pub(crate) fn reconcile_ack_snapshot_to_newer_operator_buffer(
             snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
         })
         .max_by_key(|snapshot| snapshot.timestamp_ms)
-    else {
+        .and_then(|snapshot| snapshot.content)
+}
+
+/// Settle the editor (wait out active typing) so the next live-buffer read is
+/// quiescent. Bounded by the ack-content settle/timeout budget; a no-op when the
+/// editor is not typing.
+fn settle_editor_typing(file: &Path) {
+    for key in live_buffer_file_keys(file) {
+        if agent_doc_debounce::is_typing_via_file(&key, ACK_CONTENT_TYPING_SETTLE_MS) {
+            agent_doc_debounce::await_idle_via_file(
+                &key,
+                ACK_CONTENT_TYPING_SETTLE_MS,
+                ACK_CONTENT_TYPING_TIMEOUT_MS,
+            );
+        }
+    }
+}
+
+/// Max rounds of the bounded reconcile-before-accept loop. Each round settles the
+/// editor and re-samples the operator buffer; the loop ends when the buffer is
+/// stable across two reads (a fixpoint) or this bound is hit.
+const ACK_RECONCILE_MAX_ROUNDS: usize = 4;
+
+/// `#adoc-live-prompt-drift-operator-edit` (Phase 2): the bounded
+/// reconcile-before-accept loop. When the operator kept editing past the ack
+/// capture (so the ack snapshot is stale relative to the live buffer), settle the
+/// editor and re-sample its buffer until it reaches a fixpoint (unchanged across
+/// two reads) or the round bound is hit, then adopt that settled
+/// operator-authoritative buffer as the snapshot — provided it still presents this
+/// cycle's response and is structurally clean. This makes the downstream
+/// disk-write-through proof match the live buffer instead of wedging on
+/// `stale_source_buffer`, and persists the operator's *final* edits (not a
+/// mid-keystroke sample) to disk/snapshot/CRDT consistently. The decision each
+/// round is owned by the realtime model (`operator_reconcile_step`); this function
+/// owns only the IO/settling. Returns true when a reconcile happened; never
+/// regresses to an older or non-authoritative buffer, and fails closed (returns
+/// false) when a settled buffer dropped the response.
+pub(crate) fn reconcile_ack_snapshot_to_newer_operator_buffer(
+    file: &Path,
+    editor_id: Option<&str>,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
         return false;
     };
-    let Some(newer_content) = newer.content.as_deref() else {
-        return false;
-    };
-    // Already consistent — nothing to reconcile.
-    if newer_content == decision.snapshot_content {
-        return false;
-    }
-    // Only reconcile forward when the newer operator buffer still carries this
-    // cycle's response; otherwise leave the existing fail-closed proof to run so a
-    // genuinely dropped response is never silently committed.
-    if !buffer_presents_reference_response(&decision.snapshot_content, newer_content) {
-        return false;
-    }
-    // Structural safety: never adopt a corrupt operator buffer.
-    if element::structural_corruption_reason(newer_content).is_some() {
-        return false;
+    let mut prev: Option<String> = None;
+    for round in 0..ACK_RECONCILE_MAX_ROUNDS {
+        settle_editor_typing(file);
+        let Some(curr) = newest_operator_authoritative_buffer(file, editor_id) else {
+            return false;
+        };
+        match operator_reconcile_step(&decision.snapshot_content, prev.as_deref(), &curr) {
+            OperatorReconcileStep::Accept(content) => {
+                // Already consistent — nothing to reconcile.
+                if content == decision.snapshot_content {
+                    return false;
+                }
+                // Structural safety: never adopt a corrupt operator buffer.
+                if element::structural_corruption_reason(&content).is_some() {
+                    return false;
+                }
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "ack_content_snapshot_reconciled_forward file={} editor_id={} reason=operator_buffer_ahead rounds={} stale_len={} stale_hash={} newer_len={} newer_hash={}",
+                        file.display(),
+                        editor_id,
+                        round + 1,
+                        decision.snapshot_content.len(),
+                        agent_doc_hash::content_hash(&decision.snapshot_content),
+                        content.len(),
+                        agent_doc_hash::content_hash(&content),
+                    ),
+                );
+                decision.snapshot_content = content;
+                return true;
+            }
+            OperatorReconcileStep::Continue => {
+                prev = Some(curr);
+            }
+            OperatorReconcileStep::FailClosed => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "ack_content_snapshot_reconcile_fail_closed file={} editor_id={} reason=settled_buffer_dropped_response rounds={}",
+                        file.display(),
+                        editor_id,
+                        round + 1,
+                    ),
+                );
+                return false;
+            }
+        }
     }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ack_content_snapshot_reconciled_forward file={} editor_id={} reason=operator_buffer_ahead stale_len={} stale_hash={} newer_len={} newer_hash={}",
+            "ack_content_snapshot_reconcile_timeout file={} editor_id={} reason=operator_still_editing rounds={}",
             file.display(),
             editor_id,
-            decision.snapshot_content.len(),
-            agent_doc_hash::content_hash(&decision.snapshot_content),
-            newer_content.len(),
-            agent_doc_hash::content_hash(newer_content),
+            ACK_RECONCILE_MAX_ROUNDS,
         ),
     );
-    decision.snapshot_content = newer_content.to_string();
-    true
+    false
 }
 
 #[cfg(test)]

@@ -1703,7 +1703,15 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // repair now logs the deferred visible-write guard reason before
         // falling back to file-IPC instead of hard-erroring the closeout. The
         // recovery still routes through the existing file-IPC fallback outcome.
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 27,
+        // 27 -> 32 (#adoc-live-prompt-drift-operator-edit): the operator-edit
+        // reconcile path adds diagnostic `reason=` log tokens on the ack-content
+        // forward-reconcile — `operator_buffer_ahead` (Phase 1 + Phase 2 loop),
+        // `settled_buffer_dropped_response` (fail-closed), and
+        // `operator_still_editing` (bounded-loop timeout). These are ops.log
+        // diagnostics for the existing snapshot-adoption recovery, not new flow
+        // branches; the convergence decision routes through the realtime model's
+        // `operator_reconcile_step`.
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 32,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not

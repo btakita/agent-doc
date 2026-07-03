@@ -11294,6 +11294,9 @@ fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
         manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
     )
     .unwrap();
+    let prompt_bearing_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/prompt_bearing.rs"))
+            .unwrap();
     for forbidden in [
         "pub(crate) fn strip_queue_components_for_unstarted_prompt_guard",
         "pub(crate) fn prompt_target_is_immediately_before_existing_response",
@@ -11310,8 +11313,8 @@ fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
         "agent_doc_diff::first_unstarted_prompt_bearing_change_from_diff",
     ] {
         assert!(
-            closeout_guards.contains(required),
-            "session_check closeout guards should call the focused diff helper directly: {required}"
+            prompt_bearing_io.contains(required),
+            "session-check prompt-bearing IO should call the focused diff helper directly: {required}"
         );
     }
 }

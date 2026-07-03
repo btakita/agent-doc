@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -89,7 +89,24 @@ The realtime transport is already there — admin sessions hold a WebSocket at `
 Captured as backlog **#pipe-rt-notify**, full plan at `src/equityfundingsource-dev/prds/admin-pipeline-realtime-notifications.md` (committed to EFS `44895ab`). Queue's paused — unpause or say the word and I'll do 1 + 2; 3 needs your definition of "preapproval."
 
 One flag: the queue line `/goal Implement backlog item(s): #3q3g` points at `#3q3g`, which isn't a backlog id — did you mean **#pipe-rt-notify**?
-<!-- agent:boundary:a8c27d7b -->
+
+
+### Re: go-mode backlog (lender requirements form, deploy) — opus-4-8
+
+The concurrent agent-doc sync refactor landed (`f3afce48`) and the read/convergence path recovered, but the JB plugin's **patch-apply IPC is still wedged** (`file_apply_failed`), so this response was persisted via the git-direct path again. Closing/reopening the file in JB will show it.
+
+Two housekeeping fixes this cycle:
+- **`#vcyr` → icebox.** Your edit replaced the `#vcyr` line (Robert admin-login link, blocked on a Cloudflare email-sending token) with the two new items. I moved it to the icebox so it isn't lost — if the removal was intentional, ignore this; if not, say so and I'll restore it to the backlog.
+- **`go` marker was malformed.** `<!-- agent:backlog … go -->` needs `go=<value>`, so the bare `go` was rejected by the lint gate and **never activated go-mode**. I normalized the marker; go-mode is currently off.
+
+Backlog now (top-first): **#pipe-rt-notify** (realtime pipeline notifications — plan in EFS `44895ab`), **lender requirements form** (admin fills the requirements form for the lender in the lender-pipeline dialog), **deploy**.
+
+Before I drive this: the last item is a **production deploy**, and I won't auto-ship on the back of a malformed `go`. How do you want to proceed?
+- **All three, then deploy to prod** — reply `go` and I'll set valid go-mode.
+- **Start with one** — e.g. `do lender form` or `do #pipe-rt-notify`; I'll hold deploy until you confirm.
+
+Both new items are real features in `src/equityfundingsource-dev`; I'll explore and implement whichever you point me at.
+<!-- agent:boundary:d39aaa6f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,7 +135,8 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 - [ ] [#pipe-rt-notify] [recommended] Admin pipeline realtime + desktop notifications. Bus already exists (AdminEventsRoom / notify_admin_event_ / admin-events hub, #7djh) — do NOT add deal_pipeline_bus. Work: (1) client desktop Notification API + toast on pipeline event types, (2) emit lender_interest_created on investor self-service interest path, (3) preapproval trigger blocked on defining what 'preapproval' is. Plan: src/equityfundingsource-dev/prds/admin-pipeline-realtime-notifications.md
-- [/] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send; no active unused Robert login tokens remain.
+- [ ] [#6em3] In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=96176122-b287-4c47-823e-88a71a831f7c&dialog=lender, allow the admin to fill out the requirements form for the lender.
+- [ ] [#7jj2] deploy
 <!-- /agent:backlog -->
 
 ## Review
@@ -157,6 +175,7 @@ After 20:30
 ## Completed / Reaped
 
 <!-- agent:icebox -->
+- [ ] [#vcyr] Send rwaldman100+admin@gmail.com admin login link to btak.dev+admin@gmail.com once a working Cloudflare Email Sending API token is available or Brian explicitly confirms an alternate sender/body. Verified Robert is active admin; current local Cloudflare/Resend credentials cannot send. (Deferred from backlog 2026-07-03; operator replaced the line — restore if unintended.)
 - [ ] [#cutover-checklist] [recommended] Write (do not execute) the workers.dev to equityfundingsource.com custom-domain + Google Workspace SSO cutover checklist doc: routing for /, /funded-deals, admin routes; /login/access-callback; rollback steps. Execution stays gated on #m6ch creds. Advances #efs-cutover-sso-plan/#next-steps.
 - [ ] [#ghl-stage-bridge] [recommended] Implement an event-driven GHL stage bridge from EFS Deal Pipeline state to HighLevel contacts/opportunities/workflows for Processing, Underwriting, Terms negotiation, and Closing while keeping EFS/D1 canonical for loan, lender-selection, borrower portal, document, audit, and funding state.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

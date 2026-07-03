@@ -120,13 +120,14 @@ impl ClaimRuntimeEffects for CliClaimRuntimeEffects {
         context_session: Option<&str>,
         col_args: &[String],
     ) -> anyhow::Result<String> {
-        agent_doc_orchestration::route::provision_pane(
+        agent_doc_route_io::startup::provision_pane(
             tmux,
             file,
             session_id,
             file_path,
             context_session,
             col_args,
+            agent_doc_orchestration::route::route_startup_effects(),
         )
     }
 }
@@ -165,7 +166,14 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         file_arg: &str,
         window: Option<&str>,
     ) -> anyhow::Result<String> {
-        agent_doc_orchestration::route::auto_start(tmux, file, session_id, file_arg, window)
+        agent_doc_route_io::startup::auto_start(
+            tmux,
+            file,
+            session_id,
+            file_arg,
+            window,
+            agent_doc_orchestration::route::route_startup_effects(),
+        )
     }
 }
 
@@ -225,13 +233,14 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         context_session: Option<&str>,
         col_args: &[String],
     ) -> anyhow::Result<String> {
-        agent_doc_orchestration::route::provision_pane(
+        agent_doc_route_io::startup::provision_pane(
             tmux,
             file,
             session_id,
             file_path,
             context_session,
             col_args,
+            agent_doc_orchestration::route::route_startup_effects(),
         )
     }
 }

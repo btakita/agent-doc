@@ -252,6 +252,7 @@ use agent_doc_route_io::pane_resolution::{
 };
 use agent_doc_route_io::restart_handoff::wait_for_busy_restart_handoff;
 use agent_doc_route_io::session_resolution::resolve_target_session;
+use agent_doc_route_io::startup::RouteStartupEffects;
 use agent_doc_route_io::startup_debounce::await_idle;
 use agent_doc_route_io::supervisor_runtime::{
     query_supervisor_health, query_supervisor_runtime, restart_via_supervisor,
@@ -415,6 +416,14 @@ fn route_dispatch_only_effects() -> DispatchOnlyRouteEffects {
         emit_busy_route_diagnostic,
         dispatch_only_starting_pane_ready_timeout,
         file_route_dispatch_bug_report,
+    }
+}
+
+pub fn route_startup_effects() -> RouteStartupEffects {
+    RouteStartupEffects {
+        route_dispatch_effects: route_dispatch_effects(),
+        dispatch_only_route_effects: route_dispatch_only_effects(),
+        route_cycle_ack_effects: route_cycle_ack_effects(),
     }
 }
 
@@ -2562,8 +2571,8 @@ fn route_via_authoritative_actor(
 mod pane_resolution;
 pub(crate) use pane_resolution::*;
 
+#[cfg(test)]
 mod startup;
-pub use startup::*;
 
 #[cfg(test)]
 pub(crate) static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());

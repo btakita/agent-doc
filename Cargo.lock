@@ -91,6 +91,7 @@ dependencies = [
  "agent-doc-repair-io",
  "agent-doc-response-replay-io",
  "agent-doc-response-toc-io",
+ "agent-doc-route-io",
  "agent-doc-run-context-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",

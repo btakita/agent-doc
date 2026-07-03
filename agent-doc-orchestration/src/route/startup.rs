@@ -1,5 +1,7 @@
 //! Route startup/provisioning adapters.
 
+#![allow(dead_code)]
+
 use super::*;
 #[cfg(test)]
 use agent_doc_route_io::session_resolution::evict_previous_stash_pane_entry;

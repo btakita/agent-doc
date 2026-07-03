@@ -401,7 +401,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
     fail_if_recent_session_loss_window(file, session_id)?;
     let split_before = is_first_column(file, col_args);
     ensure_auto_start_target_session(tmux, None, target_session, harness)?;
-    auto_start_in_session(
+    agent_doc_route_io::startup::auto_start_in_session(
         tmux,
         file,
         session_id,
@@ -413,6 +413,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
         None,
         Some(created_panes),
         true,
+        route_startup_effects(),
     )
 }
 
@@ -616,7 +617,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
             fail_if_recent_session_loss_window(file, session_id)?;
             let split_before = is_first_column(file, col_args);
             ensure_auto_start_target_session(tmux, None, target_session, harness)?;
-            return auto_start_in_session(
+            return agent_doc_route_io::startup::auto_start_in_session(
                 tmux,
                 file,
                 session_id,
@@ -628,6 +629,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 Some(registered_pane.as_str()),
                 Some(created_panes),
                 false,
+                route_startup_effects(),
             );
         }
 
@@ -1092,7 +1094,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
     fail_if_recent_session_loss_window(file, session_id)?;
     let split_before = is_first_column(file, col_args);
     ensure_auto_start_target_session(tmux, None, target_session, harness)?;
-    auto_start_in_session(
+    agent_doc_route_io::startup::auto_start_in_session(
         tmux,
         file,
         session_id,
@@ -1104,6 +1106,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         None,
         Some(created_panes),
         false,
+        route_startup_effects(),
     )
 }
 

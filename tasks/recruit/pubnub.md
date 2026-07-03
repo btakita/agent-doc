@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -129,18 +129,34 @@ I've filed this as **`#pubnubpoc` [recommended]** in the backlog with those exac
 2. **Don't build first.** A recruiter screen doesn't reward a prototype, and you'd be investing before confirming the role/timeline.
 3. **After you advance (technical round):** build the tight `#pubnubpoc` connector — that's where working code pays off.
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
+### Re: The brief — lazily → signal-space → Signal Patchboard — opus-4-8
 
-ipc_proof_insufficient file=tasks/recruit/pubnub.md source=socket_already_applied patch_id=8fed8071-f3ea-4dbc-9010-e92f718c999c invariant=disk_missing_response_probe recovery=content_ours_snapshot_visible_response_repair response_sha256=1c1130553aaba38ff7d8dccb8d2c621ac22c62db86d161d1abff41e88760c4f5 current_len=3771 current_hash=5d8f2bd05a7f95c9ec50ac9d6775d9c3dedb98a5f761eda663ce8b6b78fbfafa repaired_len=10765 repaired_hash=0bbd69d8b0fd630f1c909b0f66b7f2b66d532ee2310b0e472b2a31feb24f072d doc=pubnub session=4272fa95-d314-4843-bd18-e21c8c99823a turn=cycle-1783037818790
+**One-liner:** *I build a layered real-time reactive stack in Rust — a cross-language signals core, a live signal-graph surface, and a realtime patchboard product on top — and PubNub's pub/sub is the natural transport at the top layer.*
+
+**The stack (bottom-up, each layer depends only on the one below):**
+
+**`lazily`** → cross-language reactive signals core (Rust, with Python/Zig/JS/Dart/Kotlin ports that interoperate as one live system over FFI/IPC/WebSockets/WebRTC/WASM). The reactive primitive: lazily-resolved dependencies, cascade invalidation, scoped cancellation. *Working.*
+
+**`signal-space`** → live signal-graph surface built on lazily; the shared domain interface. Projects reactive state into an inspectable `SignalGraph` shape that adapters read and write against. *Working.*
+
+**`Signal Patchboard`** (`patchboard`) → product adapter over signal-space: wires live signals through inspectable reactive circuits, trains small learnable mixers from timeline feedback, and gates agent loops so they only fire when a situation deserves reasoning. Owns the runtime authority signal-space deliberately doesn't — including a **transport-agnostic realtime I/O host** (ingress/egress `IoBinding`s). *In active development.*
+
 ```
-<!-- agent:boundary:109a444a -->
+lazily            reactive signals core          (working)
+   └─> signal-space   live signal-graph surface   (working)
+          └─> Signal Patchboard   realtime product + I/O host   (in development)
+                    └─ transport layer ◀── PubNub pub/sub slots in here
+```
+
+**The PubNub tie-in:** Signal Patchboard's I/O host is transport-agnostic by design (`#spb3`, `IoBinding` descriptors, WebSocket spine already in the plan). **PubNub pub/sub drops straight into that layer** — subscribe → signal on ingress, signal-delta → publish on egress. I built the port their product plugs into before I ever looked at the role.
+
+**Spoken version for the call (~2 sentences):**
+> "I build a layered real-time reactive stack in Rust: `lazily` is the cross-language signals core, `signal-space` is a live signal-graph surface on top of it, and `Signal Patchboard` is a realtime product layer that wires those signals through inspectable circuits with a transport-agnostic I/O host. lazily and signal-space are working today; the patchboard is in active development — and PubNub's pub/sub is exactly the kind of transport its I/O layer is built to plug into."
+
+Honesty guardrail unchanged: lazily + signal-space **working**, patchboard **in development**, PubNub connector **not started** — say "designing," never "built."
+Please repost the brief with lazily -> signal-space -> Signal Patchboard.
+<!-- agent:boundary:ddf8786d -->
 <!-- /agent:exchange -->
 
 ## Queue

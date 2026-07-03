@@ -180,7 +180,11 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     // #22a8: mirror the live pipeline phase into the document frontmatter now the
     // response is fully on disk (doc lock still held, so no writer races).
     if let Ok(Some(st)) = agent_doc_cycle_state_io::load(file) {
-        crate::pipeline_frontmatter::mirror_pipeline_frontmatter(file, &st);
+        agent_doc_cycle_state_io::pipeline_frontmatter::mirror_pipeline_frontmatter(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            &st,
+        );
     }
 
     drop(doc_lock);
@@ -492,7 +496,11 @@ pub fn run_template(
     // #22a8: mirror the live pipeline phase into the document frontmatter now the
     // response is fully on disk (doc lock still held, so no writer races).
     if let Ok(Some(st)) = agent_doc_cycle_state_io::load(file) {
-        crate::pipeline_frontmatter::mirror_pipeline_frontmatter(file, &st);
+        agent_doc_cycle_state_io::pipeline_frontmatter::mirror_pipeline_frontmatter(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            &st,
+        );
     }
 
     drop(doc_lock);

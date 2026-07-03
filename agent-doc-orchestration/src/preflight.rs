@@ -2892,7 +2892,8 @@ mod tests {
         );
         std::fs::write(&doc, drained).unwrap();
         agent_doc_snapshot_io::save(&doc, drained, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(active),
@@ -2977,7 +2978,8 @@ mod tests {
         );
         std::fs::write(&doc, drained_plus_edit).unwrap();
         agent_doc_snapshot_io::save(&doc, drained_plus_edit, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(active),

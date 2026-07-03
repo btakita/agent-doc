@@ -16,13 +16,36 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
+use crate::one_shot_sync::OneShotQueueSyncResult;
 use agent_doc_element_backlog::backlog;
+#[cfg(test)]
+use agent_doc_queue::queue_heads::active_queue_head_text;
 use agent_doc_queue::queue_heads::{ActiveQueueHeadKind, classify_active_queue_head};
-use agent_doc_queue_io::one_shot_sync::OneShotQueueSyncResult;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConsumeOptions {
     pub force_disk: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueCommandConsumeOutcome {
+    pub consumed_text: String,
+    pub remaining: usize,
+    pub drained: bool,
+}
+
+pub trait QueueCommandEffects {
+    fn consume_queue_prompt_force_disk(
+        &self,
+        file: &Path,
+    ) -> Result<Option<QueueCommandConsumeOutcome>>;
+    fn consume_queue_prompt_with_outcome(
+        &self,
+        file: &Path,
+    ) -> Result<Option<QueueCommandConsumeOutcome>>;
+    fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
+    fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
+    fn prune_noise_queue_heads(&self, file: &Path) -> Result<usize>;
 }
 
 /// Explicitly strike the leading `count` free-text queue head(s) — the agent
@@ -42,7 +65,12 @@ pub struct ConsumeOptions {
 /// guidance to use `--done`, so it can never silently desync a head from its
 /// still-open backlog item. Writes document + snapshot like `sync`; the caller
 /// closes out through the normal commit path.
-pub fn consume_with_options(file: &Path, count: usize, options: ConsumeOptions) -> Result<()> {
+pub fn consume_with_options(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    count: usize,
+    options: ConsumeOptions,
+) -> Result<()> {
     // #sqedit-race Phase 2: hold the queue-edit lease for the whole strike loop so
     // preflight queue maintenance and the supervisor idle-watch defer instead of
     // round-tripping a torn intermediate queue. Released on drop (incl. early
@@ -77,9 +105,9 @@ pub fn consume_with_options(file: &Path, count: usize, options: ConsumeOptions) 
             ActiveQueueHeadKind::FreeText => {}
         }
         let outcome = if options.force_disk {
-            crate::write::consume_queue_prompt_force_disk(file)?
+            effects.consume_queue_prompt_force_disk(file)?
         } else {
-            crate::write::consume_queue_prompt_with_outcome(file)?
+            effects.consume_queue_prompt_with_outcome(file)?
         };
         match outcome {
             Some(outcome) => {
@@ -118,9 +146,9 @@ pub fn consume_with_options(file: &Path, count: usize, options: ConsumeOptions) 
 /// Escape hatch (#orphanqhead): strike an orphaned id-backed queue head by id.
 /// Delegates to the write-layer striker, which guards against desyncing live
 /// open backlog work and keeps the document and snapshot in sync.
-pub fn consume_orphan_id(file: &Path, id: &str) -> Result<()> {
+pub fn consume_orphan_id(effects: &impl QueueCommandEffects, file: &Path, id: &str) -> Result<()> {
     let normalized = backlog::normalize_pending_id(id);
-    if crate::write::strike_orphan_id_backed_queue_head(file, id)? {
+    if effects.strike_orphan_id_backed_queue_head(file, id)? {
         println!(
             "{}: struck orphaned id-backed queue head [#{}] (#orphanqhead).",
             file.display(),
@@ -136,9 +164,13 @@ pub fn consume_orphan_id(file: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn acknowledge_open_id(file: &Path, id: &str) -> Result<()> {
+pub fn acknowledge_open_id(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    id: &str,
+) -> Result<()> {
     let normalized = backlog::normalize_pending_id(id);
-    if crate::write::acknowledge_open_id_backed_queue_head(file, id)? {
+    if effects.acknowledge_open_id_backed_queue_head(file, id)? {
         println!(
             "{}: acknowledged id-backed correction head [#{}] while preserving the open backlog item (#freshqueueauth).",
             file.display(),
@@ -154,8 +186,8 @@ pub fn acknowledge_open_id(file: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn consume(file: &Path, count: usize) -> Result<()> {
-    consume_with_options(file, count, ConsumeOptions::default())
+pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) -> Result<()> {
+    consume_with_options(effects, file, count, ConsumeOptions::default())
 }
 
 /// `agent-doc queue prune-noise <FILE>` — strike every non-drainable noise queue
@@ -171,11 +203,11 @@ pub fn consume(file: &Path, count: usize) -> Result<()> {
 /// drainable are never removed by this command.
 /// Supervisor-safe: routes through the same editor-IPC-converged write path the
 /// closeout strikes use.
-pub fn prune_noise(file: &Path) -> Result<()> {
+pub fn prune_noise(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
     // #sqedit-race Phase 2: hold the queue-edit lease across the prune so the
     // supervisor idle-watch + preflight maintenance defer (single queue writer).
     let _queue_edit_guard = agent_doc_queue::queue_edit_owner::QueueEditGuard::acquire(file);
-    let struck = crate::write::prune_noise_queue_heads(file)?;
+    let struck = effects.prune_noise_queue_heads(file)?;
     if struck == 0 {
         println!(
             "{}: no predicate-proven queue heads to prune (queue inactive, empty, or all heads are drainable/live).",
@@ -192,10 +224,9 @@ pub fn prune_noise(file: &Path) -> Result<()> {
 }
 
 pub fn sync(file: &Path) -> Result<()> {
-    match agent_doc_queue_io::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(
-        file,
-        |path, content| agent_doc_snapshot_io::save(path, content, agent_doc_ops_log_io::log_op),
-    )? {
+    match crate::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(file, |path, content| {
+        agent_doc_snapshot_io::save(path, content, agent_doc_ops_log_io::log_op)
+    })? {
         OneShotQueueSyncResult::AlreadyInSync {
             requested_count,
             mode,
@@ -219,16 +250,14 @@ pub fn sync(file: &Path) -> Result<()> {
                 println!(
                     "{}: skipped already represented backlog id(s): {} (reason: already_in_queue)",
                     file.display(),
-                    agent_doc_queue_io::one_shot_sync::format_queue_ids(&applied.already_present)
+                    crate::one_shot_sync::format_queue_ids(&applied.already_present)
                 );
             }
             if !applied.newly_materialized.is_empty() {
                 println!(
                     "{}: materialized backlog id(s): {}",
                     file.display(),
-                    agent_doc_queue_io::one_shot_sync::format_queue_ids(
-                        &applied.newly_materialized
-                    )
+                    crate::one_shot_sync::format_queue_ids(&applied.newly_materialized)
                 );
             }
             if let Some(warning) = applied.snapshot_warning {
@@ -242,6 +271,55 @@ pub fn sync(file: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct FakeEffects;
+
+    impl FakeEffects {
+        fn strike_free_text_head(file: &Path) -> Result<Option<QueueCommandConsumeOutcome>> {
+            let content = std::fs::read_to_string(file)?;
+            let Some(head) = active_queue_head_text(&content)? else {
+                return Ok(None);
+            };
+            let needle = format!("- {head}");
+            let replacement = format!("- ~{head}~");
+            let updated = content.replacen(&needle, &replacement, 1);
+            std::fs::write(file, &updated)?;
+            Ok(Some(QueueCommandConsumeOutcome {
+                consumed_text: head,
+                remaining: usize::from(active_queue_head_text(&updated)?.is_some()),
+                drained: false,
+            }))
+        }
+    }
+
+    impl QueueCommandEffects for FakeEffects {
+        fn consume_queue_prompt_force_disk(
+            &self,
+            file: &Path,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Self::strike_free_text_head(file)
+        }
+
+        fn consume_queue_prompt_with_outcome(
+            &self,
+            file: &Path,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Self::strike_free_text_head(file)
+        }
+
+        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            Ok(true)
+        }
+
+        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+            Ok(true)
+        }
+
+        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+            Ok(0)
+        }
+    }
 
     #[test]
     fn sync_accepts_enqueue_marker_without_queue_attr() {
@@ -299,7 +377,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        consume_with_options(&doc, 2, ConsumeOptions { force_disk: true })
+        let effects = FakeEffects;
+        consume_with_options(&effects, &doc, 2, ConsumeOptions { force_disk: true })
             .expect("consume two answered free-text heads");
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -333,7 +412,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        consume_with_options(&doc, 5, ConsumeOptions { force_disk: true })
+        let effects = FakeEffects;
+        consume_with_options(&effects, &doc, 5, ConsumeOptions { force_disk: true })
             .expect("consume should stop at the id-backed head");
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -361,7 +441,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let err = consume(&doc, 1).unwrap_err();
+        let effects = FakeEffects;
+        let err = consume(&effects, &doc, 1).unwrap_err();
         assert!(
             err.to_string().contains("id-backed"),
             "a bare [#id] head must be refused, not struck: {err}"
@@ -387,7 +468,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let err = consume(&doc, 1).unwrap_err();
+        let effects = FakeEffects;
+        let err = consume(&effects, &doc, 1).unwrap_err();
         assert!(
             err.to_string().contains("id-backed"),
             "should refuse a leading id-backed head: {err}"

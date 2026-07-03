@@ -44,10 +44,8 @@ pub mod flow;
 pub mod focus;
 pub mod git;
 pub use agent_doc_run_context_io as graph;
-pub(crate) mod pipeline_frontmatter;
 pub mod preflight;
 pub mod project_controller;
-pub mod queue_cmd;
 pub use agent_doc_queue_io::queue_continuation;
 pub mod realtime_model;
 pub mod repair;
@@ -61,7 +59,53 @@ pub mod start;
 pub mod stream;
 pub mod sync;
 pub mod write;
-pub mod write_queue;
+
+pub(crate) struct PipelineFrontmatterEffects;
+
+pub(crate) const PIPELINE_FRONTMATTER_EFFECTS: PipelineFrontmatterEffects =
+    PipelineFrontmatterEffects;
+
+impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
+    for PipelineFrontmatterEffects
+{
+    fn converge_or_disk_write(
+        &self,
+        file: &std::path::Path,
+        current_content: &str,
+        target_content: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        crate::write::converge_or_disk_write(file, current_content, target_content, reason)
+    }
+
+    fn log_op(&self, file: &std::path::Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+pub(crate) struct SessionActorWriteQueueSubmitter;
+
+pub(crate) static SESSION_ACTOR_WRITE_QUEUE: SessionActorWriteQueueSubmitter =
+    SessionActorWriteQueueSubmitter;
+
+impl agent_doc_queue_io::write_queue::DocumentWriteQueueSubmitter
+    for SessionActorWriteQueueSubmitter
+{
+    fn submit<R, F>(
+        &self,
+        base_dir: &std::path::Path,
+        file: &str,
+        kind: agent_doc_document_realtime::session_ops::SessionOpKind,
+        job: F,
+    ) -> anyhow::Result<R>
+    where
+        R: Send + 'static,
+        F: FnOnce() -> R + Send + 'static,
+    {
+        let actor = crate::session_actor::document_actor_in(base_dir, file);
+        actor.submit(kind, move |_ctx| job())
+    }
+}
 
 fn load_active_capture_for_hooks(
     file: &std::path::Path,

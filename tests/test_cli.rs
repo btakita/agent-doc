@@ -6712,29 +6712,33 @@ fn test_agent_doc_queue_io_owns_write_queue_serialization_policy() {
         );
     }
 
-    let orchestration_write_queue =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write_queue.rs"))
-            .unwrap();
-    for forbidden_snippet in [
-        "pub trait DocumentWriteQueueSubmitter",
-        "pub fn run_serialized",
-        "pub struct DocumentWriteQueue",
-        "pub use agent_doc_queue_io::write_queue",
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/write_queue.rs")
+            .exists(),
+        "orchestration must not keep a write_queue module after the focused queue IO extraction"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_write =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    for required_snippet in [
+        "agent_doc_queue_io::write_queue::DocumentWriteQueueSubmitter",
+        "SessionActorWriteQueueSubmitter",
+        "document_actor_in(",
     ] {
         assert!(
-            !orchestration_write_queue.contains(forbidden_snippet),
-            "orchestration write_queue must not re-own or facade focused queue policy: {forbidden_snippet}"
+            orchestration_lib.contains(required_snippet),
+            "orchestration root should only adapt queue IO to the local session actor effect: {required_snippet}"
         );
     }
     for required_snippet in [
-        "impl DocumentWriteQueueSubmitter for SessionActorWriteQueueSubmitter",
         "serialized_atomic_write_with(",
-        "document_actor_in(",
         "crate::write::atomic_write_pub",
     ] {
         assert!(
-            orchestration_write_queue.contains(required_snippet),
-            "orchestration write_queue should only adapt queue IO to local actor/write effects: {required_snippet}"
+            orchestration_write.contains(required_snippet),
+            "write.rs should call focused queue IO directly for serialized writes: {required_snippet}"
         );
     }
 }
@@ -9626,7 +9630,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 24,
+        ledger_rows.len() >= 30,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -9755,6 +9759,42 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "move controller inspection and realtime buffer divergence into focused IO crates",
         ),
         (
+            "State backbone chart and observer graph",
+            "agent-doc-orchestration/src/state_backbone.rs",
+            "agent-doc-state-backbone",
+            "Split pure chart/event vocabulary from observer/read-model adapters",
+        ),
+        (
+            "State wire subscription boundary",
+            "agent-doc-orchestration/src/state_wire.rs",
+            "agent-doc-state-wire",
+            "Split wire payload encoding from callback dispatch",
+        ),
+        (
+            "Turn-scope sidecar IO",
+            "agent-doc-orchestration/src/turn_scope_store.rs",
+            "agent-doc-turn-scope-io",
+            "Split pure affectedness/authority decisions from sidecar pathing and filesystem IO",
+        ),
+        (
+            "Transcript context and model-tier graph",
+            "agent-doc-orchestration/src/context_pct.rs",
+            "agent-doc-model-tier/src/{context_usage.rs,context_transcript_io.rs}",
+            "Split deterministic context parsing from transcript filesystem discovery",
+        ),
+        (
+            "Prompt-cache policy and history IO",
+            "agent-doc-orchestration/src/prompt_cache.rs",
+            "agent-doc-prompt-cache",
+            "Split pure cache economics/ranking from history file IO",
+        ),
+        (
+            "Codex hook blocked-stop sidecar IO",
+            "agent-doc-orchestration/src/codex_hook.rs",
+            "agent-doc-codex-hook-io/src/lib.rs",
+            "Split project-root enumeration from blocked-payload persistence",
+        ),
+        (
             "Session accretion IO adapter",
             "agent-doc-orchestration/src/session_accretion.rs",
             "agent-doc-session-accretion-io/src/lib.rs",
@@ -9801,6 +9841,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/admin.rs",
             "agent-doc-admin-io/src/lib.rs",
             "Split JSON view structs from project-controller RPC structs once controller RPC types move",
+        ),
+        (
+            "Queue command, pipeline mirror, and write-queue adapter batch",
+            "agent-doc-orchestration/src/{queue_cmd.rs,pipeline_frontmatter.rs,write_queue.rs}",
+            "agent-doc-cycle-state-io/src/pipeline_frontmatter.rs",
+            "Move the remaining queue write effects out of `write.rs`",
         ),
         (
             "CRDT relay host IO",
@@ -16778,8 +16824,14 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "agent-doc-queue-io should parse agent components directly for one-shot queue sync"
     );
 
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/queue_cmd.rs")
+            .exists(),
+        "orchestration must not keep a queue_cmd facade after queue command host extraction"
+    );
     let queue_cmd =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_cmd.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_cmd.rs")).unwrap();
     for forbidden_snippet in [
         "agent_doc_queue::backlog_sync",
         "agent_doc_queue::document_queue",
@@ -16798,10 +16850,10 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         );
     }
     assert!(
-        queue_cmd.contains(
-            "agent_doc_queue_io::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot("
-        ) && queue_cmd.contains("OneShotQueueSyncResult"),
-        "queue_cmd.rs should adapt one-shot queue sync through agent-doc-queue-io"
+        queue_cmd.contains("crate::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(")
+            && queue_cmd.contains("OneShotQueueSyncResult")
+            && queue_cmd.contains("pub trait QueueCommandEffects"),
+        "agent-doc-queue-io queue_cmd should own command rendering and inject remaining write effects"
     );
 }
 
@@ -22639,7 +22691,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     }
     for relative in [
         "agent-doc-orchestration/src/session_actor.rs",
-        "agent-doc-orchestration/src/write_queue.rs",
+        "agent-doc-orchestration/src/lib.rs",
+        "agent-doc-queue-io/src/write_queue.rs",
         "src/main.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -23535,7 +23588,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
     }
 
     for relative_path in [
-        "agent-doc-orchestration/src/queue_cmd.rs",
+        "agent-doc-queue-io/src/queue_cmd.rs",
         "agent-doc-orchestration/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
         "agent-doc-orchestration/src/repair.rs",
@@ -23669,7 +23722,7 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     );
 
     let queue_cmd =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_cmd.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_cmd.rs")).unwrap();
     for forbidden_snippet in [
         "enum HeadKind",
         "fn classify_active_head(",

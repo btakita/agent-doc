@@ -992,7 +992,13 @@ pub fn apply_closeout_recovery_mutation(
                 rebuild_sidecars_from_content(file, content)?;
             }
             if let Some(event) = mark_cycle_committed_event {
-                crate::pipeline_frontmatter::mark_committed(file, event, content, content)?;
+                agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                    &crate::PIPELINE_FRONTMATTER_EFFECTS,
+                    file,
+                    event,
+                    content,
+                    content,
+                )?;
             }
             log_closeout_recovery_mutation(file, "retire_stale_capture", reason);
         }
@@ -1296,8 +1302,14 @@ mod tests {
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let response = "<!-- patch:exchange -->\n### Re: close the loop — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->";
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
 
         complete_required_closeout(&doc).expect("closeout must reap the lingering completed item");
 
@@ -1373,7 +1385,8 @@ mod tests {
         );
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        let abandoned = crate::pipeline_frontmatter::mark_abandoned(
+        let abandoned = agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "suprecyclespin_stalled_cycle_resolved",
             Some(base),
@@ -1475,8 +1488,14 @@ mod tests {
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
 
         let info = stuck_captured_cycle(&doc).expect("missing HEAD response should be detected");
         assert_eq!(info.cycle_id, state.cycle_id);
@@ -1521,7 +1540,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -1548,7 +1568,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&full_doc),
@@ -1581,7 +1602,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&full_doc),
@@ -1826,7 +1848,8 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -1851,7 +1874,8 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -1879,8 +1903,14 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
         // Patch a visible response directly into the working file (bypassing write).
         let with_response = base.replace(
             "❯ a question\n",
@@ -1958,7 +1988,8 @@ mod tests {
         let doc = subwt.join("doc.md");
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(content),
@@ -2022,7 +2053,8 @@ mod tests {
         // The snapshot AND the visible file carry the drift; only HEAD is behind.
         std::fs::write(&doc, &snapshot).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -2069,7 +2101,8 @@ mod tests {
         let (dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -2117,8 +2150,14 @@ mod tests {
         let (dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, head, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(head), Some(head))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(head),
+            Some(head),
+        )
+        .unwrap();
         std::fs::write(&doc, &visible).unwrap();
         assert_eq!(
             classify_closeout_recovery_state_for_file(&doc),
@@ -2163,7 +2202,8 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -2188,8 +2228,14 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
         assert_eq!(
             classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::MissingResponseBody
@@ -2208,7 +2254,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&full_doc),
@@ -2244,7 +2291,8 @@ mod tests {
         // Snapshot carries the un-canonicalized prompt prefix; HEAD has the bare
         // form. Artifact normalization makes them equal; transient does not.
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -2305,7 +2353,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, full_doc, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(full_doc),
@@ -2356,7 +2405,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, &compacted, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&compacted),
@@ -2411,7 +2461,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, &compacted, agent_doc_ops_log_io::log_op).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&compacted),

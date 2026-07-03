@@ -276,7 +276,8 @@ mod tests {
             .output()
             .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),

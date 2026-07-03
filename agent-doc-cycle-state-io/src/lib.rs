@@ -53,6 +53,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+pub mod pipeline_frontmatter;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BacklogTargetRequirement {
     pub path: String,

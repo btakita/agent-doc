@@ -2099,7 +2099,8 @@ agent-doc {}\n",
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::pipeline_frontmatter::mark_abandoned(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(&original),
@@ -2150,7 +2151,8 @@ agent-doc {}\n",
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::pipeline_frontmatter::mark_abandoned(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(&original),
@@ -2551,7 +2553,8 @@ agent-doc {}\n",
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&original),
@@ -2662,7 +2665,8 @@ agent-doc {}\n",
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&original),
@@ -2826,7 +2830,8 @@ agent-doc {}\n",
         let doc = write_doc(&dir);
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit",
             Some(&original),
@@ -3719,7 +3724,8 @@ agent-doc {}\n",
         let doc = write_doc(&dir);
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit",
             Some(&original),

@@ -158,7 +158,8 @@ pub fn cancel_preflight_cycle(file: &Path) -> Result<CancelOutcome> {
     }
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let file_content = std::fs::read_to_string(file).ok();
-    crate::pipeline_frontmatter::mark_abandoned(
+    agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+        &crate::PIPELINE_FRONTMATTER_EFFECTS,
         file,
         "cancel_preflight_cycle_abandoned",
         snapshot_content.as_deref(),
@@ -241,7 +242,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
                 file.display(),
             );
         }
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             file,
             "repair_preflight_stale_lock",
             snapshot_content.as_deref(),
@@ -271,7 +273,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
 
     if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
         let repaired_snapshot = agent_doc_snapshot_io::load(file)?;
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             file,
             "repair_preflight_committed_historical",
             repaired_snapshot.as_deref(),
@@ -329,7 +332,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
             .unwrap_or(change.text.as_str())
             .trim();
         if age_secs >= STALE_EMPTY_PREFLIGHT_TTL_SECS {
-            crate::pipeline_frontmatter::mark_abandoned(
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+                &crate::PIPELINE_FRONTMATTER_EFFECTS,
                 file,
                 "repair_preflight_stale_prompt_cycle_abandoned",
                 snapshot_content.as_deref(),
@@ -377,7 +381,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
     }
 
     if age_secs >= STALE_EMPTY_PREFLIGHT_TTL_SECS && !cycle_capture_exists {
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             file,
             "repair_preflight_stale_empty_cycle",
             snapshot_content.as_deref(),
@@ -453,7 +458,8 @@ pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Optio
     };
 
     let repaired_snapshot = agent_doc_snapshot_io::load(file)?;
-    crate::pipeline_frontmatter::mark_committed(
+    agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+        &crate::PIPELINE_FRONTMATTER_EFFECTS,
         file,
         event,
         repaired_snapshot.as_deref(),
@@ -559,7 +565,8 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
     };
 
     if repaired_snapshot.as_deref() == Some(repaired.as_str()) {
-        let _ = crate::pipeline_frontmatter::mark_committed(
+        let _ = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             file,
             "repair_completed_backlog_reap",
             Some(&repaired),
@@ -3644,8 +3651,14 @@ mod tests {
         init_git_repo(dir.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
 
         let direct_patch = concat!(
             "---\nsession: sid\nagent_doc_format: template\n---\n\n",
@@ -3706,8 +3719,14 @@ mod tests {
         init_git_repo(root, &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -3764,8 +3783,14 @@ mod tests {
 
         agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "commit_success", Some(base), Some(base))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
 
         let current = committed_patchback.replace(
             "<!-- /agent:exchange -->\n",

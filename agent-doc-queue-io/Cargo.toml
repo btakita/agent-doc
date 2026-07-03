@@ -13,6 +13,7 @@ name = "agent_doc_queue_io"
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }

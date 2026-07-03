@@ -1817,7 +1817,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -2089,7 +2090,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -2265,7 +2267,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -2430,7 +2433,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -2588,7 +2592,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         launch_mock_registered_agent_doc(&iso, &live_pane, &mock_agent, &doc);
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -2623,7 +2628,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::pipeline_frontmatter::mark_committed(
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &crate::PIPELINE_FRONTMATTER_EFFECTS,
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -2696,7 +2702,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -2756,7 +2763,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::pipeline_frontmatter::mark_committed(
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &crate::PIPELINE_FRONTMATTER_EFFECTS,
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -2840,7 +2848,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
         )
         .unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(&crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
@@ -2968,7 +2976,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -3121,7 +3130,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -3233,7 +3243,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
             agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot))
                 .unwrap();
-            crate::pipeline_frontmatter::mark_committed(
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &crate::PIPELINE_FRONTMATTER_EFFECTS,
                 &doc,
                 "commit_success",
                 Some(snapshot),
@@ -3350,7 +3361,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -3410,7 +3422,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::pipeline_frontmatter::mark_committed(
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &crate::PIPELINE_FRONTMATTER_EFFECTS,
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -3490,7 +3503,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -3557,7 +3571,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 Some(&current_for_thread),
             )
             .unwrap();
-            crate::pipeline_frontmatter::mark_committed(
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &crate::PIPELINE_FRONTMATTER_EFFECTS,
                 &doc_for_thread,
                 "commit_success",
                 Some(&snapshot_for_thread),
@@ -3627,7 +3642,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -3746,7 +3762,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),
@@ -3866,7 +3883,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot),

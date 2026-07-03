@@ -1141,6 +1141,7 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-document-realtime",
  "agent-doc-element",
+ "agent-doc-element-backlog",
  "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-ops-log-io",

@@ -485,6 +485,48 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
     }
 }
 
+struct CliQueueCommandEffects;
+
+fn queue_command_consume_outcome(
+    outcome: agent_doc_orchestration::write::QueueConsumptionOutcome,
+) -> agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
+    agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
+        consumed_text: outcome.consumed_text,
+        remaining: outcome.remaining,
+        drained: outcome.drained,
+    }
+}
+
+impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffects {
+    fn consume_queue_prompt_force_disk(
+        &self,
+        file: &Path,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        agent_doc_orchestration::write::consume_queue_prompt_force_disk(file)
+            .map(|outcome| outcome.map(queue_command_consume_outcome))
+    }
+
+    fn consume_queue_prompt_with_outcome(
+        &self,
+        file: &Path,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        agent_doc_orchestration::write::consume_queue_prompt_with_outcome(file)
+            .map(|outcome| outcome.map(queue_command_consume_outcome))
+    }
+
+    fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
+        agent_doc_orchestration::write::strike_orphan_id_backed_queue_head(file, id)
+    }
+
+    fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
+        agent_doc_orchestration::write::acknowledge_open_id_backed_queue_head(file, id)
+    }
+
+    fn prune_noise_queue_heads(&self, file: &Path) -> anyhow::Result<usize> {
+        agent_doc_orchestration::write::prune_noise_queue_heads(file)
+    }
+}
+
 #[derive(Default)]
 struct CliWatchDaemonEffects {
     actor_contexts: HashMap<PathBuf, agent_doc_run_context_io::ActorContext>,
@@ -4411,7 +4453,7 @@ fn main() -> anyhow::Result<()> {
                 max_git_versions,
                 restore_patch,
             } => queue_recovery::run(&file, json, max_git_versions, restore_patch.as_deref()),
-            QueueAction::Sync { file } => agent_doc_orchestration::queue_cmd::sync(&file),
+            QueueAction::Sync { file } => agent_doc_queue_io::queue_cmd::sync(&file),
             QueueAction::Consume {
                 file,
                 count,
@@ -4419,20 +4461,23 @@ fn main() -> anyhow::Result<()> {
                 id,
                 ack_id,
             } => {
+                let queue_effects = CliQueueCommandEffects;
                 if let Some(id) = id {
-                    agent_doc_orchestration::queue_cmd::consume_orphan_id(&file, &id)
+                    agent_doc_queue_io::queue_cmd::consume_orphan_id(&queue_effects, &file, &id)
                 } else if let Some(id) = ack_id {
-                    agent_doc_orchestration::queue_cmd::acknowledge_open_id(&file, &id)
+                    agent_doc_queue_io::queue_cmd::acknowledge_open_id(&queue_effects, &file, &id)
                 } else {
-                    agent_doc_orchestration::queue_cmd::consume_with_options(
+                    agent_doc_queue_io::queue_cmd::consume_with_options(
+                        &queue_effects,
                         &file,
                         count,
-                        agent_doc_orchestration::queue_cmd::ConsumeOptions { force_disk },
+                        agent_doc_queue_io::queue_cmd::ConsumeOptions { force_disk },
                     )
                 }
             }
             QueueAction::PruneNoise { file } => {
-                agent_doc_orchestration::queue_cmd::prune_noise(&file)
+                let queue_effects = CliQueueCommandEffects;
+                agent_doc_queue_io::queue_cmd::prune_noise(&queue_effects, &file)
             }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {

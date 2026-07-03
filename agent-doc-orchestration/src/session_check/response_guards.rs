@@ -362,7 +362,8 @@ mod tests {
             &["do [#ipc1]".to_string(), "do [#39c5]".to_string()],
         )
         .unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&content),
@@ -399,7 +400,8 @@ mod tests {
         agent_doc_cycle_state_io::mark_pending_mutations(&doc).unwrap();
         agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["nsga4verify".to_string()])
             .unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_already_current",
             Some(&current),

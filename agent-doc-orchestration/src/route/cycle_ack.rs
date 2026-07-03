@@ -565,7 +565,8 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
 
         agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some("# Session\n"),
@@ -579,7 +580,8 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
             agent_doc_cycle_state_io::start_preflight(&doc_for_thread, None, Some("# Session\n"))
                 .unwrap();
-            crate::pipeline_frontmatter::mark_committed(
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &crate::PIPELINE_FRONTMATTER_EFFECTS,
                 &doc_for_thread,
                 "commit_success",
                 Some("# Session\n"),
@@ -601,7 +603,8 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
 
         agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some("# Session\n"),
@@ -624,7 +627,8 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
 
         agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some("# Session\n"),
@@ -636,7 +640,8 @@ mod tests {
         let doc_for_thread = doc.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
-            crate::pipeline_frontmatter::mark_committed(
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &crate::PIPELINE_FRONTMATTER_EFFECTS,
                 &doc_for_thread,
                 "commit_already_current",
                 Some("# Session\n"),
@@ -669,7 +674,8 @@ mod tests {
             prompt_bearing_marker_present: true,
         }));
 
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some("# Session\n"),

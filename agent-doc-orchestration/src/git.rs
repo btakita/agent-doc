@@ -1131,7 +1131,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             );
             let snap = agent_doc_snapshot_io::load(file).ok().flatten();
             let file_content = std::fs::read_to_string(file).ok();
-            if let Err(e) = crate::pipeline_frontmatter::mark_committed(
+            if let Err(e) = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &crate::PIPELINE_FRONTMATTER_EFFECTS,
                 file,
                 "commit_success",
                 snap.as_deref(),
@@ -2212,9 +2213,13 @@ fn finalize_already_committed_noop(
         file,
         &format!("commit_already_current file={} basis=head", file.display()),
     );
-    if let Err(e) =
-        crate::pipeline_frontmatter::mark_committed(file, event, snapshot_content, file_content)
-    {
+    if let Err(e) = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+        &crate::PIPELINE_FRONTMATTER_EFFECTS,
+        file,
+        event,
+        snapshot_content,
+        file_content,
+    ) {
         eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
     }
     if let Err(e) = agent_doc_capture_io::mark_committed(file) {
@@ -5049,7 +5054,8 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        let committed_state = crate::pipeline_frontmatter::mark_committed(
+        let committed_state = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),

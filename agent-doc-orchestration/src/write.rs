@@ -2555,11 +2555,11 @@ fn log_fence_count_drop_if_any(path: &Path, new_content: &str) {
 /// Atomic write through the 08b document write-authority end state
 /// ([`crate::write_authority`]). Every editor-visible document `.md` write
 /// serializes through the session actor's single ordered write queue
-/// ([`crate::write_queue`]), so a supervisor write and an agent-finalize write
-/// for the same document can never interleave. This was the `#pcpc5cut` migration
-/// (gated `off → shadow → dual-write → authority → removed`); the cutover is
-/// complete and the `AGENT_DOC_WRITE_AUTHORITY` flag + bare-write bypass were
-/// removed, so routing is now unconditional.
+/// (`agent-doc-queue-io`), so a supervisor write and an agent-finalize write for
+/// the same document can never interleave. This was the `#pcpc5cut` migration
+/// (gated `off → shadow → dual-write → authority → removed`); the cutover is complete
+/// and the `AGENT_DOC_WRITE_AUTHORITY` flag + bare-write bypass were removed, so
+/// routing is now unconditional.
 ///
 /// `.agent-doc/` sidecar/snapshot writes and writes already executing on the
 /// session-actor owner thread take the raw path directly (the latter prevents a
@@ -2572,7 +2572,14 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         let base_dir = agent_doc_project_root_io::project_root_containing(path)
             .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
         let file = path.to_string_lossy().to_string();
-        let result = crate::write_queue::serialized_atomic_write(&base_dir, &file, path, content);
+        let result = agent_doc_queue_io::write_queue::serialized_atomic_write_with(
+            &crate::SESSION_ACTOR_WRITE_QUEUE,
+            &base_dir,
+            &file,
+            path,
+            content,
+            crate::write::atomic_write_pub,
+        );
         if result.is_ok() {
             // Log after the write lands so the document path canonicalizes
             // (ops.log root resolution requires the file to exist).

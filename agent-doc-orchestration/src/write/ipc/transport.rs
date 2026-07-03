@@ -4417,8 +4417,14 @@ mod late_fallback_patch_guard_tests {
         .unwrap();
         agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
             .unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "test", Some(content), Some(content))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
 
         let result = cycle_already_committed(&doc);
         assert!(result.is_some(), "should return Some for committed cycle");
@@ -4495,8 +4501,14 @@ mod late_fallback_patch_guard_tests {
         .unwrap();
         agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
             .unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "test", Some(content), Some(content))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
 
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let stale_patch_path = tmp
@@ -4572,8 +4584,14 @@ mod late_fallback_patch_guard_tests {
         .unwrap();
         agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
             .unwrap();
-        crate::pipeline_frontmatter::mark_committed(&doc, "test", Some(content), Some(content))
-            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
 
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let stale_patch_path = tmp

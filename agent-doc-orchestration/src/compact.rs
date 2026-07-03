@@ -1601,7 +1601,14 @@ mod tests {
         )
         .unwrap();
         agent_doc_cycle_state_io::mark_write_applied(&file, "test", Some(doc), Some(doc)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(&file, "test", Some(doc), Some(doc)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &file,
+            "test",
+            Some(doc),
+            Some(doc),
+        )
+        .unwrap();
 
         run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted summary."), false)
             .unwrap();

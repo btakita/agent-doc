@@ -1234,7 +1234,8 @@ fn abandon_run_recursive_cycle(file: &Path, event: &str, diagnostic: &str) -> Re
     let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let file_content = std::fs::read_to_string(file).ok();
-    crate::pipeline_frontmatter::mark_abandoned(
+    agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+        &crate::PIPELINE_FRONTMATTER_EFFECTS,
         file,
         &event,
         snapshot_content.as_deref(),

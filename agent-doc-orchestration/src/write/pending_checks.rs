@@ -1638,7 +1638,8 @@ mod precommit_pending_capture_tests {
             "do #followup. spec-test-build-install-commit-push\n<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, &drifted).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_already_current",
             Some(initial),

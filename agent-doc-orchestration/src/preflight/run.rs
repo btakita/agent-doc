@@ -2763,7 +2763,8 @@ mod tests {
             Some(patched),
         )
         .unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(patched),
@@ -2918,7 +2919,8 @@ mod tests {
         );
         std::fs::write(&doc, &materialized).unwrap();
         agent_doc_snapshot_io::save(&doc, &materialized, agent_doc_ops_log_io::log_op).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&materialized),
@@ -3007,7 +3009,8 @@ mod tests {
             .output()
             .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -3075,7 +3078,8 @@ mod tests {
             .output()
             .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -3158,7 +3162,8 @@ mod tests {
             .output()
             .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -3628,7 +3633,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, &queued, agent_doc_ops_log_io::log_op).unwrap();
         std::fs::write(&doc, &live).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&queued),

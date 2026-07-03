@@ -4993,7 +4993,8 @@ agent:queue\n\
             .unwrap();
         agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["stale-item".to_string()])
             .unwrap();
-        crate::pipeline_frontmatter::mark_committed(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(content),

@@ -86,6 +86,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `b23eb844` | Lazily run-context graph |
 | `1c0abe65` | Queue continuation host IO |
 | `35752f5c` | Tracked-work command and done-archive IO |
+| `1e486e4f` | Session-check guard IO adapter batch |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

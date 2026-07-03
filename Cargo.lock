@@ -51,6 +51,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
+ "agent-doc-gc-io",
  "agent-doc-git-io",
  "agent-doc-harness",
  "agent-doc-hash",

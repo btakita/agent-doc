@@ -9611,6 +9611,36 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split the broad IO wave by durable domain once call sites settle",
         ),
         (
+            "Legacy route/controller policy wave",
+            "agent-doc-orchestration/src/{route*.rs,route/*.rs,project_controller*.rs,start*.rs,repair.rs}",
+            "agent-doc-controller",
+            "Finish moving remaining route/project-controller authority into focused controller/supervisor IO crates",
+        ),
+        (
+            "Legacy write/realtime/session-check policy wave",
+            "agent-doc-orchestration/src/{write.rs,write/*,session_check*.rs,session_check/*,flow/closeout.rs}",
+            "agent-doc-document-realtime",
+            "Split deterministic markdown/write normalization from live-authority and realtime effects",
+        ),
+        (
+            "Legacy git/sync/frontmatter helper wave",
+            "agent-doc-orchestration/src/{git.rs,sync.rs,resync.rs,resync/*,frontmatter_io.rs}",
+            "agent-doc-process-owner-io",
+            "Extract the remaining whole `sync.rs` graph only after tmux/controller/project-controller callbacks are narrowed",
+        ),
+        (
+            "Legacy supervisor/agent runtime IO wave",
+            "agent-doc-orchestration/src/{supervisor/*,agent/{claude.rs,codex.rs},start/*}",
+            "agent-doc-supervisor-process",
+            "Separate pure runtime policy from process/PTY/file IO",
+        ),
+        (
+            "Legacy memory/queue/harness adapter wave",
+            "agent-doc-orchestration/src/{memory_cmd.rs,queue_continuation.rs,hooks.rs,run.rs,agent/codex.rs,write/ipc.rs}",
+            "agent-doc-queue-io",
+            "Split memory store policy from command IO",
+        ),
+        (
             "Agent backend process adapters",
             "agent-doc-orchestration/src/agent/{claude.rs,codex.rs,junie.rs,opencode.rs}",
             "agent-doc-agent-io/src/agent/*",
@@ -9681,6 +9711,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/gc.rs",
             "agent-doc-gc-io/src/lib.rs",
             "Split pure retention/path classification from filesystem deletes",
+        ),
+        (
+            "GC/watch CLI effect adapter cleanup",
+            "agent-doc-orchestration/src/{gc.rs,watch.rs}",
+            "src/main.rs",
+            "Move controller/state-event and stream-flush effect bindings out of the CLI",
         ),
         (
             "CRDT relay host IO",
@@ -11166,7 +11202,6 @@ fn test_global_config_has_no_orchestration_facade() {
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/stream.rs",
-        "agent-doc-orchestration/src/watch.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -16426,11 +16461,16 @@ fn test_agent_doc_watch_io_owns_pid_effects() {
         ],
     );
 
-    let watch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/watch.rs")
+            .exists(),
+        "orchestration must not keep a watch source module facade"
+    );
+    let watch = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert_source_omits_all(
         &watch,
-        "orchestration watch adapter",
+        "CLI watch effects adapter",
         &[
             "const PID_FILE",
             "fn pid_alive(",
@@ -22069,20 +22109,19 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
         ],
     );
 
-    let watch_effects =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+    let watch_effects = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert_source_mentions_all(
         &watch_effects,
-        "orchestration watch effects",
+        "CLI watch effects",
         &[
             "agent_doc_watch_io::observe_document_event",
-            "crate::project_controller::append_state_event",
+            "agent_doc_orchestration::project_controller::append_state_event",
             "document_actor_in",
         ],
     );
     assert_source_omits_all(
         &watch_effects,
-        "orchestration watch effects",
+        "CLI watch effects",
         &[
             "file_watch_event_id",
             "agent_doc_hash::content_hash",
@@ -22491,7 +22530,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     for relative in [
         "agent-doc-orchestration/src/session_actor.rs",
         "agent-doc-orchestration/src/write_queue.rs",
-        "agent-doc-orchestration/src/watch.rs",
+        "src/main.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(

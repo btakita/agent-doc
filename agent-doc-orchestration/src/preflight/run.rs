@@ -20,6 +20,97 @@ pub struct PreflightOptions {
     pub probe: bool,
 }
 
+struct PreflightGcControllerEffects;
+
+impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
+    fn close_stale_starting_actors(
+        &mut self,
+        project_root: &Path,
+        stale_after: std::time::Duration,
+        dry_run: bool,
+    ) -> Result<(usize, usize)> {
+        crate::project_controller::close_stale_starting_actors(project_root, stale_after, dry_run)
+    }
+
+    fn close_stale_dead_pane_actors(
+        &mut self,
+        project_root: &Path,
+        dry_run: bool,
+        caller: &str,
+        reason: &str,
+    ) -> Result<(usize, usize)> {
+        crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+            project_root,
+            dry_run,
+            caller,
+            reason,
+        )
+    }
+
+    fn prune_dead_actors(
+        &mut self,
+        project_root: &Path,
+        prune_after: std::time::Duration,
+        dry_run: bool,
+    ) -> Result<(usize, usize)> {
+        crate::project_controller::prune_dead_actors(project_root, prune_after, dry_run)
+    }
+
+    fn terminate_stale_preparing_controllers(
+        &mut self,
+        project_root: &Path,
+        stale_after: std::time::Duration,
+        dry_run: bool,
+    ) -> Result<(usize, usize)> {
+        crate::project_controller::terminate_stale_preparing_controllers(
+            project_root,
+            stale_after,
+            dry_run,
+        )
+    }
+
+    fn reap_orphaned_preparing_controllers(
+        &mut self,
+        project_root: &Path,
+        stale_after: std::time::Duration,
+        dry_run: bool,
+    ) -> Result<(usize, usize)> {
+        crate::project_controller::reap_orphaned_preparing_controllers(
+            project_root,
+            stale_after,
+            dry_run,
+        )
+    }
+
+    fn reap_orphaned_preparing_controllers_all_projects(
+        &mut self,
+        stale_after: std::time::Duration,
+        dry_run: bool,
+        caller: &str,
+    ) -> Result<(usize, usize)> {
+        crate::project_controller::reap_orphaned_preparing_controllers_all_projects(
+            stale_after,
+            dry_run,
+            caller,
+        )
+    }
+}
+
+fn run_auto_gc(root: &Path) -> Result<agent_doc_gc_io::GcResult> {
+    let mut effects = PreflightGcControllerEffects;
+    agent_doc_gc_io::run_with_controller_effects(
+        Some(root),
+        false,
+        &mut effects,
+        agent_doc_gc_io::GcControllerConfig {
+            stale_starting_after: std::time::Duration::from_secs(3600),
+            dead_actor_prune_after: crate::project_controller::DEAD_ACTOR_PRUNE_AFTER,
+            stale_preparing_controller_after:
+                crate::project_controller::stale_preparing_controller_threshold(),
+        },
+    )
+}
+
 /// Run preflight with default (dispatch/response-bound) options.
 pub fn run(file: &Path) -> Result<()> {
     run_with_options(file, PreflightOptions::default())
@@ -137,7 +228,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             };
             if needs_gc {
                 eprintln!("[preflight] step 0a: auto-gc");
-                match crate::gc::run(Some(&root), false) {
+                match run_auto_gc(&root) {
                     Ok(result) => {
                         if result.deleted > 0 {
                             eprintln!("[preflight] gc: {} files cleaned", result.deleted);

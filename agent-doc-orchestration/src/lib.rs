@@ -43,7 +43,6 @@ pub mod compact;
 pub use agent_doc_crdt_relay_io as crdt_relay_host;
 pub mod flow;
 pub mod focus;
-pub mod gc;
 pub mod git;
 pub use agent_doc_run_context_io as graph;
 pub(crate) mod pipeline_frontmatter;
@@ -62,7 +61,6 @@ pub mod sessions;
 pub mod start;
 pub mod stream;
 pub mod sync;
-pub mod watch;
 pub mod write;
 pub mod write_queue;
 

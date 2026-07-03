@@ -16,7 +16,7 @@
 //!   flag is given; CRDT-mode documents use `agent_doc_orchestration::write::run_stream`, others use `agent_doc_orchestration::write::run`.
 //! - `Prompt --all` runs `agent_doc_prompt_io::run_all()`; otherwise `FILE` is required.
 //! - `History --restore <commit>` calls `history::restore`; bare `History` calls `history::list`.
-//! - `Watch` dispatches to `agent_doc_watch_io::stop`, `agent_doc_watch_io::status`, or the orchestration watch effects adapter based on flags.
+//! - `Watch` dispatches to `agent_doc_watch_io::stop`, `agent_doc_watch_io::status`, or the CLI watch effects adapter based on flags.
 //! - `Skill install --reload` prints `SKILL_RELOAD=compact` or `SKILL_RELOAD=restart` when the
 //!   skill was updated, enabling the caller to take the appropriate reload action.
 //! - `LibPath` prints the platform-appropriate shared library path (`libagent_doc.so/dylib/dll`)
@@ -95,8 +95,10 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_template_io as template_io;
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Document mode for agent-doc sessions.
 #[derive(Clone, Debug, ValueEnum)]
@@ -195,6 +197,154 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
             agent_doc_orchestration::realtime_model::durable_buffer_state(file, disk_content)
                 .is_some(),
         ))
+    }
+}
+
+struct CliGcControllerEffects;
+
+impl agent_doc_gc_io::GcControllerEffects for CliGcControllerEffects {
+    fn close_stale_starting_actors(
+        &mut self,
+        project_root: &Path,
+        stale_after: Duration,
+        dry_run: bool,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_orchestration::project_controller::close_stale_starting_actors(
+            project_root,
+            stale_after,
+            dry_run,
+        )
+    }
+
+    fn close_stale_dead_pane_actors(
+        &mut self,
+        project_root: &Path,
+        dry_run: bool,
+        caller: &str,
+        reason: &str,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_orchestration::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+            project_root,
+            dry_run,
+            caller,
+            reason,
+        )
+    }
+
+    fn prune_dead_actors(
+        &mut self,
+        project_root: &Path,
+        prune_after: Duration,
+        dry_run: bool,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_orchestration::project_controller::prune_dead_actors(
+            project_root,
+            prune_after,
+            dry_run,
+        )
+    }
+
+    fn terminate_stale_preparing_controllers(
+        &mut self,
+        project_root: &Path,
+        stale_after: Duration,
+        dry_run: bool,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_orchestration::project_controller::terminate_stale_preparing_controllers(
+            project_root,
+            stale_after,
+            dry_run,
+        )
+    }
+
+    fn reap_orphaned_preparing_controllers(
+        &mut self,
+        project_root: &Path,
+        stale_after: Duration,
+        dry_run: bool,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_orchestration::project_controller::reap_orphaned_preparing_controllers(
+            project_root,
+            stale_after,
+            dry_run,
+        )
+    }
+
+    fn reap_orphaned_preparing_controllers_all_projects(
+        &mut self,
+        stale_after: Duration,
+        dry_run: bool,
+        caller: &str,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_orchestration::project_controller::reap_orphaned_preparing_controllers_all_projects(
+            stale_after,
+            dry_run,
+            caller,
+        )
+    }
+}
+
+#[derive(Default)]
+struct CliWatchDaemonEffects {
+    actor_contexts: HashMap<PathBuf, agent_doc_run_context_io::ActorContext>,
+}
+
+impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
+    fn flush_stream_to_document(
+        &mut self,
+        file: &Path,
+        text: &str,
+        target: &str,
+        baseline: &str,
+    ) -> anyhow::Result<()> {
+        agent_doc_orchestration::stream::flush_to_document(file, text, target, baseline)
+    }
+
+    fn route_file_change(
+        &mut self,
+        base_dir: &Path,
+        doc_id: &str,
+        file: &str,
+        raw: &agent_doc_document_realtime::watch_authority::RawWatchEvent,
+        current_content: &str,
+    ) -> anyhow::Result<agent_doc_document_realtime::watch_authority::WatchDelivery> {
+        let observation =
+            agent_doc_watch_io::observe_document_event(doc_id, file, raw, current_content);
+        if let Some(event) = observation.state_event {
+            let actor = agent_doc_orchestration::session_actor::document_actor_in(base_dir, file);
+            let base_dir = base_dir.to_path_buf();
+            actor.submit(
+                agent_doc_document_realtime::session_ops::SessionOpKind::FileWatch,
+                move |_ctx| -> anyhow::Result<()> {
+                    agent_doc_orchestration::project_controller::append_state_event(
+                        &base_dir, &event,
+                    )?;
+                    Ok(())
+                },
+            )??;
+        }
+        Ok(observation.delivery)
+    }
+
+    fn on_file_change(&mut self, path: &Path) -> anyhow::Result<()> {
+        let ac = self
+            .actor_contexts
+            .entry(path.to_path_buf())
+            .or_insert_with(|| agent_doc_run_context_io::ActorContext::new(path.to_path_buf()));
+        ac.on_file_change(path.to_path_buf());
+        Ok(())
+    }
+
+    fn on_config_change(&mut self) -> anyhow::Result<usize> {
+        for ac in self.actor_contexts.values() {
+            ac.on_config_change();
+        }
+        Ok(self.actor_contexts.len())
+    }
+
+    fn on_stream_dead(&mut self, path: &Path) -> anyhow::Result<()> {
+        self.actor_contexts.remove(path);
+        Ok(())
     }
 }
 
@@ -2525,7 +2675,18 @@ fn main() -> anyhow::Result<()> {
             diff,
         } => agent_doc_git_io::checkpoint::run(&file, restore.as_deref(), diff.as_deref()),
         Commands::Gc { root, dry_run } => {
-            let result = agent_doc_orchestration::gc::run(root.as_deref(), dry_run)?;
+            let mut effects = CliGcControllerEffects;
+            let result = agent_doc_gc_io::run_with_controller_effects(
+                root.as_deref(),
+                dry_run,
+                &mut effects,
+                agent_doc_gc_io::GcControllerConfig {
+                    stale_starting_after: Duration::from_secs(3600),
+                    dead_actor_prune_after:
+                        agent_doc_orchestration::project_controller::DEAD_ACTOR_PRUNE_AFTER,
+                    stale_preparing_controller_after: agent_doc_orchestration::project_controller::stale_preparing_controller_threshold(),
+                },
+            )?;
             if dry_run {
                 eprintln!(
                     "[gc] Dry run: {} files would be deleted, {} kept",
@@ -2718,12 +2879,14 @@ fn main() -> anyhow::Result<()> {
             } else if status {
                 agent_doc_watch_io::status()
             } else {
-                agent_doc_orchestration::watch::start(
+                let mut effects = CliWatchDaemonEffects::default();
+                agent_doc_watch_io::start(
                     &config,
                     agent_doc_watch_io::WatchConfig {
                         debounce_ms: debounce,
                         max_cycles,
                     },
+                    &mut effects,
                 )
             }
         }

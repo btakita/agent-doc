@@ -15,6 +15,7 @@ pub mod crdt_relay;
 pub mod editor_identity;
 pub mod ipc_corruption;
 pub mod read_authority;
+pub mod replica_sync;
 pub mod session_ops;
 pub mod watch_authority;
 pub mod write_authority;

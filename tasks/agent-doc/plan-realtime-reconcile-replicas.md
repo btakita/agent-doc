@@ -113,19 +113,29 @@ Work items:
    cell model and drives reconcile rounds when it sends a diff to the editor; if
    the editor's returned version is out of sync, run more CRDT rounds until in
    sync (bounded).
-3. **VERIFY before retiring yrs — lazily `TextCrdt` sync semantics.**
-   `op_level_merge` (`cell_doc.rs:1026`) currently builds `TextCrdt::from_str(1,
-   base)` and **forks** to peers → a 3-way-with-common-base merge. True
-   coordinator-free replica sync (CPC ⇄ editor ⇄ turn) wants **op/delta merge with
-   causal metadata** (state-vector / update encoding) so a replica accepts a
-   sender's delta without agreeing on a base. Task: confirm whether lazily
-   `TextCrdt` exposes persistent per-peer state + delta/state-vector encoding. If
-   yes → replicas hold persistent `TextCrdt`s and exchange deltas. If no → either
-   keep a per-cell `Y.Text` register under the lazily tree structure, or keep the
-   3-way-with-base model and have each replica track a shared base (more
-   coordination). **Do not retire yrs in the same change** — keep yrs
-   `encode_state_as_update_v1` as the on-disk `.yrs` persistence + wire format
-   until lazily's delta encoding is proven equivalent.
+3. **VERIFY before retiring yrs — lazily `TextCrdt` sync semantics. → RESOLVED
+   (2026-07-02): lazily HAS coordinator-free delta/frontier sync.**
+   `op_level_merge` (`cell_doc.rs:1026`) only uses the 3-way-with-common-base
+   entry (`TextCrdt::from_str` + `fork`), but lazily 0.13.1 also ships the full
+   anti-entropy layer that true replica sync needs:
+   - `lazily::TextCrdt::merge(other)` is a **commutative/associative/idempotent**
+     state merge (tombstones order-independent) — proven for agent-doc's content
+     shape by `agent-doc-document-realtime/src/replica_sync.rs` (4 convergence
+     tests: disjoint inserts, delete+insert, concurrent same-char deletes, no-op).
+   - `lazily::crdt_plane::CrdtPlaneRuntime` provides an HLC clock + per-peer
+     `StampFrontier`, `sync_frame_since(frontier)` and `sync_reply(request)` — ship
+     exactly the ops a peer's frontier is missing. That is **delta sync keyed on
+     causal metadata**, the coordinator-free pull protocol (no shared base
+     required).
+
+   So yrs is **retirable for the replica model**: lazily's per-cell plane is a
+   better fit than the whole-document `Y.Text` (per-cell isolation kills cross-cell
+   splicing; HLC frontiers give causal-stability GC). Adoption path: hold one
+   `CrdtPlaneRuntime` per replica, per-cell `TextCrdt`s behind the shared FFI,
+   exchange `CrdtSync` frames. **Still do not retire yrs in the same change** as
+   the first plane adoption — migrate persistence (`.yrs` → lazily op-log
+   snapshot) once the plane model is the authority and its serialization is
+   proven, to keep the cutover reversible.
 4. **Structured persistence.** Once the cell model is the authority, persist the
    per-cell structure (not a flat text blob) so restart/merge is per-node.
 
@@ -144,7 +154,10 @@ before applying; documented decision on lazily-vs-yrs for persistence/transport.
 
 ## Open questions
 
-- lazily `TextCrdt` delta/state-vector API (Phase 3 item 3) — the gating check.
+- ~~lazily `TextCrdt` delta/state-vector API (Phase 3 item 3) — the gating
+  check.~~ **RESOLVED:** lazily ships `CrdtPlaneRuntime` (HLC + `StampFrontier` +
+  `sync_frame_since`/`sync_reply`) and commutative `TextCrdt::merge`; convergence
+  proven by `replica_sync.rs`. Phase 3 is unblocked.
 - Whether `cell_doc::project_document` node keys are stable enough to be the
   convergence identity across a live operator edit that renames a heading.
 - Editor-side shadow reconcile: JetBrains Document API listener granularity vs

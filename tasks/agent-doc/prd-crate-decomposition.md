@@ -100,7 +100,7 @@ rows below remain the source of truth for moved graphs and follow-up seams.
 | `78e75cd1` | Route session target resolution IO graph |
 | `ecd969f4` | Route startup helper IO batch |
 | `6f15ffee` | Route startup ready-wait and post-claim sync IO batch |
-| `pending-current-round` | Route busy-pane recovery and supervisor runtime IO graph |
+| `49a6c666` | Route busy-pane recovery and supervisor runtime IO graph |
 
 | Coarse graph | Moved from | Moved to | Why it moved as a chunk | Fine-grained follow-up seams |
 |---|---|---|---|---|

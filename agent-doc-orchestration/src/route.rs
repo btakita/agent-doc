@@ -746,7 +746,7 @@ fn build_routed_dispatch_start_tracker(
 ) -> Result<Option<RoutedDispatchStartTracker>> {
     match harness.binary.as_str() {
         "codex" if codex_dispatch_start_tracking_enabled(file) => {
-            let latest = crate::codex_hook::load_latest_prompt_state_for_file(file)?;
+            let latest = agent_doc_codex_hook_io::load_latest_prompt_state_for_file(file)?;
             Ok(Some(RoutedDispatchStartTracker::CodexHook {
                 trigger: harness.trigger_command(file_path),
                 previous_session_id: latest.as_ref().map(|state| state.session_id.clone()),
@@ -777,7 +777,7 @@ fn build_routed_dispatch_start_tracker(
 
 fn codex_routed_dispatch_start_proof_facts<'a>(
     tracker: &'a RoutedDispatchStartTracker,
-    state: &'a crate::codex_hook::ActiveSessionState,
+    state: &'a agent_doc_codex_hook_io::ActiveSessionState,
 ) -> Option<agent_doc_controller::dispatch::CodexRoutedDispatchStartProofFacts<'a>> {
     let RoutedDispatchStartTracker::CodexHook {
         trigger,
@@ -848,7 +848,8 @@ fn wait_for_routed_dispatch_start(
     while start.elapsed() < timeout {
         match tracker {
             RoutedDispatchStartTracker::CodexHook { .. } => {
-                if let Some(state) = crate::codex_hook::load_latest_prompt_state_for_file(file)?
+                if let Some(state) =
+                    agent_doc_codex_hook_io::load_latest_prompt_state_for_file(file)?
                     && let Some(facts) = codex_routed_dispatch_start_proof_facts(tracker, &state)
                     && let Some(proof) = classify_codex_routed_dispatch_start_proof(facts)
                 {
@@ -927,7 +928,7 @@ fn tracked_harness_clear_requires_fresh_restart(
     latest_prompt: Option<&str>,
 ) -> bool {
     matches!(harness.binary.as_str(), "codex" | "opencode")
-        && latest_prompt.is_some_and(crate::codex_hook::prompt_requests_clear)
+        && latest_prompt.is_some_and(agent_doc_codex_hook_io::prompt_requests_clear)
 }
 
 fn reapply_harness_launch_contract_after_clear(
@@ -939,7 +940,7 @@ fn reapply_harness_launch_contract_after_clear(
     harness: &HarnessConfig,
     respect_tracked_clear_restart: bool,
 ) -> Result<String> {
-    let latest_prompt = crate::codex_hook::load_latest_prompt_for_file(file)?;
+    let latest_prompt = agent_doc_codex_hook_io::load_latest_prompt_for_file(file)?;
     if !respect_tracked_clear_restart
         || !tracked_harness_clear_requires_fresh_restart(harness, latest_prompt.as_deref())
     {

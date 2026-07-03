@@ -7648,8 +7648,12 @@ Body\n\
         );
         fs::write(&doc, drifted).unwrap();
 
-        crate::codex_hook::record_external_prompt_for_file(&doc, "test-session", "new prompt")
-            .unwrap();
+        agent_doc_codex_hook_io::record_external_prompt_for_file(
+            &doc,
+            "test-session",
+            "new prompt",
+        )
+        .unwrap();
         let _thread = EnvGuard::set("CODEX_THREAD_ID", "test-session");
 
         let status = inspect(&doc).unwrap();

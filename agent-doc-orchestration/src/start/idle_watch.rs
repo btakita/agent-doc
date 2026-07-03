@@ -239,9 +239,11 @@ fn record_context_clear_prompt_for_hooks(
     let Some(runtime) = shared.actor_runtime.as_ref() else {
         return;
     };
-    if let Err(err) =
-        crate::codex_hook::record_external_prompt_for_file(path, &runtime.session_id, clear_cmd)
-    {
+    if let Err(err) = agent_doc_codex_hook_io::record_external_prompt_for_file(
+        path,
+        &runtime.session_id,
+        clear_cmd,
+    ) {
         eprintln!(
             "[agent-doc] idle-queue watch: failed to record context clear prompt for {}: {err:#}",
             path.display()

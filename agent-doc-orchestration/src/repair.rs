@@ -1092,7 +1092,7 @@ pub(crate) fn run_with_queue_completion_ids(
         && historical_capture.is_none()
         && visible_response_recovery_is_adoptable(
             cycle_state.as_ref().map(|state| state.phase),
-            crate::codex_hook::load_active_session_for_current_file(file)
+            agent_doc_codex_hook_io::load_active_session_for_current_file(file)
                 .ok()
                 .flatten()
                 .is_some(),

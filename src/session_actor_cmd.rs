@@ -558,7 +558,7 @@ pub fn clear(file: &Path) -> Result<()> {
         }
     }
     if matches!(ctx.harness.as_str(), "codex" | "opencode") {
-        agent_doc_orchestration::codex_hook::record_external_prompt_for_file(
+        agent_doc_codex_hook_io::record_external_prompt_for_file(
             &ctx.canonical_file,
             &ctx.session_id,
             harness_clear_command(&ctx.harness),
@@ -4675,7 +4675,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         )
         .unwrap();
         clear(&doc).unwrap();
-        let latest = agent_doc_orchestration::codex_hook::load_latest_prompt_for_file(&doc)
+        let latest = agent_doc_codex_hook_io::load_latest_prompt_for_file(&doc)
             .unwrap()
             .unwrap();
         assert_eq!(latest, "/clear");

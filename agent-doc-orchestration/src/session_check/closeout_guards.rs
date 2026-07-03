@@ -204,7 +204,7 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
 }
 
 pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {
-    let Some(session) = crate::codex_hook::load_active_session_for_current_file(file)? else {
+    let Some(session) = agent_doc_codex_hook_io::load_active_session_for_current_file(file)? else {
         return Ok(None);
     };
     let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {

@@ -38,12 +38,19 @@
 //! - `stop_blocks_open_cycle_without_recoverable_response`
 //! - `stop_fails_closed_after_one_auto_continue`
 
-use agent_doc_codex_hook_io::{project_roots_for, push_unique_root, tracking_roots};
+use agent_doc_codex_hook_io::{
+    SessionState, clear_state_across_roots, load_state_any, project_roots_for, save_state,
+    save_state_across_roots, tracking_roots,
+};
+#[cfg(test)]
+use agent_doc_codex_hook_io::{
+    load_latest_prompt_for_file, load_prompt_for_current_session, load_state, prompt_requests_clear,
+};
 use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_model_tier::context_transcript_io::{
     latest_codex_transcript, transcript_context_pct,
 };
-use agent_doc_model_tier::context_usage::{clear_decision, Harness};
+use agent_doc_model_tier::context_usage::{Harness, clear_decision};
 use agent_doc_queue_io::queue_consume;
 use agent_doc_turn::codex_stop_continuation::{
     render_prompt_continuation_instruction, render_slash_command_continuation_instruction,
@@ -77,29 +84,6 @@ struct StopInput {
     last_assistant_message: String,
     #[serde(default)]
     stop_hook_active: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct SessionState {
-    session_id: String,
-    doc_path: String,
-    last_turn_id: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    last_prompt: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_auto_queue_head: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_context_clear_at: Option<u64>,
-    updated_at: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActiveSessionState {
-    pub session_id: String,
-    pub doc_path: String,
-    pub last_turn_id: String,
-    pub last_prompt: String,
-    pub updated_at: u64,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -1358,49 +1342,6 @@ fn resolve_agent_doc_path(prompt: &str, cwd: &Path) -> Option<PathBuf> {
     Some(joined.canonicalize().unwrap_or(joined))
 }
 
-fn load_state_any(roots: &[PathBuf], session_id: &str) -> Result<Option<(PathBuf, SessionState)>> {
-    for root in roots {
-        if let Some(state) = load_state(root, session_id)? {
-            return Ok(Some((root.clone(), state)));
-        }
-    }
-    Ok(None)
-}
-
-fn clear_state_across_roots(roots: &[PathBuf], loaded_root: &Path, session_id: &str) -> Result<()> {
-    let mut all_roots = roots.to_vec();
-    push_unique_root(&mut all_roots, loaded_root.to_path_buf());
-    for root in all_roots {
-        clear_state(&root, session_id)?;
-    }
-    Ok(())
-}
-
-fn save_state_across_roots(
-    roots: &[PathBuf],
-    loaded_root: &Path,
-    state: &SessionState,
-) -> Result<()> {
-    let mut all_roots = roots.to_vec();
-    push_unique_root(&mut all_roots, loaded_root.to_path_buf());
-    for root in all_roots {
-        save_state(&root, state)?;
-    }
-    Ok(())
-}
-
-fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
-    let path = state_path(root, session_id);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content =
-        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let state =
-        serde_json::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
-    Ok(Some(state))
-}
-
 fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
     // Single source of truth: the shared queue-continuation detector
     // (#codex-auto-queue-stalled-final-gate). Keeps the Stop-hook continuation
@@ -1424,160 +1365,6 @@ fn open_cycle_started_from_unchanged_file(file: &Path) -> Result<bool> {
             },
         },
     )
-}
-
-pub fn load_prompt_for_current_session(file: &Path) -> Result<Option<String>> {
-    let Some(state) = load_active_session_for_current_file(file)? else {
-        return Ok(None);
-    };
-    if state.last_prompt.trim().is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(state.last_prompt))
-}
-
-pub fn load_latest_prompt_for_file(file: &Path) -> Result<Option<String>> {
-    let Some(state) = load_latest_state_for_file(file)? else {
-        return Ok(None);
-    };
-    if state.last_prompt.trim().is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(state.last_prompt))
-}
-
-pub fn load_latest_prompt_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>> {
-    load_latest_state_for_file(file)
-}
-
-pub fn prompt_requests_clear(prompt: &str) -> bool {
-    is_context_clear_prompt(prompt)
-}
-
-pub fn record_external_prompt_for_file(file: &Path, session_id: &str, prompt: &str) -> Result<()> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let state = SessionState {
-        session_id: session_id.to_string(),
-        doc_path: canonical.display().to_string(),
-        last_turn_id: String::new(),
-        last_prompt: prompt.to_string(),
-        last_auto_queue_head: None,
-        last_context_clear_at: is_context_clear_prompt(prompt).then(now_secs),
-        updated_at: now_secs(),
-    };
-    for root in project_roots_for(&canonical) {
-        save_state(&root, &state)?;
-    }
-    Ok(())
-}
-
-pub fn load_active_session_for_current_file(file: &Path) -> Result<Option<ActiveSessionState>> {
-    let Some(session_id) = current_session_id() else {
-        return Ok(None);
-    };
-    let roots = project_roots_for(file);
-    let Some((_, state)) = load_state_any(&roots, &session_id)? else {
-        return Ok(None);
-    };
-    let state_file = PathBuf::from(&state.doc_path)
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(&state.doc_path));
-    let current_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    if state_file != current_file {
-        return Ok(None);
-    }
-    Ok(Some(ActiveSessionState {
-        session_id: state.session_id,
-        doc_path: state.doc_path,
-        last_turn_id: state.last_turn_id,
-        last_prompt: state.last_prompt,
-        updated_at: state.updated_at,
-    }))
-}
-
-fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>> {
-    let current_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let mut latest: Option<SessionState> = None;
-
-    for root in project_roots_for(file) {
-        let dir = root.join(".agent-doc/codex-hooks/sessions");
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(state) = serde_json::from_str::<SessionState>(&content) else {
-                continue;
-            };
-            let state_file = PathBuf::from(&state.doc_path)
-                .canonicalize()
-                .unwrap_or_else(|_| PathBuf::from(&state.doc_path));
-            if state_file != current_file {
-                continue;
-            }
-            let is_newer = latest
-                .as_ref()
-                .is_none_or(|best| state.updated_at >= best.updated_at);
-            if is_newer {
-                latest = Some(state);
-            }
-        }
-    }
-
-    Ok(latest.map(|state| ActiveSessionState {
-        session_id: state.session_id,
-        doc_path: state.doc_path,
-        last_turn_id: state.last_turn_id,
-        last_prompt: state.last_prompt,
-        updated_at: state.updated_at,
-    }))
-}
-
-fn save_state(root: &Path, state: &SessionState) -> Result<()> {
-    let path = state_path(root, &state.session_id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(state)?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-fn clear_state(root: &Path, session_id: &str) -> Result<()> {
-    let path = state_path(root, session_id);
-    match std::fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => return Err(err).with_context(|| format!("remove {}", path.display())),
-    }
-    Ok(())
-}
-
-fn state_path(root: &Path, session_id: &str) -> PathBuf {
-    let hash = agent_doc_hash::content_hash(session_id);
-    root.join(".agent-doc/codex-hooks/sessions")
-        .join(format!("{hash}.json"))
-}
-
-fn current_session_id() -> Option<String> {
-    std::env::var("CODEX_THREAD_ID")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            std::env::var("CODEX_SESSION_ID")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        })
 }
 
 fn now_secs() -> u64 {

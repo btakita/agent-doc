@@ -786,7 +786,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let raw_diff = diff_result_with_current.diff;
     let harness_diff = agent_doc_harness::prompt_source::synthetic_diff_for_file(
         file,
-        crate::codex_hook::load_prompt_for_current_session,
+        agent_doc_codex_hook_io::load_prompt_for_current_session,
     )?;
     let initial_diff = raw_diff.clone().or(harness_diff.clone());
 

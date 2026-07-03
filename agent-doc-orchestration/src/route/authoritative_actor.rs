@@ -16,7 +16,7 @@ pub(crate) fn load_authoritative_actor_binding(
     if respect_tracked_clear_restart
         && tracked_harness_clear_requires_fresh_restart(
             harness,
-            crate::codex_hook::load_latest_prompt_for_file(file)?.as_deref(),
+            agent_doc_codex_hook_io::load_latest_prompt_for_file(file)?.as_deref(),
         )
     {
         return Ok(None);

@@ -9,9 +9,16 @@
 # A test running past `period` is logged as slow; after `terminate-after` periods
 # nextest kills it and reports a timeout failure (so the suite still terminates
 # and names the hung test). 60s × 3 = 180s ceiling — comfortably above the
-# slowest legitimate IPC-replay integration test (~20s) yet far below a hang.
+# slowest ordinary IPC-replay integration test (~20s) yet far below a hang.
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 3 }
+
+# Queue-accretion restart covers a full multi-turn queue drain and fresh backend
+# handoff. It is legitimately slow on shared CI runners, but should still be
+# bounded tightly enough to catch deadlocks.
+[[profile.default.overrides]]
+filter = 'test(run_auto_queue_starts_fresh_backend_session_after_accretion_threshold)'
+slow-timeout = { period = "60s", terminate-after = 5 }
 
 # File-IPC integration tests use temp-project patch directories but still compete
 # for process-level test binary resources under nextest. Run those binaries
@@ -27,6 +34,10 @@ file-ipc = { max-threads = 1 }
 # inherits the same deadlock guard.
 [profile.ci]
 slow-timeout = { period = "60s", terminate-after = 3 }
+
+[[profile.ci.overrides]]
+filter = 'test(run_auto_queue_starts_fresh_backend_session_after_accretion_threshold)'
+slow-timeout = { period = "60s", terminate-after = 5 }
 
 [[profile.ci.overrides]]
 filter = 'binary(live_typing_ipc_replay) | binary(live_ipc_race_integration) | binary(ipc_closeout_model)'

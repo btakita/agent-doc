@@ -50,9 +50,16 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
     let response = agent_doc_turn::response_text::strip_assistant_heading(&response);
-    prewrite_pending_capture_check(file, &response, &flags)?;
-    auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
-    prewrite_pending_done_check(file, &response, &flags)?;
+    let pending_flags = super::pending_write_flags(&flags);
+    agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
+    agent_doc_session_check_io::auto_apply_pending_done_if_enabled(
+        file,
+        &response,
+        &pending_flags,
+        &mut current_content,
+        &crate::BACKLOG_COMMAND_EFFECTS,
+    )?;
+    agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
     repair::save_pending(file, &response)?;
@@ -291,9 +298,16 @@ pub fn run_template(
             &unmatched,
         )?;
     }
-    prewrite_pending_capture_check(file, &response, &flags)?;
-    auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
-    prewrite_pending_done_check(file, &response, &flags)?;
+    let pending_flags = super::pending_write_flags(&flags);
+    agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
+    agent_doc_session_check_io::auto_apply_pending_done_if_enabled(
+        file,
+        &response,
+        &pending_flags,
+        &mut current_content,
+        &crate::BACKLOG_COMMAND_EFFECTS,
+    )?;
+    agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
     repair::save_pending(file, &response)?;
@@ -635,9 +649,16 @@ pub fn run_stream(
             &unmatched,
         )?;
     }
-    prewrite_pending_capture_check(file, &response, &flags)?;
-    auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
-    prewrite_pending_done_check(file, &response, &flags)?;
+    let pending_flags = super::pending_write_flags(&flags);
+    agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
+    agent_doc_session_check_io::auto_apply_pending_done_if_enabled(
+        file,
+        &response,
+        &pending_flags,
+        &mut current_content,
+        &crate::BACKLOG_COMMAND_EFFECTS,
+    )?;
+    agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     agent_doc_template::response_materialization::reject_marker_response_with_zero_patches(
         parsed_marker_count,
@@ -1351,9 +1372,16 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             &unmatched,
         )?;
     }
-    prewrite_pending_capture_check(file, &response, &flags)?;
-    auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
-    prewrite_pending_done_check(file, &response, &flags)?;
+    let pending_flags = super::pending_write_flags(&flags);
+    agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
+    agent_doc_session_check_io::auto_apply_pending_done_if_enabled(
+        file,
+        &response,
+        &pending_flags,
+        &mut current_content,
+        &crate::BACKLOG_COMMAND_EFFECTS,
+    )?;
+    agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
 

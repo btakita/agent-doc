@@ -9,6 +9,7 @@ pub mod prompt_bearing;
 pub mod queue_head_guards;
 pub mod queue_head_provenance_guards;
 pub mod response_guards;
+pub mod write_pending_checks;
 
 pub use backlog_guards::*;
 pub use closeout_guards::*;
@@ -21,3 +22,4 @@ pub use prompt_bearing::*;
 pub use queue_head_guards::*;
 pub use queue_head_provenance_guards::*;
 pub use response_guards::*;
+pub use write_pending_checks::*;

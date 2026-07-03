@@ -1134,7 +1134,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-template-io/src/write_normalize.rs",
         "agent-doc-orchestration/src/write/converge.rs",
-        "agent-doc-orchestration/src/write/pending_checks.rs",
+        "agent-doc-session-check-io/src/write_pending_checks.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
     ];
@@ -1606,8 +1606,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // unsaved operator edit still fails closed). These are test-assertion
         // literals exercising the existing visible-write guard boundary, not new
         // production flow guards.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 49,
-        ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
+        // 49 -> 28 and 4 -> 6 (#write-pending-checks-extract): pending
+        // capture/done guard policy and the review-done source guard moved out
+        // of orchestration into `agent-doc-session-check-io`. Orchestration keeps
+        // visible-write guard adapters and closeout sequencing; the focused
+        // session-check IO module owns the pending closeout guard tokens.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 28,
+        ("agent-doc-session-check-io/src/write_pending_checks.rs", "guard_") => 6,
         // 3 -> 1 (#template-materialization-policy): raw-response probe
         // construction now lives in `agent-doc-template::response_materialization`,
         // so the audited transient guard-marker stripping token moved out of
@@ -4914,7 +4919,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
-        "agent-doc-orchestration/src/write/pending_checks.rs",
+        "agent-doc-session-check-io/src/write_pending_checks.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -5454,7 +5459,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
 
     for relative in [
         "agent-doc-session-check-io/src/pending_guards.rs",
-        "agent-doc-orchestration/src/write/pending_checks.rs",
+        "agent-doc-session-check-io/src/write_pending_checks.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -5486,7 +5491,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     );
 
     let pending_checks = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/write/pending_checks.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/write_pending_checks.rs"),
     )
     .unwrap();
     let pending_capture_policy =
@@ -6584,7 +6589,7 @@ fn test_agent_doc_turn_owns_pending_capture_heuristics() {
 
     for relative in [
         "agent-doc-session-check-io/src/pending_guards.rs",
-        "agent-doc-orchestration/src/write/pending_checks.rs",
+        "agent-doc-session-check-io/src/write_pending_checks.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -10283,17 +10288,31 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "session_check.rs should call the focused guard IO crate directly"
     );
 
-    for relative_path in [
-        "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/write/pending_checks.rs",
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    assert!(
+        !write_source.contains("crate::session_check::resolve_"),
+        "write.rs must not route guard-mode resolvers through orchestration session_check"
+    );
+    let pending_write_checks = fs::read_to_string(
+        manifest_dir.join("agent-doc-session-check-io/src/write_pending_checks.rs"),
+    )
+    .unwrap();
+    for required in [
+        "crate::resolve_pending_capture_guard_mode",
+        "crate::resolve_pending_done_guard_mode",
+        "crate::resolve_review_done_guard_mode",
     ] {
-        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
-            source.contains("agent_doc_session_check_io::resolve_")
-                && !source.contains("crate::session_check::resolve_"),
-            "{relative_path} should call guard-mode resolvers from the focused session-check IO crate"
+            pending_write_checks.contains(required),
+            "focused write pending checks should call crate-local guard-mode resolver: {required}"
         );
     }
+    assert!(
+        !pending_write_checks.contains("agent_doc_session_check_io::resolve_")
+            && !pending_write_checks.contains("crate::session_check::resolve_"),
+        "focused write pending checks must not route guard-mode resolvers through orchestration"
+    );
 }
 
 #[test]
@@ -18290,7 +18309,7 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
     );
 
     let pending_checks = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/write/pending_checks.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/write_pending_checks.rs"),
     )
     .unwrap();
     assert!(
@@ -18393,7 +18412,7 @@ fn test_extracted_pure_layers_keep_focused_owners() {
         );
     }
     let pending_checks = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/write/pending_checks.rs"),
+        manifest_dir.join("agent-doc-session-check-io/src/write_pending_checks.rs"),
     )
     .unwrap();
     for forbidden in [
@@ -18407,7 +18426,7 @@ fn test_extracted_pure_layers_keep_focused_owners() {
         );
     }
     assert!(
-        pending_checks.contains("use agent_doc_session_check_io::{")
+        pending_checks.contains("use crate::{")
             && pending_checks.contains("promised_backlog_item_inventory_shortfall")
             && pending_checks.contains("unresolved_promised_backlog_item_ids")
             && !pending_checks.contains("use agent_doc_workflow::pending_capture;"),

@@ -1,12 +1,38 @@
-//! Extracted from `write.rs` (large-module split). See parent module for context.
+//! Write-time pending capture/done closeout guards.
 
-use super::*;
-use agent_doc_session_check_io::{
+use anyhow::{Context, Result};
+use std::path::Path;
+
+use crate::{
     promised_backlog_item_inventory_shortfall, promised_plan_reference_shortfall,
     unresolved_backlog_capture_targets, unresolved_promised_backlog_item_ids,
 };
 
-pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
+#[derive(Clone, Debug, Default)]
+pub struct PendingWriteFlags {
+    pub has_pending_add: bool,
+    pub has_pending_done: bool,
+    pub pending_done_ids: Vec<String>,
+    pub pending_kept_open_ids: Vec<String>,
+    pub strict_closeout: bool,
+    pub force_disk: bool,
+    pub rerun_command_base: Option<String>,
+}
+
+fn log_closeout_guard(
+    file: &Path,
+    stage: agent_doc_flow::types::FlowStage,
+    outcome: agent_doc_flow::types::FlowOutcome,
+    reason: agent_doc_turn::closeout_guard::CloseoutGuardReason,
+) {
+    agent_doc_flow_io::log_flow_event(
+        file,
+        agent_doc_turn::closeout_guard::closeout_guard_event(stage, outcome, reason),
+        agent_doc_ops_log_io::log_op,
+    );
+}
+
+pub fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(());
     };
@@ -149,7 +175,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let mode = agent_doc_session_check_io::resolve_pending_capture_guard_mode(file)?;
+    let mode = crate::resolve_pending_capture_guard_mode(file)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -180,10 +206,10 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     );
 }
 
-pub(crate) fn prewrite_pending_capture_check(
+pub fn prewrite_pending_capture_check(
     file: &Path,
     response_body: &str,
-    flags: &WriteFlags,
+    flags: &PendingWriteFlags,
 ) -> Result<()> {
     if !flags.strict_closeout {
         return Ok(());
@@ -353,7 +379,7 @@ pub(crate) fn prewrite_pending_capture_check(
         return Ok(());
     }
 
-    let mode = agent_doc_session_check_io::resolve_pending_capture_guard_mode(file)?;
+    let mode = crate::resolve_pending_capture_guard_mode(file)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -384,9 +410,10 @@ pub(crate) fn prewrite_pending_capture_check(
     );
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct PendingDoneCheckOptions {
+#[derive(Clone, Copy, Default)]
+pub struct PendingDoneCheckOptions {
     pub force_disk: bool,
+    pub backlog_effects: Option<&'static dyn agent_doc_element_backlog_io::BacklogCommandEffects>,
 }
 
 fn malformed_tracked_item_refs_completed_by_response(
@@ -409,15 +436,15 @@ fn malformed_tracked_item_refs_completed_by_response(
 }
 
 #[cfg(test)]
-pub(crate) fn precommit_pending_done_check(file: &Path) -> Result<()> {
+pub fn precommit_pending_done_check(file: &Path) -> Result<()> {
     precommit_pending_done_check_with_options(file, PendingDoneCheckOptions::default())
 }
 
-pub(crate) fn precommit_pending_done_check_with_options(
+pub fn precommit_pending_done_check_with_options(
     file: &Path,
     options: PendingDoneCheckOptions,
 ) -> Result<()> {
-    let mode = agent_doc_session_check_io::resolve_pending_done_guard_mode(file)?;
+    let mode = crate::resolve_pending_done_guard_mode(file)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -463,21 +490,24 @@ pub(crate) fn precommit_pending_done_check_with_options(
         return Ok(());
     }
 
-    if agent_doc_session_check_io::resolve_auto_done(file)? {
-        agent_doc_element_backlog_io::with_backlog_command_effects(
-            &crate::BACKLOG_COMMAND_EFFECTS,
-            || {
-                agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
-                    options.force_disk,
-                    || {
-                        for id in &missing {
-                            auto_apply_pending_done_id(file, id)?;
-                        }
-                        Ok(())
-                    },
-                )
-            },
-        )?;
+    if crate::resolve_auto_done(file)? {
+        let Some(backlog_effects) = options.backlog_effects else {
+            anyhow::bail!(
+                "auto_done is enabled for {} but backlog command effects are not installed",
+                file.display()
+            );
+        };
+        agent_doc_element_backlog_io::with_backlog_command_effects(backlog_effects, || {
+            agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+                options.force_disk,
+                || {
+                    for id in &missing {
+                        auto_apply_pending_done_id(file, id)?;
+                    }
+                    Ok(())
+                },
+            )
+        })?;
         agent_doc_cycle_state_io::record_pending_done_ids(file, &missing)?;
         agent_doc_cycle_state_io::mark_pending_mutations(file)?;
         eprintln!(
@@ -519,16 +549,16 @@ pub(crate) fn precommit_pending_done_check_with_options(
     );
 }
 
-pub(crate) fn prewrite_pending_done_check(
+pub fn prewrite_pending_done_check(
     file: &Path,
     response_body: &str,
-    flags: &WriteFlags,
+    flags: &PendingWriteFlags,
 ) -> Result<()> {
     if !flags.strict_closeout {
         return Ok(());
     }
 
-    let mode = agent_doc_session_check_io::resolve_pending_done_guard_mode(file)?;
+    let mode = crate::resolve_pending_done_guard_mode(file)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -616,13 +646,14 @@ pub(crate) fn prewrite_pending_done_check(
     );
 }
 
-pub(crate) fn auto_apply_pending_done_if_enabled(
+pub fn auto_apply_pending_done_if_enabled(
     file: &Path,
     response_body: &str,
-    flags: &WriteFlags,
+    flags: &PendingWriteFlags,
     current_content: &mut String,
+    backlog_effects: &'static dyn agent_doc_element_backlog_io::BacklogCommandEffects,
 ) -> Result<()> {
-    if !flags.strict_closeout || !agent_doc_session_check_io::resolve_auto_done(file)? {
+    if !flags.strict_closeout || !crate::resolve_auto_done(file)? {
         return Ok(());
     }
     if agent_doc_turn::closeout_signal::pending_done_suppressed(response_body) {
@@ -659,20 +690,17 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
         return Ok(());
     };
 
-    agent_doc_element_backlog_io::with_backlog_command_effects(
-        &crate::BACKLOG_COMMAND_EFFECTS,
-        || {
-            agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
-                flags.force_disk,
-                || {
-                    for id in &missing {
-                        auto_apply_pending_done_id(file, id)?;
-                    }
-                    Ok(())
-                },
-            )
-        },
-    )?;
+    agent_doc_element_backlog_io::with_backlog_command_effects(backlog_effects, || {
+        agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+            flags.force_disk,
+            || {
+                for id in &missing {
+                    auto_apply_pending_done_id(file, id)?;
+                }
+                Ok(())
+            },
+        )
+    })?;
     agent_doc_cycle_state_io::record_pending_done_ids(file, &missing)?;
     agent_doc_cycle_state_io::mark_pending_mutations(file)?;
     *current_content = std::fs::read_to_string(file)
@@ -688,7 +716,7 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
     Ok(())
 }
 
-pub(crate) fn auto_apply_pending_done_id(file: &Path, id: &str) -> Result<()> {
+pub fn auto_apply_pending_done_id(file: &Path, id: &str) -> Result<()> {
     if let Some(component) =
         agent_doc_element_backlog_io::backlog_cmd::open_item_component_name(file, id)?
         && agent_doc_element::element::is_backlog_component(&component)
@@ -699,12 +727,50 @@ pub(crate) fn auto_apply_pending_done_id(file: &Path, id: &str) -> Result<()> {
     agent_doc_element_backlog_io::backlog_cmd::done(file, id)
 }
 
-pub(crate) fn run_closeout_pending_maintenance(
+pub fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
+    let mode = crate::resolve_review_done_guard_mode(file)?;
+    if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(());
+    }
+    let Some(component_name) =
+        agent_doc_element_backlog_io::backlog_cmd::open_item_component_name(file, id)?
+    else {
+        return Ok(());
+    };
+    if agent_doc_element::element::is_review_component(&component_name) {
+        return Ok(());
+    }
+
+    let normalized = agent_doc_element_backlog::backlog::normalize_pending_id(id);
+    let message = format!(
+        "review_done_guard: --done #{} resolved from agent:{} instead of agent:review; run --backlog-gate {} first or set review_done_guard = \"off\"",
+        normalized, component_name, normalized
+    );
+    match mode {
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
+            eprintln!("[write] warning: {}", message);
+            Ok(())
+        }
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
+            log_closeout_guard(
+                file,
+                agent_doc_flow::types::FlowStage::PreWriteGuard,
+                agent_doc_flow::types::FlowOutcome::Blocked,
+                agent_doc_turn::closeout_guard::CloseoutGuardReason::ReviewDoneSourceNotReviewed,
+            );
+            anyhow::bail!("{}", message)
+        }
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => Ok(()),
+    }
+}
+
+pub fn run_closeout_pending_maintenance(
     file: &Path,
-    commit_mode: CommitMode,
+    commit_required: bool,
     force_disk: bool,
+    run_pending_maintenance: impl FnOnce(&Path, bool) -> Result<()>,
 ) -> Result<()> {
-    if commit_mode != CommitMode::Required {
+    if !commit_required {
         return Ok(());
     }
     if !closeout_pending_maintenance_required(file)? {
@@ -717,11 +783,7 @@ pub(crate) fn run_closeout_pending_maintenance(
         );
         return Ok(());
     }
-    if force_disk {
-        crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
-    } else {
-        crate::preflight::run_pending_maintenance(file).map(|_| ())
-    }
+    run_pending_maintenance(file, force_disk)
 }
 
 fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
@@ -757,7 +819,25 @@ fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
 mod precommit_pending_capture_tests {
     use std::fs;
     use std::path::Path;
-    use std::process::Command as ProcessCommand;
+
+    struct TestBacklogCommandEffects;
+
+    static TEST_BACKLOG_COMMAND_EFFECTS: TestBacklogCommandEffects = TestBacklogCommandEffects;
+
+    impl agent_doc_element_backlog_io::BacklogCommandEffects for TestBacklogCommandEffects {
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current_content: &str,
+            target_content: &str,
+            _reason: &str,
+        ) -> anyhow::Result<()> {
+            fs::write(file, target_content)?;
+            Ok(())
+        }
+
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+    }
 
     fn setup_precommit(
         root: &std::path::Path,
@@ -866,34 +946,6 @@ mod precommit_pending_capture_tests {
         agent_doc_hash::content_hash(component.content(&content))
     }
 
-    fn init_git_repo(root: &Path, tracked: &Path) {
-        ProcessCommand::new("git")
-            .current_dir(root)
-            .args(["init"])
-            .status()
-            .unwrap();
-        ProcessCommand::new("git")
-            .current_dir(root)
-            .args(["config", "user.email", "test@example.com"])
-            .status()
-            .unwrap();
-        ProcessCommand::new("git")
-            .current_dir(root)
-            .args(["config", "user.name", "Test User"])
-            .status()
-            .unwrap();
-        ProcessCommand::new("git")
-            .current_dir(root)
-            .args(["add", tracked.file_name().unwrap().to_str().unwrap()])
-            .status()
-            .unwrap();
-        ProcessCommand::new("git")
-            .current_dir(root)
-            .args(["commit", "-m", "initial", "--no-verify"])
-            .status()
-            .unwrap();
-    }
-
     #[test]
     fn precommit_blocks_without_pending_add() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -937,7 +989,7 @@ mod precommit_pending_capture_tests {
         super::prewrite_pending_capture_check(
             &doc,
             "### Re: #done1 — gpt-5\n\nImplemented and verified.\n",
-            &super::WriteFlags {
+            &super::PendingWriteFlags {
                 has_pending_done: true,
                 pending_done_ids: vec!["done1".to_string()],
                 strict_closeout: true,
@@ -1145,7 +1197,7 @@ mod precommit_pending_capture_tests {
         let err = super::prewrite_pending_capture_check(
             &doc,
             "### Re: #agent-doc-bug — gpt-5\n\nPlanned item:\n- [ ] [#new1] New transferred item\n",
-            &super::WriteFlags {
+            &super::PendingWriteFlags {
                 has_pending_add: true,
                 strict_closeout: true,
                 ..Default::default()
@@ -1359,7 +1411,10 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_done_check_with_options(
             &doc,
-            super::PendingDoneCheckOptions { force_disk: true },
+            super::PendingDoneCheckOptions {
+                force_disk: true,
+                backlog_effects: Some(&TEST_BACKLOG_COMMAND_EFFECTS),
+            },
         )
         .expect("auto_done should record and apply missing --done mutations");
         let content = fs::read_to_string(&doc).unwrap();
@@ -1401,7 +1456,7 @@ mod precommit_pending_capture_tests {
         super::prewrite_pending_done_check(
             &doc,
             "### Re: #fvtg rescope — gpt-5\n\nUpdated #fvtg to keep the rollout validation item open.\nVerification:\n- cargo test\n",
-            &super::WriteFlags {
+            &super::PendingWriteFlags {
                 pending_kept_open_ids: vec!["#FVTG".to_string()],
                 strict_closeout: true,
                 ..Default::default()
@@ -1455,51 +1510,5 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_done_check(&doc)
             .expect("suppression marker should disable the pre-commit pending-done gate");
-    }
-
-    #[test]
-    fn required_closeout_fails_when_only_later_prompt_drift_remains() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
-        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
-        fs::create_dir_all(tmp.path().join(".agent-doc/state/cycles")).unwrap();
-        fs::create_dir_all(tmp.path().join(".agent-doc/captures")).unwrap();
-
-        let doc = tmp.path().join("doc.md");
-        let initial = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "agent_doc_write: crdt\n",
-            "---\n\n",
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: topic — gpt-5\n",
-            "body\n",
-            "<!-- /agent:exchange -->\n",
-        );
-        fs::write(&doc, initial).unwrap();
-        init_git_repo(tmp.path(), &doc);
-        agent_doc_snapshot_io::save(&doc, initial, agent_doc_ops_log_io::log_op).unwrap();
-
-        let drifted = initial.replace(
-            "<!-- /agent:exchange -->\n",
-            "do #followup. spec-test-build-install-commit-push\n<!-- /agent:exchange -->\n",
-        );
-        fs::write(&doc, &drifted).unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "commit_already_current",
-            Some(initial),
-            Some(&drifted),
-        )
-        .unwrap();
-
-        let err = super::complete_required_closeout(&doc).unwrap_err();
-        let message = err.to_string();
-        assert!(message.contains("unresolved prompt-bearing user changes"));
-        assert!(message.contains("do #followup. spec-test-build-install-commit-push"));
     }
 }

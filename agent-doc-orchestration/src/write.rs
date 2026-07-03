@@ -354,6 +354,18 @@ pub struct WriteFlags {
     pub rerun_command_base: Option<String>,
 }
 
+fn pending_write_flags(flags: &WriteFlags) -> agent_doc_session_check_io::PendingWriteFlags {
+    agent_doc_session_check_io::PendingWriteFlags {
+        has_pending_add: flags.has_pending_add,
+        has_pending_done: flags.has_pending_done,
+        pending_done_ids: flags.pending_done_ids.clone(),
+        pending_kept_open_ids: flags.pending_kept_open_ids.clone(),
+        strict_closeout: flags.strict_closeout,
+        force_disk: flags.force_disk,
+        rerun_command_base: flags.rerun_command_base.clone(),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommitMode {
     None,
@@ -676,41 +688,6 @@ fn resolve_commit_mode(
         return Ok(CommitMode::Required);
     }
     Ok(CommitMode::BestEffort)
-}
-
-fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
-    let mode = agent_doc_session_check_io::resolve_review_done_guard_mode(file)?;
-    if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
-        return Ok(());
-    }
-    let Some(component_name) = backlog_cmd::open_item_component_name(file, id)? else {
-        return Ok(());
-    };
-    if agent_doc_element::element::is_review_component(&component_name) {
-        return Ok(());
-    }
-
-    let normalized = agent_doc_element_backlog::backlog::normalize_pending_id(id);
-    let message = format!(
-        "review_done_guard: --done #{} resolved from agent:{} instead of agent:review; run --backlog-gate {} first or set review_done_guard = \"off\"",
-        normalized, component_name, normalized
-    );
-    match mode {
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
-            eprintln!("[write] warning: {}", message);
-            Ok(())
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
-            log_closeout_guard(
-                file,
-                agent_doc_flow::types::FlowStage::PreWriteGuard,
-                agent_doc_flow::types::FlowOutcome::Blocked,
-                agent_doc_turn::closeout_guard::CloseoutGuardReason::ReviewDoneSourceNotReviewed,
-            );
-            anyhow::bail!("{}", message)
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => Ok(()),
-    }
 }
 
 pub fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
@@ -1153,7 +1130,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                         backlog_cmd::resolve_gate(file, gt)?;
                     }
                     for id in &options.pending_done {
-                        enforce_review_done_guard(file, id)?;
+                        agent_doc_session_check_io::enforce_review_done_guard(file, id)?;
                         backlog_cmd::done(file, id)?;
                     }
                     if !options.pending_done.is_empty() {
@@ -1189,7 +1166,18 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if options.pending_only {
-        run_closeout_pending_maintenance(file, commit_mode, options.force_disk)?;
+        agent_doc_session_check_io::run_closeout_pending_maintenance(
+            file,
+            commit_mode == CommitMode::Required,
+            options.force_disk,
+            |file, force_disk| {
+                if force_disk {
+                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                } else {
+                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                }
+            },
+        )?;
         if commit_mode != CommitMode::None {
             agent_doc_lint_io::run_with_logger(
                 file,
@@ -1360,16 +1348,28 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if write_result.is_ok() {
-        run_closeout_pending_maintenance(file, commit_mode, options.force_disk)?;
+        agent_doc_session_check_io::run_closeout_pending_maintenance(
+            file,
+            commit_mode == CommitMode::Required,
+            options.force_disk,
+            |file, force_disk| {
+                if force_disk {
+                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                } else {
+                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                }
+            },
+        )?;
     }
 
     // Phase 3b: pre-commit pending closeout gates (strict mode only).
     if write_result.is_ok() && commit_mode == CommitMode::Required {
-        precommit_pending_capture_check(file)?;
-        precommit_pending_done_check_with_options(
+        agent_doc_session_check_io::precommit_pending_capture_check(file)?;
+        agent_doc_session_check_io::precommit_pending_done_check_with_options(
             file,
-            PendingDoneCheckOptions {
+            agent_doc_session_check_io::PendingDoneCheckOptions {
                 force_disk: options.force_disk,
+                backlog_effects: Some(&crate::BACKLOG_COMMAND_EFFECTS),
             },
         )?;
     }
@@ -1742,9 +1742,6 @@ fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
     crate::git::commit(file)?;
     Ok(true)
 }
-
-mod pending_checks;
-pub(crate) use pending_checks::*;
 
 fn ipc_response_materialized_or_fallback(
     file: &Path,
@@ -2953,7 +2950,19 @@ mod tests {
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
         crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
-        let err = run_closeout_pending_maintenance(&doc, CommitMode::Required, false).unwrap_err();
+        let err = agent_doc_session_check_io::run_closeout_pending_maintenance(
+            &doc,
+            true,
+            false,
+            |file, force_disk| {
+                if force_disk {
+                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                } else {
+                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                }
+            },
+        )
+        .unwrap_err();
         let err = format!("{err:?}");
         assert!(
             err.contains("refused direct disk write"),
@@ -2965,8 +2974,19 @@ mod tests {
             "non-force closeout must not write behind an active listener"
         );
 
-        run_closeout_pending_maintenance(&doc, CommitMode::Required, true)
-            .expect("force-disk closeout pending maintenance should write directly");
+        agent_doc_session_check_io::run_closeout_pending_maintenance(
+            &doc,
+            true,
+            true,
+            |file, force_disk| {
+                if force_disk {
+                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                } else {
+                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                }
+            },
+        )
+        .expect("force-disk closeout pending maintenance should write directly");
 
         let result = fs::read_to_string(&doc).unwrap();
         let backlog_after = agent_doc_element::element::parse(&result)
@@ -3033,7 +3053,19 @@ mod tests {
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
         crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
-        let err = run_closeout_pending_maintenance(&doc, CommitMode::Required, false).unwrap_err();
+        let err = agent_doc_session_check_io::run_closeout_pending_maintenance(
+            &doc,
+            true,
+            false,
+            |file, force_disk| {
+                if force_disk {
+                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                } else {
+                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                }
+            },
+        )
+        .unwrap_err();
         let err = format!("{err:?}");
         assert!(
             err.contains("visible editor buffer"),
@@ -3080,8 +3112,19 @@ mod tests {
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
         crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
-        run_closeout_pending_maintenance(&doc, CommitMode::Required, false)
-            .expect("status-only housekeeping should not block response closeout");
+        agent_doc_session_check_io::run_closeout_pending_maintenance(
+            &doc,
+            true,
+            false,
+            |file, force_disk| {
+                if force_disk {
+                    crate::preflight::run_pending_maintenance_force_disk(file).map(|_| ())
+                } else {
+                    crate::preflight::run_pending_maintenance(file).map(|_| ())
+                }
+            },
+        )
+        .expect("status-only housekeeping should not block response closeout");
 
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),

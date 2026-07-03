@@ -215,6 +215,65 @@ pub fn restart_continue_exit_strategy(
     SupervisorRestartContinueExitStrategy::Resume
 }
 
+// ---------------------------------------------------------------------------
+// Autonomous controller watchdog restart policy (#supresilience Part B).
+//
+// The project-controller daemon periodically probes each route-owned supervisor
+// and restarts one that died (dead pid + live pane + non-closed session). A
+// deterministically-crashing supervisor must NOT spawn-storm, so the watchdog
+// caps restarts per rolling window and then HALTS with an operator diagnostic.
+//
+// The restart budget is sourced from the SAME session-loss ledger the route
+// auto-start fallback reads (`agent-doc-supervisor::startup_miss` session-loss
+// events / route `fail_if_recent_session_loss_window`) — the watchdog records a
+// session-loss event on each restart so the count in `WATCHDOG_RESTART_WINDOW`
+// grows across ticks. This decision function is the PURE cap policy over that
+// count; there is no second in-memory counter competing with the ledger.
+// ---------------------------------------------------------------------------
+
+/// Rolling window over which autonomous supervisor restarts are counted.
+pub const WATCHDOG_RESTART_WINDOW: Duration = Duration::from_secs(5 * 60);
+
+/// Maximum autonomous watchdog restarts of a single document's route-owned
+/// supervisor within [`WATCHDOG_RESTART_WINDOW`]. Beyond this the watchdog stops
+/// and emits an operator-visible diagnostic instead of looping.
+pub const WATCHDOG_RESTART_CAP: usize = 3;
+
+/// Outcome of the pure watchdog restart-budget decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchdogRestartDecision {
+    /// Budget available — restart the dead supervisor. `attempt` is the 1-based
+    /// restart number within the current window (so `attempt == cap` is the last
+    /// restart before the halt).
+    Restart { attempt: usize },
+    /// Budget exhausted — do NOT restart; emit an operator-visible diagnostic.
+    /// `restarts_in_window` is the observed session-loss count that tripped the cap.
+    Halt { restarts_in_window: usize },
+}
+
+/// Decide whether the controller watchdog should restart a dead route-owned
+/// supervisor, given how many session-loss events already occurred for this
+/// document within [`WATCHDOG_RESTART_WINDOW`].
+///
+/// `prior_restarts_in_window` is the session-loss ledger count observed BEFORE
+/// this restart is recorded. Once it reaches `cap` the watchdog halts. Pure and
+/// side-effect-free so it is unit-tested in isolation; the caller performs the
+/// actual record-loss + replacement dispatch or the halt diagnostic.
+pub fn watchdog_restart_decision(
+    prior_restarts_in_window: usize,
+    cap: usize,
+) -> WatchdogRestartDecision {
+    if cap == 0 || prior_restarts_in_window >= cap {
+        WatchdogRestartDecision::Halt {
+            restarts_in_window: prior_restarts_in_window,
+        }
+    } else {
+        WatchdogRestartDecision::Restart {
+            attempt: prior_restarts_in_window + 1,
+        }
+    }
+}
+
 /// Parsed operator response to the supervisor restart/quit prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupervisorPromptDecision {
@@ -454,6 +513,53 @@ mod tests {
     /// Create an Instant offset by `secs` from a base.
     fn offset(base: Instant, secs: u64) -> Instant {
         base + Duration::from_secs(secs)
+    }
+
+    #[test]
+    fn watchdog_restarts_while_under_cap() {
+        assert_eq!(
+            watchdog_restart_decision(0, WATCHDOG_RESTART_CAP),
+            WatchdogRestartDecision::Restart { attempt: 1 }
+        );
+        assert_eq!(
+            watchdog_restart_decision(2, WATCHDOG_RESTART_CAP),
+            WatchdogRestartDecision::Restart { attempt: 3 },
+            "the third restart is still allowed (attempt == cap)"
+        );
+    }
+
+    #[test]
+    fn watchdog_halts_at_and_beyond_cap() {
+        assert_eq!(
+            watchdog_restart_decision(WATCHDOG_RESTART_CAP, WATCHDOG_RESTART_CAP),
+            WatchdogRestartDecision::Halt {
+                restarts_in_window: WATCHDOG_RESTART_CAP
+            },
+            "once cap restarts have been recorded in the window, stop"
+        );
+        assert_eq!(
+            watchdog_restart_decision(9, WATCHDOG_RESTART_CAP),
+            WatchdogRestartDecision::Halt {
+                restarts_in_window: 9
+            }
+        );
+    }
+
+    #[test]
+    fn watchdog_zero_cap_always_halts() {
+        assert_eq!(
+            watchdog_restart_decision(0, 0),
+            WatchdogRestartDecision::Halt {
+                restarts_in_window: 0
+            }
+        );
+    }
+
+    #[test]
+    fn watchdog_window_and_cap_match_operator_decision() {
+        // Operator decision (#supresilience): 3 restarts / 5-minute window.
+        assert_eq!(WATCHDOG_RESTART_CAP, 3);
+        assert_eq!(WATCHDOG_RESTART_WINDOW, Duration::from_secs(300));
     }
 
     #[test]

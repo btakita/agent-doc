@@ -47,6 +47,7 @@ mod clean;
 mod cleanup_cmd;
 mod commands;
 mod convert;
+mod crash_resilience;
 mod dashboard_cmd;
 mod dedupe_cmd;
 mod describe_image;
@@ -744,6 +745,114 @@ fn recycle_should_escalate_dead_supervisor(recycled: bool, target: Option<&Path>
             path.is_file() || path.extension().is_some()
         }
         None => false,
+    }
+}
+
+/// Bounded wait for a `session *` ensure-or-cold-start to settle before retrying.
+const SESSION_ENSURE_SUPERVISOR_WAIT: Duration = Duration::from_secs(8);
+
+/// #supresilience Part C — classify a `session *` failure as a dead/unreachable-
+/// supervisor fail-closed refusal that an ensure-or-cold-start should escalate.
+///
+/// These are the exact refusals `session_actor_cmd::clear` raises when it cannot
+/// deliver a clear because there is no usable supervisor AND no live pane to fall
+/// back on (verified against `src/session_actor_cmd.rs`):
+/// - `ensure_supervisor_socket`: "no live supervisor socket for {} ..." (no socket).
+/// - `send_command` context: "failed to contact supervisor for {}" (a STALE socket
+///   left by a crashed supervisor — the Part B crash case).
+/// - legacy IPC + no pane: "supervisor does not support clear IPC and no live pane
+///   is available for direct `/clear` submission for {} ...".
+///
+/// It deliberately does NOT match:
+/// - the controller-connect timeout ("timed out waiting for project controller ..."),
+///   because when the whole control plane is down the escalation (`restart` →
+///   `request_supervisor_replacement`) hits the same timeout and cannot help; and
+/// - the turn-scoped no-op reports ("No active turn to cancel for ...", stop-agent's
+///   supervisor-provided errors), so `stop-agent` / `cancel-turn` stay fail-closed and
+///   never fabricate a turn (they are also not wrapped).
+fn session_error_is_missing_supervisor(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let msg = cause.to_string();
+        msg.contains("no live supervisor socket for")
+            || msg.contains("failed to contact supervisor for")
+            || msg.contains(
+                "supervisor does not support clear IPC and no live pane is available",
+            )
+    })
+}
+
+/// #supresilience Part C — poll the supervisor socket until it becomes live or the
+/// timeout elapses, so an ensure-or-cold-start retry has a fair chance to succeed
+/// immediately after the cold-start dispatch. Best-effort: any resolution failure
+/// (no session id / no project root) returns without waiting.
+fn wait_for_live_supervisor_socket(file: &Path, timeout: Duration) {
+    let canonical = file
+        .canonicalize()
+        .unwrap_or_else(|_| agent_doc_git_io::dirs::resolve_absolute_file_path(file));
+    let Some(session_id) = agent_doc_frontmatter_io::session::read_session_id(&canonical) else {
+        return;
+    };
+    let Some(base_dir) = agent_doc_fs::find_project_root(&canonical) else {
+        return;
+    };
+    let socket = agent_doc_supervisor_io::ipc::socket_path(&base_dir, &session_id);
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if matches!(
+            agent_doc_supervisor_io::ipc::probe_socket(&socket),
+            agent_doc_supervisor_io::ipc::SocketLiveness::Live
+        ) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+}
+
+/// #supresilience Part C — run a supervisor-requiring `session *` command and, if it
+/// fails closed because no live supervisor exists, escalate through the SAME
+/// dead→cold-start path `admin recycle <FILE>` uses
+/// (`recycle_should_escalate_dead_supervisor` gate + `session_actor_cmd::restart`
+/// continue-mode), wait briefly for the supervisor to come up, then retry ONCE.
+///
+/// Only `session clear` is wrapped: it is the supervisor-requiring command that
+/// genuinely fails closed (it must inject `/clear` through the supervisor or a live
+/// pane, and errors when neither is available). `session status` / `session doctor`
+/// are NOT wrapped — they REPORT a dead supervisor as state/issues and return `Ok`, so
+/// there is no fail-closed refusal to escalate (a read/report must not cold-start a
+/// whole control plane as a side effect). Turn-scoped commands (`stop-agent`,
+/// `cancel-turn`) are NOT wrapped either: they may legitimately no-op / fail closed
+/// when there is no live agent turn, and this must never fabricate a turn.
+fn run_session_command_ensuring_supervisor<F>(file: &Path, run: F) -> anyhow::Result<()>
+where
+    F: Fn() -> anyhow::Result<()>,
+{
+    match run() {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            // Only escalate the specific "no live supervisor" refusal, only for a real
+            // session document (one that can be cold-started), and only through the
+            // shared `admin recycle` escalation gate.
+            if !session_error_is_missing_supervisor(&err)
+                || agent_doc_frontmatter_io::session::read_session_id(file).is_none()
+                || !recycle_should_escalate_dead_supervisor(false, Some(file))
+            {
+                return Err(err);
+            }
+            eprintln!(
+                "[session] supervisor for {} is dead or unreachable — escalating to a cold-start via `session restart-supervisor {}` before retrying once",
+                file.display(),
+                file.display()
+            );
+            session_actor_cmd::restart(file, session_actor_cmd::RestartMode::Continue, false)
+                .with_context(|| {
+                    format!(
+                        "failed to cold-start a supervisor for {} while ensuring one exists",
+                        file.display()
+                    )
+                })?;
+            wait_for_live_supervisor_socket(file, SESSION_ENSURE_SUPERVISOR_WAIT);
+            run()
+        }
     }
 }
 
@@ -2845,6 +2954,8 @@ fn init_tracing() {
 }
 
 fn main() -> anyhow::Result<()> {
+    // `#supresilience` — crash resilience before any output (SIGPIPE reset + panic hook).
+    crash_resilience::install();
     // Initialize structured logging via AGENT_DOC_LOG env var.
     // Examples: AGENT_DOC_LOG=debug, AGENT_DOC_LOG=agent_doc::preflight=debug
     // When set, logs to .agent-doc/logs/debug.log (auto-rotated).
@@ -3849,7 +3960,9 @@ fn main() -> anyhow::Result<()> {
             Some(SessionAction::StopAgent { file, reason }) => {
                 session_actor_cmd::stop_agent(&file, reason)
             }
-            Some(SessionAction::Clear { file: Some(file) }) => session_actor_cmd::clear(&file),
+            Some(SessionAction::Clear { file: Some(file) }) => {
+                run_session_command_ensuring_supervisor(&file, || session_actor_cmd::clear(&file))
+            }
             Some(SessionAction::Clear { file: None }) => session_cmd::clear(),
             Some(SessionAction::InterruptClear { file, force }) => {
                 session_actor_cmd::interrupt_clear(&file, force)
@@ -4787,5 +4900,50 @@ mod recycle_force_tests {
             false,
             Some(dir.as_path())
         ));
+    }
+
+    #[test]
+    fn session_missing_supervisor_classifier_matches_real_clear_refusals() {
+        // #supresilience Part C — the strings below are copied verbatim from the real
+        // `session_actor_cmd::clear` / `ensure_supervisor_socket` refusal paths in
+        // `src/session_actor_cmd.rs`. The classifier must fire on each one so the
+        // ensure-or-cold-start escalation actually triggers in production.
+
+        // ensure_supervisor_socket (no socket at all).
+        let no_socket = anyhow::anyhow!(
+            "no live supervisor socket for /repo/plan.md (expected /repo/.agent-doc/supervisor-abc.sock)"
+        );
+        assert!(session_error_is_missing_supervisor(&no_socket));
+
+        // send_command context — a STALE socket left by a crashed supervisor (the
+        // Part B crash case), surfaced through the anyhow context chain.
+        let stale_socket = Err::<(), _>(anyhow::anyhow!("Connection refused (os error 111)"))
+            .context("failed to contact supervisor for /repo/plan.md")
+            .unwrap_err();
+        assert!(session_error_is_missing_supervisor(&stale_socket));
+
+        // legacy clear IPC + no live pane fallback.
+        let legacy_no_pane = anyhow::anyhow!(
+            "supervisor does not support clear IPC and no live pane is available for direct `/clear` submission for /repo/plan.md: legacy clear unsupported"
+        );
+        assert!(session_error_is_missing_supervisor(&legacy_no_pane));
+
+        // NEGATIVE — the controller-connect timeout must NOT escalate (the escalation
+        // path hits the same timeout and cannot help).
+        let controller_timeout = anyhow::anyhow!(
+            "timed out waiting for project controller at /repo/.agent-doc/controller.sock"
+        );
+        assert!(!session_error_is_missing_supervisor(&controller_timeout));
+
+        // NEGATIVE — the turn-scoped no-op report (real `cancel_turn` wording) must
+        // stay fail-closed; never cold-start a supervisor to cancel a nonexistent turn.
+        let no_turn = anyhow::anyhow!(
+            "No active turn to cancel for /repo/plan.md (harness is idle; not sending an interrupt)."
+        );
+        assert!(!session_error_is_missing_supervisor(&no_turn));
+
+        // NEGATIVE — an unrelated error must not escalate.
+        let unrelated = anyhow::anyhow!("failed to read /repo/plan.md");
+        assert!(!session_error_is_missing_supervisor(&unrelated));
     }
 }

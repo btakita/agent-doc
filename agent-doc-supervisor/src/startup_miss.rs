@@ -517,6 +517,37 @@ pub fn recent_session_loss_window_at(
     })
 }
 
+/// Count session-loss events in `content` within `window_secs` of `now_epoch_secs`.
+///
+/// Same ledger and event shape as [`recent_session_loss_window_at`], but returns
+/// the raw count over a caller-supplied window with no minimum threshold. The
+/// controller supervisor watchdog (`#supresilience` Part B) uses this to enforce
+/// its own restart budget over the SAME session-loss events the route auto-start
+/// fallback reads, so the watchdog and route share one ledger instead of keeping
+/// two competing counters.
+pub fn count_session_loss_events_within(
+    content: &str,
+    now_epoch_secs: u64,
+    window_secs: u64,
+) -> usize {
+    let cutoff = now_epoch_secs.saturating_sub(window_secs);
+    content
+        .lines()
+        .filter_map(|raw_line| {
+            let line = raw_line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let event = event_from_log_line(line);
+            let timestamp = timestamp_from_log_line(line)?;
+            (timestamp >= cutoff
+                && timestamp <= now_epoch_secs
+                && is_session_loss_event(event))
+            .then_some(())
+        })
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -950,6 +981,26 @@ mod tests {
             recent_session_loss_window_at(content, 1000).is_none(),
             "old session-loss events outside the guard window should not trip it"
         );
+    }
+
+    #[test]
+    fn count_session_loss_events_within_counts_only_events_in_window() {
+        let content = concat!(
+            "[100] supervisor_exit code=missing_pane pane=%41 reason=watchdog_dead_supervisor\n",
+            "[150] session_start file=x pane=%41 session=s\n",
+            "[200] supervisor_exit code=missing_pane pane=%41 reason=watchdog_dead_supervisor\n",
+            "[900] supervisor_exit code=missing_pane pane=%41 reason=watchdog_dead_supervisor\n",
+        );
+
+        // Window covering [100, 300]: two loss events, unaffected by the
+        // interleaved non-loss session_start line.
+        assert_eq!(count_session_loss_events_within(content, 300, 300), 2);
+        // Narrow window excludes the older loss at t=100.
+        assert_eq!(count_session_loss_events_within(content, 300, 150), 1);
+        // No minimum threshold: a single event still counts (unlike the guard).
+        assert_eq!(count_session_loss_events_within(content, 950, 100), 1);
+        // Future/empty ledger reads as zero.
+        assert_eq!(count_session_loss_events_within("", 300, 300), 0);
     }
 
     #[test]

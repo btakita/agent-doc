@@ -376,6 +376,40 @@ pub fn recent_session_loss_window_at(
     Ok(agent_doc_supervisor::startup_miss::recent_session_loss_window_at(&content, now_epoch_secs))
 }
 
+/// Count session-loss events in the supervisor session log for `file`/`session_id`
+/// within `window_secs` of now. Reads the same ledger the route auto-start
+/// fallback consults (`recent_session_loss_window`) so the controller supervisor
+/// watchdog (`#supresilience` Part B) shares one crash-window ledger rather than a
+/// competing counter. Missing log ⇒ `Ok(0)`.
+pub fn count_recent_session_loss_events(
+    file: &Path,
+    session_id: &str,
+    window_secs: u64,
+) -> Result<usize> {
+    count_recent_session_loss_events_at(file, session_id, window_secs, current_epoch_secs())
+}
+
+pub fn count_recent_session_loss_events_at(
+    file: &Path,
+    session_id: &str,
+    window_secs: u64,
+    now_epoch_secs: u64,
+) -> Result<usize> {
+    let Some(path) = supervisor_session_log_path(file, session_id)? else {
+        return Ok(0);
+    };
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+        return Ok(0);
+    };
+    Ok(
+        agent_doc_supervisor::startup_miss::count_session_loss_events_within(
+            &content,
+            now_epoch_secs,
+            window_secs,
+        ),
+    )
+}
+
 pub fn record_session_loss(
     file: &Path,
     session_id: &str,
@@ -881,6 +915,39 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "old session-loss events outside the guard window should not trip it"
+        );
+    }
+
+    #[test]
+    fn count_recent_session_loss_events_reads_shared_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        let logs_dir = tmp.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&logs_dir).unwrap();
+        std::fs::write(
+            logs_dir.join("watchdog-window.log"),
+            concat!(
+                "[100] supervisor_exit code=missing_pane pane=%41 reason=watchdog_dead_supervisor\n",
+                "[200] supervisor_exit code=missing_pane pane=%41 reason=watchdog_dead_supervisor\n",
+                "[900] supervisor_exit code=missing_pane pane=%41 reason=watchdog_dead_supervisor\n",
+            ),
+        )
+        .unwrap();
+
+        // 300s window ending at 350 sees the two recent losses (unlike the guard
+        // there is no minimum-count threshold).
+        assert_eq!(
+            count_recent_session_loss_events_at(&doc, "watchdog-window", 300, 350).unwrap(),
+            2
+        );
+        assert_eq!(
+            count_recent_session_loss_events_at(&doc, "watchdog-window", 300, 950).unwrap(),
+            1
+        );
+        // Missing session log reads as zero.
+        assert_eq!(
+            count_recent_session_loss_events_at(&doc, "no-such-session", 300, 350).unwrap(),
+            0
         );
     }
 }

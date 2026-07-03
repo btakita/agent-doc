@@ -2021,6 +2021,14 @@ pub(crate) fn serve_with_options(
     let controller_launched_at = Instant::now();
     let recycle_grace = recycle_idle_grace();
     let mut recycle_stale_since: Option<Instant> = None;
+    // #supresilience Part B — autonomous route-owned supervisor watchdog. Runs on
+    // the controller's idle serve tick, throttled to `SUPERVISOR_WATCHDOG_INTERVAL`.
+    // `watchdog_halt_notified` dedups the operator halt diagnostic per document so a
+    // budget-exhausted supervisor is reported once, not every tick.
+    let supervisor_watchdog_interval = supervisor_watchdog_interval();
+    let mut supervisor_watchdog_last_run: Option<Instant> = None;
+    let mut supervisor_watchdog_halt_notified: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok(stream) => {
@@ -2119,6 +2127,20 @@ pub(crate) fn serve_with_options(
                     should_stop.store(true, Ordering::SeqCst);
                     break;
                 }
+                // #supresilience Part B — periodic dead-supervisor watchdog. Skipped
+                // on a recycling iteration above (the controller is going away, so a
+                // spawned replacement would be orphaned in a dying process).
+                let watchdog_now = Instant::now();
+                let watchdog_due = supervisor_watchdog_last_run
+                    .map(|last| watchdog_now.duration_since(last) >= supervisor_watchdog_interval)
+                    .unwrap_or(true);
+                if watchdog_due {
+                    supervisor_watchdog_last_run = Some(watchdog_now);
+                    controller_supervisor_watchdog_tick(
+                        &runtime,
+                        &mut supervisor_watchdog_halt_notified,
+                    );
+                }
                 std::thread::sleep(CONNECT_POLL);
             }
             Err(err) => return Err(err).context("failed to accept project controller client"),
@@ -2126,6 +2148,263 @@ pub(crate) fn serve_with_options(
     }
     let _ = std::fs::remove_file(&sock);
     Ok(())
+}
+
+/// Env override (seconds) for the [`controller_supervisor_watchdog_tick`] cadence.
+const SUPERVISOR_WATCHDOG_INTERVAL_SECS_ENV: &str = "AGENT_DOC_SUPERVISOR_WATCHDOG_INTERVAL_SECS";
+/// Default idle-tick cadence for the dead-supervisor watchdog.
+const DEFAULT_SUPERVISOR_WATCHDOG_INTERVAL_SECS: u64 = 10;
+
+fn supervisor_watchdog_interval() -> Duration {
+    let secs = std::env::var(SUPERVISOR_WATCHDOG_INTERVAL_SECS_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_SUPERVISOR_WATCHDOG_INTERVAL_SECS);
+    Duration::from_secs(secs)
+}
+
+/// #supresilience Part B — autonomous route-owned supervisor watchdog.
+///
+/// The project-controller daemon detects a route-owned supervisor that died and
+/// restarts it by REUSING the existing operator replacement path
+/// ([`handle_supervisor_replacement`] → `spawn_supervisor_replacement_worker` →
+/// `drive_supervisor_replacement_background` → `cold_start_supervisor_replacement`) —
+/// the same path `session restart-supervisor` / `admin recycle --force` drive. No
+/// parallel spawn logic.
+///
+/// A supervisor is restarted ONLY when ALL hold:
+/// - its recorded `supervisor_pid` is dead ([`process_is_alive`] is false),
+/// - the document's actor session is not `Closed`,
+/// - a live tmux pane still exists for it,
+/// - its supervisor session log is still open (a hard crash leaves no close event;
+///   this also dedups against a restart already recorded and in flight — recording
+///   the loss below closes the log until the cold-start reopens it), AND
+/// - it is within the restart budget ([`crash_policy::watchdog_restart_decision`]).
+///
+/// The self-ancestor guard skips any pid equal to this controller process so the
+/// watchdog never tears down its own process.
+///
+/// Backoff shares ONE ledger with the route auto-start fallback: each restart
+/// records a session-loss event, and the budget is the count of those events within
+/// [`crash_policy::WATCHDOG_RESTART_WINDOW`]. After the cap the watchdog emits an
+/// operator-visible diagnostic (once per document) instead of spawn-storming.
+fn controller_supervisor_watchdog_tick(
+    runtime: &Arc<ControllerRuntime>,
+    halt_notified: &mut std::collections::HashSet<String>,
+) {
+    let bootstrap = match runtime.bootstrap_snapshot() {
+        Ok(bootstrap) => bootstrap,
+        Err(err) => {
+            eprintln!("[controller] supervisor watchdog: bootstrap snapshot unavailable: {err}");
+            return;
+        }
+    };
+    let project_root = bootstrap.project_root.clone();
+    let conn = match open_state_db(&project_root) {
+        Ok(conn) => conn,
+        Err(err) => {
+            eprintln!(
+                "[controller] supervisor watchdog: failed to open state db in {}: {err}",
+                project_root.display()
+            );
+            return;
+        }
+    };
+    let store = match load_actor_store_from_db(&conn) {
+        Ok(store) => store,
+        Err(err) => {
+            eprintln!(
+                "[controller] supervisor watchdog: failed to load actor store in {}: {err}",
+                project_root.display()
+            );
+            return;
+        }
+    };
+    let registry = match agent_doc_session_registry_io::load_in(&project_root) {
+        Ok(registry) => registry,
+        Err(err) => {
+            eprintln!(
+                "[controller] supervisor watchdog: failed to load session registry in {}: {err}",
+                project_root.display()
+            );
+            return;
+        }
+    };
+    let tmux = tmux_router::Tmux::default_server();
+    let window_secs = agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_WINDOW.as_secs();
+
+    for record in store.values() {
+        let document_id = record.document_id.clone();
+        // Gate: document actor session must not be Closed/ended.
+        if record.state == agent_doc_sqlite::state_store::ActorState::Closed
+            || record.pane_id.is_empty()
+        {
+            halt_notified.remove(&document_id);
+            continue;
+        }
+        // Resolve the served file path from the session registry projection.
+        let Some(file) = registry
+            .get(&document_id)
+            .map(|entry| PathBuf::from(&entry.file))
+            .filter(|file| !file.as_os_str().is_empty())
+        else {
+            continue;
+        };
+        // Recorded supervisor pid for the authoritative generation.
+        let Some(supervisor_pid) =
+            load_supervisor_lease_from_db(&conn, &document_id, record.generation)
+                .ok()
+                .flatten()
+                .and_then(|lease| lease.supervisor_pid)
+        else {
+            continue;
+        };
+        // Self-ancestor guard: never act on this controller's own process.
+        if supervisor_pid == std::process::id() {
+            continue;
+        }
+        // Gate: supervisor pid must actually be dead. A live supervisor is healthy —
+        // clear any stale halt-notified marker so a future crash storm re-notifies.
+        if process_is_alive(supervisor_pid) {
+            halt_notified.remove(&document_id);
+            continue;
+        }
+        // Gate: a live tmux pane must still exist (the pane-loss path is owned by
+        // route/sync `record_session_loss`, not the crash watchdog).
+        if !tmux.pane_alive(&record.pane_id) {
+            continue;
+        }
+        // Gate + dedup: only act on an OPEN supervisor session log. A hard crash
+        // leaves the latest session open (no close event); once we record the loss
+        // below the log closes until the cold-start reopens it, so an in-flight
+        // restart is not re-triggered on the next tick.
+        let session_open = match agent_doc_supervisor_io::startup_miss::session_log_status(
+            &file,
+            &record.session_id,
+        ) {
+            Ok(Some(status)) => status.latest_session_open(),
+            Ok(None) => false,
+            Err(err) => {
+                eprintln!(
+                    "[controller] supervisor watchdog: failed to read session log for {}: {err}",
+                    file.display()
+                );
+                false
+            }
+        };
+        if !session_open {
+            continue;
+        }
+        // Restart budget from the shared session-loss ledger.
+        let prior_restarts = match agent_doc_supervisor_io::startup_miss::count_recent_session_loss_events(
+            &file,
+            &record.session_id,
+            window_secs,
+        ) {
+            Ok(count) => count,
+            Err(err) => {
+                eprintln!(
+                    "[controller] supervisor watchdog: failed to read restart budget for {}: {err}",
+                    file.display()
+                );
+                continue;
+            }
+        };
+        match agent_doc_supervisor::crash_policy::watchdog_restart_decision(
+            prior_restarts,
+            agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_CAP,
+        ) {
+            agent_doc_supervisor::crash_policy::WatchdogRestartDecision::Restart { attempt } => {
+                // Record the loss into the shared ledger (also closes the session log,
+                // dedup'ing in-flight restarts) before dispatching the replacement.
+                if let Err(err) = agent_doc_supervisor_io::startup_miss::record_session_loss(
+                    &file,
+                    &record.session_id,
+                    &record.pane_id,
+                    "watchdog_dead_supervisor",
+                    Some(record.window_id.as_str()),
+                ) {
+                    eprintln!(
+                        "[controller] supervisor watchdog: failed to record session loss for {}: {err}",
+                        file.display()
+                    );
+                }
+                halt_notified.remove(&document_id);
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!(
+                        "controller_supervisor_watchdog_restart document={document_id} session={} pane={} generation={} dead_pid={supervisor_pid} attempt={attempt} cap={} window_secs={window_secs}",
+                        record.session_id,
+                        record.pane_id,
+                        record.generation,
+                        agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_CAP,
+                    ),
+                );
+                let diagnostic_payload = serde_json::json!({
+                    "force": false,
+                    "mode": "continue",
+                    "caller": "controller_supervisor_watchdog",
+                    "dead_pid": supervisor_pid,
+                    "attempt": attempt,
+                })
+                .to_string();
+                let request = ControllerRequest {
+                    command: "supervisor_replacement".to_string(),
+                    file: Some(file.clone()),
+                    session_id: None,
+                    pane_id: None,
+                    window_id: None,
+                    generation: None,
+                    state: Some("continue".to_string()),
+                    caller: Some("controller_supervisor_watchdog".to_string()),
+                    reason: Some("watchdog_dead_supervisor".to_string()),
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: Some(diagnostic_payload),
+                };
+                if let Err(err) =
+                    handle_supervisor_replacement(&bootstrap, Some(runtime.as_ref()), request)
+                {
+                    eprintln!(
+                        "[controller] supervisor watchdog: replacement dispatch failed for {}: {err:#}",
+                        file.display()
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!(
+                            "controller_supervisor_watchdog_restart_failed document={document_id} session={} dead_pid={supervisor_pid} error={err}",
+                            record.session_id
+                        ),
+                    );
+                }
+            }
+            agent_doc_supervisor::crash_policy::WatchdogRestartDecision::Halt {
+                restarts_in_window,
+            } => {
+                // Operator-visible diagnostic, once per document until it recovers.
+                if halt_notified.insert(document_id.clone()) {
+                    let message = format!(
+                        "controller_supervisor_watchdog_halted document={document_id} session={} pane={} generation={} dead_pid={supervisor_pid} restarts_in_window={restarts_in_window} cap={} window_secs={window_secs} reason=restart_budget_exhausted",
+                        record.session_id,
+                        record.pane_id,
+                        record.generation,
+                        agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_CAP,
+                    );
+                    agent_doc_ops_log_io::log_op(&file, &message);
+                    eprintln!(
+                        "[controller] supervisor watchdog: STOP restarting {} — {} restarts within {}s exhausted the budget (cap={}); inspect the crash and run `agent-doc start {}` manually to recover",
+                        file.display(),
+                        restarts_in_window,
+                        window_secs,
+                        agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_CAP,
+                        file.display(),
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// M1/M1b (#stuckhandoff2) — runtime adapter for the pure controller watchdog policy.

@@ -106,7 +106,11 @@ Before I drive this: the last item is a **production deploy**, and I won't auto-
 - **Start with one** — e.g. `do lender form` or `do #pipe-rt-notify`; I'll hold deploy until you confirm.
 
 Both new items are real features in `src/equityfundingsource-dev`; I'll explore and implement whichever you point me at.
-<!-- agent:boundary:b7269c35 -->
+
+### Re: wedge root-caused + fixed — opus-4-8
+
+Root cause: after repeated git-direct commits (my own wedge workaround), the JB plugin's native yrs CRDT node model diverged from disk, so `native node-patch apply` rejected every patch. Re-synced the plugin's native CRDT; this note verifies the editor apply path works again.
+<!-- agent:boundary:7fcb2394 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,9 +130,8 @@ After 20:30
 -->
 
 <!-- agent:queue preset="#spec-test-commit-push" stop -->
-/goal Implement backlog item(s): #3q3g
-- ~~On https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=3c4ed166-e179-40d7-8ab9-27bd333a3e27&dialog=advance-lender, the upload fields should be replaced by the questionaire. Remove all lender annual requirements uploads.~~
-- ~~deploy~~ ✅ live — worker version 56d33654, https://equityfundingsource.brian-takita.workers.dev/
+- When the lender completes the annual requirements, but EFS admin has not yet approved, https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard should not show the "Complete Your Lender Sign Up" modal. The dashboard should also not show the "Annual requirements — action needed" alert. Instead, show an alert that the Annual requirements are awaiting approval.
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

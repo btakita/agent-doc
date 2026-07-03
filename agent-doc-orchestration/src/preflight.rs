@@ -446,7 +446,7 @@ fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> 
 
 fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
     file: &Path,
-    rc: &crate::graph::RunContext,
+    rc: &agent_doc_run_context_io::RunContext,
 ) -> Result<bool> {
     let current = std::fs::read_to_string(file)?;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
@@ -1220,7 +1220,10 @@ pub(crate) fn append_ipc_dogfood_note_for_diagnostic(
     Ok(true)
 }
 
-fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunContext) -> Result<()> {
+fn enforce_no_uncommitted_closeout_drift(
+    file: &Path,
+    rc: &agent_doc_run_context_io::RunContext,
+) -> Result<()> {
     // Route can enqueue a dispatch behind a busy authoritative actor by writing
     // `agent:queue auto` plus the saved snapshot, then return before a normal
     // response closeout exists. If the user keeps editing that prompt before
@@ -1390,7 +1393,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
 /// by construction: it never blocks and never commits a response-less document.
 fn recover_ipc_truncated_worktree_from_editor_buffer(
     file: &Path,
-    rc: &crate::graph::RunContext,
+    rc: &agent_doc_run_context_io::RunContext,
 ) -> Result<bool> {
     // Only the snapshot-vs-HEAD divergence shape that bails today.
     if !matches!(
@@ -1525,7 +1528,7 @@ fn poll_save_document_ack_content(project_root: &Path, patch_id: &str) -> Result
 
 fn recover_route_queue_snapshot_commit_boundary(
     file: &Path,
-    rc: &crate::graph::RunContext,
+    rc: &agent_doc_run_context_io::RunContext,
 ) -> Result<bool> {
     if !detect_route_queue_snapshot_commit_boundary_recoverable(file, rc)? {
         return Ok(false);
@@ -1574,7 +1577,7 @@ fn recover_route_queue_snapshot_commit_boundary(
 
 fn detect_route_queue_snapshot_commit_boundary_recoverable(
     file: &Path,
-    rc: &crate::graph::RunContext,
+    rc: &agent_doc_run_context_io::RunContext,
 ) -> Result<bool> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(false);
@@ -2610,7 +2613,7 @@ mod tests {
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
             agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
         ));
-        let rc = crate::graph::RunContext::new(doc.clone());
+        let rc = agent_doc_run_context_io::RunContext::new(doc.clone());
         assert!(
             detect_route_queue_snapshot_commit_boundary_recoverable(&doc, &rc).unwrap(),
             "drained-queue maintenance drift must be recoverable"
@@ -2692,7 +2695,7 @@ mod tests {
         )
         .unwrap();
 
-        let rc = crate::graph::RunContext::new(doc.clone());
+        let rc = agent_doc_run_context_io::RunContext::new(doc.clone());
         assert!(
             !detect_route_queue_snapshot_commit_boundary_recoverable(&doc, &rc).unwrap(),
             "a user edit alongside the drain must block auto-commit"
@@ -3200,7 +3203,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let rc = crate::graph::RunContext::new(doc.clone());
+        let rc = agent_doc_run_context_io::RunContext::new(doc.clone());
         let changed =
             remove_post_exchange_duplicate_prompt_comments_for_preflight(&doc, &rc).unwrap();
 

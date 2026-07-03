@@ -1021,7 +1021,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             // a clean closeout still owes an `agent:queue auto` continuation,
             // clear it otherwise. Binary-owned proof that survives missing Codex
             // hook session state. (#codex-auto-queue-stalled-final-gate)
-            if let Some(continuation) = crate::queue_continuation::reconcile_marker(file, "commit")
+            if let Some(continuation) =
+                agent_doc_queue_io::queue_continuation::reconcile_marker(file, "commit")
             {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -1949,7 +1950,7 @@ fn finalize_already_committed_noop(
     }
     // Reconcile the durable auto-queue continuation marker on the
     // already-committed closeout path too. (#codex-auto-queue-stalled-final-gate)
-    crate::queue_continuation::reconcile_marker(file, "commit_already_current");
+    agent_doc_queue_io::queue_continuation::reconcile_marker(file, "commit_already_current");
 }
 
 fn cycle_is_terminal(file: &Path) -> bool {

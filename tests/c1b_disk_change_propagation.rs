@@ -16,9 +16,9 @@
 //! canonical replica, idempotently (already-present → no-op) and safely
 //! (out-of-band deletion → rebuild + editors flagged for re-bootstrap).
 
+use agent_doc_crdt_relay_io as relay;
 use agent_doc_document_realtime::crdt_relay::DiskChangeOutcome;
 use agent_doc_document_realtime::watch_authority::{WatchAction, WatchDelivery};
-use agent_doc_orchestration::crdt_relay_host as relay;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;

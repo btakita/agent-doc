@@ -383,7 +383,7 @@ mod tests {
         // Until B applies + ACKs the queued fan-out delivery, the live delivery cut
         // is not converged and materialization must not be considered safe.
         assert!(
-            !crate::crdt_relay_host::commit_barrier_for_file(&doc),
+            !agent_doc_crdt_relay_io::commit_barrier_for_file(&doc),
             "unacked live fan-out delivery blocks the materialization barrier"
         );
 
@@ -430,8 +430,8 @@ mod tests {
 
         // The commit barrier then captures a consistent cut INCLUDING the fanned-out
         // ops: the canonical replica holds A's edit and every live delivery is ACKed.
-        assert!(crate::crdt_relay_host::commit_barrier_for_file(&doc));
-        crate::crdt_relay_host::with_hub(&doc, |hub| {
+        assert!(agent_doc_crdt_relay_io::commit_barrier_for_file(&doc));
+        agent_doc_crdt_relay_io::with_hub(&doc, |hub| {
             assert!(
                 hub.canonical_text().contains("FROM-A"),
                 "the commit barrier cut holds the fanned-out op"
@@ -499,7 +499,7 @@ mod tests {
         );
         // No hub was allocated for the detached document.
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        let allocated = crate::crdt_relay_host::hub_is_allocated_for_test(&hash);
+        let allocated = agent_doc_crdt_relay_io::hub_is_allocated_for_test(&hash);
         assert!(
             !allocated,
             "the detached path must not allocate a relay hub"

@@ -381,7 +381,7 @@ pub fn run_with_context(
     no_git: bool,
     force_disk: bool,
     config: &Config,
-    run_context: Option<&crate::graph::RunContext>,
+    run_context: Option<&agent_doc_run_context_io::RunContext>,
 ) -> Result<()> {
     let _stderr_redirect = if !dry_run && file.exists() {
         RunStderrRedirect::maybe_start(file)
@@ -455,7 +455,7 @@ fn run_once(
     no_git: bool,
     force_disk: bool,
     config: &Config,
-    run_context: Option<&crate::graph::RunContext>,
+    run_context: Option<&agent_doc_run_context_io::RunContext>,
     force_fresh_agent_session: bool,
 ) -> Result<RunCycleOutcome> {
     if !file.exists() {
@@ -515,7 +515,7 @@ fn run_once(
         std::fs::write(file, &content_original)?;
     }
     if !dry_run {
-        let early_rc = crate::graph::RunContext::new(file.to_path_buf());
+        let early_rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
         let (early_fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
             &content_original,
             file,
@@ -526,7 +526,7 @@ fn run_once(
             .or(config.default_agent.as_deref())
             .unwrap_or("claude");
         if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, early_agent_name)
-            && let Some(continuation) = crate::queue_continuation::detect(file)?
+            && let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
             && !queue_synthetic_diff
             && owner_pane_queue_edit_should_defer_until_closeout(file, &the_diff, &content_original)
         {
@@ -546,11 +546,11 @@ fn run_once(
             &the_diff,
         )?;
     let owned_rc;
-    let rc: &crate::graph::RunContext = if let Some(provided) = run_context {
+    let rc: &agent_doc_run_context_io::RunContext = if let Some(provided) = run_context {
         provided.set_file_path(file.to_path_buf());
         provided
     } else {
-        owned_rc = crate::graph::RunContext::new(file.to_path_buf());
+        owned_rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
         &owned_rc
     };
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
@@ -676,7 +676,7 @@ fn run_once(
     // detector is a strict subset of the recursive-guard case, so non-owner and
     // non-Codex runs are unaffected.
     if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
-        && let Some(continuation) = crate::queue_continuation::detect(file)?
+        && let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
     {
         if !queue_synthetic_diff
             && owner_pane_queue_edit_should_defer_until_closeout(file, &the_diff, &content_original)
@@ -942,7 +942,7 @@ enum ActiveQueuePromptState {
 fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let (fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
         file,
@@ -1413,7 +1413,7 @@ pub(crate) fn detect_owned_pane_self_invocation_with_options(
         )));
     }
     if !options.suppress_active_queue_head
-        && let Some(continuation) = crate::queue_continuation::detect(file)?
+        && let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
     {
         return Ok(Some(build_owned_pane_self_invocation(
             OwnedPaneSelfInvocationInput {
@@ -1654,7 +1654,7 @@ fn build_prompt_volatile_suffix(
         agent_doc_prompt_context::format_active_format_requirements(content)
             .map(|section| format!("\n\n{}\n", section))
             .unwrap_or_default();
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let ssh_context = rc.ssh_context();
     let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
         file,
@@ -1741,7 +1741,7 @@ fn apply_template_response(
     response: &str,
     use_crdt: bool,
 ) -> Result<()> {
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let (mut patches, unmatched) =
@@ -1804,7 +1804,7 @@ fn apply_template_response(
         // regress live text). Under `GitAuthoritative` (headless) this returns
         // `None` and the existing baseline-wins load above runs unchanged.
         if let Err(e) =
-            crate::crdt_relay_host::reconcile_disk_projection_for_file(file, &base_state)
+            agent_doc_crdt_relay_io::reconcile_disk_projection_for_file(file, &base_state)
         {
             eprintln!("[crdt] disk-demotion reconcile failed (non-fatal): {e}");
         }

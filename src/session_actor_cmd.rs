@@ -819,10 +819,9 @@ fn reconcile_idle_projection_before_clear(
             // defer the clear to the next inter-iteration idle gap instead of
             // killing the in-flight turn. A busy pane with no active loop keeps
             // the existing fail-closed block — there is nothing to preempt.
-            let queue_active =
-                agent_doc_orchestration::queue_continuation::detect(&ctx.canonical_file)
-                    .unwrap_or(None)
-                    .is_some();
+            let queue_active = agent_doc_queue_io::queue_continuation::detect(&ctx.canonical_file)
+                .unwrap_or(None)
+                .is_some();
             let deferred_clear_pending =
                 agent_doc_queue_io::continuation_marker::read_deferred_operator_clear(
                     &ctx.canonical_file,

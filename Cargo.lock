@@ -35,6 +35,7 @@ dependencies = [
  "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-controller-io",
+ "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-diff",

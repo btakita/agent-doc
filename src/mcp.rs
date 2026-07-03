@@ -477,7 +477,7 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
             (false, "interrupted", message)
         }
     };
-    let continuation = agent_doc_orchestration::queue_continuation::detect(&file)?;
+    let continuation = agent_doc_queue_io::queue_continuation::detect(&file)?;
     let structured = json!({
         "ok": ok,
         "status": status,

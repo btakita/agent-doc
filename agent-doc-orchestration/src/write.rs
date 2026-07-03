@@ -1614,7 +1614,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                 // `#crdtauth4` — authority-gated commit barrier (plan phase 4).
                 // No-op under `GitAuthoritative` (Detached); under `MultiReplica`
                 // flushes live editor replicas to a consistent cut before commit.
-                let barrier_ready = crate::crdt_relay_host::commit_barrier_for_file(file);
+                let barrier_ready = agent_doc_crdt_relay_io::commit_barrier_for_file(file);
                 if !barrier_ready {
                     log_closeout_guard(
                         file,
@@ -1637,7 +1637,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                 match crate::git::commit(file) {
                     // `#staleinmem` — record what we just committed so a later
                     // out-of-band disk correction is detectable at the next barrier.
-                    Ok(_) => crate::crdt_relay_host::record_committed_baseline_for_file(file),
+                    Ok(_) => agent_doc_crdt_relay_io::record_committed_baseline_for_file(file),
                     Err(e) => {
                         eprintln!("[commit] warning: {}", e);
                         if session_document {

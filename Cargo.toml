@@ -162,6 +162,7 @@ agent-doc-compact-io = { path = "agent-doc-compact-io", version = "0.34.67" }
 agent-doc-config = { path = "agent-doc-config", version = "0.34.67" }
 agent-doc-controller = { path = "agent-doc-controller", version = "0.34.67" }
 agent-doc-controller-io = { path = "agent-doc-controller-io", version = "0.34.67" }
+agent-doc-crdt-relay-io = { path = "agent-doc-crdt-relay-io", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-debounce = { path = "agent-doc-debounce", version = "0.34.67" }
 agent-doc-diff = { path = "agent-doc-diff", version = "0.34.67" }

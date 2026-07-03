@@ -934,7 +934,7 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
         // idle loop reconciles this out-of-band disk change into the canonical
         // replica. Best-effort + authority-gated inside the helper (headless docs
         // get no marker); a failure here must never wedge the watch loop.
-        if let Err(e) = agent_doc_orchestration::crdt_relay_host::route_disk_change_signal(
+        if let Err(e) = agent_doc_crdt_relay_io::route_disk_change_signal(
             Path::new(file),
             &observation.delivery,
         ) {

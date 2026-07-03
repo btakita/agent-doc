@@ -989,7 +989,7 @@ fn auto_queue_continuation_response(
 /// durable continuation marker (written at the last clean closeout) may still
 /// prove the document owes an `agent:queue auto` continuation. The marker is
 /// re-confirmed against the live document inside
-/// [`crate::queue_continuation::pending_marker_continuation_for_roots_with_actor_binding`], so a
+/// [`agent_doc_queue_io::queue_continuation::pending_marker_continuation_for_roots_with_actor_binding`], so a
 /// stale marker never forces a spurious block. (#codex-auto-queue-stalled-final-gate)
 fn marker_fallback_continuation_response(
     roots: &[PathBuf],
@@ -1002,7 +1002,7 @@ fn marker_fallback_continuation_response(
     // to run a foreign-owned document.
     let current_pane = std::env::var("TMUX_PANE").ok();
     let Some((file, continuation, marker)) =
-        crate::queue_continuation::pending_marker_continuation_for_roots_with_actor_binding(
+        agent_doc_queue_io::queue_continuation::pending_marker_continuation_for_roots_with_actor_binding(
             roots,
             current_pane.as_deref(),
             agent_doc_controller_io::project_controller::authoritative_actor_binding,
@@ -1346,7 +1346,8 @@ fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
     // Single source of truth: the shared queue-continuation detector
     // (#codex-auto-queue-stalled-final-gate). Keeps the Stop-hook continuation
     // decision identical to the durable marker and `session-check` gate.
-    Ok(crate::queue_continuation::detect(file)?.map(|continuation| continuation.head_prompt))
+    Ok(agent_doc_queue_io::queue_continuation::detect(file)?
+        .map(|continuation| continuation.head_prompt))
 }
 
 fn open_cycle_started_from_unchanged_file(file: &Path) -> Result<bool> {
@@ -2884,7 +2885,8 @@ agent-doc {}\n",
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
         // Prior clean closeout wrote the durable marker.
-        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
+            .expect("continuation required");
 
         // Untracked session id → load_state_any returns None.
         let response = apply_stop(&StopInput {
@@ -2925,7 +2927,8 @@ agent-doc {}\n",
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["/clear"]);
         init_git_repo(dir.path(), &doc);
-        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
+            .expect("continuation required");
 
         let response = apply_stop(&StopInput {
             session_id: "untracked-session".to_string(),
@@ -2951,7 +2954,8 @@ agent-doc {}\n",
         .unwrap();
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
-        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
+            .expect("continuation required");
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         let response = apply_stop(&StopInput {
@@ -3053,7 +3057,8 @@ agent-doc {}\n",
         .unwrap();
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
-        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
+            .expect("continuation required");
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         apply_stop(&StopInput {
@@ -3115,7 +3120,8 @@ agent-doc {}\n",
 
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
-        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
+            .expect("continuation required");
 
         let response = apply_stop(&StopInput {
             session_id: "untracked-session".to_string(),
@@ -3159,7 +3165,8 @@ agent-doc {}\n",
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
-        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
+            .expect("continuation required");
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         apply_stop(&StopInput {
@@ -3234,7 +3241,8 @@ agent-doc {}\n",
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         write_codex_mcp_config(dir.path());
         init_git_repo(dir.path(), &doc);
-        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
+            .expect("continuation required");
 
         let response = apply_stop(&StopInput {
             session_id: "untracked-session".to_string(),
@@ -3274,7 +3282,7 @@ agent-doc {}\n",
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy"]);
         init_git_repo(dir.path(), &doc);
-        crate::queue_continuation::reconcile_marker(&doc, "commit").unwrap();
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit").unwrap();
         // The first continuation request recorded this head into the marker.
         agent_doc_queue_io::continuation_marker::record_continuation_requested_head(
             &doc,
@@ -3298,7 +3306,9 @@ agent-doc {}\n",
         assert!(content.contains("Verification: Codex stop-hook simulation."));
         assert!(!content.contains("- do [#seopdp] deploy"));
         assert!(
-            crate::queue_continuation::detect(&doc).unwrap().is_none(),
+            agent_doc_queue_io::queue_continuation::detect(&doc)
+                .unwrap()
+                .is_none(),
             "replayed response should drain the only active head"
         );
     }

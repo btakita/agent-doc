@@ -8098,7 +8098,7 @@ mod crdt_relay_sim {
 ///
 /// Where `crdt_relay_sim` above exercises the standalone `RelayHub` API directly,
 /// this module drives the wiring the live finalize / disk paths actually call:
-/// `agent_doc_orchestration::crdt_relay_host` — the per-document hub registry, the
+/// `agent_doc_crdt_relay_io` — the per-document hub registry, the
 /// authority-gated finalize commit barrier (`commit_barrier_for_file_with_authority`),
 /// and the authority-gated disk-demotion reconcile. It proves the LIVE seams (a)
 /// gate on `CrdtAuthority::EditorAttached` vs `Detached`, (b) never allocate / touch
@@ -8106,11 +8106,11 @@ mod crdt_relay_sim {
 /// (c) flush live replicas to a consistent cut for the EditorAttached path — all
 /// keyed per-document through a real tracked path, no live editor / tmux / socket.
 mod crdt_relay_host_sim {
-    use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-    use agent_doc_document_realtime::crdt_relay::{RelayHub, mint_client_id};
-    use agent_doc_orchestration::crdt_relay_host::{
+    use agent_doc_crdt_relay_io::{
         commit_barrier_for_file_with_authority, recover_hub_from_disk, with_hub,
     };
+    use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+    use agent_doc_document_realtime::crdt_relay::{RelayHub, mint_client_id};
     use std::io::Write;
     use std::path::PathBuf;
 

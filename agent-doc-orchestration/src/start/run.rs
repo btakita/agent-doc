@@ -417,7 +417,7 @@ pub fn run_with_reap_policy(
         }
     };
 
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &updated_content,
         file,
@@ -1138,7 +1138,7 @@ pub fn run_with_reap_policy(
     let mut failed_resume_tracker = FailedResumeTracker::default();
     let mut suppress_stale_ctrl_d_until_prompt = false;
     let mut child_launch_count: u32 = 0;
-    let _actor_context = crate::graph::ActorContext::new(canonical.clone());
+    let _actor_context = agent_doc_run_context_io::ActorContext::new(canonical.clone());
     let supervisor_exit_reason = loop {
         if child_launch_count > 0 {
             let restart_reason = if first_run {

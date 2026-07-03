@@ -3590,12 +3590,12 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         );
     }
     assert!(
-        orchestration_lib.contains("pub use agent_doc_queue_io::queue_continuation;")
+        !orchestration_lib.contains("pub use agent_doc_queue_io::queue_continuation;")
             && !orchestration_lib.contains("pub mod queue_continuation;")
             && !manifest_dir
                 .join("agent-doc-orchestration/src/queue_continuation.rs")
                 .exists(),
-        "orchestration should re-export the queue-io continuation host without owning a source facade"
+        "orchestration must not re-export the queue-io continuation host facade"
     );
     for forbidden_snippet in [
         "pub struct QueueContinuation",
@@ -9545,8 +9545,8 @@ fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
         !orchestration_lib.contains("pub mod graph;")
-            && orchestration_lib.contains("pub use agent_doc_run_context_io as graph;"),
-        "orchestration should preserve the public graph path with a direct crate re-export"
+            && !orchestration_lib.contains("pub use agent_doc_run_context_io as graph;"),
+        "orchestration must not preserve the public graph path with a direct crate re-export"
     );
     let orchestration_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
@@ -9564,11 +9564,20 @@ fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
         root_dependencies.contains_key("agent-doc-run-context-io"),
         "the CLI should call the focused run-context IO crate directly"
     );
-    for relative in ["src/notify.rs", "src/orchestrate.rs", "src/patch.rs"] {
+    for relative in [
+        "src/notify.rs",
+        "src/orchestrate.rs",
+        "src/patch.rs",
+        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/start/run.rs",
+        "agent-doc-orchestration/src/write/run_entry.rs",
+    ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains("agent_doc_run_context_io::RunContext")
-                && !source.contains("agent_doc_orchestration::graph::RunContext"),
+                && !source.contains("agent_doc_orchestration::graph::RunContext")
+                && !source.contains("crate::graph::RunContext"),
             "{relative} should use the focused run-context crate directly"
         );
     }
@@ -10063,6 +10072,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/queue_continuation.rs",
             "agent-doc-queue-io/src/queue_continuation.rs",
             "Move pure queue policy regression tests into `agent-doc-queue`",
+        ),
+        (
+            "Top-level focused crate re-export facade deletion batch",
+            "agent-doc-orchestration/src/lib.rs",
+            "agent-doc-crdt-relay-io",
+            "Split the remaining root effects providers and delete them once git/write/repair callbacks are focused",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -24116,9 +24131,14 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     let orchestration_manifest: toml::Value =
         toml::from_str(&orchestration_manifest_source).unwrap();
     let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
+    let root_dependencies = workspace_manifest["dependencies"].as_table().unwrap();
     assert!(
         orchestration_dependencies.contains_key("agent-doc-crdt-relay-io"),
         "orchestration should depend on the focused CRDT relay host IO crate"
+    );
+    assert!(
+        root_dependencies.contains_key("agent-doc-crdt-relay-io"),
+        "the CLI/tests should call the focused CRDT relay host IO crate directly"
     );
     assert!(
         orchestration_dependencies.contains_key("agent-doc-document-realtime-io"),
@@ -24153,8 +24173,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "orchestration must not export a realtime_model source-file facade"
     );
     assert!(
-        orchestration_lib.contains("pub use agent_doc_crdt_relay_io as crdt_relay_host;"),
-        "orchestration should preserve the public CRDT relay host path with a direct crate re-export"
+        !orchestration_lib.contains("pub use agent_doc_crdt_relay_io as crdt_relay_host;"),
+        "orchestration must not preserve the public CRDT relay host path with a direct crate re-export"
     );
     let crdt_relay_host =
         fs::read_to_string(manifest_dir.join("agent-doc-crdt-relay-io/src/lib.rs")).unwrap();

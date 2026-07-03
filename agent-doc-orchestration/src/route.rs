@@ -798,7 +798,7 @@ pub fn run_with_tmux_with_options(
         updated_content = cleanup.content;
     }
 
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let fm = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &updated_content,
         file,
@@ -1212,7 +1212,7 @@ fn inactive_route_queue_head(file: &Path) -> Result<Option<String>> {
 }
 
 fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Option<String>> {
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let (fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         content,
         file,
@@ -2146,7 +2146,7 @@ fn route_via_authoritative_actor(
                 // loop is alive). Report deferred success so the IDE surfaces an
                 // "auto-loop active, will continue" acknowledgment instead of an
                 // error, mirroring the existing `*_busy_existing_queue_deferred` path.
-                if let Some(continuation) = crate::queue_continuation::detect(file)? {
+                if let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)? {
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
@@ -2278,7 +2278,8 @@ fn route_via_authoritative_actor(
                     )
                 );
                 Ok(dispatch_pane)
-            } else if let Some(continuation) = crate::queue_continuation::detect(file)? {
+            } else if let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
+            {
                 // #jb-busy-reopen-auto-drain-when-idle: a bare reopen (no prompt to
                 // queue) against a busy actor whose document already has an active
                 // queue continuation defers to that loop instead of erroring.
@@ -4177,7 +4178,7 @@ mod tests {
         );
         // But the active-loop continuation signal IS present — this is what the busy
         // route path uses to defer (report success) instead of failing closed.
-        let continuation = crate::queue_continuation::detect(&doc)
+        let continuation = agent_doc_queue_io::queue_continuation::detect(&doc)
             .unwrap()
             .expect("active go-loop must expose a continuation head for busy deferral");
         assert_eq!(continuation.head_prompt, "do [#regional]");

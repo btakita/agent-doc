@@ -36,13 +36,10 @@
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod codex_hook;
-pub use agent_doc_crdt_relay_io as crdt_relay_host;
 #[cfg(test)]
 mod flow;
 pub mod git;
-pub use agent_doc_run_context_io as graph;
 pub mod preflight;
-pub use agent_doc_queue_io::queue_continuation;
 pub mod repair;
 pub mod route;
 pub mod run;

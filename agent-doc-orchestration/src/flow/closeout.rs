@@ -257,16 +257,16 @@ mod tests {
         );
 
         let (a_id, a_bootstrap) =
-            crate::crdt_relay_host::register_replica_for_file(&doc, "vscode:a")
+            agent_doc_crdt_relay_io::register_replica_for_file(&doc, "vscode:a")
                 .unwrap()
                 .expect("replica A should register");
-        crate::crdt_relay_host::register_replica_for_file(&doc, "vscode:b")
+        agent_doc_crdt_relay_io::register_replica_for_file(&doc, "vscode:b")
             .unwrap()
             .expect("replica B should register");
 
         let a = ReplicaState::from_encoded(a_id, &a_bootstrap).unwrap();
         a.apply_local_edit(0, 0, "typed before closeout\n");
-        crate::crdt_relay_host::relay_replica_update_for_file(&doc, "vscode:a", &a.encode_state())
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(&doc, "vscode:a", &a.encode_state())
             .unwrap()
             .expect("replica A update should relay");
 

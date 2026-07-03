@@ -1374,7 +1374,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // canonical replica now (this supervisor owns the hub) and clear the
                 // marker. Best-effort — a reconcile hiccup must not block the idle
                 // recycle path below.
-                match crate::crdt_relay_host::consume_disk_change_reconcile(&path) {
+                match agent_doc_crdt_relay_io::consume_disk_change_reconcile(&path) {
                     Ok(Some(outcome)) => agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(

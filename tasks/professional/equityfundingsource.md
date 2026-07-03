@@ -106,23 +106,7 @@ Before I drive this: the last item is a **production deploy**, and I won't auto-
 - **Start with one** — e.g. `do lender form` or `do #pipe-rt-notify`; I'll hold deploy until you confirm.
 
 Both new items are real features in `src/equityfundingsource-dev`; I'll explore and implement whichever you point me at.
-
-### Re: go-mode backlog (lender requirements form, deploy) — opus-4-8
-
-Editor's un-wedged now — the concurrent agent-doc sync refactor landed (`f3afce48`) and a fresh cdylib installed, so the JB plugin syncs again (writes no longer need the git-direct workaround).
-
-Two housekeeping fixes this cycle:
-- **`#vcyr` → icebox.** Your edit replaced the `#vcyr` line (Robert admin-login link, blocked on a Cloudflare email-sending token) with the two new items. I moved it to the icebox so it isn't lost — if the removal was intentional, ignore this; if not, say so and I'll restore it to the backlog.
-- **`go` marker was malformed.** `&lt;!-- agent:backlog … go --&gt;` needs `go=<value>`, so the bare `go` was rejected by the lint gate and **never activated go-mode**. I normalized the marker; go-mode is currently off.
-
-Backlog now (top-first): **#pipe-rt-notify** (realtime pipeline notifications — plan in EFS `44895ab`), **lender requirements form** (admin fills the requirements form for the lender in the lender-pipeline dialog), **deploy**.
-
-Before I drive this: the last item is a **production deploy**, and I won't auto-ship on the back of a malformed `go`. How do you want to proceed?
-- **All three, then deploy to prod** — reply `go` and I'll set valid go-mode.
-- **Start with one** — e.g. `do lender form` or `do #pipe-rt-notify`; I'll hold deploy until you confirm.
-
-Both new items are real features in `src/equityfundingsource-dev`; I'll explore and implement whichever you point me at.
-<!-- agent:boundary:0a10a128 -->
+<!-- agent:boundary:b7269c35 -->
 <!-- /agent:exchange -->
 ###
 <!--

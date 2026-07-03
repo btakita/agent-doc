@@ -1227,41 +1227,15 @@ fn append_latest_ipc_dogfood_note(file: &Path) -> Result<bool> {
     // lives in a superproject alongside `src/agent-doc`) must never have binary
     // IPC diagnostics written into its content — for those the diagnostic stays in
     // ops.log only. Without this gate the interrupted-cycle recovery pollutes and
-    // re-duplicates diagnostics into real user documents.
-    if !is_agent_doc_dogfood_document(file) {
+    // re-duplicates diagnostics into real user documents. Single source of truth:
+    // `project_controller::rpc::dogfood_agent_doc_crate_root` (None ⇒ not dogfood).
+    if agent_doc_controller_io::project_controller::dogfood_agent_doc_crate_root(file).is_none() {
         return Ok(false);
     }
     let Some(diagnostic) = agent_doc_ops_log_io::latest_ipc_proof_diagnostic(file)? else {
         return Ok(false);
     };
     append_ipc_dogfood_note_for_diagnostic(file, &diagnostic)
-}
-
-/// True only for agent-doc's own dogfood sessions — a document under the agent-doc
-/// crate scope. Mirrors the scope check behind
-/// `project_controller::rpc::dogfood_agent_doc_crate_root`, reusing the canonical
-/// `is_agent_doc_dogfood_session` primitive. (Candidate for consolidation into a
-/// single shared `agent_doc_dogfood_crate_root` helper — see the IPC-action
-/// unification follow-up.)
-fn is_agent_doc_dogfood_document(file: &Path) -> bool {
-    let Ok(canonical) = file.canonicalize() else {
-        return false;
-    };
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
-        return false;
-    };
-    [project_root.clone(), project_root.join("src/agent-doc")]
-        .into_iter()
-        .any(|candidate| {
-            std::fs::read_to_string(candidate.join("Cargo.toml"))
-                .map(|cargo| cargo.contains("name = \"agent-doc\""))
-                .unwrap_or(false)
-                && agent_doc_supervisor::config::is_agent_doc_dogfood_session(
-                    &canonical,
-                    &project_root,
-                    &candidate,
-                )
-        })
 }
 
 pub(crate) fn append_ipc_dogfood_note_for_diagnostic(

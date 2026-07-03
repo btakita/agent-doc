@@ -1382,7 +1382,7 @@ pub fn run_with_reap_policy(
         shared
             .suppress_stale_ctrl_d_until_prompt
             .store(suppress_stale_ctrl_d_until_prompt, Ordering::Relaxed);
-        shared.recent_output.lock().unwrap().clear();
+        shared.output.clear_recent_output();
         reset_terminal_screen(&shared, initial_size);
 
         // Spawn I/O forwarding threads
@@ -1419,7 +1419,7 @@ pub fn run_with_reap_policy(
         let resize_handle = session.resize_handle()?;
         let resize_shared = shared.clone();
         resize_watcher = resize::ResizeWatcher::spawn(move |size| {
-            resize_shared.terminal_screen.lock().unwrap().resize(size);
+            resize_shared.output.resize_terminal_screen(size);
             if let Err(e) = resize_handle.resize(size) {
                 eprintln!("[supervisor::resize] resize error: {e}");
             }

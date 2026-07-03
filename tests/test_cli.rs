@@ -17552,13 +17552,27 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
             && start_run.contains("EnvSpec::from_frontmatter(fm)"),
         "start/run.rs should import EnvSpec from agent-doc-supervisor-io directly"
     );
+    let supervisor_process_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/lib.rs")).unwrap();
+    let output_state_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/output_state.rs"))
+            .unwrap();
+    assert!(
+        supervisor_process_lib.contains("pub mod output_state;")
+            && output_state_source.contains("use crate::screen::OwnedPtyScreen;")
+            && output_state_source.contains("pub struct SupervisorOutputState")
+            && output_state_source.contains("terminal_screen: Mutex<OwnedPtyScreen>"),
+        "agent-doc-supervisor-process should own terminal screen state through SupervisorOutputState"
+    );
     let start_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
     assert!(
-        start_source.contains("use agent_doc_supervisor_process::screen::OwnedPtyScreen;")
-            && start_source.contains("terminal_screen: Mutex<OwnedPtyScreen>")
-            && start_source.contains("terminal_screen: Mutex::new(OwnedPtyScreen::default())"),
-        "start.rs should import OwnedPtyScreen from agent-doc-supervisor-process directly"
+        start_source.contains("output_state::SupervisorOutputState")
+            && start_source.contains("output: SupervisorOutputState")
+            && start_source.contains("output: SupervisorOutputState::default()")
+            && !start_source.contains("terminal_screen: Mutex<OwnedPtyScreen>")
+            && !start_source.contains("recent_output: Mutex<Vec<u8>>"),
+        "start.rs should depend on the supervisor-process output-state boundary, not own screen buffers"
     );
     for forbidden in [
         "crate::supervisor::env",

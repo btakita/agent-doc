@@ -5,36 +5,19 @@ use agent_doc_controller::dispatch::dispatch_payload_pending_in_current_input;
 use agent_doc_supervisor::detection as supervisor_detection;
 
 pub(crate) fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
-    if bytes.is_empty() {
-        return;
-    }
-    let mut recent = shared.recent_output.lock().unwrap();
-    recent.extend_from_slice(bytes);
-    if recent.len() > AUTO_TRIGGER_OUTPUT_BYTES_MAX {
-        let overflow = recent.len() - AUTO_TRIGGER_OUTPUT_BYTES_MAX;
-        recent.drain(..overflow);
-    }
+    shared.output.record_recent_output(bytes);
 }
 
 pub(crate) fn record_terminal_screen(shared: &SupervisorShared, bytes: &[u8]) {
-    if bytes.is_empty() {
-        return;
-    }
-    shared.terminal_screen.lock().unwrap().push(bytes);
+    shared.output.record_terminal_screen(bytes);
 }
 
 pub(crate) fn reset_terminal_screen(shared: &SupervisorShared, size: PtySize) {
-    shared.terminal_screen.lock().unwrap().reset(size);
+    shared.output.reset_terminal_screen(size);
 }
 
 pub(crate) fn child_output_for_detection(shared: &SupervisorShared) -> String {
-    let screen = shared.terminal_screen.lock().unwrap().visible_text();
-    if screen.trim().is_empty() {
-        let recent = shared.recent_output.lock().unwrap();
-        String::from_utf8_lossy(&recent).into_owned()
-    } else {
-        screen
-    }
+    shared.output.child_output_for_detection()
 }
 
 pub(crate) fn prompt_visible_requires_ready_transition(shared: &SupervisorShared) -> bool {
@@ -191,8 +174,11 @@ pub(crate) fn normalize_stdin_for_harness_permission_prompt(
         return None;
     }
     let output = child_output_for_detection(shared);
-    let raw = shared.recent_output.lock().unwrap();
-    agent_doc_turn_executor_tmux::prompt::normalize_opencode_permission_stdin(&output, &raw, data)
+    shared.output.with_recent_output(|raw| {
+        agent_doc_turn_executor_tmux::prompt::normalize_opencode_permission_stdin(
+            &output, raw, data,
+        )
+    })
 }
 
 pub(crate) fn is_help_screen_visible(

@@ -31,12 +31,17 @@ class TurnStateStatusBarWidget(private val project: Project) :
     companion object {
         const val WIDGET_ID = "com.github.btakita.agentdoc.TurnStateStatusBar"
         private const val REFRESH_MS = 1500
+        private const val BRAND = "agent-doc"
         private val LOG = Logger.getInstance(TurnStateStatusBarWidget::class.java)
     }
 
     private var statusBar: StatusBar? = null
     private val alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
-    private var widgetText: String = ""
+    // Never empty: an empty TextPresentation makes the platform build a zero-width
+    // TextPanel at creation that a later updateWidget won't re-grow, so the widget
+    // stays invisible. Seed with the brand so the component has a paintable size
+    // from the first render.
+    private var widgetText: String = BRAND
 
     override fun ID(): String = WIDGET_ID
 
@@ -45,6 +50,8 @@ class TurnStateStatusBarWidget(private val project: Project) :
     override fun install(statusBar: StatusBar) {
         this.statusBar = statusBar
         LOG.info("[turn-widget] installed on status bar; polling every ${REFRESH_MS}ms")
+        // Paint immediately with real state instead of waiting a full poll interval.
+        refresh()
         scheduleRefresh()
     }
 
@@ -63,13 +70,13 @@ class TurnStateStatusBarWidget(private val project: Project) :
     private fun refresh() {
         val file = FileEditorManager.getInstance(project).selectedFiles
             .firstOrNull { it.name.endsWith(".md") }
-        // Always show a visible indicator on a markdown document so the widget is
-        // findable: the CPC turn phase when a turn is in flight, otherwise "idle".
-        // Hidden (empty) only for non-markdown files.
+        // Always show a visible, non-empty indicator so the widget stays findable
+        // and never collapses to zero width: the CPC turn phase when a turn is in
+        // flight, "$BRAND: idle" on a markdown document, otherwise the bare brand.
         val next = if (file == null) {
-            ""
+            BRAND
         } else {
-            TurnStateBridge.presentationForFile(file.path).label.ifEmpty { "agent-doc: idle" }
+            TurnStateBridge.presentationForFile(file.path).label.ifEmpty { "$BRAND: idle" }
         }
         if (next != widgetText) {
             LOG.info("[turn-widget] refresh: file=${file?.path ?: "(none)"} text=\"$next\"")

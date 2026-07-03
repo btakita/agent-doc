@@ -272,6 +272,28 @@ surface. A change to the editor delivery or turn-state projection is not complet
 until both the IntelliJ and VS Code frontends consume it identically. Divergence
 between the two frontends on any of these paths is a forbidden shape.
 
+The **turn-state projection is the shared contract; the visible surface is
+per-editor** because the two IDE platforms do not paint the same widgets
+reliably. Both frontends map `TurnProjection` through the identical
+`buildTurnStatePresentation` / `TurnStateBridge.presentation` logic (show
+`⟳ agent-doc: persisting` / `⟳ agent-doc: awaiting response` while the CPC turn is
+in flight, hide when idle) and poll the `agent_doc_turn_projection` FFI on the same
+cadence. They differ only in the native surface that renders it:
+
+- **VS Code** renders it in a **status-bar item** (`turnStatusBarItem`), which
+  paints reliably, with a tooltip and attention background while in flight.
+- **JetBrains** renders it in an **editor banner**
+  (`TurnStateBannerProvider`, an `EditorNotificationProvider`) driven by
+  `TurnStateBannerRefresher`, because the IntelliJ 2026.1 status-bar widget API
+  instantiates the widget but silently never paints it. The banner is a real
+  editor component that fails loudly instead of silently, so it is both reliable
+  and diagnosable. The status-bar widget (`TurnStateStatusBarWidget`) is retained
+  only for its `idea.log` coordination probes.
+
+Parity is satisfied by identical projection→presentation logic and equivalent
+in-flight/idle behavior, not by forcing the same non-native widget onto both
+platforms.
+
 ## Realtime States
 
 These states describe document authority, not the agent turn/cycle. Agent cycle

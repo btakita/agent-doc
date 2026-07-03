@@ -31,6 +31,8 @@
                                  displayName="Agent Doc Markdown Style"/>
         <statusBarWidgetFactory id="com.github.btakita.agentdoc.TurnStateStatusBar"
                                 implementation="com.github.btakita.agentdoc.TurnStateStatusBarWidgetFactory"/>
+        <editorNotificationProvider
+                implementation="com.github.btakita.agentdoc.TurnStateBannerProvider"/>
     </extensions>
 
     <projectListeners>

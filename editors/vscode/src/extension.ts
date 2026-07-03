@@ -379,9 +379,17 @@ function refreshTurnStatus(): void {
         | null;
     const presentation = buildTurnStatePresentation(projection);
     if (presentation.label) {
+        // Prominence parity with the JetBrains editor banner: tooltip + an
+        // attention background while the CPC turn is in flight.
         turnStatusBarItem.text = presentation.label;
+        turnStatusBarItem.tooltip =
+            "Agent Doc turn state — the CPC's authoritative turn phase for this document";
+        turnStatusBarItem.backgroundColor = new vscode.ThemeColor(
+            'statusBarItem.warningBackground',
+        );
         turnStatusBarItem.show();
     } else {
+        turnStatusBarItem.backgroundColor = undefined;
         turnStatusBarItem.hide();
     }
 }

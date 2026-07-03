@@ -35,6 +35,8 @@ class PluginLifecycleListener : ProjectManagerListener {
         VisualHighlighterManager.getInstance(project)
         // Detect editor layout changes (tab drags, new splits) and sync tmux
         LayoutChangeDetector.getInstance(project)
+        // Flip the turn-state editor banner on/off as the CPC turn phase changes.
+        TurnStateBannerRefresher.getInstance(project).start()
         // Register EditorTabSyncListener via code (not XML) so it survives hot-reload
         val editorTabSync = EditorTabSyncListener()
         project.messageBus.connect().subscribe(

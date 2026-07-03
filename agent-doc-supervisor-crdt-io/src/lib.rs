@@ -62,6 +62,23 @@ pub fn handle_replica_update(file: &str, identity: &str, update_b64: &str) -> Ip
 }
 
 pub fn handle_replica_pull(file: &str, identity: &str) -> IpcResponse {
+    // D2 — replace-capable delivery for out-of-band deletions. A `RebuiltFromDisk`
+    // change (e.g. a disk `git checkout HEAD` that *deletes* content) cannot be
+    // expressed as an additive CRDT delta, so when this editor is flagged for
+    // re-bootstrap the pull returns a REPLACE delivery: the corrected canonical
+    // text the plugin applies by **replacing** its buffer, not CRDT-merging. The
+    // flag is cleared as it is drained. The replace path is checked before the
+    // normal delta pull so a pending re-bootstrap always wins.
+    match agent_doc_crdt_relay_io::pull_rebootstrap_for_file(Path::new(file), identity) {
+        Ok(Some(canonical)) => {
+            return IpcResponse::ok(serde_json::json!({
+                "kind": "replace",
+                "replace": canonical,
+            }));
+        }
+        Ok(None) => {}
+        Err(e) => return IpcResponse::err(format!("crdt rebootstrap pull failed: {e}")),
+    }
     match agent_doc_crdt_relay_io::pull_replica_updates_for_file(Path::new(file), identity) {
         Ok(Some(pull)) => {
             let updates: Vec<serde_json::Value> = pull
@@ -78,6 +95,7 @@ pub fn handle_replica_pull(file: &str, identity: &str) -> IpcResponse {
                 })
                 .collect();
             IpcResponse::ok(serde_json::json!({
+                "kind": "delta",
                 "client_id": pull.client_id,
                 "updates": updates,
                 "current_generation": pull.delivery.current_generation,

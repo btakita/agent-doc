@@ -252,6 +252,20 @@ Path (`plan-crdt-scramble-and-disk-propagation.md`, Phase C/D):
    **replace-capable bootstrap delivery**: the editor applies it by *replacing*
    its buffer, not CRDT-merging (an additive merge cannot drop the stale text).
 
+   **Wire form (D2).** The supervisor owns the choice (FFI-first): `replica_pull`
+   returns a tagged response — `{ "kind": "delta", "updates": [...] }` for the normal
+   additive stream, or `{ "kind": "replace", "replace": "<canonical text>" }` when the
+   pulling editor is flagged for re-bootstrap (`handle_replica_pull` drains
+   `pull_rebootstrap_for_file`, which clears the flag). A replace pull is checked
+   before the delta pull so a pending re-bootstrap always wins. On receipt the plugin
+   (JetBrains `CrdtReplicaManager.applyReplaceDelivery`, VS Code
+   `applyReplaceDelivery` — identical logic, thin consumers): (a) no-ops if the buffer
+   already equals the canonical; (b) never clobbers unsaved operator edits
+   (fail-open); (c) otherwise installs the canonical wholesale via a minimal edit
+   (preserving cursor/undo) and re-bootstraps the native replica so later deltas are
+   relative to the corrected state. The `ReplicaPullDelivery` type (`Deltas` |
+   `Replace`) is mirrored across both frontends per the Editor Parity Requirement.
+
 ### Turn-State Projection To The Plugin
 
 The CPC owns the authoritative turn phase (`CyclePhase`). The plugin observes a

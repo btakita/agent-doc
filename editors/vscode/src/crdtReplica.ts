@@ -20,6 +20,9 @@ export interface ReplicaTransport {
     register(filePath: string, identity: string): Promise<ReplicaRegisterAck | null>;
     broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void>;
     pullUpdates(filePath: string, identity: string): Promise<ReplicaRemoteUpdate[]>;
+    /** D2: fetch the pending delivery, distinguishing additive deltas from a replace
+     * delivery (out-of-band deletion re-bootstrap). Defaults to wrapping pullUpdates. */
+    pullDelivery?(filePath: string, identity: string): Promise<ReplicaPullDelivery>;
     ackUpdate(filePath: string, identity: string, patchId: string, generation: number): Promise<boolean>;
     deregister(filePath: string, identity: string): Promise<void>;
 }
@@ -124,6 +127,29 @@ export function parsePullResponse(response: SupervisorResponse): ReplicaRemoteUp
     });
 }
 
+/**
+ * D2: the outcome of a `replica_pull` — a normal additive-delta batch, or a
+ * **replace** delivery (out-of-band deletion re-bootstrap) whose text the editor
+ * installs into its buffer wholesale instead of CRDT-merging. The supervisor
+ * decides which (FFI-first); the plugin is a thin consumer. Mirrors the JetBrains
+ * `ReplicaPullDelivery` (specs/14-realtime-workflow.md § Editor Parity Requirement).
+ */
+export type ReplicaPullDelivery =
+    | { kind: 'deltas'; updates: ReplicaRemoteUpdate[] }
+    | { kind: 'replace'; text: string };
+
+export function parsePullDelivery(response: SupervisorResponse): ReplicaPullDelivery {
+    if (
+        response.ok &&
+        isRecord(response.data) &&
+        response.data.kind === 'replace' &&
+        typeof response.data.replace === 'string'
+    ) {
+        return { kind: 'replace', text: response.data.replace };
+    }
+    return { kind: 'deltas', updates: parsePullResponse(response) };
+}
+
 export class SupervisorSocketReplicaTransport implements ReplicaTransport {
     private cachedSocket: string | null = null;
 
@@ -157,6 +183,15 @@ export class SupervisorSocketReplicaTransport implements ReplicaTransport {
             identity,
         });
         return response ? parsePullResponse(response) : [];
+    }
+
+    async pullDelivery(filePath: string, identity: string): Promise<ReplicaPullDelivery> {
+        const response = await this.send({
+            method: 'replica_pull',
+            file: filePath,
+            identity,
+        });
+        return response ? parsePullDelivery(response) : { kind: 'deltas', updates: [] };
     }
 
     async ackUpdate(
@@ -302,6 +337,18 @@ export class CrdtReplicaForwarder {
         return this.transport.pullUpdates(this.filePath, this.identity);
     }
 
+    /** D2: pull the pending delivery (normal deltas, or a replace delivery whose
+     * text the caller installs wholesale for an out-of-band deletion re-bootstrap). */
+    pullRemoteDelivery(): Promise<ReplicaPullDelivery> {
+        if (!this.attached) return Promise.resolve({ kind: 'deltas', updates: [] });
+        if (this.transport.pullDelivery) {
+            return this.transport.pullDelivery(this.filePath, this.identity);
+        }
+        return this.transport
+            .pullUpdates(this.filePath, this.identity)
+            .then((updates) => ({ kind: 'deltas', updates }));
+    }
+
     ackRemoteUpdate(update: ReplicaRemoteUpdate): Promise<boolean> {
         if (!this.attached) return Promise.resolve(false);
         return this.transport.ackUpdate(this.filePath, this.identity, update.patchId, update.generation);
@@ -443,10 +490,45 @@ export class CrdtReplicaManager {
         }
     }
 
+    /**
+     * D2 — apply a REPLACE delivery: install the corrected canonical text into the
+     * buffer wholesale (an out-of-band deletion the additive CRDT delta cannot
+     * express), then re-bootstrap the local replica so later deltas are relative to
+     * the corrected state. Never clobbers unsaved operator edits (fail-open).
+     */
+    private async applyReplaceDelivery(
+        filePath: string,
+        forwarder: CrdtReplicaForwarder,
+        canonical: string,
+    ): Promise<void> {
+        if (this.hasPendingLocal(filePath)) return;
+        const expectedText = this.shadows.get(filePath) ?? '';
+        this.applyingRemote.add(filePath);
+        let installed = false;
+        try {
+            installed = await this.options.applyText(filePath, canonical, expectedText);
+            if (installed) this.shadows.set(filePath, canonical);
+        } finally {
+            this.applyingRemote.delete(filePath);
+        }
+        if (installed) {
+            // Re-bootstrap the native replica against the corrected canonical.
+            await forwarder.deregister();
+            await forwarder.register();
+        }
+    }
+
     async pollRemoteUpdates(): Promise<void> {
         for (const [filePath, forwarder] of Array.from(this.forwarders.entries())) {
             if (this.hasPendingLocal(filePath)) continue;
-            const updates = await forwarder.pullRemoteUpdates();
+            // D2: a replace delivery (out-of-band deletion re-bootstrap) installs the
+            // corrected canonical wholesale; a normal delta batch applies per-update.
+            const delivery = await forwarder.pullRemoteDelivery();
+            if (delivery.kind === 'replace') {
+                await this.applyReplaceDelivery(filePath, forwarder, delivery.text);
+                continue;
+            }
+            const updates = delivery.updates;
             if (this.hasPendingLocal(filePath)) continue;
             for (const update of updates) {
                 if (this.hasPendingLocal(filePath)) break;

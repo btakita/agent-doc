@@ -110,6 +110,16 @@ class CrdtReplicaForwarder(
         return transport.pullUpdates(filePath, identity)
     }
 
+    /**
+     * Pull the pending delivery (D2): normal deltas, or a replace delivery whose
+     * text the caller installs into the editor buffer wholesale (out-of-band
+     * deletion re-bootstrap).
+     */
+    fun pullRemoteDelivery(): ReplicaPullDelivery {
+        if (!attached) return ReplicaPullDelivery.Deltas(emptyList())
+        return transport.pullDelivery(filePath, identity)
+    }
+
     /** ACK a remote update after the caller has applied [applyRemoteUpdate]'s text to the editor buffer. */
     fun ackRemoteUpdate(update: ReplicaRemoteUpdate): Boolean {
         if (!attached) return false
@@ -138,6 +148,18 @@ data class ReplicaRemoteUpdate(
 )
 
 /**
+ * The outcome of a `replica_pull` (D2). The supervisor decides which kind to send
+ * (FFI-first): a normal additive-delta delivery, or a **replace** delivery when the
+ * editor was flagged for re-bootstrap — an out-of-band *deletion* (`RebuiltFromDisk`)
+ * cannot be expressed as an additive CRDT delta, so the plugin must replace its
+ * whole buffer with the corrected canonical text instead of CRDT-merging.
+ */
+sealed interface ReplicaPullDelivery {
+    data class Deltas(val updates: List<ReplicaRemoteUpdate>) : ReplicaPullDelivery
+    data class Replace(val text: String) : ReplicaPullDelivery
+}
+
+/**
  * Transport to the supervisor's per-document relay hub over the new
  * `#crdtauth5` IPC family (`replica_register` / `replica_deregister` /
  * `replica_update`). Injected so the seam is testable without a real socket.
@@ -151,6 +173,15 @@ interface ReplicaTransport {
 
     /** `replica_pull`: fetch pending peer updates queued for this replica. */
     fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> = emptyList()
+
+    /**
+     * `replica_pull` (D2): fetch the pending delivery, distinguishing a normal
+     * additive-delta batch from a replace delivery (out-of-band deletion
+     * re-bootstrap). Defaults to wrapping [pullUpdates] so legacy transports/tests
+     * keep working.
+     */
+    fun pullDelivery(filePath: String, identity: String): ReplicaPullDelivery =
+        ReplicaPullDelivery.Deltas(pullUpdates(filePath, identity))
 
     /** `replica_ack`: confirm a pulled update has been applied to the local editor. */
     fun ackUpdate(filePath: String, identity: String, patchId: String, generation: Long): Boolean = false
@@ -187,10 +218,27 @@ class SupervisorSocketReplicaTransport(private val projectRoot: String) : Replic
         send(request)
     }
 
+    override fun pullDelivery(filePath: String, identity: String): ReplicaPullDelivery {
+        val response = send(jsonRequest("replica_pull", filePath, identity))
+            ?: return ReplicaPullDelivery.Deltas(emptyList())
+        if (!response.ok) return ReplicaPullDelivery.Deltas(emptyList())
+        // D2: a replace delivery carries the corrected canonical text to install
+        // wholesale (the supervisor already decided merging cannot express it).
+        if (response.data?.get("kind")?.asString == "replace") {
+            val text = response.data.get("replace")?.asString
+            if (text != null) return ReplicaPullDelivery.Replace(text)
+        }
+        return ReplicaPullDelivery.Deltas(parseUpdates(response.data))
+    }
+
     override fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> {
         val response = send(jsonRequest("replica_pull", filePath, identity)) ?: return emptyList()
         if (!response.ok) return emptyList()
-        val updates = response.data?.getAsJsonArray("updates") ?: return emptyList()
+        return parseUpdates(response.data)
+    }
+
+    private fun parseUpdates(data: JsonObject?): List<ReplicaRemoteUpdate> {
+        val updates = data?.getAsJsonArray("updates") ?: return emptyList()
         return updates.mapNotNull { element ->
             val item = element.asJsonObject
             val patchId = item.get("patch_id")?.asString ?: return@mapNotNull null

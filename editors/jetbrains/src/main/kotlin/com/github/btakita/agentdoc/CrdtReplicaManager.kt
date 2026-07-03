@@ -126,7 +126,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun pollRemoteUpdates() {
         for ((filePath, forwarder) in forwarders) {
             if (hasPendingLocal(filePath)) continue
-            val updates = forwarder.pullRemoteUpdates()
+            // D2: a replace delivery (out-of-band deletion re-bootstrap) installs the
+            // corrected canonical wholesale; a normal delta batch applies per-update.
+            val delivery = forwarder.pullRemoteDelivery()
+            if (delivery is ReplicaPullDelivery.Replace) {
+                applyReplaceDelivery(filePath, forwarder, delivery.text)
+                continue
+            }
+            val updates = (delivery as ReplicaPullDelivery.Deltas).updates
             if (updates.isEmpty()) continue
             for (update in updates) {
                 if (hasPendingLocal(filePath)) break
@@ -141,6 +148,50 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     forwarder.ackRemoteUpdate(update)
                 }
             }
+        }
+    }
+
+    /**
+     * D2 — apply a REPLACE delivery: install the corrected canonical text into the
+     * buffer wholesale (an out-of-band deletion the additive CRDT delta cannot
+     * express), then re-bootstrap the local replica node so later deltas are
+     * relative to the corrected state. Never clobbers unsaved operator edits
+     * (fail-open to the buffer), and no-ops when the buffer already matches.
+     */
+    private fun applyReplaceDelivery(
+        filePath: String,
+        forwarder: CrdtReplicaForwarder,
+        canonical: String,
+    ) {
+        if (hasPendingLocal(filePath)) return
+        var installed = false
+        ApplicationManager.getApplication().invokeAndWait {
+            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
+            val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return@invokeAndWait
+            val before = document.text
+            if (before == canonical) {
+                shadows[filePath] = canonical
+                installed = true
+                return@invokeAndWait
+            }
+            if (hasPendingLocal(filePath)) return@invokeAndWait
+            applyingRemote.add(filePath)
+            try {
+                runUndoableRemoteUpdateCommand(document) {
+                    applyMinimalDocumentEditUtil(document, before, canonical)
+                }
+                shadows[filePath] = canonical
+                installed = true
+                log.info("[crdt-replica] applied REPLACE re-bootstrap for $filePath (${canonical.length} chars)")
+            } finally {
+                applyingRemote.remove(filePath)
+            }
+        }
+        if (installed) {
+            // Re-bootstrap the native replica against the corrected canonical so the
+            // next additive delta stream is relative to the post-deletion state.
+            forwarder.deregister()
+            forwarder.register()
         }
     }
 

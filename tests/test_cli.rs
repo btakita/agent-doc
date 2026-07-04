@@ -1180,7 +1180,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/write/ipc.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-template-io/src/write_normalize.rs",
-        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-session-check-io/src/write_pending_checks.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
@@ -1577,7 +1577,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/write/run_entry.rs", "reason=") => 2,
         // queue-prompt consumption, IPC transport/repair, and live-prompt-drift
         // convergence extracted into agent-doc-queue-io/src/queue_consume.rs,
-        // write/ipc.rs, and write/converge.rs (#splitmods3 large-module split). The moved
+        // write/ipc.rs, and the moved convergence fixture (#splitmods3 large-module split). The moved
         // `guard_`/`reason=` tokens are tracked against the new submodules,
         // not added anew.
         ("agent-doc-queue-io/src/queue_consume.rs", "guard_") => 0,
@@ -1762,7 +1762,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // guard now has a regression path proving it skips visible rebase when
         // the active captured response is present in the snapshot but missing
         // from visible current content.
-        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 13,
+        ("agent-doc-write-converge-io/src/convergence_fixture_tests.rs", "guard_") => 13,
         // 24 -> 26 (#operator-text-authority-refresh): a missing-authority sidecar
         // now asks the editor to republish a read-only live-buffer proof before
         // failing closed. The two `reason=publish_live_buffer_failed` diagnostics
@@ -1777,7 +1777,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `reason=auto_recycle_opted_out` when it stays advisory. These route the
         // stale-IPC hot path through the `decide_stale_supervisor` workflow kernel;
         // they are not new ad hoc flow branches.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 29,
+        ("agent-doc-write-converge-io/src/convergence_fixture_tests.rs", "reason=") => 29,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`
@@ -2894,7 +2894,7 @@ fn test_turn_scope_io_extraction_stays_first_class_and_facade_free() {
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/git.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
-        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "tests/run_integration.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
@@ -9715,7 +9715,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 82,
+        ledger_rows.len() >= 83,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10402,6 +10402,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write.rs",
             "agent-doc-write-converge-io",
             "Move the remaining `write/converge.rs` fixture coverage",
+        ),
+        (
+            "Write convergence fixture coverage relocation",
+            "agent-doc-orchestration/src/write/converge.rs",
+            "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
+            "Split the test-only convergence effects adapter by durable sidecar family",
         ),
         (
             "Codex hook user-prompt-submit tracking IO graph",
@@ -17446,17 +17452,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "agent-doc-supervisor lifecycle policy should own recycle-in-flight routing decisions: {required_snippet}"
         );
     }
-    let write_converge =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
-            .unwrap();
-    assert!(
-        !write_converge.contains("pub fn write_wedged_from_ipc_failures("),
-        "write::converge must not re-own pure supervisor write-wedge classification"
-    );
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
     assert!(
-        !write_converge.contains("pub fn write_wedged_from_ipc_failures(")
+        !write_converge_io.contains("pub fn write_wedged_from_ipc_failures(")
             && !write_ipc.contains("pub fn write_wedged_from_ipc_failures("),
         "orchestration write modules must not re-own pure supervisor write-wedge classification"
     );
@@ -21369,7 +21368,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     );
     for relative in [
         "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-compact-io/src/lib.rs",
@@ -22492,7 +22491,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-session-check-io/src/detect.rs",
         "agent-doc-session-check-io/src/closeout_guards.rs",
         "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
@@ -23165,7 +23164,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     for relative in [
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-session-check-io/src/closeout_guards.rs",
-        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
     ] {
@@ -23998,9 +23997,10 @@ fn test_agent_doc_document_realtime_owns_ack_mismatch_policy() {
 
     let write_converge_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
-    let orchestration_converge_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
-            .unwrap();
+    let convergence_fixture_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-write-converge-io/src/convergence_fixture_tests.rs"),
+    )
+    .unwrap();
     for forbidden in [
         "enum AckMismatchRecovery",
         "fn classify_ack_mismatch_recovery",
@@ -24010,7 +24010,7 @@ fn test_agent_doc_document_realtime_owns_ack_mismatch_policy() {
     ] {
         assert!(
             !write_converge_source.contains(forbidden)
-                && !orchestration_converge_source.contains(forbidden),
+                && !convergence_fixture_source.contains(forbidden),
             "write convergence layers must not re-own ACK-mismatch recovery policy: {forbidden}"
         );
     }
@@ -26090,9 +26090,10 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         );
     }
 
-    let converge =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
-            .unwrap();
+    let convergence_fixture = fs::read_to_string(
+        manifest_dir.join("agent-doc-write-converge-io/src/convergence_fixture_tests.rs"),
+    )
+    .unwrap();
     let write_converge_io =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     let write_source =
@@ -26173,8 +26174,8 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO",
     ] {
         assert!(
-            !converge.contains(forbidden_snippet),
-            "write/converge.rs must not re-own realtime exchange/live-drift policy: {forbidden_snippet}"
+            !convergence_fixture.contains(forbidden_snippet),
+            "write convergence fixture must not re-own realtime exchange/live-drift policy: {forbidden_snippet}"
         );
     }
     for forbidden_snippet in [
@@ -26187,7 +26188,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         );
     }
     assert!(
-        write_source.contains("#[cfg(test)]\nmod converge;")
+        !write_source.contains("#[cfg(test)]\nmod converge;")
             && !write_source.contains("pub use converge::*;")
             && !write_source.contains("pub(crate) use converge::*;")
             && write_source.contains("pub static WRITE_CONVERGENCE_EFFECTS")
@@ -26195,14 +26196,15 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
                 "impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceEffects",
             )
             && write_source.contains("fn log_file_ipc_proof_failure(")
-            && converge.contains("Test-only write convergence coverage")
-            && !converge.contains("fn try_detached_disk_write(")
-            && !converge.contains("fn try_editor_converge_file_ipc(")
-            && !converge.contains("fn refresh_editor_after_ack_mismatch(")
-            && !converge.contains("fn live_editor_sidecar_present(")
-            && !converge.contains("stale_snapshot_reset_drift(snapshot_doc, current_doc)")
-            && !converge.contains("fn classify_stale_snapshot_visible_rebase"),
-        "production write convergence should live in agent-doc-write-converge-io with orchestration retaining only test wrappers and explicit effects"
+            && write_converge_io.contains("#[cfg(test)]\nmod convergence_fixture_tests;")
+            && convergence_fixture.contains("Test-only write convergence coverage relocated")
+            && !convergence_fixture.contains("fn try_detached_disk_write(")
+            && !convergence_fixture.contains("fn try_editor_converge_file_ipc(")
+            && !convergence_fixture.contains("fn refresh_editor_after_ack_mismatch(")
+            && !convergence_fixture.contains("fn live_editor_sidecar_present(")
+            && !convergence_fixture.contains("stale_snapshot_reset_drift(snapshot_doc, current_doc)")
+            && !convergence_fixture.contains("fn classify_stale_snapshot_visible_rebase"),
+        "production write convergence should live in agent-doc-write-converge-io with orchestration retaining only explicit effects"
     );
     for forbidden_snippet in [
         "pub(crate) fn editor_ipc_write_wedged",
@@ -26235,8 +26237,8 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "fn dedupe_ipc_snapshot_content(",
     ] {
         assert!(
-            !converge.contains(forbidden_snippet) && !write_ipc.contains(forbidden_snippet),
-            "orchestration write/converge and write/ipc must not re-own write convergence sidecar IO: {forbidden_snippet}"
+            !write_source.contains(forbidden_snippet) && !write_ipc.contains(forbidden_snippet),
+            "orchestration write and write/ipc must not re-own write convergence sidecar IO: {forbidden_snippet}"
         );
     }
     assert!(

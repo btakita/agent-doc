@@ -2040,9 +2040,6 @@ const SHRINK_GUARD_MIN_BYTES: usize = 100;
 /// If the new exchange content is less than this fraction of the old, refuse.
 const SHRINK_GUARD_MAX_RATIO: f64 = 0.10;
 
-#[cfg(test)]
-mod converge;
-
 struct TemplatePatchApplicationBase<'a, 'b> {
     file: &'b Path,
     baseline: Option<&'a str>,

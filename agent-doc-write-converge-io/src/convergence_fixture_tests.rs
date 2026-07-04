@@ -1,4 +1,4 @@
-//! Test-only write convergence coverage retained while production convergence lives in `agent-doc-write-converge-io`.
+//! Test-only write convergence coverage relocated from orchestration.
 
 use super::*;
 use agent_doc_document_realtime::write_policy::{
@@ -6,14 +6,79 @@ use agent_doc_document_realtime::write_policy::{
     normalize_visible_recovery_compare, snapshot_contains_dropped_prompt,
 };
 
+struct TestWriteConvergenceEffects;
+
+static TEST_WRITE_CONVERGENCE_EFFECTS: TestWriteConvergenceEffects = TestWriteConvergenceEffects;
+
+impl EditorConvergenceEffects for TestWriteConvergenceEffects {
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        super::atomic_write(file, content)
+    }
+
+    fn guard_visible_write_idle_and_current(
+        &self,
+        file: &Path,
+        source: &str,
+        expected_current: &str,
+    ) -> Result<()> {
+        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
+            file,
+            source,
+            expected_current,
+        )
+    }
+
+    fn atomic_write_if_current(
+        &self,
+        file: &Path,
+        content: &str,
+        expected_current: &str,
+        source: &str,
+    ) -> Result<()> {
+        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
+            file,
+            source,
+            expected_current,
+        )?;
+        let current = std::fs::read_to_string(file).unwrap_or_default();
+        if current != expected_current {
+            anyhow::bail!("refusing {source} write: document changed before write");
+        }
+        super::atomic_write(file, content)
+    }
+
+    fn cycle_already_committed(&self, file: &Path) -> Option<String> {
+        agent_doc_flow_io::closeout::cycle_already_committed(file)
+    }
+
+    fn log_file_ipc_already_committed(&self, _file: &Path, _cycle_id: &str) {}
+
+    fn cleanup_fallback_patch_files(&self, file: &Path) {
+        agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
+    }
+
+    fn log_file_ipc_proof_failure(
+        &self,
+        file: &Path,
+        patch_id: Option<&str>,
+        invariant: &str,
+        recovery: &str,
+        detail: &str,
+    ) {
+        super::log_ipc_proof_failure_with_recycle(
+            file, "file_ipc", patch_id, invariant, recovery, detail,
+        );
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn try_auto_recover_live_prompt_drift(
     file: &Path,
     snapshot: &str,
     file_content: &str,
 ) -> Result<Option<String>> {
-    agent_doc_write_converge_io::try_auto_recover_live_prompt_drift(
-        &super::WRITE_CONVERGENCE_EFFECTS,
+    super::try_auto_recover_live_prompt_drift(
+        &TEST_WRITE_CONVERGENCE_EFFECTS,
         file,
         snapshot,
         file_content,
@@ -27,8 +92,8 @@ pub(crate) fn try_editor_converge(
     current_content: &str,
     source: &str,
 ) -> Result<bool> {
-    agent_doc_write_converge_io::try_editor_converge(
-        &super::WRITE_CONVERGENCE_EFFECTS,
+    super::try_editor_converge(
+        &TEST_WRITE_CONVERGENCE_EFFECTS,
         file,
         target,
         current_content,
@@ -43,8 +108,8 @@ pub(crate) fn converge_document_or_disk(
     current: &str,
     source: &str,
 ) -> Result<()> {
-    agent_doc_write_converge_io::converge_document_or_disk(
-        &super::WRITE_CONVERGENCE_EFFECTS,
+    super::converge_document_or_disk(
+        &TEST_WRITE_CONVERGENCE_EFFECTS,
         file,
         target,
         current,
@@ -59,8 +124,8 @@ pub(crate) fn converge_or_disk_write(
     target: &str,
     source: &str,
 ) -> Result<()> {
-    agent_doc_write_converge_io::converge_or_disk_write(
-        &super::WRITE_CONVERGENCE_EFFECTS,
+    super::converge_or_disk_write(
+        &TEST_WRITE_CONVERGENCE_EFFECTS,
         file,
         current,
         target,
@@ -74,9 +139,7 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
     content: &str,
     source: &str,
 ) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
-    agent_doc_write_converge_io::live_buffer_delivery_missing_operator_text_authority_after_refresh(
-        file, content, source,
-    )
+    super::live_buffer_delivery_missing_operator_text_authority_after_refresh(file, content, source)
 }
 
 #[cfg(test)]
@@ -87,13 +150,7 @@ pub(crate) fn editor_convergence_payload(
     source: &str,
     patch_id: &str,
 ) -> Result<Option<serde_json::Value>> {
-    agent_doc_write_converge_io::editor_convergence_payload(
-        canonical_file,
-        target,
-        current_content,
-        source,
-        patch_id,
-    )
+    super::editor_convergence_payload(canonical_file, target, current_content, source, patch_id)
 }
 
 #[cfg(test)]
@@ -101,14 +158,14 @@ fn live_prompt_drift_response_patches(
     file_content: &str,
     snapshot: &str,
 ) -> Result<Vec<serde_json::Value>> {
-    agent_doc_write_converge_io::live_prompt_drift_response_patches(file_content, snapshot)
+    super::live_prompt_drift_response_patches(file_content, snapshot)
 }
 
 #[cfg(test)]
 mod core_tests {
     #![allow(unused_imports)]
+    use super::super::guard_no_stale_snapshot_reset_drift;
     use super::*;
-    use agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift;
     use fs2::FileExt;
     use std::fs;
     use std::fs::OpenOptions;

@@ -4574,6 +4574,9 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 }
 
 #[cfg(test)]
+mod convergence_fixture_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;

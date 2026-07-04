@@ -49,4 +49,8 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.67" }
+agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.34.67" }
+fs2 = "0.4"
 tempfile = "3"

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -131,14 +131,10 @@ CI note: `gh run list --workflow CI --limit 1` could not find a workflow named `
 > **Queue prompt:** 🚧 [#6em3]
 
 This queue head was completed in the prior closeout response: the admin lender pipeline Requirements/accreditation questionnaire is implemented, tested, committed, pushed, and deployed. The duplicate live queue head was intentionally removed when the queue component was normalized to the struck completed form.
-<!-- agent:boundary:67f1bf38 -->
+<!-- agent:boundary:e6f4d85c -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~[#pipe-rt-notify]~~
-- ~~[#6em3]~~
-- ~~deploy~~
-- ~~do [#7jj2]~~
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Notes

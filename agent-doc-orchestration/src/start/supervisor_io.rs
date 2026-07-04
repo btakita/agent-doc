@@ -2,29 +2,21 @@
 
 use super::*;
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
-pub(crate) use agent_doc_supervisor_process::io_threads::{
-    spawn_reader_thread, spawn_writer_thread,
-};
 
-impl agent_doc_supervisor_process::io_threads::PtyReaderObserver for SupervisorShared {
-    fn on_filtered_pty_output(&self, harness: &agent_doc_harness::HarnessConfig, bytes: &[u8]) {
-        record_terminal_screen(self, bytes);
-        record_recent_output(self, bytes);
-        if current_child_prompt_visible(self, harness) {
-            if prompt_visible_requires_ready_transition(self) {
-                self.transition_actor_state(
-                    agent_doc_sqlite::state_store::ActorState::Ready,
-                    "supervisor",
-                    "prompt_ready",
-                );
-            }
-            self.suppress_stale_ctrl_d_until_prompt
-                .store(false, Ordering::Relaxed);
-        }
+impl agent_doc_supervisor_process_io::SupervisorProcessIoState for SupervisorShared {
+    fn transition_actor_ready_for_prompt(&self) {
+        self.transition_actor_state(
+            agent_doc_sqlite::state_store::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        );
     }
-}
 
-impl agent_doc_supervisor_process::io_threads::StdinForwardObserver for SupervisorShared {
+    fn clear_suppress_stale_ctrl_d_until_prompt(&self) {
+        self.suppress_stale_ctrl_d_until_prompt
+            .store(false, Ordering::Relaxed);
+    }
+
     fn suppress_stale_ctrl_d_until_prompt(&self) -> bool {
         self.suppress_stale_ctrl_d_until_prompt
             .load(Ordering::Relaxed)
@@ -32,14 +24,6 @@ impl agent_doc_supervisor_process::io_threads::StdinForwardObserver for Supervis
 
     fn prompt_visible_once(&self) -> bool {
         self.prompt_visible_once.load(Ordering::Relaxed)
-    }
-
-    fn normalize_permission_prompt_input(
-        &self,
-        harness: &agent_doc_harness::HarnessConfig,
-        data: &[u8],
-    ) -> Option<Vec<u8>> {
-        normalize_stdin_for_harness_permission_prompt(self, harness, data)
     }
 }
 

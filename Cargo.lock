@@ -1099,6 +1099,7 @@ dependencies = [
  "agent-doc-supervisor-crdt-io",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
+ "agent-doc-supervisor-process-io",
  "agent-doc-sync",
  "agent-doc-sync-io",
  "agent-doc-template",
@@ -1819,6 +1820,15 @@ dependencies = [
  "signal-hook",
  "tempfile",
  "tmux-router",
+]
+
+[[package]]
+name = "agent-doc-supervisor-process-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-harness",
+ "agent-doc-supervisor-io",
+ "agent-doc-supervisor-process",
 ]
 
 [[package]]

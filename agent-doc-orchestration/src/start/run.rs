@@ -10,7 +10,9 @@ use agent_doc_supervisor::{
 };
 use agent_doc_supervisor_io::env::EnvSpec;
 use agent_doc_supervisor_process::{
-    REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState, resize,
+    REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState,
+    io_threads::{spawn_reader_thread, spawn_writer_thread},
+    resize,
 };
 use agent_doc_turn_executor::codex_launch::{
     CODEX_SANDBOX_NETWORK_DISABLED_ENV, apply_codex_network_access_env_map,
@@ -1387,14 +1389,18 @@ pub fn run_with_reap_policy(
         reset_terminal_screen(&shared, initial_size);
 
         // Spawn I/O forwarding threads
-        let reader_thread = spawn_reader_thread(shared.clone(), harness.clone(), pty_reader);
+        let process_io_observer = Arc::new(
+            agent_doc_supervisor_process_io::SupervisorProcessIoObserver::new(shared.clone()),
+        );
+        let reader_thread =
+            spawn_reader_thread(process_io_observer.clone(), harness.clone(), pty_reader);
         let writer_stop = StopSignal::new().context("failed to create writer stop signal")?;
         let writer_stop_flag = Arc::new(AtomicBool::new(false));
         let ctrl_c_flag = Arc::new(AtomicBool::new(false));
         let ctrl_d_flag = Arc::new(AtomicBool::new(false));
         #[cfg(unix)]
         let writer_thread = spawn_writer_thread(
-            shared.clone(),
+            process_io_observer.clone(),
             harness.clone(),
             writer_arc.clone(),
             writer_stop.read_fd(),
@@ -1404,7 +1410,7 @@ pub fn run_with_reap_policy(
         );
         #[cfg(not(unix))]
         let writer_thread = spawn_writer_thread(
-            shared.clone(),
+            process_io_observer.clone(),
             harness.clone(),
             writer_arc.clone(),
             (),

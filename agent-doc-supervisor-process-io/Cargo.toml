@@ -1,0 +1,15 @@
+[package]
+name = "agent-doc-supervisor-process-io"
+version = "0.34.67"
+edition = "2024"
+description = "Supervisor process observer adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_supervisor_process_io"
+
+[dependencies]
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.67" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.67" }

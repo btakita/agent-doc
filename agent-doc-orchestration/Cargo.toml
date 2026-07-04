@@ -99,6 +99,7 @@ agent-doc-status-io = { path = "../agent-doc-status-io", version = "0.34.67" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
 agent-doc-supervisor-crdt-io = { path = "../agent-doc-supervisor-crdt-io", version = "0.34.67" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.67" }
+agent-doc-supervisor-process-io = { path = "../agent-doc-supervisor-process-io", version = "0.34.67" }
 agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.67" }
 agent-doc-sync = { path = "../agent-doc-sync", version = "0.34.67" }
 agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.34.67" }

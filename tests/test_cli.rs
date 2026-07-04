@@ -9697,7 +9697,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 58,
+        ledger_rows.len() >= 59,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10246,6 +10246,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/start/detection.rs",
             "agent-doc-supervisor-io/src/detection.rs",
             "Split the `SupervisorDetectionState` adapter",
+        ),
+        (
+            "Supervisor process observer adapter graph",
+            "agent-doc-orchestration/src/start/supervisor_io.rs",
+            "agent-doc-supervisor-process-io/src/lib.rs",
+            "Split the `SupervisorProcessIoState` adapter",
         ),
     ] {
         let row_text = ledger_rows
@@ -17801,6 +17807,23 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
             "agent-doc-supervisor-process screen module must own its dependency: {required}"
         );
     }
+    let supervisor_process_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process-io/Cargo.toml"))
+            .unwrap();
+    let supervisor_process_io: toml::Value =
+        toml::from_str(&supervisor_process_io_manifest).unwrap();
+    let supervisor_process_io_dependencies =
+        supervisor_process_io["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-harness",
+        "agent-doc-supervisor-io",
+        "agent-doc-supervisor-process",
+    ] {
+        assert!(
+            supervisor_process_io_dependencies.contains_key(required),
+            "agent-doc-supervisor-process-io observer adapter must own its dependency: {required}"
+        );
+    }
 
     assert!(
         !manifest_dir
@@ -17832,6 +17855,9 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
     let io_threads_source =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/io_threads.rs"))
             .unwrap();
+    let process_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process-io/src/lib.rs"))
+            .unwrap();
     assert!(
         supervisor_process_lib.contains("pub mod output_state;")
             && output_state_source.contains("use crate::screen::OwnedPtyScreen;")
@@ -17861,13 +17887,21 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
         "start.rs should depend on the supervisor-process output-state boundary, not own screen buffers"
     );
     assert!(
-        start_supervisor_io
-            .contains("impl agent_doc_supervisor_process::io_threads::PtyReaderObserver")
+        process_io_source.contains("pub struct SupervisorProcessIoObserver")
+            && process_io_source.contains("pub trait SupervisorProcessIoState")
+            && process_io_source
+                .contains("impl<S> PtyReaderObserver for SupervisorProcessIoObserver<S>")
+            && process_io_source
+                .contains("impl<S> StdinForwardObserver for SupervisorProcessIoObserver<S>")
             && start_supervisor_io
+                .contains("impl agent_doc_supervisor_process_io::SupervisorProcessIoState")
+            && !start_supervisor_io
+                .contains("impl agent_doc_supervisor_process::io_threads::PtyReaderObserver")
+            && !start_supervisor_io
                 .contains("impl agent_doc_supervisor_process::io_threads::StdinForwardObserver")
             && !start_supervisor_io.contains("pub(crate) fn spawn_reader_thread")
             && !start_supervisor_io.contains("pub(crate) fn spawn_writer_thread"),
-        "start/supervisor_io.rs should implement supervisor-process thread callbacks instead of owning thread loops"
+        "agent-doc-supervisor-process-io should own supervisor-process observer adapters"
     );
     for forbidden in [
         "crate::supervisor::env",

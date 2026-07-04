@@ -113,6 +113,7 @@ members = [
     "agent-doc-supervisor",
     "agent-doc-supervisor-crdt-io",
     "agent-doc-supervisor-io",
+    "agent-doc-supervisor-process-io",
     "agent-doc-supervisor-process",
     "agent-doc-controller",
     "agent-doc-tmux",

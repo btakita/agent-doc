@@ -1777,7 +1777,6 @@ impl agent_doc_supervisor_io::detection::SupervisorDetectionState for Supervisor
 /// proof failed can still be inspected, cleared, and stopped without `kill -9`.
 /// Pure and deterministic for unit testing the gate-exemption classification.
 mod supervisor_io;
-pub(crate) use supervisor_io::*;
 
 mod run;
 pub use run::*;

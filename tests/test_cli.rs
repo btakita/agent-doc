@@ -3448,7 +3448,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     );
     for relative in [
         "agent-doc-orchestration/src/codex_hook.rs",
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-run-io/src/lib.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "src/main.rs",
     ] {
@@ -3621,11 +3621,10 @@ fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
         "orchestration must not export a prompt_cache facade"
     );
 
-    let run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let run_source = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     assert!(
         run_source.contains("use agent_doc_prompt_cache::{"),
-        "run.rs should import focused prompt-cache APIs directly"
+        "run IO should import focused prompt-cache APIs directly"
     );
     assert!(
         !run_source.contains("crate::prompt_cache::PromptCache")
@@ -5969,7 +5968,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     );
     for relative in [
         "agent-doc-orchestration/src/write/run_entry.rs",
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-run-io/src/lib.rs",
         "src/orchestrate/dispatch.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -6274,6 +6273,8 @@ fn test_agent_doc_turn_owns_no_change_cycle_policy() {
 
     let run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let run_io_source = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs"))
+        .unwrap();
     for forbidden in [
         "enum NoChangeVerdict",
         "fn classify_no_change_cycle_state(",
@@ -6292,8 +6293,8 @@ fn test_agent_doc_turn_owns_no_change_cycle_policy() {
         "classify_no_change_cycle_state",
     ] {
         assert!(
-            run_source.contains(required),
-            "orchestration run should call focused no-change policy directly: {required}"
+            run_io_source.contains(required),
+            "run IO should call focused no-change policy directly: {required}"
         );
     }
 }
@@ -6594,8 +6595,8 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
         "queue_wedge_halt_message",
     ] {
         assert!(
-            run_source.contains(required),
-            "orchestration run should call focused owner-pane recursion diagnostics directly: {required}"
+            run_io_source.contains(required),
+            "run IO should call focused owner-pane recursion diagnostics directly: {required}"
         );
     }
     for required in [
@@ -6615,7 +6616,7 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
         );
     }
     for relative_path in [
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-run-io/src/lib.rs",
         "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
     ] {
@@ -9762,6 +9763,18 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         "pub struct RunCycleOutcome",
         "pub enum AutoQueueContinuation",
         "pub enum ActiveQueuePromptState",
+        "pub trait DirectRunEffects",
+        "pub fn run(",
+        "pub fn run_with_context(",
+        "pub fn run_once(",
+        "pub fn repair_document_frontmatter_on_disk",
+        "pub fn apply_append_response",
+        "pub fn apply_template_response",
+        "pub fn normalize_direct_run_prompt_prefixes",
+        "pub fn normalize_direct_run_template_content",
+        "pub fn update_resume_id",
+        "pub fn acquire_doc_lock",
+        "pub fn direct_run_atomic_write",
         "pub fn compute_run_diff",
         "pub fn active_queue_prompt_diff",
         "pub fn active_queue_prompt_state",
@@ -9817,6 +9830,15 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         "fn detect_owned_pane_self_invocation_with_options(",
         "fn recursive_codex_start_invocation_diagnostic(",
         "fn run_dispatch_timeout_diagnostic(",
+        "fn run_once(",
+        "fn apply_append_response(",
+        "fn apply_template_response(",
+        "fn normalize_direct_run_prompt_prefixes(",
+        "fn normalize_direct_run_template_content(",
+        "fn update_resume_id(",
+        "fn acquire_doc_lock(",
+        "fn atomic_write(path:",
+        "fn repair_document_frontmatter_on_disk(",
     ] {
         assert!(
             !orchestration_source.contains(forbidden),
@@ -10397,6 +10419,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/run.rs",
             "agent-doc-run-io/src/lib.rs",
             "Split stderr redirection, cycle markers/heartbeat, owner-pane recursion, queue-edit deferral, and dispatch timeout helpers",
+        ),
+        (
+            "Direct-run command runtime and writeback IO graph",
+            "agent-doc-orchestration/src/run.rs",
+            "agent-doc-run-io/src/lib.rs",
+            "Split `DirectRunEffects` into commit, writeback, queue-consume, closeout, and cycle-abandon ports",
         ),
         (
             "Codex Stop continuation context IO graph",
@@ -11785,7 +11813,7 @@ fn test_agent_doc_diff_owns_truncation_pure_policy() {
             "agent_doc_snapshot_io::DiffSnapshotStore::new(",
         ),
         (
-            "agent-doc-orchestration/src/run.rs",
+            "agent-doc-run-io/src/lib.rs",
             "agent_doc_diff_io::compute(",
             "agent_doc_snapshot_io::DiffSnapshotStore::new(",
         ),
@@ -13883,7 +13911,7 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
         );
     }
     for relative in [
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-run-io/src/lib.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
         "src/sim_world/engine.rs",
@@ -22417,7 +22445,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
     for relative in [
         "src/undo.rs",
         "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-run-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/repair.rs",
     ] {
@@ -22524,7 +22552,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         "src/reset.rs",
         "agent-doc-compact-io/src/lib.rs",
         "agent-doc-stream-io/src/lib.rs",
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-run-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/git.rs",
@@ -24777,13 +24805,12 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             && realtime_io_source.contains("agent_doc_debounce::await_idle_via_file"),
         "agent-doc-document-realtime-io must own the visible-write guard effect adapter"
     );
-    let run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let run_source = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     assert!(
         !write_source.contains("pub use agent_doc_document_realtime_io::guard_visible_write_idle")
             && write_source.contains("pub(crate) use agent_doc_document_realtime_io::{")
             && write_source.contains("guard_visible_write_reconcile_with_target")
-            && run_source.contains("use agent_doc_document_realtime_io::guard_visible_write_idle")
+            && run_source.contains("agent_doc_document_realtime_io::guard_visible_write_idle")
             && !run_source.contains("write::guard_visible_write_idle"),
         "orchestration write path must not re-export focused realtime IO guard adapters"
     );
@@ -25411,7 +25438,7 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
     );
 
     let focused_callers = [
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-run-io/src/lib.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-write-ipc-io/src/transport.rs",
         "agent-doc-write-ipc-io/src/lib.rs",
@@ -25698,7 +25725,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
             "agent_doc_queue::queue_consume::queue_targeted_completion_id_for_current_head",
         ),
         (
-            "agent-doc-orchestration/src/run.rs",
+            "agent-doc-run-io/src/lib.rs",
             "agent_doc_queue::queue_consume::queue_diff_completion_id_for_current_head",
         ),
     ] {
@@ -27030,8 +27057,7 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
     let template_io_backlog =
         fs::read_to_string(manifest_dir.join("agent-doc-template-io/src/backlog_normalization.rs"))
             .unwrap();
-    let run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let run_source = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     for (source, content) in [
         (
             "agent-doc-orchestration/src/write/run_entry.rs",
@@ -27051,7 +27077,7 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
     assert!(
         run_source.contains("agent_doc_template_io::{")
             && run_source.contains("normalize_backlog_patch_response"),
-        "run.rs should delegate pending patch normalization to focused template IO"
+        "run IO should delegate pending patch normalization to focused template IO"
     );
     assert!(
         write_materialize.contains(

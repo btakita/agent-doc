@@ -109,86 +109,88 @@
 //!   two user request blocks → prompt includes the ordered turn-completeness section
 
 #[cfg(test)]
-use agent_doc_run_io::run_stderr_redirect_harness;
+use agent_doc_frontmatter::frontmatter;
 #[cfg(test)]
 use agent_doc_run_io::{
-    ActiveQueuePromptState, active_queue_prompt_diff, active_queue_prompt_state,
+    ActiveQueuePromptState, AutoQueueContinuation, RunCycleOutcome, RunMode, acquire_doc_lock,
+    active_queue_prompt_diff, active_queue_prompt_state, apply_template_response, build_prompt,
+    direct_run_atomic_write, normalize_direct_run_prompt_prefixes, prompt_cache_routing_affinity,
+    run_stderr_redirect_harness, should_continue_auto_queue, start_run_cycle,
 };
-use agent_doc_run_io::{
-    AutoQueueContinuation, RunCycleOutcome, RunHeartbeat, RunMode, RunStderrRedirect,
-    abandon_run_recursive_cycle, build_prompt, compute_run_diff, current_epoch_secs,
-    mark_run_write_applied, owned_pane_self_invocation_detail,
-    owner_pane_queue_edit_deferred_outcome, owner_pane_queue_edit_should_defer_until_closeout,
-    prompt_cache_routing_affinity, record_run_preflight_timeout, record_run_progress,
-    recursive_codex_direct_invocation_diagnostic, run_dispatch_timeout_diagnostic,
-    should_continue_auto_queue, start_run_cycle,
-};
+use agent_doc_run_io::{DirectRunEffects, abandon_run_recursive_cycle};
 #[cfg(test)]
 use agent_doc_session_accretion::{SessionAccretionLevel, SessionAccretionReport};
-use anyhow::{Context, Result};
-use fs2::FileExt;
-use std::fs::OpenOptions;
+use anyhow::Result;
 use std::path::Path;
 
 use agent_doc_config::Config;
-use agent_doc_diff as diff;
-use agent_doc_document_realtime_io::guard_visible_write_idle;
-use agent_doc_frontmatter::frontmatter;
+#[cfg(test)]
+use agent_doc_prompt_cache::PromptCacheBlocks;
 #[cfg(test)]
 use agent_doc_prompt_cache::{PROMPT_CACHE_BOUNDARY, PROMPT_CACHE_CONTROL};
-use agent_doc_prompt_cache::{
-    PromptCacheBlocks, PromptCacheSessionCostSample, render_cache_miss_ranking,
-};
 use agent_doc_queue_io::queue_consume;
-use agent_doc_template as template;
-use agent_doc_template_io::{
-    enforce_imperative_response_contract_for_diff, enforce_no_replace_pending,
-    normalize_backlog_patch_response, normalize_user_prompts_in_exchange_safe,
-};
-use agent_doc_turn::no_change::{
-    NoChangeCycleStateInput, NoChangeVerdict, classify_no_change_cycle_state,
-};
-use agent_doc_turn::owner_pane_recursion::{
-    OwnerPaneQueueHead, owner_pane_wedge_threshold_reached, prompt_miss_message,
-    queue_handoff_message, queue_wedge_halt_message,
-};
-
-use agent_doc_agent_io::agent;
 
 use crate::{git, write};
 
-#[allow(clippy::too_many_arguments)]
-/// Basic-repair a document's malformed frontmatter ON DISK before startup so a
-/// recoverable formatting slip (tab indentation / a stray `---` fence) does not
-/// prevent the supervisor from opening (operator bug 2026-07-03: "if the
-/// frontmatter is not well formatted, the supervisor does not open. Basic repairs
-/// can be done or a user facing message can appear."). Conservative + idempotent:
-/// rewrites only when the current frontmatter fails to parse AND a
-/// semantics-preserving repair parses cleanly. An unrepairable block is left
-/// as-is so the normal parse surfaces the clear user-facing message downstream.
-/// Returns whether a repair was written.
-pub fn repair_document_frontmatter_on_disk(file: &Path) -> Result<bool> {
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(_) => return Ok(false),
-    };
-    if frontmatter::parse(&content).is_ok() {
-        return Ok(false);
+pub struct OrchestrationDirectRunEffects;
+
+static DIRECT_RUN_EFFECTS: OrchestrationDirectRunEffects = OrchestrationDirectRunEffects;
+
+impl DirectRunEffects for OrchestrationDirectRunEffects {
+    fn guard_no_exchange_compaction_request_for_diff(
+        &self,
+        file: &Path,
+        diff_text: &str,
+    ) -> Result<()> {
+        write::guard_no_exchange_compaction_request_for_diff(file, diff_text)
     }
-    let Some((bad, good)) = frontmatter::raw_frontmatter_yaml(&content)
-        .map(str::to_string)
-        .and_then(|bad| frontmatter::repair_frontmatter_yaml(&bad).map(|good| (bad, good)))
-    else {
-        return Ok(false);
-    };
-    let repaired = content.replacen(&bad, &good, 1);
-    std::fs::write(file, &repaired)
-        .with_context(|| format!("failed to persist repaired frontmatter {}", file.display()))?;
-    eprintln!(
-        "[agent-doc] repaired malformed frontmatter in {} (tabs/stray fence) before startup",
-        file.display()
-    );
-    Ok(true)
+
+    fn commit(&self, file: &Path) -> Result<bool> {
+        git::commit(file)
+    }
+
+    fn normalize_template_structure_or_fail(&self, content: &str, file: &Path) -> Result<String> {
+        write::normalize_template_structure_or_fail(content, file)
+    }
+
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        write::atomic_write_pub(file, content)
+    }
+
+    fn consume_queue_prompts_for_done_ids_with_outcome(
+        &self,
+        file: &Path,
+        done_ids: &[String],
+        force_disk: bool,
+    ) -> Result<Option<queue_consume::QueueConsumptionOutcome>> {
+        if force_disk {
+            queue_consume::consume_queue_prompts_with_outcome(
+                file,
+                done_ids,
+                true,
+                &write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            )
+        } else {
+            queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
+                file,
+                done_ids,
+                &write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            )
+        }
+    }
+
+    fn complete_required_closeout(&self, file: &Path) -> Result<()> {
+        write::complete_required_closeout(file).map(|_| ())
+    }
+
+    fn abandon_recursive_cycle(&self, file: &Path, event: &str, diagnostic: &str) -> Result<()> {
+        abandon_run_recursive_cycle(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            event,
+            diagnostic,
+        )
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -202,8 +204,16 @@ pub fn run(
     force_disk: bool,
     config: &Config,
 ) -> Result<()> {
-    run_with_context(
-        file, branch, agent_name, model, dry_run, no_git, force_disk, config, None,
+    agent_doc_run_io::run(
+        &DIRECT_RUN_EFFECTS,
+        file,
+        branch,
+        agent_name,
+        model,
+        dry_run,
+        no_git,
+        force_disk,
+        config,
     )
 }
 
@@ -219,754 +229,18 @@ pub fn run_with_context(
     config: &Config,
     run_context: Option<&agent_doc_run_context_io::RunContext>,
 ) -> Result<()> {
-    let _stderr_redirect = if !dry_run && file.exists() {
-        RunStderrRedirect::maybe_start(file)
-    } else {
-        RunStderrRedirect::inactive()
-    };
-    // Repair malformed frontmatter on disk before ANY parse in the run pipeline
-    // (diff / session-ensure / config resolution), so a recoverable slip opens
-    // cleanly instead of failing the whole run. Skipped for dry-run (no writes).
-    if !dry_run {
-        let _ = repair_document_frontmatter_on_disk(file);
-    }
-    // #jb-tsift-pane-sync diagnostic: log if this run is executing inside a tmux
-    // pane that owns a *different* document (cross-document contamination vector
-    // — e.g. a tsift.md-owned pane running agent-doc-bugs2.md's cycle). The
-    // same-document recursion guard below only catches same-document re-entry.
-    agent_doc_sync_io::sync::log_cross_document_execution_context(file, "run");
-
-    let mut create_branch = branch;
-    let mut completed_queue_items = 0usize;
-    let mut force_fresh_agent_session = false;
-    let mut last_context_clear_at = None;
-
-    loop {
-        let used_fresh_agent_session = force_fresh_agent_session;
-        let outcome = run_once(
-            file,
-            create_branch,
-            agent_name,
-            model,
-            dry_run,
-            no_git,
-            force_disk,
-            config,
-            run_context,
-            force_fresh_agent_session,
-        )?;
-        create_branch = false;
-        if used_fresh_agent_session {
-            last_context_clear_at = Some(current_epoch_secs());
-        }
-
-        if !outcome.dispatched {
-            return Ok(());
-        }
-        if let Some(queue_consumption) = outcome.queue_consumption.as_ref() {
-            completed_queue_items += queue_consumption.consumed_count.max(1);
-        }
-        match should_continue_auto_queue(
-            file,
-            &outcome,
-            completed_queue_items,
-            no_git,
-            last_context_clear_at,
-        )? {
-            AutoQueueContinuation::Stop => return Ok(()),
-            AutoQueueContinuation::Continue {
-                force_fresh_agent_session: fresh,
-            } => force_fresh_agent_session = fresh,
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_once(
-    file: &Path,
-    branch: bool,
-    agent_name: Option<&str>,
-    model: Option<&str>,
-    dry_run: bool,
-    no_git: bool,
-    force_disk: bool,
-    config: &Config,
-    run_context: Option<&agent_doc_run_context_io::RunContext>,
-    force_fresh_agent_session: bool,
-) -> Result<RunCycleOutcome> {
-    if !file.exists() {
-        anyhow::bail!("file not found: {}", file.display());
-    }
-
-    eprintln!("[run] starting for {}", file.display());
-
-    // Compute diff
-    let Some((the_diff, queue_synthetic_diff)) = compute_run_diff(file)? else {
-        let cycle_state = agent_doc_cycle_state_io::load(file)?;
-        let no_change_input = cycle_state.as_ref().map(|state| NoChangeCycleStateInput {
-            cycle_id: &state.cycle_id,
-            file: &state.file,
-            phase: state.phase,
-            last_event: &state.last_event,
-            has_capture: state.capture_id.is_some(),
-            has_response_hash: state.response_sha256.is_some(),
-            had_pending_mutations: state.had_pending_mutations,
-            has_pending_done_ids: !state.pending_done_ids.is_empty(),
-            has_pending_kept_open_ids: !state.pending_kept_open_ids.is_empty(),
-            has_reaped_pending_ids: !state.reaped_pending_ids.is_empty(),
-            has_pending_gated_ids: !state.pending_gated_ids.is_empty(),
-            pending_added_this_cycle: state.pending_added_this_cycle,
-        });
-        match classify_no_change_cycle_state(no_change_input) {
-            NoChangeVerdict::Abnormal { summary, recovery } => {
-                eprintln!(
-                    "[run] no document changes since last run for {}, but {}. Recovery: {}",
-                    file.display(),
-                    summary,
-                    recovery
-                );
-            }
-            NoChangeVerdict::Clean => {
-                eprintln!(
-                    "[run] Nothing changed since last run for {}",
-                    file.display()
-                );
-            }
-        }
-        return Ok(RunCycleOutcome {
-            dispatched: false,
-            queue_synthetic_diff: false,
-            queue_consumption: None,
-        });
-    };
-    write::guard_no_exchange_compaction_request_for_diff(file, &the_diff)?;
-
-    // Ensure the document has a session UUID (for tmux routing)
-    let raw_content = std::fs::read_to_string(file)?;
-    // Opt-in gate: a plain `.md` must not be auto-converted into a session.
-    agent_doc_frontmatter_io::session::require_agent_doc_document(&raw_content, file)?;
-    let (mut content_original, session_id) =
-        agent_doc_frontmatter_io::session::ensure_session_for_file(&raw_content, file)?;
-    if content_original != raw_content {
-        std::fs::write(file, &content_original)?;
-    }
-    if !dry_run {
-        let early_rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
-        let (early_fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
-            &content_original,
-            file,
-            &early_rc.ssh_context(),
-        )?;
-        let early_agent_name = agent_name
-            .or(early_fm.agent.as_deref())
-            .or(config.default_agent.as_deref())
-            .unwrap_or("claude");
-        if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, early_agent_name)
-            && let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
-            && !queue_synthetic_diff
-            && owner_pane_queue_edit_should_defer_until_closeout(file, &the_diff, &content_original)
-        {
-            return Ok(owner_pane_queue_edit_deferred_outcome(
-                file,
-                queue_synthetic_diff,
-                &detail,
-                &continuation,
-            ));
-        }
-    }
-    content_original = normalize_direct_run_prompt_prefixes(file, &content_original, &the_diff)?;
-    let queue_diff_completion_id =
-        agent_doc_queue::queue_consume::queue_diff_completion_id_for_current_head(
-            file,
-            &content_original,
-            &the_diff,
-        )?;
-    let owned_rc;
-    let rc: &agent_doc_run_context_io::RunContext = if let Some(provided) = run_context {
-        provided.set_file_path(file.to_path_buf());
-        provided
-    } else {
-        owned_rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
-        &owned_rc
-    };
-    let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
-        &content_original,
+    agent_doc_run_io::run_with_context(
+        &DIRECT_RUN_EFFECTS,
         file,
-        &rc.ssh_context(),
-    )?;
-    let mut prompt_fm = fm.clone();
-    if force_fresh_agent_session && prompt_fm.resume.is_some() {
-        eprintln!(
-            "[run] queue context reset: starting a fresh agent session for {}",
-            file.display()
-        );
-        prompt_fm.resume = None;
-    }
-    let run_mode = RunMode::from_frontmatter(&prompt_fm);
-
-    // Resolve agent
-    let agent_name = agent_name
-        .or(fm.agent.as_deref())
-        .or(config.default_agent.as_deref())
-        .unwrap_or("claude");
-    let agent_config = config.agents.get(agent_name);
-    let harness = agent_doc_model_tier::harness_key_for_agent_name(agent_name);
-    let resolved_model = model
-        .or(fm.resolve_harness_model(&harness))
-        .map(|m| agent_doc_model_tier::canonical_model_name(m, &harness, &config.model));
-    let prompt_cache_routing_affinity =
-        prompt_cache_routing_affinity(run_mode, agent_name, resolved_model.as_deref());
-
-    // Expand frontmatter env vars (applied to the spawned agent child process).
-    let expanded_env = if fm.env.is_empty() {
-        Vec::new()
-    } else {
-        match agent_doc_config::env::expand_values(&fm.env) {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("[run] env expansion failed: {} — continuing without env", e);
-                Vec::new()
-            }
-        }
-    };
-
-    let backend = agent::resolve_for_file(agent_name, agent_config, expanded_env, file, &fm)?;
-
-    let session_accretion = agent_doc_session_accretion_io::inspect(file).ok();
-    let prompt = build_prompt(
-        file,
-        run_mode,
-        &prompt_fm,
-        &the_diff,
-        &content_original,
-        session_accretion.as_ref(),
-    );
-
-    if dry_run {
-        eprintln!("--- Diff ---");
-        print!("{}", the_diff);
-        eprintln!("--- Prompt would be {} bytes ---", prompt.len());
-        if let Some(blocks) = PromptCacheBlocks::from_rendered(&prompt) {
-            let replay_key = blocks.replay_key(&prompt_cache_routing_affinity);
-            let adapter_state = if prompt_fm.resume.is_some() {
-                "resumed"
-            } else {
-                "fresh"
-            };
-            let current_cost =
-                PromptCacheSessionCostSample::from_replay_key(&replay_key, adapter_state);
-            eprintln!(
-                "--- Prompt cache stable_prefix_sha256={} provider_cache_key={} cache_control={} routing_affinity={} ---",
-                replay_key.stable_prefix_sha256,
-                replay_key.provider_cache_key,
-                replay_key.cache_control,
-                replay_key.routing_affinity
-            );
-            eprintln!(
-                "--- Prompt cache session_cost {} ---",
-                render_cache_miss_ranking(None, &current_cost)
-            );
-        }
-        return Ok(RunCycleOutcome {
-            dispatched: false,
-            queue_synthetic_diff,
-            queue_consumption: None,
-        });
-    }
-
-    // #codex-owned-pane-prompt-miss: when a Codex-owned pane re-invokes
-    // `agent-doc <FILE>` for the document it already owns AND an unresolved
-    // exchange prompt is still pending, fail closed *before* pre-commit and
-    // before `start_run_cycle` opens a cycle. The late recursive-deadlock guard
-    // further down would also refuse to dispatch a nested child, but only after
-    // pre-commit baselined the prompt into HEAD — silently losing it as an
-    // executable diff. Bailing here keeps the prompt uncommitted/executable and
-    // tells the operator to answer it in this owner pane. The detector is a
-    // strict subset of the recursive-guard case, so non-recursive runs are
-    // unaffected.
-    if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
-        && let Some(unresolved) = agent_doc_session_check_io::unresolved_exchange_prompt(file)?
-    {
-        let document = file.display().to_string();
-        let diagnostic = prompt_miss_message(&document, &detail, &unresolved);
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "run_owned_pane_prompt_miss file={} {}",
-                file.display(),
-                detail
-            ),
-        );
-        anyhow::bail!("{}", diagnostic);
-    }
-
-    // #codex-owned-pane-auto-queue-stuck: when a Codex-owned pane re-invokes
-    // `agent-doc <FILE>` for the document it already owns AND a ready active
-    // auto-queue head remains (an unresolved exchange prompt takes precedence and
-    // is handled by the guard above), fail closed *before* pre-commit and child
-    // dispatch. The late recursive-deadlock guard further down would otherwise
-    // let pre-commit baseline queue/boundary drift and leave the head unprocessed
-    // with no owner-pane handoff, so the operator gets a retry loop. Bailing here
-    // keeps the queue head live/executable and tells the operator to run the head
-    // in THIS owner turn rather than re-running the same direct command. The
-    // detector is a strict subset of the recursive-guard case, so non-owner and
-    // non-Codex runs are unaffected.
-    if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
-        && let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
-    {
-        if !queue_synthetic_diff
-            && owner_pane_queue_edit_should_defer_until_closeout(file, &the_diff, &content_original)
-        {
-            return Ok(owner_pane_queue_edit_deferred_outcome(
-                file,
-                queue_synthetic_diff,
-                &detail,
-                &continuation,
-            ));
-        }
-        // #recguard-wedge-escape: a busy owner pane re-invoking `agent-doc <FILE>`
-        // mid-turn trips this guard (Option B `#codex-self-reinvoke-prevent` only
-        // redirects the *Stop-hook* continuation, not a mid-turn re-run). One
-        // transient self-invoke is normal, but the SAME head tripping this guard
-        // enough times to hit the owner-pane wedge threshold is a self-driving
-        // `agent:queue auto` dead-loop with no operator watching — it would re-fire forever. Break
-        // it: halt the runaway auto-queue (`queue: stop`) so the loop stops
-        // burning cycles, and hand the operator one clear recovery action.
-        let wedge_count = agent_doc_owner_pane_io::record(file, &continuation.head_prompt)?;
-        if owner_pane_wedge_threshold_reached(wedge_count) {
-            if let Ok(content) = std::fs::read_to_string(file)
-                && let Ok(stopped) = frontmatter::merge_queue_state(&content, false)
-                && let Err(err) = std::fs::write(file, &stopped)
-            {
-                eprintln!(
-                    "[recguard-wedge] WARNING: failed to halt wedged auto-queue for {}: {}",
-                    file.display(),
-                    err
-                );
-            }
-            agent_doc_owner_pane_io::clear(file)?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "recursive_self_invocation_wedge_halt file={} head_id={} count={} {}",
-                    file.display(),
-                    continuation.head_id.as_deref().unwrap_or("<none>"),
-                    wedge_count,
-                    detail
-                ),
-            );
-            anyhow::bail!(
-                "{}",
-                queue_wedge_halt_message(
-                    &file.display().to_string(),
-                    &detail,
-                    OwnerPaneQueueHead {
-                        prompt: &continuation.head_prompt,
-                        id: continuation.head_id.as_deref(),
-                    },
-                    wedge_count
-                )
-            );
-        }
-        let document = file.display().to_string();
-        let diagnostic = queue_handoff_message(
-            &document,
-            &detail,
-            OwnerPaneQueueHead {
-                prompt: &continuation.head_prompt,
-                id: continuation.head_id.as_deref(),
-            },
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "run_owned_pane_queue_handoff file={} head_id={} self_invocation_count={} {}",
-                file.display(),
-                continuation.head_id.as_deref().unwrap_or("<none>"),
-                wedge_count,
-                detail
-            ),
-        );
-        anyhow::bail!("{}", diagnostic);
-    }
-
-    // Create branch if requested
-    if branch && !no_git {
-        agent_doc_git_io::branch::create_session_branch(file)?;
-    }
-
-    // Pre-commit: commit user's changes before sending to agent
-    // This lets the editor show agent additions as diff gutters
-    if !no_git {
-        let did_commit = git::commit(file)?;
-        if !did_commit
-            && !queue_synthetic_diff
-            && agent_doc_diff_io::compute(
-                &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
-                file,
-            )?
-            .is_none()
-        {
-            anyhow::bail!(
-                "no child-agent dispatch: the pre-commit repair closed {} as already committed and no new assistant response body was supplied. If you need to recover a missed response patchback, pipe the response through `agent-doc write --commit {}`.",
-                file.display(),
-                file.display()
-            );
-        }
-    }
-    start_run_cycle(file)?;
-
-    eprintln!("Submitting to {}...", agent_name);
-    if let Some(diagnostic) =
-        recursive_codex_direct_invocation_diagnostic(file, &session_id, agent_name)
-    {
-        // The recursive same-pane guard fires before any response capture, so the
-        // empty preflight cycle just opened by `start_run_cycle` must be marked
-        // terminal (`Abandoned`) rather than left `preflight_started`. Otherwise
-        // `session-check` reports an interruption and the owner session stays
-        // wedged until a manual `agent-doc cancel`. (#recguard-abandon)
-        abandon_run_recursive_cycle(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            "recursive_direct_invocation_blocked",
-            &diagnostic,
-        )?;
-        anyhow::bail!("{}", diagnostic);
-    }
-
-    // Send to agent — use `resume` for agent conversation tracking
-    let fork = prompt_fm.resume.is_none();
-    let response_result = {
-        let _heartbeat = RunHeartbeat::start(
-            file,
-            "child_agent_wait",
-            agent_name,
-            Some(agent_doc_agent_io::agent::run_agent_timeout()),
-        );
-        backend.send(
-            &prompt,
-            prompt_fm.resume.as_deref(),
-            fork,
-            resolved_model.as_deref(),
-        )
-    };
-    let response = match response_result {
-        Ok(response) => response,
-        Err(err) if agent_doc_harness::timeout::error_chain_is_timeout(&err) => {
-            let diagnostic = run_dispatch_timeout_diagnostic(file, agent_name);
-            record_run_preflight_timeout(file, "direct_invocation_timeout", &diagnostic)?;
-            anyhow::bail!("{}\n\nsource: {}", diagnostic, err);
-        }
-        Err(err) => return Err(err),
-    };
-
-    let response_text = match run_mode {
-        RunMode::Append => agent_doc_turn::response_text::strip_assistant_heading(&response.text),
-        RunMode::Template => response.text.clone(),
-    };
-    enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;
-    record_run_progress(file, "response_capture", agent_name, None);
-    agent_doc_repair_io::pending::save_pending(file, &response_text)?;
-
-    record_run_progress(file, "response_write", agent_name, None);
-    match run_mode {
-        RunMode::Append => apply_append_response(file, &content_original, &response_text)?,
-        RunMode::Template => apply_template_response(
-            file,
-            &content_original,
-            &response_text,
-            fm.resolve_mode().is_crdt(),
-        )?,
-    }
-    mark_run_write_applied(file, "run_write_applied")?;
-
-    if let Some(ref sid) = response.session_id {
-        update_resume_id(file, sid)?;
-        mark_run_write_applied(file, "run_write_applied_resume")?;
-    }
-
-    agent_doc_repair_io::pending::clear_pending(file)?;
-    maybe_abort_after_write_applied_for_test()?;
-
-    let mut queue_consumption = None;
-    if !no_git {
-        let _heartbeat = RunHeartbeat::start(file, "commit_closeout", agent_name, None);
-        if queue_synthetic_diff
-            || queue_consume::should_consume_queue_prompt_for_diff(file, Some(&the_diff))?
-        {
-            let queue_completion_ids = queue_diff_completion_id
-                .clone()
-                .into_iter()
-                .collect::<Vec<_>>();
-            queue_consumption = if force_disk {
-                queue_consume::consume_queue_prompts_with_outcome(
-                    file,
-                    &queue_completion_ids,
-                    true,
-                    &write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
-                )?
-            } else {
-                queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
-                    file,
-                    &queue_completion_ids,
-                    &write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
-                )?
-            };
-        } else {
-            eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?);
-        }
-        write::complete_required_closeout(file)?;
-    }
-
-    eprintln!("Response written to {}", file.display());
-    Ok(RunCycleOutcome {
-        dispatched: true,
-        queue_synthetic_diff,
-        queue_consumption,
-    })
-}
-
-fn maybe_abort_after_write_applied_for_test() -> Result<()> {
-    if std::env::var_os("AGENT_DOC_TEST_ABORT_AFTER_RUN_WRITE_APPLIED").is_some() {
-        anyhow::bail!("test abort after run write_applied");
-    }
-    Ok(())
-}
-
-fn apply_append_response(file: &Path, baseline: &str, response: &str) -> Result<()> {
-    let doc_lock = acquire_doc_lock(file)?;
-    agent_doc_snapshot_io::save_pre_response(file, baseline)?;
-
-    let mut content_ours = baseline.to_string();
-    if !content_ours.ends_with('\n') {
-        content_ours.push('\n');
-    }
-    content_ours.push_str("## Assistant\n\n");
-    content_ours.push_str(response);
-    if !response.ends_with('\n') {
-        content_ours.push('\n');
-    }
-    content_ours.push_str("\n## User\n\n");
-
-    let content_current = std::fs::read_to_string(file)?;
-    let final_content = if content_current == baseline {
-        content_ours
-    } else {
-        eprintln!("File was modified during run. Merging changes...");
-        agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?
-    };
-
-    guard_visible_write_idle(file, "direct_run_append")?;
-    agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
-    atomic_write(file, &final_content)?;
-    drop(doc_lock);
-    Ok(())
-}
-
-fn apply_template_response(
-    file: &Path,
-    baseline: &str,
-    response: &str,
-    use_crdt: bool,
-) -> Result<()> {
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
-    let current_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    let (mut patches, unmatched) =
-        template::parse_patches(response).context("failed to parse patch blocks from response")?;
-    agent_doc_template::sanitize::sanitize_patches(&mut patches);
-    let normalized =
-        normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;
-    let patches = normalized.patches;
-    let unmatched = normalized.unmatched;
-    enforce_no_replace_pending(&patches, false)?;
-
-    if patches.is_empty() && unmatched.trim().is_empty() {
-        anyhow::bail!("no patch blocks or content found in response");
-    }
-    agent_doc_template::response_materialization::ensure_template_response_write_proof(
-        &patches, &unmatched,
-    )?;
-
-    let doc_lock = acquire_doc_lock(file)?;
-    agent_doc_snapshot_io::save_pre_response(file, baseline)?;
-
-    let content_ours = agent_doc_template_io::apply_patches_with_project_config(
-        baseline,
-        &patches,
-        &unmatched,
-        file,
-        Some(rc.project_config()),
+        branch,
+        agent_name,
+        model,
+        dry_run,
+        no_git,
+        force_disk,
+        config,
+        run_context,
     )
-    .context("failed to apply template patches")?;
-    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-    let content_ours = normalize_direct_run_template_content(
-        file,
-        baseline,
-        snapshot_doc.as_deref(),
-        &content_ours,
-    )?;
-
-    let content_current = std::fs::read_to_string(file)?;
-    let (final_content, crdt_state) = if content_current == baseline {
-        let state = if use_crdt {
-            Some(agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours).encode_state())
-        } else {
-            None
-        };
-        (content_ours, state)
-    } else if use_crdt {
-        eprintln!("File was modified during run. CRDT merging changes...");
-        let base_state = agent_doc_snapshot_io::crdt_merge_base_state_with(
-            file,
-            baseline,
-            agent_doc_op_capture_io::has_pending_editor_ops,
-            agent_doc_ops_log_io::log_op,
-        )?
-        .state;
-        // `#crdtauth4` — disk demotion (plan phase 6). Under `MultiReplica` (a live
-        // editor is attached) the in-memory canonical replica is authoritative and
-        // the disk `.yrs` is a write-through recovery projection only: reconcile the
-        // just-loaded base state INTO the live replica so in-memory wins (a stale
-        // disk projection can only add ops the live replica genuinely lost, never
-        // regress live text). Under `GitAuthoritative` (headless) this returns
-        // `None` and the existing baseline-wins load above runs unchanged.
-        if let Err(e) =
-            agent_doc_crdt_relay_io::reconcile_disk_projection_for_file(file, &base_state)
-        {
-            eprintln!("[crdt] disk-demotion reconcile failed (non-fatal): {e}");
-        }
-        let (merged, state) = agent_doc_merge::merge_contents_crdt(
-            Some(&base_state),
-            &content_ours,
-            &content_current,
-        )?;
-        (merged, Some(state))
-    } else {
-        eprintln!("File was modified during run. Merging changes...");
-        (
-            agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?,
-            None,
-        )
-    };
-    let final_content = normalize_direct_run_template_content(
-        file,
-        baseline,
-        snapshot_doc.as_deref(),
-        &final_content,
-    )?;
-
-    guard_visible_write_idle(file, "direct_run_template")?;
-    agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
-    if let Some(state) = crdt_state {
-        agent_doc_merge_io::save_document_crdt(file, &state, &final_content)?;
-    }
-    atomic_write(file, &final_content)?;
-    drop(doc_lock);
-    Ok(())
-}
-
-fn normalize_direct_run_prompt_prefixes(
-    file: &Path,
-    content: &str,
-    diff_text: &str,
-) -> Result<String> {
-    let has_prompt_bearing_user_drift = diff::classify_prompt_bearing_changes(diff_text)
-        .into_iter()
-        .any(|change| {
-            matches!(
-                change.kind,
-                diff::PromptBearingChangeKind::PromptTarget
-                    | diff::PromptBearingChangeKind::ContentEdit
-            )
-        });
-    if !has_prompt_bearing_user_drift {
-        return Ok(content.to_string());
-    }
-
-    let Some(snapshot_doc) = agent_doc_snapshot_io::load(file).ok().flatten() else {
-        return Ok(content.to_string());
-    };
-    let boundary_normalized = template::reposition_boundary_to_end_clean(content);
-    let normalized = normalize_user_prompts_in_exchange_safe(
-        &boundary_normalized,
-        &boundary_normalized,
-        &snapshot_doc,
-        file,
-    );
-    if normalized != content {
-        guard_visible_write_idle(file, "direct_run_prefix_normalize")?;
-        atomic_write(file, &normalized)?;
-        eprintln!("[run] normalized direct-run user prompt prefixes");
-    }
-    Ok(normalized)
-}
-
-fn normalize_direct_run_template_content(
-    file: &Path,
-    baseline: &str,
-    snapshot: Option<&str>,
-    content: &str,
-) -> Result<String> {
-    let normalized = if let Some(snapshot_doc) = snapshot {
-        normalize_user_prompts_in_exchange_safe(content, baseline, snapshot_doc, file)
-    } else {
-        content.to_string()
-    };
-    write::normalize_template_structure_or_fail(&normalized, file)
-}
-
-fn update_resume_id(file: &Path, session_id: &str) -> Result<()> {
-    let current = std::fs::read_to_string(file)?;
-    let updated = frontmatter::set_resume_id(&current, session_id)?;
-    guard_visible_write_idle(file, "direct_run_update_resume_id")?;
-    atomic_write(file, &updated)?;
-    agent_doc_snapshot_io::save(file, &updated, agent_doc_ops_log_io::log_op)?;
-    Ok(())
-}
-
-/// Acquire an advisory flock on a document file for agent-doc-vs-agent-doc
-/// coordination. Lock file is `.agent-doc/locks/<hash>.lock`. Released on drop.
-fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    let lock_path = agent_doc_fs::state_lock_path_for(path)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open doc lock {}", lock_path.display()))?;
-    file.lock_exclusive()
-        .with_context(|| format!("failed to acquire doc lock on {}", lock_path.display()))?;
-    Ok(file)
-}
-
-/// Write content to a file atomically, routed through the `#pcpc5cut` 08b
-/// document write-authority gate ladder.
-///
-/// Delegates to [`crate::write::atomic_write_pub`] — the single gated chokepoint
-/// shared with the IPC/finalize `write.rs::atomic_write` path — rather than being
-/// a parallel direct-disk writer. The underlying raw write still uses
-/// write-to-temp + rename (atomic on POSIX when source and destination share a
-/// filesystem, guaranteed here since the temp file is a sibling).
-///
-/// `#pcpc5d` (08b removal rung): previously this wrote the visible `.md` straight
-/// to disk and only recorded provenance, so under `dual-write`/`authority`/
-/// `removed` a direct-run write still bypassed the session actor's ordered write
-/// queue — a *surviving direct-disk writer* the cutover must delete. After this
-/// change every same-process document writer flows through one gate:
-/// - `off` (default): bare atomic write + provenance — byte-identical to the
-///   prior behavior, so no response cycle persisting through this path changes;
-/// - `shadow`: raw write + would-route observation to `ops.log`;
-/// - `dual-write`/`authority`/`removed`: serialized through the ordered write
-///   queue, removing the in-process direct-run vs finalize interleave at the root.
-///
-/// Provenance (`#ipc-drift-writeprovenance`) is still recorded inside the shared
-/// raw writer (`write.rs::atomic_write_raw`) on both the raw and queued paths.
-fn atomic_write(path: &Path, content: &str) -> Result<()> {
-    crate::write::atomic_write_pub(path, content)
 }
 
 #[cfg(test)]
@@ -1783,7 +1057,7 @@ old status\n\
             "<!-- /patch:backlog -->\n",
         );
 
-        apply_template_response(&doc, baseline, response, false)
+        apply_template_response(&DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
             .expect("run path should normalize legacy backlog patches before enforcement");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -1832,7 +1106,7 @@ old status\n\
             "<!-- /patch:backlog -->\n",
         );
 
-        apply_template_response(&doc, baseline, response, false)
+        apply_template_response(&DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
             .expect("run path should normalize sampleorders-style backlog patches");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -1881,7 +1155,7 @@ old status\n\
             "<!-- /patch:exchange -->\n",
         );
 
-        apply_template_response(&doc, baseline, response, false)
+        apply_template_response(&DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
             .expect("direct-run template write should normalize prompt lines");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -1933,8 +1207,9 @@ old status\n\
 
         let diff_text = agent_doc_diff::unified_diff_from_contents(snapshot, baseline)
             .expect("snapshot and baseline differ");
-        let normalized = normalize_direct_run_prompt_prefixes(&doc, baseline, &diff_text)
-            .expect("direct-run baseline prompt normalization should succeed");
+        let normalized =
+            normalize_direct_run_prompt_prefixes(&DIRECT_RUN_EFFECTS, &doc, baseline, &diff_text)
+                .expect("direct-run baseline prompt normalization should succeed");
         let on_disk = std::fs::read_to_string(&doc).unwrap();
 
         assert_eq!(normalized, on_disk);
@@ -2009,7 +1284,7 @@ old status\n\
     fn atomic_write_correct_content() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("atomic.md");
-        atomic_write(&path, "hello world").unwrap();
+        direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, "hello world").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello world");
     }
 
@@ -2018,7 +1293,7 @@ old status\n\
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("overwrite.md");
         std::fs::write(&path, "old content").unwrap();
-        atomic_write(&path, "new content").unwrap();
+        direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, "new content").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new content");
     }
 
@@ -2031,7 +1306,7 @@ old status\n\
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let path = dir.path().join("prov-direct-run.md");
-        atomic_write(&path, "direct run body").unwrap();
+        direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, "direct run body").unwrap();
         let key = path
             .canonicalize()
             .unwrap_or_else(|_| path.clone())
@@ -2058,7 +1333,7 @@ old status\n\
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc").join("logs")).unwrap();
         let path = dir.path().join("routed-direct-run.md");
-        atomic_write(&path, "routed direct-run body").unwrap();
+        direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, "routed direct-run body").unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "routed direct-run body"
@@ -2089,7 +1364,7 @@ old status\n\
             let content = format!("writer-{}-content", i);
             handles.push(std::thread::spawn(move || {
                 bar.wait();
-                atomic_write(&p, &content).unwrap();
+                direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &p, &content).unwrap();
             }));
         }
 
@@ -2127,7 +1402,12 @@ old status\n\
             // Simulate read-modify-write cycle
             let content = std::fs::read_to_string(&path_a).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
-            atomic_write(&path_a, &format!("{}\n## Assistant\nResponse A", content)).unwrap();
+            direct_run_atomic_write(
+                &DIRECT_RUN_EFFECTS,
+                &path_a,
+                &format!("{}\n## Assistant\nResponse A", content),
+            )
+            .unwrap();
         });
 
         let bar_b = Arc::clone(&barrier);
@@ -2137,7 +1417,12 @@ old status\n\
             bar_b.wait(); // both threads hold their own lock simultaneously
             let content = std::fs::read_to_string(&path_b).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
-            atomic_write(&path_b, &format!("{}\n## Assistant\nResponse B", content)).unwrap();
+            direct_run_atomic_write(
+                &DIRECT_RUN_EFFECTS,
+                &path_b,
+                &format!("{}\n## Assistant\nResponse B", content),
+            )
+            .unwrap();
         });
 
         ha.join().unwrap();
@@ -2172,7 +1457,7 @@ old status\n\
                 let content = std::fs::read_to_string(&path).unwrap();
                 let updated = format!("{}writer-{}\n", content, i);
                 std::thread::sleep(std::time::Duration::from_millis(5));
-                atomic_write(&path, &updated).unwrap();
+                direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, &updated).unwrap();
                 drop(lock);
             }));
         }
@@ -2208,7 +1493,7 @@ old status\n\
             locked_tx.send(()).unwrap();
             // Hold lock while "processing"
             std::thread::sleep(std::time::Duration::from_millis(50));
-            atomic_write(&path_w, "after").unwrap();
+            direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path_w, "after").unwrap();
             drop(lock);
         });
 

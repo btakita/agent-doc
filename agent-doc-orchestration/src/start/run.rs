@@ -349,7 +349,7 @@ pub fn run_with_reap_policy(
 
     // Malformed frontmatter must not silently prevent the supervisor from opening
     // (operator bug 2026-07-03): basic-repair it on disk before any parse below.
-    let _ = crate::run::repair_document_frontmatter_on_disk(file);
+    let _ = agent_doc_run_io::repair_document_frontmatter_on_disk(file);
     // Ensure session UUID exists in frontmatter
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;

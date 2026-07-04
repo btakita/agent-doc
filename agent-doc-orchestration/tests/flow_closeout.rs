@@ -6,42 +6,28 @@ pub use agent_doc_turn::closeout_recovery::CloseoutRecoveryState;
 pub use agent_doc_flow_io::closeout::{
     CloseoutBinaryFreshnessEvidence, CloseoutCaptureEvidence, CloseoutCycleEvidence,
     CloseoutEditorIpcEvidence, CloseoutQueueOnlyDriftEvidence, CloseoutRecoveryEvidence,
-    CloseoutRecoveryMutation, CloseoutResponseBodyEvidence, RecoveryApplication,
-    closeout_recovery_command_for_file, reconcile_compacted_committed_capture,
-    stuck_captured_cycle,
+    CloseoutResponseBodyEvidence, RecoveryApplication, closeout_recovery_command_for_file,
+    reconcile_compacted_committed_capture, stuck_captured_cycle,
 };
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
-}
-
-pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<()> {
-    agent_doc_flow_io::closeout::record_terminal_closeout_proof(file, did_commit)
+    agent_doc_flow_io::closeout::complete_required_closeout(
+        file,
+        &agent_doc_orchestration::closeout_effects(),
+    )
 }
 
 pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
-    agent_doc_flow_io::closeout::apply_closeout_recovery(file, &crate::closeout_effects())
+    agent_doc_flow_io::closeout::apply_closeout_recovery(
+        file,
+        &agent_doc_orchestration::closeout_effects(),
+    )
 }
 
 pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecoveryEvidence> {
-    agent_doc_flow_io::closeout::gather_closeout_recovery_evidence(file, &crate::closeout_effects())
-}
-
-pub fn decide_closeout_recovery(
-    file: &Path,
-    input: agent_doc_turn::closeout_recovery::CloseoutRecoveryDecisionInput<'_>,
-) -> agent_doc_turn::closeout_recovery::CloseoutRecoveryDecision {
-    agent_doc_flow_io::closeout::decide_closeout_recovery(file, input, &crate::closeout_effects())
-}
-
-pub fn apply_closeout_recovery_mutation(
-    file: &Path,
-    mutation: CloseoutRecoveryMutation<'_>,
-) -> Result<()> {
-    agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
+    agent_doc_flow_io::closeout::gather_closeout_recovery_evidence(
         file,
-        mutation,
-        &crate::closeout_effects(),
+        &agent_doc_orchestration::closeout_effects(),
     )
 }
 
@@ -50,7 +36,7 @@ pub fn classify_closeout_recovery_state_for_file(
 ) -> agent_doc_turn::closeout_recovery::CloseoutRecoveryState {
     agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
         file,
-        &crate::closeout_effects(),
+        &agent_doc_orchestration::closeout_effects(),
     )
 }
 
@@ -58,6 +44,47 @@ pub fn classify_closeout_recovery_state_for_file(
 mod tests {
     use super::*;
     use std::process::Command;
+
+    struct TestPipelineFrontmatterEffects;
+
+    static TEST_PIPELINE_FRONTMATTER_EFFECTS: TestPipelineFrontmatterEffects =
+        TestPipelineFrontmatterEffects;
+
+    impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
+        for TestPipelineFrontmatterEffects
+    {
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            current_content: &str,
+            target_content: &str,
+            reason: &str,
+        ) -> Result<()> {
+            let observed = std::fs::read_to_string(file)?;
+            anyhow::ensure!(
+                observed == current_content,
+                "pipeline frontmatter test write saw stale content for reason {reason}"
+            );
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
+
+        fn log_op(&self, file: &Path, message: &str) {
+            agent_doc_ops_log_io::log_op(file, message);
+        }
+    }
+
+    fn seed_live_plugin_owner_lease(file: &str) {
+        let pid = std::process::id();
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(
+                file,
+                &format!("test-editor-{pid}"),
+                pid
+            ),
+            "test setup should acquire a live plugin-owner lease"
+        );
+    }
 
     fn setup_git_project_with_doc(base: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::TempDir::new().unwrap();
@@ -110,7 +137,7 @@ mod tests {
         let response = "<!-- patch:exchange -->\n### Re: close the loop — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->";
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(base),
@@ -143,7 +170,11 @@ mod tests {
             "HEAD must not strand the completed item:\n{head}"
         );
         matches!(
-            agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap(),
+            agent_doc_session_check_io::inspect(
+                &doc,
+                &agent_doc_orchestration::session_check_effects()
+            )
+            .unwrap(),
             agent_doc_session_check_io::SessionCheckStatus::Ok(_)
         )
         .then_some(())
@@ -193,7 +224,7 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let abandoned = agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "suprecyclespin_stalled_cycle_resolved",
             Some(base),
@@ -251,7 +282,7 @@ mod tests {
         // Make the document editor-attached (MultiReplica): a live owner lease
         // for the current test process makes `authority_for_file` take the real
         // editor-attached path.
-        crate::test_support::seed_live_plugin_owner_lease(&file_str);
+        seed_live_plugin_owner_lease(&file_str);
         assert!(
             agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_str).editor_attached()
         );
@@ -296,7 +327,7 @@ mod tests {
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(base),
@@ -348,7 +379,7 @@ mod tests {
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -376,7 +407,7 @@ mod tests {
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&full_doc),
@@ -410,7 +441,7 @@ mod tests {
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&full_doc),
@@ -656,7 +687,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -682,7 +713,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -711,7 +742,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(base),
@@ -796,7 +827,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(content),
@@ -861,7 +892,7 @@ mod tests {
         std::fs::write(&doc, &snapshot).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -909,7 +940,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -958,7 +989,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, head, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(head),
@@ -1010,7 +1041,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -1036,7 +1067,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(base),
@@ -1062,7 +1093,7 @@ mod tests {
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&full_doc),
@@ -1099,7 +1130,7 @@ mod tests {
         // form. Artifact normalization makes them equal; transient does not.
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&snapshot),
@@ -1161,7 +1192,7 @@ mod tests {
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(full_doc),
@@ -1213,7 +1244,7 @@ mod tests {
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&compacted),
@@ -1269,7 +1300,7 @@ mod tests {
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&compacted),

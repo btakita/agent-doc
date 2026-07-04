@@ -1,0 +1,70 @@
+use agent_doc_flow::types::{FlowName, FlowOutcome, FlowStage};
+
+#[test]
+fn typed_flow_events_cover_route_write_closeout_session_check_and_child_patchback() {
+    let route_event = agent_doc_controller::dispatch::dispatch_proof_failed_event(
+        agent_doc_controller::dispatch::RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof,
+    );
+    assert_eq!(route_event.flow, FlowName::RoutedReopen);
+    assert_eq!(route_event.stage, FlowStage::DispatchProof);
+    assert_eq!(route_event.outcome, FlowOutcome::FailedClosed);
+
+    let typing_decision =
+        agent_doc_document_realtime::write_policy::decide_visible_write_after_typing(
+            agent_doc_document_realtime::write_policy::VisibleWriteTypingFacts {
+                idle_reached: false,
+                timeout_ms: 5_000,
+            },
+        );
+    let write_event = agent_doc_document_realtime::write_policy::visible_write_guard_event(
+        typing_decision,
+        "socket_ipc",
+    );
+    assert_eq!(write_event.flow, FlowName::DocumentMutation);
+    assert_eq!(write_event.stage, FlowStage::PreWriteGuard);
+    assert_eq!(write_event.outcome, FlowOutcome::Blocked);
+
+    let closeout_event = agent_doc_turn::closeout_guard::closeout_guard_event(
+        FlowStage::SessionCheck,
+        FlowOutcome::FailedClosed,
+        agent_doc_turn::closeout_guard::CloseoutGuardReason::SessionCheckInterrupted,
+    );
+    assert_eq!(closeout_event.flow, FlowName::Closeout);
+    assert_eq!(closeout_event.stage, FlowStage::SessionCheck);
+    assert_eq!(closeout_event.outcome, FlowOutcome::FailedClosed);
+
+    let child_patchback = agent_doc_template::patchback::normalize_child_template_response(
+        "### Re: child - gpt-5\n\nImplemented.".to_string(),
+    );
+    assert_eq!(
+        child_patchback.decision,
+        agent_doc_template::patchback::ChildPatchbackNormalizationDecision::WrappedPlainResponse
+    );
+    let child_event =
+        agent_doc_template::patchback::child_patchback_normalization_event(&child_patchback);
+    assert_eq!(child_event.flow, FlowName::OrchestrationBatch);
+    assert_eq!(child_event.stage, FlowStage::ChildCloseout);
+    assert_eq!(child_event.outcome, FlowOutcome::Completed);
+
+    let child = agent_doc_work_graph::BatchChildResult {
+        label: "child".to_string(),
+        outcome: child_event.outcome,
+        proof: child_event.reason.clone(),
+    };
+    assert_eq!(
+        agent_doc_work_graph::classify_batch_progress(
+            false,
+            child.outcome == FlowOutcome::Completed
+        ),
+        agent_doc_work_graph::BatchProgressDecision::Continue
+    );
+
+    let auto_dag_event = agent_doc_work_graph::auto_dag_schedule_event(
+        agent_doc_work_graph::AutoDagScheduleDecision::SessionReviewBlocked,
+        2,
+        1,
+    );
+    assert_eq!(auto_dag_event.flow, FlowName::OrchestrationBatch);
+    assert_eq!(auto_dag_event.stage, FlowStage::QueueFreeze);
+    assert_eq!(auto_dag_event.outcome, FlowOutcome::Blocked);
+}

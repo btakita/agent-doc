@@ -4769,8 +4769,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let flow_lib = fs::read_to_string(manifest_dir.join("agent-doc-flow/src/lib.rs")).unwrap();
     let flow_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/lib.rs")).unwrap();
-    let orchestration_flow_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     assert!(
         flow_lib.contains("pub mod types;")
             && flow_lib.contains("pub mod outcome;")
@@ -4778,11 +4776,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-flow should expose focused flow vocabulary and outcome contracts"
     );
     assert!(
-        !orchestration_flow_mod.contains("pub mod types")
-            && !orchestration_flow_mod.contains("pub mod outcome")
-            && !orchestration_flow_mod.contains("pub mod session_cycle")
-            && !orchestration_flow_mod.contains("pub mod proof"),
-        "orchestration flow must not keep types/outcome shim modules"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow")
+            .exists(),
+        "orchestration must not keep a flow source module for types/outcome/session-cycle/proof shims"
     );
     assert!(
         !manifest_dir
@@ -4860,7 +4857,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-flow-io closeout should call focused flow latency formatting directly"
     );
     for relative in [
-        "agent-doc-orchestration/src/flow/mod.rs",
         "agent-doc-orchestration/src/git.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/write.rs",
@@ -9468,11 +9464,11 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
             .exists(),
         "orchestration must not keep an orchestration-batch flow adapter"
     );
-    let flow_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     assert!(
-        !flow_mod.contains("pub mod orchestration_batch"),
-        "orchestration flow must not expose an orchestration-batch facade"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow")
+            .exists(),
+        "orchestration must not keep a flow source module for orchestration-batch facades"
     );
     assert!(
         !manifest_dir
@@ -9653,7 +9649,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 53,
+        ledger_rows.len() >= 54,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10123,7 +10119,13 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Flow closeout effects facade demotion",
             "agent-doc-orchestration/src/flow/mod.rs",
             "agent-doc-flow-io",
-            "Move the test-only closeout boundary tests into `agent-doc-flow-io`",
+            "Split `CloseoutEffects` into narrower",
+        ),
+        (
+            "Flow test-only source module deletion",
+            "agent-doc-orchestration/src/flow/{mod.rs,closeout.rs}",
+            "agent-doc-orchestration/tests/{flow_closeout.rs,flow_events.rs}",
+            "Move the remaining orchestration-bound closeout effect fixtures into `agent-doc-flow-io` after the git/write/repair effects split",
         ),
         (
             "Focus command host IO",
@@ -10266,7 +10268,6 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "src/main.rs",
         "src/mcp.rs",
         "agent-doc-orchestration/src/codex_hook.rs",
-        "agent-doc-orchestration/src/flow/mod.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-orchestration/src/repair.rs",
@@ -10366,30 +10367,38 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
         !orchestration_lib.contains("pub mod flow;")
-            && orchestration_lib.contains("#[cfg(test)]")
-            && orchestration_lib.contains("mod flow;")
+            && !orchestration_lib.contains("mod flow;")
             && orchestration_lib.contains("pub fn closeout_effects()")
             && orchestration_lib.contains(
                 "impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffects"
             ),
-        "orchestration must keep flow as a test-only shim and expose only the focused CloseoutEffects port"
+        "orchestration must delete the flow source module and expose only the focused CloseoutEffects port"
     );
 
-    let flow_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     assert!(
-        !flow_mod.contains("pub fn closeout_effects()")
-            && !flow_mod.contains("OrchestrationCloseoutEffects"),
-        "flow/mod.rs must not retain the production closeout effects facade"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow")
+            .exists(),
+        "orchestration must not keep a test-only flow source module"
     );
 
     let closeout_tests =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/flow_closeout.rs"))
             .unwrap();
     assert!(
-        !closeout_tests.contains("crate::flow::closeout_effects()")
-            && closeout_tests.contains("crate::closeout_effects()"),
-        "test-only closeout wrappers should use the crate-root CloseoutEffects port"
+        !closeout_tests.contains("crate::")
+            && closeout_tests.contains("agent_doc_flow_io::closeout::")
+            && closeout_tests.contains("agent_doc_orchestration::closeout_effects()"),
+        "moved closeout boundary tests should call flow-io directly through the public root CloseoutEffects port"
+    );
+
+    let flow_events =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/flow_events.rs"))
+            .unwrap();
+    assert!(
+        flow_events.contains("agent_doc_flow::types")
+            && !flow_events.contains("agent_doc_orchestration::flow"),
+        "flow event coverage should live as an integration test without an orchestration flow module"
     );
 
     for production_source in [
@@ -10718,30 +10727,12 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         );
     }
 
-    let flow_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     assert!(
-        !flow_mod.contains("pub mod workflow_state"),
-        "orchestration must not expose a workflow_state facade"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow")
+            .exists(),
+        "orchestration must not keep a flow source module for workflow/session-cycle facades"
     );
-    assert!(
-        !flow_mod.contains("pub mod workflow_invariants"),
-        "orchestration must not expose a workflow_invariants facade"
-    );
-    assert!(
-        !flow_mod.contains("pub mod proof_ledger"),
-        "orchestration flow must not expose a proof_ledger IO facade"
-    );
-    for forbidden in [
-        "pub use agent_doc_workflow::session_cycle",
-        "SessionExecutionScope",
-        "FinalizePendingMutation",
-    ] {
-        assert!(
-            !flow_mod.contains(forbidden),
-            "orchestration flow module must not re-export session-cycle workflow policy: {forbidden}"
-        );
-    }
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     for forbidden in [
@@ -14146,8 +14137,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     .unwrap();
     let route_cycle_ack_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/cycle_ack.rs")).unwrap();
-    let flow_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     let flow_types_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
     assert!(
@@ -14732,8 +14721,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "orchestration must not keep a routed-reopen flow adapter"
     );
     assert!(
-        !flow_mod.contains("pub mod routed_reopen"),
-        "orchestration flow must not expose a routed-reopen facade"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow")
+            .exists(),
+        "orchestration flow must not expose routed-reopen facades"
     );
     assert!(
         !flow_types_source.contains("pub enum RouteDecision"),
@@ -15124,8 +15115,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         controller_operator_clear.contains("use agent_doc_flow::types::{"),
         "agent-doc-controller should use the shared flow vocabulary for operator-clear events"
     );
-    let flow_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/flow/operator_clear.rs")
@@ -15133,8 +15122,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "orchestration must not keep an operator-clear flow adapter"
     );
     assert!(
-        !flow_mod.contains("pub mod operator_clear"),
-        "orchestration flow must not expose an operator-clear facade"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow")
+            .exists(),
+        "orchestration flow must not expose operator-clear facades"
     );
     let session_actor_cmd_source =
         fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();

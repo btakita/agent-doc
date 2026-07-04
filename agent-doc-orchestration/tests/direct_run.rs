@@ -941,8 +941,14 @@ old status\n\
             "<!-- /patch:backlog -->\n",
         );
 
-        apply_template_response(&crate::DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
-            .expect("run path should normalize legacy backlog patches before enforcement");
+        apply_template_response(
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &doc,
+            baseline,
+            response,
+            false,
+        )
+        .expect("run path should normalize legacy backlog patches before enforcement");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("### Re: backlog follow-up — gpt-5"));
@@ -990,8 +996,14 @@ old status\n\
             "<!-- /patch:backlog -->\n",
         );
 
-        apply_template_response(&crate::DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
-            .expect("run path should normalize sampleorders-style backlog patches");
+        apply_template_response(
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &doc,
+            baseline,
+            response,
+            false,
+        )
+        .expect("run path should normalize sampleorders-style backlog patches");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("### Re: sampleorders backlog follow-up — gpt-5"));
@@ -1039,8 +1051,14 @@ old status\n\
             "<!-- /patch:exchange -->\n",
         );
 
-        apply_template_response(&crate::DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
-            .expect("direct-run template write should normalize prompt lines");
+        apply_template_response(
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &doc,
+            baseline,
+            response,
+            false,
+        )
+        .expect("direct-run template write should normalize prompt lines");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -1092,7 +1110,7 @@ old status\n\
         let diff_text = agent_doc_diff::unified_diff_from_contents(snapshot, baseline)
             .expect("snapshot and baseline differ");
         let normalized = normalize_direct_run_prompt_prefixes(
-            &crate::DIRECT_RUN_EFFECTS,
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
             &doc,
             baseline,
             &diff_text,
@@ -1131,7 +1149,7 @@ old status\n\
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = agent_doc_run_io::run(
-            &crate::DIRECT_RUN_EFFECTS,
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
             &doc,
             false,
             None,
@@ -1173,7 +1191,12 @@ old status\n\
     fn atomic_write_correct_content() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("atomic.md");
-        direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, "hello world").unwrap();
+        direct_run_atomic_write(
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &path,
+            "hello world",
+        )
+        .unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello world");
     }
 
@@ -1182,7 +1205,12 @@ old status\n\
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("overwrite.md");
         std::fs::write(&path, "old content").unwrap();
-        direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, "new content").unwrap();
+        direct_run_atomic_write(
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &path,
+            "new content",
+        )
+        .unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new content");
     }
 
@@ -1195,7 +1223,12 @@ old status\n\
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let path = dir.path().join("prov-direct-run.md");
-        direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, "direct run body").unwrap();
+        direct_run_atomic_write(
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &path,
+            "direct run body",
+        )
+        .unwrap();
         let key = path
             .canonicalize()
             .unwrap_or_else(|_| path.clone())
@@ -1222,8 +1255,12 @@ old status\n\
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc").join("logs")).unwrap();
         let path = dir.path().join("routed-direct-run.md");
-        direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, "routed direct-run body")
-            .unwrap();
+        direct_run_atomic_write(
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &path,
+            "routed direct-run body",
+        )
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "routed direct-run body"
@@ -1254,7 +1291,8 @@ old status\n\
             let content = format!("writer-{}-content", i);
             handles.push(std::thread::spawn(move || {
                 bar.wait();
-                direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &p, &content).unwrap();
+                direct_run_atomic_write(&agent_doc_orchestration::DIRECT_RUN_EFFECTS, &p, &content)
+                    .unwrap();
             }));
         }
 
@@ -1293,7 +1331,7 @@ old status\n\
             let content = std::fs::read_to_string(&path_a).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
             direct_run_atomic_write(
-                &crate::DIRECT_RUN_EFFECTS,
+                &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
                 &path_a,
                 &format!("{}\n## Assistant\nResponse A", content),
             )
@@ -1308,7 +1346,7 @@ old status\n\
             let content = std::fs::read_to_string(&path_b).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
             direct_run_atomic_write(
-                &crate::DIRECT_RUN_EFFECTS,
+                &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
                 &path_b,
                 &format!("{}\n## Assistant\nResponse B", content),
             )
@@ -1347,7 +1385,12 @@ old status\n\
                 let content = std::fs::read_to_string(&path).unwrap();
                 let updated = format!("{}writer-{}\n", content, i);
                 std::thread::sleep(std::time::Duration::from_millis(5));
-                direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, &updated).unwrap();
+                direct_run_atomic_write(
+                    &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+                    &path,
+                    &updated,
+                )
+                .unwrap();
                 drop(lock);
             }));
         }
@@ -1383,7 +1426,12 @@ old status\n\
             locked_tx.send(()).unwrap();
             // Hold lock while "processing"
             std::thread::sleep(std::time::Duration::from_millis(50));
-            direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path_w, "after").unwrap();
+            direct_run_atomic_write(
+                &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+                &path_w,
+                "after",
+            )
+            .unwrap();
             drop(lock);
         });
 

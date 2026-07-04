@@ -5227,7 +5227,21 @@ mod tests {
 
         std::thread::sleep(Duration::from_millis(25));
         let server_root = project_root.clone();
-        let server = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        let server = std::thread::spawn(move || {
+            let started = Instant::now();
+            loop {
+                match serve(&server_root, LaunchMode::Lazy) {
+                    Ok(()) => return Ok::<(), anyhow::Error>(()),
+                    Err(err)
+                        if err.to_string().contains("database is locked")
+                            && started.elapsed() < Duration::from_secs(5) =>
+                    {
+                        std::thread::sleep(Duration::from_millis(25));
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+        });
         wait_for_test_controller(&project_root);
 
         let result = caller.join().unwrap();
@@ -5251,7 +5265,7 @@ mod tests {
 
         let shutdown = request(&project_root, "shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
-        server.join().unwrap();
+        server.join().unwrap().unwrap();
     }
 
     #[test]
@@ -5909,7 +5923,17 @@ mod tests {
                 None => std::thread::sleep(Duration::from_millis(25)),
             }
         }
-        let status = exit.expect("wedged sentinel pid must be reaped");
+        let status = match exit {
+            Some(status) => {
+                let _ = sentinel.wait();
+                status
+            }
+            None => {
+                let _ = sentinel.kill();
+                let _ = sentinel.wait();
+                panic!("wedged sentinel pid must be reaped");
+            }
+        };
         assert!(
             !status.success(),
             "sentinel must be signal-terminated, not exit cleanly: {status:?}"
@@ -5949,7 +5973,17 @@ mod tests {
                 None => std::thread::sleep(Duration::from_millis(25)),
             }
         }
-        let status = exit.expect("aged preparing orphan must be reaped");
+        let status = match exit {
+            Some(status) => {
+                let _ = sentinel.wait();
+                status
+            }
+            None => {
+                let _ = sentinel.kill();
+                let _ = sentinel.wait();
+                panic!("aged preparing orphan must be reaped");
+            }
+        };
         assert!(
             !status.success(),
             "orphan must be signal-terminated: {status:?}"

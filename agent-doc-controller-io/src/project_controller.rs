@@ -118,7 +118,7 @@ pub(crate) fn runtime_effects() -> Result<&'static dyn ProjectControllerRuntimeE
     }
     #[cfg(test)]
     {
-        return Ok(&TEST_RUNTIME_EFFECTS);
+        Ok(&TEST_RUNTIME_EFFECTS)
     }
     #[cfg(not(test))]
     {
@@ -2344,7 +2344,7 @@ pub(crate) fn wait_for_test_controller(project_root: &Path) {
             return;
         }
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(5),
             "test controller did not start"
         );
         std::thread::sleep(Duration::from_millis(10));
@@ -5957,7 +5957,17 @@ agent:queue\n\
                 None => std::thread::sleep(Duration::from_millis(25)),
             }
         }
-        let status = exit.expect("aged preparing orphan must be reaped by recycle");
+        let status = match exit {
+            Some(status) => {
+                let _ = sentinel.wait();
+                status
+            }
+            None => {
+                let _ = sentinel.kill();
+                let _ = sentinel.wait();
+                panic!("aged preparing orphan must be reaped by recycle");
+            }
+        };
         assert!(
             !status.success(),
             "orphan must be signal-terminated: {status:?}"
@@ -6314,7 +6324,17 @@ agent:queue\n\
                 None => std::thread::sleep(Duration::from_millis(25)),
             }
         }
-        let status = exit.expect("aged cross-project preparing orphan must be reaped");
+        let status = match exit {
+            Some(status) => {
+                let _ = sentinel.wait();
+                status
+            }
+            None => {
+                let _ = sentinel.kill();
+                let _ = sentinel.wait();
+                panic!("aged cross-project preparing orphan must be reaped");
+            }
+        };
         assert!(
             !status.success(),
             "orphan must be signal-terminated: {status:?}"

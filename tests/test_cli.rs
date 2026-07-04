@@ -4804,7 +4804,9 @@ fn test_agent_doc_queue_owns_queue_control_binding_policy() {
 
     let maintenance =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
-    let run = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let direct_run_tests =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/direct_run.rs"))
+            .unwrap();
     let free_text_admission =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/free_text_admission.rs"))
             .unwrap();
@@ -4824,8 +4826,8 @@ fn test_agent_doc_queue_owns_queue_control_binding_policy() {
             "preflight maintenance must not own queue control binding policy: {forbidden}"
         );
         assert!(
-            !run.contains(forbidden),
-            "orchestration run must not own queue control binding policy: {forbidden}"
+            !direct_run_tests.contains(forbidden),
+            "orchestration direct-run tests must not own queue control binding policy: {forbidden}"
         );
         assert!(
             !free_text_admission.contains(forbidden),
@@ -6443,8 +6445,9 @@ fn test_agent_doc_turn_owns_no_change_cycle_policy() {
         "agent-doc-turn should not add a no_change root facade"
     );
 
-    let run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let direct_run_tests =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/direct_run.rs"))
+            .unwrap();
     let run_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -6455,8 +6458,8 @@ fn test_agent_doc_turn_owns_no_change_cycle_policy() {
         "let bookkeeping =",
     ] {
         assert!(
-            !run_source.contains(forbidden),
-            "orchestration run must not re-own or facade no-change cycle policy: {forbidden}"
+            !direct_run_tests.contains(forbidden),
+            "orchestration direct-run tests must not re-own or facade no-change cycle policy: {forbidden}"
         );
     }
     for required in [
@@ -6719,8 +6722,9 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
         "orchestration must not expose an owner-pane wedge-counter IO facade"
     );
 
-    let run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let direct_run_tests =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/direct_run.rs"))
+            .unwrap();
     let run_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     let owner_pane_io =
@@ -6743,8 +6747,8 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
         "managed owner-pane supervisor will submit",
     ] {
         assert!(
-            !run_source.contains(forbidden),
-            "orchestration run must not re-own or facade owner-pane recursion diagnostics: {forbidden}"
+            !direct_run_tests.contains(forbidden),
+            "orchestration direct-run tests must not re-own or facade owner-pane recursion diagnostics: {forbidden}"
         );
     }
     for forbidden in [
@@ -9979,8 +9983,14 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         );
     }
 
-    let orchestration_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let orchestration_run_source = manifest_dir.join("agent-doc-orchestration/src/run.rs");
+    assert!(
+        !orchestration_run_source.exists(),
+        "orchestration must not keep a source-module facade for direct-run tests"
+    );
+    let direct_run_tests =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/direct_run.rs"))
+            .unwrap();
     for forbidden in [
         "enum RunMode",
         "struct RunCycleOutcome",
@@ -10013,25 +10023,26 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         "fn repair_document_frontmatter_on_disk(",
     ] {
         assert!(
-            !orchestration_source.contains(forbidden),
-            "orchestration run.rs must not re-own the focused direct-run graph: {forbidden}"
+            !direct_run_tests.contains(forbidden),
+            "orchestration direct-run integration tests must not re-own the focused direct-run graph: {forbidden}"
         );
     }
     assert!(
-        orchestration_source.contains("agent_doc_run_io::{")
-            && orchestration_source.contains("build_prompt")
-            && orchestration_source.contains("should_continue_auto_queue"),
-        "test-only orchestration run.rs should exercise the focused direct-run IO crate directly"
+        direct_run_tests.contains("agent_doc_run_io::{")
+            && direct_run_tests.contains("build_prompt")
+            && direct_run_tests.contains("should_continue_auto_queue")
+            && direct_run_tests.contains("agent_doc_orchestration::DIRECT_RUN_EFFECTS"),
+        "direct-run integration tests should exercise the focused direct-run IO crate directly"
     );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
         !orchestration_lib.contains("pub mod run;")
-            && orchestration_lib.contains("#[cfg(test)]\nmod run;")
+            && !orchestration_lib.contains("mod run;")
             && orchestration_lib.contains("pub struct OrchestrationDirectRunEffects")
             && orchestration_lib.contains("pub static DIRECT_RUN_EFFECTS")
             && orchestration_lib.contains("impl agent_doc_run_io::DirectRunEffects"),
-        "orchestration must expose only the direct-run effects adapter, not a production run facade"
+        "orchestration must expose only the direct-run effects adapter, not a run source module"
     );
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert!(
@@ -10626,6 +10637,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/run.rs",
             "agent-doc-run-io/src/lib.rs",
             "Move remaining direct-run tests into `agent-doc-run-io` and split `DirectRunEffects`",
+        ),
+        (
+            "Direct-run test-only source module deletion",
+            "agent-doc-orchestration/src/run.rs",
+            "agent-doc-orchestration/tests/direct_run.rs",
+            "Move the remaining direct-run integration tests into `agent-doc-run-io` once `DirectRunEffects` no longer needs orchestration",
         ),
         (
             "Git committed historical snapshot repair IO graph",
@@ -12538,13 +12555,19 @@ fn test_agent_doc_diff_owns_semantic_diff_summary_policy() {
         preflight_run.contains("use agent_doc_diff::semantic::semantic_diff_summary;"),
         "preflight run should call the focused semantic diff builder directly"
     );
-    let orchestration_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let orchestration_run_source = manifest_dir.join("agent-doc-orchestration/src/run.rs");
+    assert!(
+        !orchestration_run_source.exists(),
+        "orchestration run source module should stay deleted after direct-run test relocation"
+    );
+    let direct_run_tests =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/direct_run.rs"))
+            .unwrap();
     let run_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     assert!(
-        !orchestration_run.contains("agent_doc_diff::semantic::semantic_diff_summary("),
-        "orchestration run must not retain the owner-pane semantic diff policy call"
+        !direct_run_tests.contains("agent_doc_diff::semantic::semantic_diff_summary("),
+        "orchestration direct-run tests must not retain the owner-pane semantic diff policy call"
     );
     assert!(
         run_io_source.contains("agent_doc_diff::semantic::semantic_diff_summary("),
@@ -12766,7 +12789,7 @@ fn test_global_config_has_no_orchestration_facade() {
         "agent-doc-agent-io/src/agent/codex.rs",
         "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-harness/src/lib.rs",
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/tests/direct_run.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
@@ -22934,7 +22957,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "src/queue_dispatch.rs",
         "src/session_actor_cmd.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/tests/direct_run.rs",
         "agent-doc-orchestration/src/route.rs",
         "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-route-io/src/startup.rs",

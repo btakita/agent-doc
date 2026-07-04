@@ -40,8 +40,6 @@ pub mod git;
 pub mod preflight;
 pub mod repair;
 pub mod route;
-#[cfg(test)]
-mod run;
 pub mod start;
 pub mod write;
 

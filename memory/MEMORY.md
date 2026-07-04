@@ -43,6 +43,7 @@
 ## agent-doc Project Intent
 
 - [Patchboard markets FIRST; agent-doc is long-term play](project_product_sequencing_patchboard_first_agentdoc_later.md) — extraction = deliberate realtime-migration paydown; #spb1–9 planned, unstarted.
+- [Realtime merge expertise = marketable alpha](project_realtime_merge_experience_marketable_alpha.md) — human+agent replica authority/provenance moat; demand map in tasks/session-findings-2026-07-04.md.
 - [IPC root-cause audit + #stale-plugin-detect shipped](project_ipc_audit_and_stale_plugin_detect.md) — 5 causes A-E queued; detect committed 9b38d017; patchboard NOT an IPC failure.
 - [provauth1/2/3 status — 3b blocked on crdtauth6](project_provauth_series_status.md) — 1/2 DONE, 3 binary-half shipped 0.34.57.
 - [Per-cell CRDT merge isolation is the deeper fix](project_agent_doc_percell_crdt_merge_intent.md) — #qcellmerge1. [[feedback_stop_cutting_agent_doc_releases]]

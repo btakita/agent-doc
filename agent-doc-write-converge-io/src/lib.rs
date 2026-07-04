@@ -12,14 +12,17 @@ use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, FullContentSourceProof, OperatorReconcileStep, WholeBufferAuthority,
     WholeBufferAuthorityFacts, WholeBufferDelivery, WholeBufferDeliveryAction,
     classify_ack_mismatch_recovery, decide_whole_buffer_delivery,
-    exchange_change_is_safe_historical_reduction, first_response_heading,
-    live_prompt_drift_recovery_target, normalize_visible_recovery_compare, operator_reconcile_step,
-    should_refuse_disk_fallback, snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
+    dropped_prompt_lines_after_content_ours, exchange_change_is_safe_historical_reduction,
+    first_response_heading, ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
+    live_prompt_drift_recovery_target, new_agent_response_headings,
+    normalize_visible_recovery_compare, operator_reconcile_step, should_refuse_disk_fallback,
+    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::{
     duplicate_prompt_line_count, normalization_prefix_observation_counts,
-    normalize_exchange_prefixes_for_targets, verify_sidecar_normalization,
+    normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
+    verify_sidecar_normalization,
 };
 use agent_doc_element_exchange_io::DuplicatePromptRepairOptions;
 use agent_doc_ipc_io::editor_target::{
@@ -30,6 +33,7 @@ use agent_doc_ipc_protocol::{
     IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, is_socket_ack_timeout_error,
     is_socket_status_error,
 };
+use agent_doc_queue::queue_prompt_drift::dropped_queue_prompt_lines_after_content_ours;
 use agent_doc_turn::response_replay::{
     materialize_response_in_current_exchange, response_materialized_in_content,
 };
@@ -93,6 +97,90 @@ pub fn save_ipc_snapshot_and_crdt_nonfatal(
         eprintln!("{message}");
     }
     true
+}
+
+pub fn try_semantic_merge_convergence(
+    base: &str,
+    candidate: &str,
+    content_ours: &str,
+) -> Option<agent_doc_merge::semantic_merge::SemanticMerge> {
+    if agent_doc_markdown_ast::overlay::components(base).is_empty()
+        || agent_doc_markdown_ast::overlay::components(candidate).is_empty()
+        || agent_doc_markdown_ast::overlay::components(content_ours).is_empty()
+    {
+        return None;
+    }
+
+    let active = agent_doc_merge::semantic_merge::ActiveNodes::new().active_component("exchange");
+    let sm = agent_doc_merge::semantic_merge::semantic_merge_scoped(
+        base,
+        candidate,
+        content_ours,
+        &active,
+    );
+
+    if sm.merged_doc.is_empty() {
+        return None;
+    }
+    if agent_doc_element::element::structural_corruption_reason(&sm.merged_doc).is_some() {
+        return None;
+    }
+    if !dropped_prompt_lines_after_content_ours(base, candidate, &sm.merged_doc).is_empty() {
+        return None;
+    }
+    if !dropped_queue_prompt_lines_after_content_ours(base, candidate, &sm.merged_doc).is_empty() {
+        return None;
+    }
+    for heading in new_agent_response_headings(base, candidate) {
+        if !sm.merged_doc.contains(&heading) {
+            return None;
+        }
+    }
+
+    Some(sm)
+}
+
+pub fn log_ipc_snapshot_adoption_allowed(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    content_ours: Option<&str>,
+    decision: &IpcRepairDecision,
+    was_blocked: bool,
+) {
+    if was_blocked {
+        return;
+    }
+    let drift_recheck = match (baseline, content_ours) {
+        (Some(base), Some(ours)) => ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+            base,
+            &decision.snapshot_content,
+            ours,
+        ),
+        _ => false,
+    };
+    let dup_recheck = content_ours
+        .map(|ours| user_prompt_count_growth(ours, &decision.snapshot_content))
+        .unwrap_or(0);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_snapshot_adoption_allowed file={} source={} patch_id={} snap_source={} snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={} drift_recheck={} dup_growth_recheck={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            decision.snap_source.label(),
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            content_ours.map(|o| o.len()).unwrap_or(0),
+            content_ours
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            drift_recheck,
+            dup_recheck,
+        ),
+    );
 }
 
 /// #ipcfullprompt-recur2 — default-on forensic capture for live editor

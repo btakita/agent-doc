@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 75,
+        ledger_rows.len() >= 76,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10224,6 +10224,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ),
         (
             "Write IPC snapshot adoption repair and forensics IO graph",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Move the remaining snapshot-adoption guard decisions",
+        ),
+        (
+            "Write IPC snapshot semantic convergence and adoption diagnostics graph",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
             "Move the remaining snapshot-adoption guard decisions",
@@ -24089,9 +24095,10 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             && write_ipc.contains("ipc_snapshot_would_absorb_live_prompt_drift_after_preflight")
             && write_ipc.contains("response_target_disjoint_from_user_edit")
             && write_ipc.contains("dropped_prompt_lines_after_content_ours")
-            && write_ipc.contains("new_agent_response_headings")
             && write_ipc.contains("ack_content_contains_latest_response")
             && write_converge.contains("materialize_missing_response_for_socket_ack_drift(")
+            && write_converge.contains("try_semantic_merge_convergence(")
+            && write_converge.contains("new_agent_response_headings")
             && write_converge.contains("first_response_heading"),
         "write IPC paths should import focused realtime snapshot/live-drift policy directly from their current owner"
     );

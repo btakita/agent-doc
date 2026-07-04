@@ -4,9 +4,8 @@ use super::*;
 use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;
 use agent_doc_document_realtime::write_policy::{
     ack_content_contains_latest_response, dropped_prompt_lines_after_content_ours,
-    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, new_agent_response_headings,
-    response_already_in_current, response_converged_in_visible_target,
-    response_target_disjoint_from_user_edit,
+    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, response_already_in_current,
+    response_converged_in_visible_target, response_target_disjoint_from_user_edit,
 };
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
@@ -22,10 +21,11 @@ use agent_doc_template::response_materialization::extract_response_headings_from
 use agent_doc_turn::response_replay::materialize_response_in_current_exchange;
 use agent_doc_write_converge_io::{
     ack_content_disk_write_proof, ipc_repair_decision_from_sidecar,
-    log_ipcfullprompt_corruption_if_any, mark_ack_content_live_buffer_synced_after_write,
+    log_ipc_snapshot_adoption_allowed, log_ipcfullprompt_corruption_if_any,
+    mark_ack_content_live_buffer_synced_after_write,
     materialize_missing_response_for_socket_ack_drift, poll_ack_content_sidecar,
     reconcile_ack_snapshot_to_newer_operator_buffer, save_document_snapshot_and_crdt,
-    write_ack_content_through_to_disk,
+    try_semantic_merge_convergence, write_ack_content_through_to_disk,
 };
 #[cfg(test)]
 use agent_doc_write_converge_io::{
@@ -165,91 +165,6 @@ pub(crate) fn normalized_content_ours_fallback(
     )
     .map(|(repaired, _)| repaired)
     .unwrap_or(normalized)
-}
-
-/// `#smconv` (`#semmerge-converge-adapter`, Phase 2): attempt a node-keyed
-/// semantic merge of `base`, `candidate` (the agent's response snapshot =
-/// `ours_agent`), and `content_ours` (the editor buffer = `theirs_operator`),
-/// returning the merged document ONLY when it is *safely applicable*.
-///
-/// This is the convergence path that replaces dropping the agent's work via a
-/// `content_ours` adoption: when the operator and agent edited disjoint nodes
-/// (the common case) both change-sets land; on a true same-node conflict the
-/// operator wins. The merge is applied only when ALL conservative gates hold —
-/// this is the commit path, so when in doubt the caller falls through to the
-/// existing line-based `#fintol2` / `content_ours` carry-forward UNCHANGED:
-///
-/// 1. The reconstructed `merged_doc` is non-empty and re-parses cleanly
-///    (`element::structural_corruption_reason` is `None`).
-/// 2. The merge preserves the agent's response: it must NOT drop any agent
-///    exchange/queue/backlog content that `content_ours` would have dropped —
-///    both `dropped_prompt_lines_after_content_ours` and
-///    `dropped_queue_prompt_lines_after_content_ours` against `merged_doc` are
-///    empty. This is the critical safety check.
-/// 3. The AST model actually applies: `base`, `candidate`, and `content_ours`
-///    each parse to at least one component, so node-keyed merge is meaningful.
-fn try_semantic_merge_convergence(
-    base: &str,
-    candidate: &str,
-    content_ours: &str,
-) -> Option<agent_doc_merge::semantic_merge::SemanticMerge> {
-    // Gate 3 first (cheapest, no allocation of the merged doc): the AST model
-    // must apply to all three sides for a node-keyed merge to be meaningful.
-    if agent_doc_markdown_ast::overlay::components(base).is_empty()
-        || agent_doc_markdown_ast::overlay::components(candidate).is_empty()
-        || agent_doc_markdown_ast::overlay::components(content_ours).is_empty()
-    {
-        return None;
-    }
-
-    // #msn6 / #smturnactive (semantic_merge Phase 6): the turn-active area is the
-    // `exchange` tail (the in-flight prompt + its response). Scope ack emission to
-    // it so a same-node operator↔agent collision OUTSIDE exchange — the operator
-    // editing the queue or a backlog item while the agent writes its response —
-    // auto-resolves to the operator value with no ack noise; only an
-    // exchange-area collision raises an AckRequest. The merged document is
-    // identical to the unscoped merge (operator always wins), so this only
-    // narrows ack noise, never content.
-    let active = agent_doc_merge::semantic_merge::ActiveNodes::new().active_component("exchange");
-    let sm = agent_doc_merge::semantic_merge::semantic_merge_scoped(
-        base,
-        candidate,
-        content_ours,
-        &active,
-    );
-
-    // Gate 1: non-empty and structurally clean (same guard used for `ours`).
-    if sm.merged_doc.is_empty() {
-        return None;
-    }
-    if element::structural_corruption_reason(&sm.merged_doc).is_some() {
-        return None;
-    }
-
-    // Gate 2 (critical): the merge must not silently drop agent content. If it
-    // would, decline and let the caller fall through to the existing path, which
-    // records the dropped-prompt evidence before adopting `content_ours`.
-    if !dropped_prompt_lines_after_content_ours(base, candidate, &sm.merged_doc).is_empty() {
-        return None;
-    }
-    if !dropped_queue_prompt_lines_after_content_ours(base, candidate, &sm.merged_doc).is_empty() {
-        return None;
-    }
-    // Gate 2b (critical, agent response): the merge must preserve every NEW
-    // `### Re:` response heading the agent authored this cycle. The shipped
-    // semantic_merge reconstructs component bodies from list *items* and keeps
-    // only the operator skeleton's non-item prose (documented assumption), so a
-    // heading-prose exchange turn can be dropped silently — which is exactly the
-    // data-loss class this phase fixes. If any agent-added response heading is
-    // absent from `merged_doc`, decline and fall through so the existing path
-    // records the dropped evidence instead of losing the agent's turn.
-    for heading in new_agent_response_headings(base, candidate) {
-        if !sm.merged_doc.contains(&heading) {
-            return None;
-        }
-    }
-
-    Some(sm)
 }
 
 pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
@@ -650,55 +565,6 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
     let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
     decision.replace_snapshot_with_content_ours_for_prompt_duplication(ours, bad_state);
     true
-}
-
-/// Emit a diagnostic for every IPC snapshot adoption that the two fail-closed
-/// guards did NOT block. Blocked adoptions already log richly; allowed ones were
-/// previously silent, so a corruption that slips through as "allowed" left no
-/// trace. This symmetric `ipc_snapshot_adoption_allowed` line records the final
-/// snapshot shape plus an independent drift/dup re-check (both must be benign on
-/// an allowed path — a non-benign re-check here flags a guard-coverage gap).
-pub(crate) fn log_ipc_snapshot_adoption_allowed(
-    file: &Path,
-    source: &str,
-    patch_id: Option<&str>,
-    baseline: Option<&str>,
-    content_ours: Option<&str>,
-    decision: &IpcRepairDecision,
-    was_blocked: bool,
-) {
-    if was_blocked {
-        return;
-    }
-    let drift_recheck = match (baseline, content_ours) {
-        (Some(base), Some(ours)) => ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
-            base,
-            &decision.snapshot_content,
-            ours,
-        ),
-        _ => false,
-    };
-    let dup_recheck = content_ours
-        .map(|ours| user_prompt_count_growth(ours, &decision.snapshot_content))
-        .unwrap_or(0);
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "ipc_snapshot_adoption_allowed file={} source={} patch_id={} snap_source={} snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={} drift_recheck={} dup_growth_recheck={}",
-            file.display(),
-            source,
-            patch_id.unwrap_or("-"),
-            decision.snap_source.label(),
-            decision.snapshot_content.len(),
-            agent_doc_hash::content_hash(&decision.snapshot_content),
-            content_ours.map(|o| o.len()).unwrap_or(0),
-            content_ours
-                .map(agent_doc_hash::content_hash)
-                .unwrap_or_else(|| "-".to_string()),
-            drift_recheck,
-            dup_recheck,
-        ),
-    );
 }
 
 struct StaleAckContentContext<'a> {

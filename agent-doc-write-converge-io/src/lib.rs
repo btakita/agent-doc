@@ -40,6 +40,58 @@ fn log_flow_event(file: &Path, event: agent_doc_flow::types::FlowEvent) {
     agent_doc_ops_log_io::log_op(file, &message);
 }
 
+pub fn save_document_snapshot_and_crdt(file: &Path, snapshot_content: &str) -> Result<()> {
+    agent_doc_snapshot_io::save(file, snapshot_content, agent_doc_ops_log_io::log_op)?;
+    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(snapshot_content);
+    agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), snapshot_content)?;
+    Ok(())
+}
+
+pub fn save_ipc_snapshot_and_crdt_nonfatal(
+    file: &Path,
+    snapshot_content: &str,
+    saved_log_event: &str,
+    success_message: Option<&str>,
+) -> bool {
+    if let Err(e) =
+        agent_doc_snapshot_io::save(file, snapshot_content, agent_doc_ops_log_io::log_op)
+    {
+        eprintln!(
+            "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
+             Commit will auto-recover via divergence detection.",
+            e
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "snapshot_save_failed_after_ipc file={} error={}",
+                file.display(),
+                e
+            ),
+        );
+        return false;
+    }
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{saved_log_event} file={} snap_len={}",
+            file.display(),
+            snapshot_content.len()
+        ),
+    );
+    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(snapshot_content);
+    if let Err(e) =
+        agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), snapshot_content)
+    {
+        eprintln!("[write] WARNING: CRDT state save failed: {}", e);
+    }
+    if let Some(message) = success_message {
+        eprintln!("{message}");
+    }
+    true
+}
+
 /// Effects still owned by the orchestration command crate while the write
 /// authority queue is being extracted.
 pub trait EditorConvergenceEffects {
@@ -947,9 +999,7 @@ pub fn try_auto_recover_live_prompt_drift(
                 file.display()
             )
         })?;
-    agent_doc_snapshot_io::save(file, &recovery_target, agent_doc_ops_log_io::log_op)?;
-    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&recovery_target);
-    agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), &recovery_target)?;
+    save_document_snapshot_and_crdt(file, &recovery_target)?;
     log_live_prompt_drift_auto_recovered(
         file,
         &recovery_target,

@@ -26,7 +26,8 @@ use agent_doc_turn::response_replay::materialize_response_in_current_exchange;
 use agent_doc_write_converge_io::{
     ack_content_disk_write_proof, ipc_repair_decision_from_sidecar,
     mark_ack_content_live_buffer_synced_after_write, poll_ack_content_sidecar,
-    reconcile_ack_snapshot_to_newer_operator_buffer, write_ack_content_through_to_disk,
+    reconcile_ack_snapshot_to_newer_operator_buffer, save_document_snapshot_and_crdt,
+    write_ack_content_through_to_disk,
 };
 #[cfg(test)]
 use agent_doc_write_converge_io::{
@@ -1255,17 +1256,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
             &repair_decision.snapshot_content,
         );
     }
-    agent_doc_snapshot_io::save(
-        file,
-        &repair_decision.snapshot_content,
-        agent_doc_ops_log_io::log_op,
-    )?;
-    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
-    agent_doc_merge_io::save_document_crdt(
-        file,
-        &crdt_doc.encode_state(),
-        &repair_decision.snapshot_content,
-    )?;
+    save_document_snapshot_and_crdt(file, &repair_decision.snapshot_content)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

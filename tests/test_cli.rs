@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 73,
+        ledger_rows.len() >= 74,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10215,6 +10215,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/ipc/transport.rs",
             "agent-doc-write-converge-io/src/lib.rs",
             "Move snapshot-adoption guards",
+        ),
+        (
+            "Write IPC snapshot and CRDT persistence IO graph",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Split snapshot-adoption guards",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -22180,8 +22186,6 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/git.rs",
         "agent-doc-write-converge-io/src/lib.rs",
-        "agent-doc-orchestration/src/write/ipc.rs",
-        "agent-doc-orchestration/src/write/ipc/transport.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -22189,6 +22193,34 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
                 && !source.contains("snapshot::save_document_crdt(")
                 && !source.contains("crate::snapshot::save_document_crdt("),
             "{relative} should call focused merge IO directly for document CRDT persistence"
+        );
+    }
+    let write_converge =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn save_document_snapshot_and_crdt(",
+        "pub fn save_ipc_snapshot_and_crdt_nonfatal(",
+        "agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), snapshot_content)",
+    ] {
+        assert!(
+            write_converge.contains(required),
+            "agent-doc-write-converge-io should own IPC snapshot/CRDT persistence helper: {required}"
+        );
+    }
+    for (relative, helper) in [
+        (
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "save_document_snapshot_and_crdt(",
+        ),
+        (
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "save_ipc_snapshot_and_crdt_nonfatal(",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains(helper) && !source.contains("agent_doc_merge_io::save_document_crdt("),
+            "{relative} should route IPC snapshot/CRDT persistence through agent-doc-write-converge-io: {helper}"
         );
     }
 }

@@ -14,7 +14,7 @@ use agent_doc_write_converge_io::{
     cleanup_legacy_ipc_degraded, clear_ipc_socket_ack_timeouts, full_content_ipc_scope_allows,
     ipc_direct_disk_degraded, log_full_content_ipc_disabled, log_ipc_dewedge_direct_disk_skip,
     log_ipc_dewedge_prefer_file_ipc, poll_ack_content_sidecar, record_ipc_socket_ack_timeout,
-    stale_supervisor_write_short_circuit,
+    save_ipc_snapshot_and_crdt_nonfatal, stale_supervisor_write_short_circuit,
 };
 
 pub fn queue_file_ipc_reposition_boundary(
@@ -584,44 +584,12 @@ pub fn try_ipc(
                             unmatched,
                         );
                     }
-                    if let Err(e) = agent_doc_snapshot_io::save(
+                    save_ipc_snapshot_and_crdt_nonfatal(
                         file,
                         &repair_decision.snapshot_content,
-                        agent_doc_ops_log_io::log_op,
-                    ) {
-                        eprintln!(
-                            "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
-                             Commit will auto-recover via divergence detection.",
-                            e
-                        );
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "snapshot_save_failed_after_ipc file={} error={}",
-                                file.display(),
-                                e
-                            ),
-                        );
-                    } else {
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "snapshot_saved_socket_ipc file={} snap_len={}",
-                                file.display(),
-                                repair_decision.snapshot_content.len()
-                            ),
-                        );
-                        let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(
-                            &repair_decision.snapshot_content,
-                        );
-                        if let Err(e) = agent_doc_merge_io::save_document_crdt(
-                            file,
-                            &crdt_doc.encode_state(),
-                            &repair_decision.snapshot_content,
-                        ) {
-                            eprintln!("[write] WARNING: CRDT state save failed: {}", e);
-                        }
-                    }
+                        "snapshot_saved_socket_ipc",
+                        None,
+                    );
                     return Ok(IpcResult {
                         success: true,
                         patch_id,
@@ -1513,44 +1481,12 @@ pub(crate) fn write_ipc_and_poll(
                 unmatched,
             );
         }
-        if let Err(e) = agent_doc_snapshot_io::save(
+        save_ipc_snapshot_and_crdt_nonfatal(
             doc_file,
             &repair_decision.snapshot_content,
-            agent_doc_ops_log_io::log_op,
-        ) {
-            eprintln!(
-                "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
-                     Commit will auto-recover via divergence detection.",
-                e
-            );
-            agent_doc_ops_log_io::log_op(
-                doc_file,
-                &format!(
-                    "snapshot_save_failed_after_ipc file={} error={}",
-                    doc_file.display(),
-                    e
-                ),
-            );
-        } else {
-            agent_doc_ops_log_io::log_op(
-                doc_file,
-                &format!(
-                    "snapshot_saved_file_ipc file={} snap_len={}",
-                    doc_file.display(),
-                    repair_decision.snapshot_content.len()
-                ),
-            );
-            let crdt_doc =
-                agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
-            if let Err(e) = agent_doc_merge_io::save_document_crdt(
-                doc_file,
-                &crdt_doc.encode_state(),
-                &repair_decision.snapshot_content,
-            ) {
-                eprintln!("[write] WARNING: CRDT state save failed: {}", e);
-            }
-            eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
-        }
+            "snapshot_saved_file_ipc",
+            Some("[write] IPC patch consumed by plugin — snapshot updated"),
+        );
         Ok(true)
     }
 }

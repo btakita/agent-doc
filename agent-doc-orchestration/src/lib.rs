@@ -157,6 +157,143 @@ impl agent_doc_repair_io::RepairIoEffects for OrchestrationRepairIoEffects {
     }
 }
 
+impl agent_doc_repair_io::RepairTemplateWriteEffects for OrchestrationRepairIoEffects {
+    fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
+        crate::write::atomic_write_pub(file, content)
+    }
+
+    fn repair_response_prompt_order_for_file(
+        &self,
+        content: &str,
+        known_response: Option<&str>,
+        file: &std::path::Path,
+        fallback_snapshot: Option<&str>,
+    ) -> anyhow::Result<Option<String>> {
+        crate::write::repair_response_prompt_order_for_file(
+            content,
+            known_response,
+            file,
+            fallback_snapshot,
+        )
+    }
+
+    fn normalize_template_structure_or_fail_preserving(
+        &self,
+        content: &str,
+        file: &std::path::Path,
+        prompt_input: Option<&str>,
+    ) -> anyhow::Result<String> {
+        crate::write::normalize_template_structure_or_fail_preserving(content, file, prompt_input)
+    }
+}
+
+pub struct OrchestrationRepairReplayWriteEffects;
+
+pub static REPAIR_REPLAY_WRITE_EFFECTS: OrchestrationRepairReplayWriteEffects =
+    OrchestrationRepairReplayWriteEffects;
+
+impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplayWriteEffects {
+    fn run_strict_write_replay(
+        &self,
+        file: &std::path::Path,
+        response: &str,
+        is_template: bool,
+        is_stream: bool,
+        force_disk: bool,
+        queue_completion_ids: &[String],
+    ) -> anyhow::Result<()> {
+        let commit_mode = if agent_doc_git_io::status::is_in_git_repo(file) {
+            crate::write::CommitMode::Required
+        } else {
+            crate::write::CommitMode::None
+        };
+        crate::write::run_command_with_response(
+            crate::write::CommandOptions {
+                file: file.to_path_buf(),
+                baseline_file: None,
+                is_template,
+                is_stream,
+                is_ipc: false,
+                force_disk,
+                origin: Some("repair_replay".to_string()),
+                pending_add: Vec::new(),
+                pending_add_to: Vec::new(),
+                pending_add_gated: Vec::new(),
+                pending_add_after: Vec::new(),
+                pending_add_before: Vec::new(),
+                pending_add_back: Vec::new(),
+                icebox_add: Vec::new(),
+                icebox_add_after: Vec::new(),
+                icebox_add_before: Vec::new(),
+                icebox_add_back: Vec::new(),
+                icebox_edit: Vec::new(),
+                icebox_clear: false,
+                icebox_reorder: None,
+                pending_done: Vec::new(),
+                pending_edit: Vec::new(),
+                pending_clear: false,
+                pending_reorder: None,
+                pending_gate: Vec::new(),
+                pending_ungate: Vec::new(),
+                pending_resolve_gate: Vec::new(),
+                pending_set_gate_type: Vec::new(),
+                pending_set_verify: Vec::new(),
+                review_add: Vec::new(),
+                review_edit: Vec::new(),
+                review_remove: Vec::new(),
+                review_resolve: Vec::new(),
+                queue_completion_ids: queue_completion_ids.to_vec(),
+                allow_replace_pending: false,
+                pending_only: false,
+                status: None,
+                lint_override: None,
+                commit_sibling: Vec::new(),
+                commit_sibling_message: Vec::new(),
+            },
+            commit_mode,
+            response.to_string(),
+        )
+    }
+
+    fn apply_template_from_string(
+        &self,
+        file: &std::path::Path,
+        response: &str,
+        force_disk: bool,
+    ) -> anyhow::Result<()> {
+        crate::write::apply_template_from_string_with_options(
+            file,
+            response,
+            crate::write::TemplateApplyOptions { force_disk },
+        )
+    }
+
+    fn apply_append_from_string(
+        &self,
+        file: &std::path::Path,
+        response: &str,
+    ) -> anyhow::Result<()> {
+        crate::write::apply_append_from_string(file, response)
+    }
+
+    fn strike_recovered_free_text_queue_head(&self, file: &std::path::Path) -> anyhow::Result<()> {
+        match agent_doc_queue_io::queue_consume::consume_queue_prompt_force_disk(
+            file,
+            &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+        ) {
+            Ok(Some(outcome)) => {
+                eprintln!(
+                    "[repair] struck consumed free-text queue head (remaining: {})",
+                    outcome.remaining
+                );
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 pub(crate) struct SessionActorWriteQueueSubmitter;
 
 pub(crate) static SESSION_ACTOR_WRITE_QUEUE: SessionActorWriteQueueSubmitter =

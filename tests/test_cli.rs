@@ -3500,8 +3500,9 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "git.rs must call focused repair IO for committed historical snapshot drift repair"
     );
     assert!(
-        repair.contains("agent_doc_repair_io::save_blocked_repair_payload("),
-        "repair.rs should call focused repair IO directly"
+        repair_io.contains("pub fn save_blocked_repair_payload(")
+            && repair.contains("agent_doc_repair_io::replay_orphaned_response("),
+        "repair.rs should route replay repair through focused repair IO"
     );
     assert!(
         repair.contains("agent_doc_repair_io::recover_missing_commit_boundary(")
@@ -5225,10 +5226,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     let repair_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     assert!(
         repair_source.contains("repair_leaves_unanswered_prompt_diff"),
-        "repair.rs should call focused unanswered-prompt recovery policy directly"
+        "repair IO should call focused unanswered-prompt recovery policy directly"
     );
     for forbidden in [
         "fn repair_leaves_unanswered_prompt_diff(",
@@ -5241,7 +5242,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     ] {
         assert!(
             !repair_source.contains(forbidden),
-            "repair.rs must not re-own pure unanswered-prompt recovery policy: {forbidden}"
+            "repair IO must not re-own pure unanswered-prompt recovery policy: {forbidden}"
         );
     }
     for required in [
@@ -20129,12 +20130,17 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
         );
     }
     assert!(
-        repair.contains("agent_doc_workflow::capture::{")
-            && repair.contains("capture_state_is_repairable(")
-            && repair.contains("RepairTemplateChanges {")
-            && repair.contains("template_changes.should_persist()")
-            && repair.contains("template_changes.changed_kinds()"),
-        "repair.rs should keep only the remaining file-backed template aggregation policy it has not yet extracted"
+        repair.contains("capture_state_is_repairable(")
+            && !repair.contains("RepairTemplateChanges {")
+            && !repair.contains("template_changes.should_persist()")
+            && !repair.contains("template_changes.changed_kinds()"),
+        "repair.rs should no longer own repair-template aggregation policy"
+    );
+    assert!(
+        repair_io.contains("agent_doc_workflow::capture::RepairTemplateChanges {")
+            && repair_io.contains("template_changes.should_persist()")
+            && repair_io.contains("template_changes.changed_kinds()"),
+        "agent-doc-repair-io should own the file-backed repair-template aggregation policy"
     );
     assert!(
         repair_io.contains("agent_doc_workflow::capture::decide_stale_capture_retirement(")
@@ -24489,13 +24495,12 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         !write_main.contains("mod exchange_reconcile"),
         "orchestration write must not keep an exchange_reconcile facade module"
     );
-    let repair =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    let repair = fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     assert!(
         repair.contains(
-            "use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines;"
+            "agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines"
         ),
-        "repair should import response-body prompt-prefix repair from the focused crate directly"
+        "repair IO should import response-body prompt-prefix repair from the focused crate directly"
     );
     let git_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
@@ -25739,7 +25744,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     for relative in [
         "agent-doc-crdt-relay-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-io/src/lib.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();

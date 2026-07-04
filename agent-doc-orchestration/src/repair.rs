@@ -61,23 +61,14 @@
 //! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
-use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines;
-use agent_doc_queue_io::queue_consume;
 use agent_doc_turn::{
-    closeout_recovery::{
-        repair_leaves_unanswered_prompt_diff, visible_response_recovery_is_adoptable,
-    },
-    repair::RepairOutcome,
+    closeout_recovery::visible_response_recovery_is_adoptable, repair::RepairOutcome,
     response_replay,
 };
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_doc_frontmatter::frontmatter;
-use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
-use agent_doc_workflow::capture::{
-    RepairTemplateChangeKind, RepairTemplateChanges, capture_state_is_repairable,
-};
+use agent_doc_workflow::capture::capture_state_is_repairable;
 
 use crate::write;
 
@@ -120,314 +111,6 @@ pub(crate) fn recover_empty_response_for_strict_closeout(
         return Ok(true);
     }
     Ok(false)
-}
-
-fn repair_template_doc_if_needed(
-    file: &Path,
-    doc_content: &str,
-    known_response: Option<&str>,
-) -> Result<String> {
-    let mut dup_opener_input = doc_content.to_string();
-    let mut duplicate_opener_changed = false;
-    while let Some(merged) =
-        agent_doc_template::repair_duplicate_exchange_opener(&dup_opener_input)?
-    {
-        dup_opener_input = merged;
-        duplicate_opener_changed = true;
-    }
-    let duplicate_scaffold_repaired =
-        agent_doc_template::repair_duplicate_exchange_close_scaffold(&dup_opener_input)?
-            .unwrap_or_else(|| dup_opener_input.clone());
-    let duplicate_scaffold_changed = duplicate_scaffold_repaired != dup_opener_input;
-    let duplicate_close_repaired =
-        agent_doc_template::repair_duplicate_exchange_close_tail(&duplicate_scaffold_repaired)?
-            .unwrap_or_else(|| duplicate_scaffold_repaired.clone());
-    let duplicate_close_changed = duplicate_close_repaired != duplicate_scaffold_repaired;
-    let tail_repaired =
-        agent_doc_template::repair_conversation_tail_outside_exchange(&duplicate_close_repaired)?
-            .unwrap_or_else(|| duplicate_close_repaired.clone());
-    let tail_changed = tail_repaired != duplicate_close_repaired;
-    let boundary_repaired = repair_answered_stale_boundary_if_safe(file, &tail_repaired)?;
-    let boundary_changed = boundary_repaired.is_some();
-    let mut repaired = boundary_repaired.unwrap_or_else(|| tail_repaired.clone());
-    let order_repaired =
-        write::repair_response_prompt_order_for_file(&repaired, known_response, file, None)?;
-    let order_changed = order_repaired.is_some();
-    if let Some(ordered) = order_repaired {
-        repaired = ordered;
-    }
-
-    let (fm, _) = frontmatter::parse(&repaired)
-        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
-
-    let prompt_input = repaired.clone();
-    if fm.resolve_mode().is_template()
-        && let Some(snapshot_content) = agent_doc_snapshot_io::load(file)?
-    {
-        repaired =
-            normalize_user_prompts_in_exchange_safe(&repaired, &repaired, &snapshot_content, file);
-        if let Some(stripped) = strip_prompt_prefix_from_response_body_first_lines(&repaired) {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "repair_response_body_prompt_prefix_stripped file={}",
-                    file.display()
-                ),
-            );
-            repaired = stripped;
-        }
-        repaired = write::normalize_template_structure_or_fail_preserving(
-            &repaired,
-            file,
-            Some(&prompt_input),
-        )?;
-    }
-    let prompt_changed = repaired != prompt_input;
-
-    let template_changes = RepairTemplateChanges {
-        duplicate_opener: duplicate_opener_changed,
-        duplicate_close: duplicate_close_changed,
-        duplicate_scaffold: duplicate_scaffold_changed,
-        conversation_tail: tail_changed,
-        completed_turn_boundary: boundary_changed,
-        response_prompt_order: order_changed,
-        prompt_prefixes: prompt_changed,
-    };
-
-    if template_changes.should_persist() {
-        let save_repaired_snapshot = match agent_doc_snapshot_io::load(file)? {
-            Some(snapshot_content) => {
-                !repair_leaves_unanswered_prompt_diff(&snapshot_content, &repaired, known_response)
-            }
-            None => true,
-        };
-        write::atomic_write_pub(file, &repaired)?;
-        if save_repaired_snapshot {
-            agent_doc_snapshot_io::save(file, &repaired, agent_doc_ops_log_io::log_op)?;
-        }
-        for change in template_changes.changed_kinds() {
-            match change {
-                RepairTemplateChangeKind::DuplicateOpener => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!("repair_duplicate_exchange_opener file={}", file.display()),
-                    );
-                    eprintln!(
-                        "[repair] merged duplicate exchange opener(s) in {}",
-                        file.display()
-                    );
-                }
-                RepairTemplateChangeKind::DuplicateClose => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!("repair_duplicate_exchange_close file={}", file.display()),
-                    );
-                    eprintln!(
-                        "[repair] removed duplicate exchange close and restored escaped content in {}",
-                        file.display()
-                    );
-                }
-                RepairTemplateChangeKind::DuplicateScaffold => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!("repair_duplicate_exchange_scaffold file={}", file.display()),
-                    );
-                    eprintln!(
-                        "[repair] removed duplicate template scaffold after exchange close in {}",
-                        file.display()
-                    );
-                }
-                RepairTemplateChangeKind::ConversationTail => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!("repair_exchange_tail file={}", file.display()),
-                    );
-                    eprintln!(
-                        "[repair] repaired escaped conversation tail in {}",
-                        file.display()
-                    );
-                }
-                RepairTemplateChangeKind::CompletedTurnBoundary => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!("repair_completed_turn_boundary file={}", file.display()),
-                    );
-                    eprintln!(
-                        "[repair] moved stale boundary to the end of the completed exchange turn in {}",
-                        file.display()
-                    );
-                }
-                RepairTemplateChangeKind::ResponsePromptOrder => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!("repair_response_prompt_order file={}", file.display()),
-                    );
-                    eprintln!(
-                        "[repair] repaired response/prompt ordering in {}",
-                        file.display()
-                    );
-                }
-                RepairTemplateChangeKind::PromptPrefixes => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!("repair_prompt_prefixes file={}", file.display()),
-                    );
-                    eprintln!(
-                        "[repair] repaired transcript prompt prefixes in {}",
-                        file.display()
-                    );
-                }
-            }
-        }
-    }
-
-    Ok(repaired)
-}
-
-fn repair_response_body_prompt_prefixes_if_needed(
-    file: &Path,
-    doc_content: &str,
-) -> Result<String> {
-    let (fm, _) = frontmatter::parse(doc_content)
-        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
-    if !fm.resolve_mode().is_template() {
-        return Ok(doc_content.to_string());
-    }
-
-    let Some(repaired) = strip_prompt_prefix_from_response_body_first_lines(doc_content) else {
-        return Ok(doc_content.to_string());
-    };
-
-    let save_repaired_snapshot = match agent_doc_snapshot_io::load(file)? {
-        Some(snapshot_content) => {
-            !repair_leaves_unanswered_prompt_diff(&snapshot_content, &repaired, None)
-        }
-        None => true,
-    };
-    write::atomic_write_pub(file, &repaired)?;
-    if save_repaired_snapshot {
-        agent_doc_snapshot_io::save(file, &repaired, agent_doc_ops_log_io::log_op)?;
-    }
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "repair_response_body_prompt_prefix_stripped file={}",
-            file.display()
-        ),
-    );
-    eprintln!(
-        "[repair] stripped leaked response-body prompt prefixes in {}",
-        file.display()
-    );
-    Ok(repaired)
-}
-
-fn repair_duplicate_exchange_scaffold_if_needed(file: &Path, doc_content: &str) -> Result<String> {
-    let repaired = agent_doc_template::repair_duplicate_exchange_close_scaffold(doc_content)?
-        .unwrap_or_else(|| doc_content.to_string());
-    if repaired == doc_content {
-        return Ok(repaired);
-    }
-
-    let save_repaired_snapshot = match agent_doc_snapshot_io::load(file)? {
-        Some(snapshot_content) => {
-            !repair_leaves_unanswered_prompt_diff(&snapshot_content, &repaired, None)
-        }
-        None => true,
-    };
-    write::atomic_write_pub(file, &repaired)?;
-    if save_repaired_snapshot {
-        agent_doc_snapshot_io::save(file, &repaired, agent_doc_ops_log_io::log_op)?;
-    }
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!("repair_duplicate_exchange_scaffold file={}", file.display()),
-    );
-    eprintln!(
-        "[repair] removed duplicate template scaffold after exchange close in {}",
-        file.display()
-    );
-    Ok(repaired)
-}
-
-fn repair_answered_stale_boundary_if_safe(
-    file: &Path,
-    doc_content: &str,
-) -> Result<Option<String>> {
-    let (fm, _) = frontmatter::parse(doc_content)
-        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
-    if !fm.resolve_mode().is_template() || agent_doc_snapshot_io::load(file)?.is_none() {
-        return Ok(None);
-    }
-
-    let components = agent_doc_element::element::parse(doc_content).with_context(|| {
-        format!(
-            "failed to parse {} for completed-turn boundary repair",
-            file.display()
-        )
-    })?;
-    let Some(exchange) = components
-        .iter()
-        .find(|component| component.name == "exchange")
-    else {
-        return Ok(None);
-    };
-    let Some(boundary_id) =
-        agent_doc_element_boundary::boundary::find_boundary_id_in_component(doc_content, exchange)
-    else {
-        return Ok(None);
-    };
-
-    let exchange_body = exchange.content(doc_content);
-    let marker = agent_doc_element_boundary::boundary::format_marker(&boundary_id);
-    let Some(marker_idx) = exchange_body.find(&marker) else {
-        return Ok(None);
-    };
-    let tail_after_boundary = &exchange_body[marker_idx + marker.len()..];
-    if tail_after_boundary.trim().is_empty()
-        || !agent_doc_diff::prompt_change_is_already_answered(tail_after_boundary)
-        || agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?.is_some()
-    {
-        return Ok(None);
-    }
-
-    let repaired = agent_doc_template::reposition_boundary_to_end_preserve_head_with_id(
-        doc_content,
-        Some(boundary_id.as_str()),
-    );
-    if repaired == doc_content {
-        return Ok(None);
-    }
-    Ok(Some(repaired))
-}
-
-fn fail_closed_on_blocked_template_replay(file: &Path, response: &str, reason: &str) -> Result<()> {
-    match agent_doc_repair_io::save_blocked_repair_payload(file, response, reason) {
-        Ok(path) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "repair_blocked_replay path={} reason={}",
-                    path.display(),
-                    reason
-                ),
-            );
-            anyhow::bail!(
-                "refused to replay pending response for {} because {}; blocked payload captured at {}",
-                file.display(),
-                reason,
-                path.display()
-            );
-        }
-        Err(err) => {
-            anyhow::bail!(
-                "refused to replay pending response for {} because {}; additionally failed to save blocked payload: {}",
-                file.display(),
-                reason,
-                err
-            );
-        }
-    }
 }
 
 /// Check for a pending response and apply it if found.
@@ -489,7 +172,11 @@ pub(crate) fn run_with_queue_completion_ids(
                 )
             })?;
             let response_prefix_repaired_doc =
-                repair_response_body_prompt_prefixes_if_needed(file, &refreshed_content)?;
+                agent_doc_repair_io::repair_response_body_prompt_prefixes_if_needed(
+                    &crate::REPAIR_IO_EFFECTS,
+                    file,
+                    &refreshed_content,
+                )?;
             if response_prefix_repaired_doc != refreshed_content {
                 return Ok(RepairOutcome::TemplateNormalized);
             }
@@ -505,19 +192,32 @@ pub(crate) fn run_with_queue_completion_ids(
             return Ok(RepairOutcome::CommitBoundaryRecovered);
         }
         let scaffold_repaired_doc =
-            repair_duplicate_exchange_scaffold_if_needed(file, &doc_content)?;
+            agent_doc_repair_io::repair_duplicate_exchange_scaffold_if_needed(
+                &crate::REPAIR_IO_EFFECTS,
+                file,
+                &doc_content,
+            )?;
         if scaffold_repaired_doc != doc_content {
             return Ok(RepairOutcome::TemplateNormalized);
         }
         let response_prefix_repaired_doc =
-            repair_response_body_prompt_prefixes_if_needed(file, &doc_content)?;
+            agent_doc_repair_io::repair_response_body_prompt_prefixes_if_needed(
+                &crate::REPAIR_IO_EFFECTS,
+                file,
+                &doc_content,
+            )?;
         if response_prefix_repaired_doc != doc_content {
             return Ok(RepairOutcome::TemplateNormalized);
         }
         let has_live_prompt =
             agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?.is_some();
         if !has_live_prompt {
-            let repaired_doc = repair_template_doc_if_needed(file, &doc_content, None)?;
+            let repaired_doc = agent_doc_repair_io::repair_template_doc_if_needed(
+                &crate::REPAIR_IO_EFFECTS,
+                file,
+                &doc_content,
+                None,
+            )?;
             if repaired_doc != doc_content {
                 return Ok(RepairOutcome::TemplateNormalized);
             }
@@ -567,7 +267,12 @@ pub(crate) fn run_with_queue_completion_ids(
         eprintln!(
             "[repair] Response already present in document — skipping apply, cleaning up pending file"
         );
-        let repaired_doc = repair_template_doc_if_needed(file, &doc_content, Some(&response))?;
+        let repaired_doc = agent_doc_repair_io::repair_template_doc_if_needed(
+            &crate::REPAIR_IO_EFFECTS,
+            file,
+            &doc_content,
+            Some(&response),
+        )?;
         let state_is_open = agent_doc_cycle_state_io::load(file)?
             .map(|state| state.is_open())
             .unwrap_or(true);
@@ -629,281 +334,15 @@ pub(crate) fn run_with_queue_completion_ids(
         agent_doc_capture_io::validate_replay(&canonical, capture)?;
     }
 
-    if replay_crdt_patchback_through_strict_write(
+    agent_doc_repair_io::replay_orphaned_response(
+        &crate::REPAIR_REPLAY_WRITE_EFFECTS,
+        &canonical,
         file,
         &doc_content,
         &response,
         queue_completion_ids,
-    )? {
-        return Ok(RepairOutcome::ReplayedResponse);
-    }
-
-    eprintln!(
-        "[repair] Found orphaned response for {} ({} bytes). Applying...",
-        file.display(),
-        response.len()
-    );
-
-    let (fm, _) = frontmatter::parse(&doc_content)
-        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
-    let use_template_write = fm.resolve_mode().is_template() || response.contains("<!-- patch:");
-    let response_to_write = if use_template_write {
-        match agent_doc_template::replay_guard::classify_replay_payload(&response) {
-            agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
-                fail_closed_on_blocked_template_replay(file, &response, &reason)?;
-                response.clone()
-            }
-            agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-                response.into_owned()
-            }
-            agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {
-                response.clone()
-            }
-        }
-    } else {
-        response.clone()
-    };
-    if use_template_write {
-        if agent_doc_git_io::status::is_in_git_repo(file) {
-            replay_orphaned_response_through_strict_write(
-                file,
-                &response_to_write,
-                true,
-                queue_completion_ids,
-            )?;
-        } else {
-            write::apply_template_from_string_with_options(
-                file,
-                &response_to_write,
-                write::TemplateApplyOptions {
-                    force_disk: repair_replay_force_disk(file),
-                },
-            )?;
-        }
-    } else {
-        if agent_doc_git_io::status::is_in_git_repo(file) {
-            replay_orphaned_response_through_strict_write(
-                file,
-                &response_to_write,
-                false,
-                queue_completion_ids,
-            )?;
-        } else {
-            write::apply_append_from_string(file, &response_to_write)?;
-        }
-    }
-
-    let final_doc_after_write = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read recovered document {}", file.display()))?;
-    ensure_repair_materialized_response(file, &final_doc_after_write, &response_to_write)?;
-
-    // Remove the pending file only after the repaired document proves the
-    // captured response materialized. A malformed/partial replay must leave the
-    // capture available for retry instead of closing a false-success cycle.
-    agent_doc_repair_io::pending::clear_pending(&canonical)?;
-
-    // #repair-strike-consumed-head: finalize strikes the consumed queue head, but
-    // repair's recovery path historically left it live. `do [#id]` heads are
-    // struck by preflight's reap path once their backlog item is done; a
-    // free-text head has no backlog id to reap, so a recovered free-text-head
-    // response leaves the head unstruck and preflight re-presents it. Strike it
-    // here via a guard-skipping consume — repair already wrote the response
-    // straight to disk, so the matching strike must bypass the visible-write
-    // guard a live IDE buffer would otherwise trip. Best-effort: never fail the
-    // recovery on the strike.
-    strike_recovered_free_text_queue_head(file);
-
-    eprintln!(
-        "[repair] Response repaired and written to {}",
-        file.display()
-    );
-    let final_doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read recovered document {}", file.display()))?;
-    if let Err(e) = agent_doc_cycle_state_io::mark_write_applied(
-        file,
-        "repair_applied",
-        Some(&final_doc),
-        Some(&final_doc),
-    ) {
-        eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
-    }
-    if historical_capture.is_none()
-        && let Err(e) = agent_doc_capture_io::mark_replayed(&canonical)
-    {
-        eprintln!("[repair] capture-state update failed: {} (non-fatal)", e);
-    }
-    Ok(RepairOutcome::ReplayedResponse)
-}
-
-fn ensure_repair_materialized_response(file: &Path, final_doc: &str, response: &str) -> Result<()> {
-    if agent_doc_turn::response_replay::response_materialized_in_content(response, final_doc) {
-        return Ok(());
-    }
-    anyhow::bail!(
-        "orphaned response replay did not materialize captured response in {}; refusing to clear capture",
-        file.display()
+        historical_capture.is_some(),
     )
-}
-
-/// Strike the active queue head after a repaired response IF it is a free-text
-/// head (`#repair-strike-consumed-head`). Scoped to free-text heads only: `do
-/// [#id]` heads are struck by preflight's reap path once their backlog item is
-/// resolved, and striking one here without resolving its id would desync the
-/// head from its still-open backlog item. Best-effort — logs but never fails the
-/// recovery.
-fn strike_recovered_free_text_queue_head(file: &Path) {
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return;
-    };
-    let Ok((fm, _)) = frontmatter::parse(&content) else {
-        return;
-    };
-    if fm.queue_active != Some(true) {
-        return;
-    }
-    if !agent_doc_queue::queue_response::queue_head_is_free_text_prompt(&content).unwrap_or(false) {
-        return;
-    }
-    match queue_consume::consume_queue_prompt_force_disk(
-        file,
-        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
-    ) {
-        Ok(Some(outcome)) => eprintln!(
-            "[repair] struck consumed free-text queue head (remaining: {})",
-            outcome.remaining
-        ),
-        Ok(None) => {}
-        Err(e) => eprintln!("[repair] queue-head strike after replay failed: {e} (non-fatal)"),
-    }
-}
-
-fn repair_replay_command_options(
-    file: &Path,
-    is_template: bool,
-    is_stream: bool,
-    force_disk: bool,
-    queue_completion_ids: &[String],
-) -> write::CommandOptions {
-    write::CommandOptions {
-        file: file.to_path_buf(),
-        baseline_file: None,
-        is_template,
-        is_stream,
-        is_ipc: false,
-        force_disk,
-        origin: Some("repair_replay".to_string()),
-        pending_add: Vec::new(),
-        pending_add_to: Vec::new(),
-        pending_add_gated: Vec::new(),
-        pending_add_after: Vec::new(),
-        pending_add_before: Vec::new(),
-        pending_add_back: Vec::new(),
-        icebox_add: Vec::new(),
-        icebox_add_after: Vec::new(),
-        icebox_add_before: Vec::new(),
-        icebox_add_back: Vec::new(),
-        icebox_edit: Vec::new(),
-        icebox_clear: false,
-        icebox_reorder: None,
-        pending_done: Vec::new(),
-        pending_edit: Vec::new(),
-        pending_clear: false,
-        pending_reorder: None,
-        pending_gate: Vec::new(),
-        pending_ungate: Vec::new(),
-        pending_resolve_gate: Vec::new(),
-        pending_set_gate_type: Vec::new(),
-        pending_set_verify: Vec::new(),
-        review_add: Vec::new(),
-        review_edit: Vec::new(),
-        review_remove: Vec::new(),
-        review_resolve: Vec::new(),
-        queue_completion_ids: queue_completion_ids.to_vec(),
-        allow_replace_pending: false,
-        pending_only: false,
-        status: None,
-        lint_override: None,
-        commit_sibling: Vec::new(),
-        commit_sibling_message: Vec::new(),
-    }
-}
-
-fn replay_orphaned_response_through_strict_write(
-    file: &Path,
-    response: &str,
-    is_template: bool,
-    queue_completion_ids: &[String],
-) -> Result<()> {
-    let force_disk = repair_replay_force_disk(file);
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "repair_replay_via_strict_write file={} mode={} force_disk={} response_hash={}",
-            file.display(),
-            if is_template { "template" } else { "append" },
-            force_disk,
-            agent_doc_hash::content_hash(response)
-        ),
-    );
-    write::run_command_with_response(
-        repair_replay_command_options(file, is_template, false, force_disk, queue_completion_ids),
-        repair_replay_commit_mode(file),
-        response.to_string(),
-    )
-}
-
-fn repair_replay_force_disk(file: &Path) -> bool {
-    !agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
-        .editor_attached()
-}
-
-fn repair_replay_commit_mode(file: &Path) -> write::CommitMode {
-    if agent_doc_git_io::status::is_in_git_repo(file) {
-        write::CommitMode::Required
-    } else {
-        write::CommitMode::None
-    }
-}
-
-fn replay_crdt_patchback_through_strict_write(
-    file: &Path,
-    doc_content: &str,
-    response: &str,
-    queue_completion_ids: &[String],
-) -> Result<bool> {
-    if !response.contains("<!-- patch:") {
-        return Ok(false);
-    }
-    if !agent_doc_git_io::status::is_in_git_repo(file) {
-        return Ok(false);
-    }
-    let (fm, _) = frontmatter::parse(doc_content)
-        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
-    if !fm.resolve_mode().is_crdt() {
-        return Ok(false);
-    }
-
-    let force_disk = repair_replay_force_disk(file);
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "repair_replay_via_strict_write file={} mode=crdt force_disk={} response_hash={}",
-            file.display(),
-            force_disk,
-            agent_doc_hash::content_hash(response)
-        ),
-    );
-    eprintln!(
-        "[repair] replaying captured CRDT patchback through strict write closeout for {}",
-        file.display()
-    );
-
-    write::run_command_with_response(
-        repair_replay_command_options(file, false, true, force_disk, queue_completion_ids),
-        repair_replay_commit_mode(file),
-        response.to_string(),
-    )?;
-    Ok(true)
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
@@ -1014,7 +453,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
 
-        let err = ensure_repair_materialized_response(
+        let err = agent_doc_repair_io::ensure_repair_materialized_response(
             std::path::Path::new("session.md"),
             malformed,
             response,

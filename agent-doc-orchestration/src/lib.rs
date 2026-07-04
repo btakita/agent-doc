@@ -143,6 +143,18 @@ impl agent_doc_repair_io::RepairIoEffects for OrchestrationRepairIoEffects {
             file_content,
         )
     }
+
+    fn apply_closeout_recovery_mutation(
+        &self,
+        file: &std::path::Path,
+        mutation: agent_doc_flow_io::closeout::CloseoutRecoveryMutation<'_>,
+    ) -> anyhow::Result<()> {
+        agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
+            file,
+            mutation,
+            &crate::closeout_effects(),
+        )
+    }
 }
 
 pub(crate) struct SessionActorWriteQueueSubmitter;

@@ -647,19 +647,22 @@ fn test_status_file_write_includes_current_timestamp() {
 #[test]
 fn test_preflight_timing_1500ms_is_configurable() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let preflight_src =
-        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_debounce_src =
+        std::fs::read_to_string(root.join("agent-doc-preflight-io/src/debounce.rs")).unwrap();
+    let preflight_run_src =
+        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight/run.rs")).unwrap();
 
     assert!(
-        preflight_src.contains(".and_then(|(fm, _)| fm.debounce_ms)"),
+        preflight_debounce_src.contains(".and_then(|(fm, _)| fm.debounce_ms)"),
         "preflight must read agent_doc_debounce from frontmatter"
     );
     assert!(
-        preflight_src.contains("is_typing_via_file(&file_str, debounce_ms)"),
+        preflight_debounce_src.contains("is_typing_via_file(&file_str, debounce_ms)"),
         "typing-indicator debounce must use the configured debounce_ms"
     );
     assert!(
-        !preflight_src.contains("is_typing_via_file(&file_str, 1500)"),
+        !preflight_debounce_src.contains("is_typing_via_file(&file_str, 1500)")
+            && !preflight_run_src.contains("is_typing_via_file(&file_str, 1500)"),
         "preflight must not retain the stale hardcoded 1500ms typing debounce"
     );
 }
@@ -682,8 +685,8 @@ fn test_preflight_3s_timeout_is_sufficient_for_debounce() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let debounce_src = std::fs::read_to_string(root.join("agent-doc-debounce/src/lib.rs"))
         .expect("agent-doc-debounce source should exist");
-    let preflight_src =
-        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_debounce_src =
+        std::fs::read_to_string(root.join("agent-doc-preflight-io/src/debounce.rs")).unwrap();
 
     assert!(
         debounce_src.contains("if debounce_ms > 3000"),
@@ -694,7 +697,7 @@ fn test_preflight_3s_timeout_is_sufficient_for_debounce() {
         "focused preflight debounce max_wait must leave margin for long configured debounce values"
     );
     assert!(
-        preflight_src.contains("agent_doc_debounce::preflight_debounce_max_wait"),
+        preflight_debounce_src.contains("agent_doc_debounce::preflight_debounce_max_wait"),
         "preflight should call focused debounce wait policy directly"
     );
 }
@@ -723,8 +726,8 @@ fn test_timing_constants_are_documented() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let debounce_src = std::fs::read_to_string(root.join("agent-doc-debounce/src/lib.rs"))
         .expect("agent-doc-debounce source should exist");
-    let preflight_src =
-        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_debounce_src =
+        std::fs::read_to_string(root.join("agent-doc-preflight-io/src/debounce.rs")).unwrap();
     // The run entry points (with the `Default: 2000ms` debounce doc) were
     // extracted into preflight/run.rs (#splitmods4 large-module split).
     let preflight_run_src =
@@ -733,7 +736,7 @@ fn test_timing_constants_are_documented() {
         debounce_src.contains("1500")
             && debounce_src.contains("preflight_debounce_max_wait")
             && debounce_src.contains("3000")
-            && preflight_src.contains("agent_doc_debounce::preflight_debounce_max_wait")
+            && preflight_debounce_src.contains("agent_doc_debounce::preflight_debounce_max_wait")
             && preflight_run_src.contains("Default: 2000ms"),
         "expected agent-doc-debounce to own documented debounce timing and preflight{{,/run}}.rs to call it directly"
     );

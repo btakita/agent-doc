@@ -65,7 +65,6 @@ use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lin
 use agent_doc_queue_io::queue_consume;
 use agent_doc_turn::{
     closeout_recovery::{
-        CloseoutRecoveryMutationReason, content_matches_ignoring_trailing_newlines,
         repair_leaves_unanswered_prompt_diff, visible_response_recovery_is_adoptable,
     },
     repair::RepairOutcome,
@@ -77,11 +76,40 @@ use std::path::Path;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 use agent_doc_workflow::capture::{
-    RepairTemplateChangeKind, RepairTemplateChanges, StaleCaptureRetirementDecision,
-    StaleCaptureRetirementEvidence, capture_state_is_repairable, decide_stale_capture_retirement,
+    RepairTemplateChangeKind, RepairTemplateChanges, capture_state_is_repairable,
 };
 
 use crate::write;
+
+pub(crate) fn recover_empty_response_for_strict_closeout(
+    file: &Path,
+    strict_closeout: bool,
+    has_pending_mutation: bool,
+) -> Result<bool> {
+    if strict_closeout {
+        let outcome = run(file)?;
+        if write::recover_missing_committed_head_response(file)? {
+            return Ok(true);
+        }
+        if outcome.repaired() {
+            eprintln!(
+                "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
+                outcome
+            );
+            return Ok(true);
+        }
+        if write::recover_dedupe_only_drift(file)? {
+            return Ok(true);
+        }
+    }
+    if has_pending_mutation {
+        eprintln!(
+            "[write] empty response stdin; committing pending mutations without a response body"
+        );
+        return Ok(true);
+    }
+    Ok(false)
+}
 
 fn repair_template_doc_if_needed(
     file: &Path,
@@ -391,148 +419,6 @@ fn fail_closed_on_blocked_template_replay(file: &Path, response: &str, reason: &
     }
 }
 
-fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> Result<()> {
-    agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
-        file,
-        agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
-            content: Some(current_doc),
-            clear_pending_response: true,
-            delete_pre_response: true,
-            mark_cycle_committed_event: Some("repair_respect_manual_exchange_tail_removal"),
-            reason: CloseoutRecoveryMutationReason::RespectManualTailRemoval,
-        },
-        &crate::closeout_effects(),
-    )?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "repair_discard_stale_capture_after_manual_tail_removal file={}",
-            file.display()
-        ),
-    );
-    eprintln!(
-        "[repair] respected manual removal of escaped conversation tail in {}",
-        file.display()
-    );
-    Ok(())
-}
-
-/// Applies the workflow-owned stale-capture retirement policy. Evidence
-/// collection stays here because baseline drift and live exchange supersession
-/// are file-backed orchestration inputs; the state/reason decision lives in
-/// `agent-doc-workflow`.
-fn retire_stale_capture_if_drifted(
-    file: &Path,
-    doc_content: &str,
-    capture: &agent_doc_capture_io::CaptureRecord,
-) -> Result<bool> {
-    let captured_response_body_missing =
-        !response_replay::response_already_applied(doc_content, &capture.response_body)
-            && !response_replay::response_already_applied_after_prefix_strip(
-                doc_content,
-                &capture.response_body,
-            );
-    let captured_response_heading_answered = response_replay::first_response_heading_line(
-        &capture.response_body,
-    )
-    .is_some_and(|heading| response_replay::live_exchange_answers_heading(doc_content, heading));
-    let decision = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
-        state: capture.state,
-        replay_baseline_drifted: agent_doc_capture_io::replay_baseline_drifted(file, capture)?,
-        captured_response_body_missing,
-        captured_response_heading_answered,
-    });
-
-    match decision {
-        StaleCaptureRetirementDecision::Keep => Ok(false),
-        StaleCaptureRetirementDecision::RetireWedgedWriteApplied => {
-            agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
-                file,
-                agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
-                    content: Some(doc_content),
-                    clear_pending_response: true,
-                    delete_pre_response: true,
-                    mark_cycle_committed_event: Some("repair_retire_wedged_write_applied_capture"),
-                    reason: CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
-                },
-                &crate::closeout_effects(),
-            )?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "repair_retire_wedged_write_applied_capture file={} capture_id={} cycle_id={}",
-                    file.display(),
-                    capture.capture_id,
-                    capture.cycle_id
-                ),
-            );
-            eprintln!(
-                "[repair] retired wedged write-applied capture for {} (response missing from document + baseline drifted); rebuilt snapshot/CRDT from current and preserved the captured body for forensics",
-                file.display()
-            );
-            Ok(true)
-        }
-        StaleCaptureRetirementDecision::RetireSupersededCapturedOnlyOrphan => {
-            agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
-                file,
-                agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
-                    content: None,
-                    clear_pending_response: true,
-                    delete_pre_response: true,
-                    mark_cycle_committed_event: None,
-                    reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
-                },
-                &crate::closeout_effects(),
-            )?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "repair_retire_superseded_captured_only_orphan file={} capture_id={} cycle_id={}",
-                    file.display(),
-                    capture.capture_id,
-                    capture.cycle_id
-                ),
-            );
-            eprintln!(
-                "[repair] retired superseded Captured-only orphan for {} (captured response's heading already answered in the live exchange + baseline drifted); preserved the captured body for forensics",
-                file.display()
-            );
-            Ok(true)
-        }
-    }
-}
-
-fn respect_manual_exchange_tail_removal_if_safe(
-    file: &Path,
-    doc_content: &str,
-    capture: &agent_doc_capture_io::CaptureRecord,
-) -> Result<bool> {
-    let (fm, _) = frontmatter::parse(doc_content)
-        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
-    if !fm.resolve_mode().is_template() {
-        return Ok(false);
-    }
-
-    let Some(snapshot_content) = agent_doc_snapshot_io::load(file)? else {
-        return Ok(false);
-    };
-    if capture.snapshot_hash != Some(agent_doc_hash::content_hash(&snapshot_content)) {
-        return Ok(false);
-    }
-
-    let Some(stripped_snapshot) =
-        agent_doc_template::strip_conversation_tail_outside_exchange(&snapshot_content)?
-    else {
-        return Ok(false);
-    };
-    if !content_matches_ignoring_trailing_newlines(&stripped_snapshot, doc_content) {
-        return Ok(false);
-    }
-
-    discard_pending_capture_for_manual_repair(file, doc_content)?;
-    Ok(true)
-}
-
 /// Check for a pending response and apply it if found.
 pub fn run(file: &Path) -> Result<RepairOutcome> {
     run_with_queue_completion_ids(file, &[])
@@ -713,10 +599,20 @@ pub(crate) fn run_with_queue_completion_ids(
     }
 
     if let Some(ref capture) = capture {
-        if respect_manual_exchange_tail_removal_if_safe(&canonical, &doc_content, capture)? {
+        if agent_doc_repair_io::respect_manual_exchange_tail_removal_if_safe(
+            &crate::REPAIR_IO_EFFECTS,
+            &canonical,
+            &doc_content,
+            capture,
+        )? {
             return Ok(RepairOutcome::ManualTailRemovalRespected);
         }
-        if retire_stale_capture_if_drifted(&canonical, &doc_content, capture)? {
+        if agent_doc_repair_io::retire_stale_capture_if_drifted(
+            &crate::REPAIR_IO_EFFECTS,
+            &canonical,
+            &doc_content,
+            capture,
+        )? {
             return Ok(RepairOutcome::StaleCaptureRetired);
         }
         agent_doc_capture_io::validate_replay(&canonical, capture)?;

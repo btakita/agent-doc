@@ -2462,7 +2462,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
     );
     assert_eq!(
         tmux_router.get("version").and_then(toml::Value::as_str),
-        Some("0.3.11")
+        Some("0.3.13")
     );
 }
 
@@ -3074,6 +3074,8 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
     let preflight_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
+    let preflight_warnings_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     for forbidden_snippet in [
         "fn canonical_harness_name(",
         "fn harness_mismatch_warning(",
@@ -3091,11 +3093,11 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         );
     }
     assert!(
-        preflight_run_source.contains("agent_doc_model_tier::harness_mismatch_warning(")
-            && preflight_run_source
+        preflight_warnings_source.contains("agent_doc_model_tier::harness_mismatch_warning(")
+            && preflight_warnings_source
                 .contains("agent_doc_model_tier::codex_network_access_non_codex_harness_warning(")
             && preflight_run_source.contains("agent_doc_model_tier::resolve_agent_model("),
-        "preflight/run.rs should adapt preflight facts into focused model-tier policy directly"
+        "preflight runtime/warnings should adapt preflight facts into focused model-tier policy directly"
     );
     assert!(
         preflight_source.contains("agent_doc_model_tier::canonical_harness_name("),
@@ -3377,10 +3379,12 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "agent-doc-project-root-io",
         "agent-doc-session-check-io",
         "agent-doc-snapshot-io",
+        "agent-doc-template",
         "agent-doc-template-io",
         "agent-doc-turn",
         "agent-doc-turn-scope-io",
         "agent-doc-write-converge-io",
+        "agent-doc-workflow",
         "anyhow",
         "serde",
         "serde_json",
@@ -3409,7 +3413,10 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "pub fn historical_committed_capture_replay(",
         "pub fn visible_response_patch_from_document(",
         "pub fn head_already_matches_current_doc(",
+        "pub fn retire_stale_capture_if_drifted(",
+        "pub fn respect_manual_exchange_tail_removal_if_safe(",
         "pub trait RepairIoEffects",
+        "fn apply_closeout_recovery_mutation(",
         "struct BlockedRepairPayloadRecord",
         ".agent-doc/repair-blocked",
         "agent_doc_project_root_io::project_root_containing(",
@@ -3421,6 +3428,9 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "agent_doc_session_check_io::first_unstarted_prompt_bearing_change(",
         "agent_doc_flow_io::closeout::log_closeout_guard_event(",
         "agent_doc_frontmatter::frontmatter::parse(",
+        "agent_doc_workflow::capture::decide_stale_capture_retirement(",
+        "agent_doc_capture_io::replay_baseline_drifted(",
+        "agent_doc_template::strip_conversation_tail_outside_exchange(",
     ] {
         assert!(
             repair_io.contains(required),
@@ -3472,6 +3482,11 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "fn visible_response_patch_from_document(",
         "fn head_already_matches_current_doc(",
         "fn repair_completed_backlog_items(",
+        "fn retire_stale_capture_if_drifted(",
+        "fn respect_manual_exchange_tail_removal_if_safe(",
+        "fn discard_pending_capture_for_manual_repair(",
+        "agent_doc_capture_io::replay_baseline_drifted(",
+        "agent_doc_template::strip_conversation_tail_outside_exchange(",
         "HashSet::new()",
     ] {
         assert!(
@@ -3497,7 +3512,10 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     assert!(
         repair.contains("agent_doc_repair_io::historical_committed_capture_replay(")
             && repair.contains("agent_doc_repair_io::visible_response_patch_from_document(")
-            && repair.contains("agent_doc_repair_io::head_already_matches_current_doc("),
+            && repair.contains("agent_doc_repair_io::head_already_matches_current_doc(")
+            && repair
+                .contains("agent_doc_repair_io::respect_manual_exchange_tail_removal_if_safe(")
+            && repair.contains("agent_doc_repair_io::retire_stale_capture_if_drifted("),
         "repair.rs should call focused repair IO for replay/recovery helper graphs"
     );
     let orchestration_lib =
@@ -3535,6 +3553,32 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
             ],
         );
     }
+}
+
+#[test]
+fn test_orchestration_repair_owns_strict_empty_response_recovery() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let repair =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    let write =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let write_run_entry =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+
+    assert!(
+        repair.contains("pub(crate) fn recover_empty_response_for_strict_closeout("),
+        "repair.rs should own strict empty-response closeout recovery coordination"
+    );
+    assert!(
+        !write.contains("fn recover_empty_response_for_strict_closeout("),
+        "write.rs must not re-own strict empty-response closeout recovery coordination"
+    );
+    assert_source_mentions_all(
+        &write_run_entry,
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        &["crate::repair::recover_empty_response_for_strict_closeout("],
+    );
 }
 
 #[test]
@@ -4007,6 +4051,9 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
 
     let queue_convergence =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_convergence.rs")).unwrap();
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
     for required_snippet in [
         "pub fn realign_baseline_to_converged_queue(",
         "pub fn queue_body_diff_is_non_selected_future_state(",
@@ -4025,9 +4072,6 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
         );
     }
 
-    let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
     for forbidden_snippet in [
         "fn realign_baseline_to_converged_queue(",
         "fn queue_body_diff_is_non_selected_future_state(",
@@ -5140,7 +5184,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     );
     for relative in [
         "agent-doc-capture-io/src/lib.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -8931,16 +8975,16 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
             .exists(),
         "orchestration must not keep a memory_cmd session-memory IO facade"
     );
-    let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+    let preflight_warnings =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     let preflight_maintenance =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     assert!(
-        preflight_run.contains("agent_doc_memory::format_semantic_completion_warning(")
+        preflight_warnings.contains("agent_doc_memory::format_semantic_completion_warning(")
             && preflight_maintenance.contains("agent_doc_memory::QUEUE_STRIKE_THRESHOLD")
             && preflight_maintenance.contains("agent_doc_memory::QueueStrikeMatchKind")
-            && preflight_run.contains("agent_doc_memory_io::session::semantic_completion_matches(")
+            && preflight_warnings
+                .contains("agent_doc_memory_io::session::semantic_completion_matches(")
             && preflight_maintenance
                 .contains("agent_doc_memory_io::session::semantic_queue_strike_matches("),
         "preflight should use focused memory IO plus semantic-memory result vocabulary directly"
@@ -17604,6 +17648,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .unwrap();
     let write_converge_io =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
+    let preflight_warnings =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     assert!(
         fs_lib.contains("pub mod install_freshness;"),
         "agent-doc-fs must expose install freshness filesystem probes"
@@ -17641,13 +17687,17 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "project_controller::rpc must not re-own install freshness source mtime scanning"
     );
     assert!(
-        preflight.contains("agent_doc_supervisor::config::classify_stale_install_artifacts")
-            && preflight.contains("agent_doc_supervisor::config::STALE_INSTALL_GRACE_SECS")
-            && preflight.contains("agent_doc_fs::install_freshness::locate_agent_doc_source_repo")
-            && preflight
+        preflight_warnings
+            .contains("agent_doc_supervisor::config::classify_stale_install_artifacts")
+            && preflight_warnings
+                .contains("agent_doc_supervisor::config::STALE_INSTALL_GRACE_SECS")
+            && preflight_warnings
+                .contains("agent_doc_fs::install_freshness::locate_agent_doc_source_repo")
+            && preflight_warnings
                 .contains("agent_doc_fs::install_freshness::newest_crate_source_mtime_secs")
-            && preflight.contains("agent_doc_fs::install_freshness::agent_doc_install_artifacts"),
-        "preflight should call focused stale-install and install-freshness policy directly"
+            && preflight_warnings
+                .contains("agent_doc_fs::install_freshness::agent_doc_install_artifacts"),
+        "focused preflight warnings should call stale-install and install-freshness policy directly"
     );
     assert!(
         start_idle_watch_source
@@ -18826,9 +18876,8 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
     }
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
-    let preflight_run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+    let preflight_warnings_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     for forbidden_snippet in [
         "QUEUE_ONLY_COMPONENT_ATTRS",
         "KNOWN_COMPONENT_ATTRS",
@@ -18841,9 +18890,9 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         );
     }
     assert!(
-        preflight_run_source
+        preflight_warnings_source
             .contains("agent_doc_workflow::preflight_policy::component_attr_preflight_warning"),
-        "preflight should delegate component-attr preflight warning adaptation to workflow policy"
+        "focused preflight warnings should delegate component-attr warning adaptation to workflow policy"
     );
     let preflight_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/preflight_policy.rs"))
@@ -20031,11 +20080,15 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
 
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    let repair_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn capture_is_repairable(",
         "fn retire_wedged_write_applied_capture_if_drifted(",
         "fn retire_superseded_captured_only_orphan_if_drifted(",
+        "fn retire_stale_capture_if_drifted(",
         "fn decide_stale_capture_retirement(",
+        "agent_doc_capture_io::replay_baseline_drifted(",
         "if duplicate_opener_changed",
         "if duplicate_close_changed",
         "if duplicate_scaffold_changed",
@@ -20052,11 +20105,16 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
     assert!(
         repair.contains("agent_doc_workflow::capture::{")
             && repair.contains("capture_state_is_repairable(")
-            && repair.contains("decide_stale_capture_retirement(")
             && repair.contains("RepairTemplateChanges {")
             && repair.contains("template_changes.should_persist()")
             && repair.contains("template_changes.changed_kinds()"),
-        "repair.rs should gather file-backed evidence and call capture/repair-template policy from agent-doc-workflow directly"
+        "repair.rs should keep only the remaining file-backed template aggregation policy it has not yet extracted"
+    );
+    assert!(
+        repair_io.contains("agent_doc_workflow::capture::decide_stale_capture_retirement(")
+            && repair_io.contains("agent_doc_workflow::capture::StaleCaptureRetirementEvidence")
+            && repair_io.contains("agent_doc_capture_io::replay_baseline_drifted("),
+        "agent-doc-repair-io should gather stale-capture evidence and call workflow capture policy directly"
     );
 }
 
@@ -20806,8 +20864,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
-    let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_layout =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/layout.rs")).unwrap();
     let start_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
@@ -20853,7 +20911,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && route_pane_resolution_io.contains("agent_doc_tmux_io::join_pane_guarded(")
             && sync_source.contains("agent_doc_tmux_io::join_pane_guarded(")
             && write_source.contains("agent_doc_tmux_io::in_tmux()")
-            && preflight_source.contains("agent_doc_tmux_io::in_tmux()")
+            && preflight_layout.contains("agent_doc_tmux_io::in_tmux()")
             && start_run_source.contains("agent_doc_tmux_io::in_tmux()")
             && !sessions_source.contains("pub fn pane_pid(")
             && !sessions_source.contains("pub fn pane_pid_with_mux(")
@@ -24546,9 +24604,8 @@ fn test_agent_doc_element_backlog_owns_active_identity_projection_policy() {
 
     let preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
-    let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+    let preflight_warnings =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     let workflow_preflight_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/preflight_policy.rs"))
             .unwrap();
@@ -24571,9 +24628,9 @@ fn test_agent_doc_element_backlog_owns_active_identity_projection_policy() {
         "workflow preflight policy should call focused active identity collision detection directly"
     );
     assert!(
-        preflight_run
+        preflight_warnings
             .contains("agent_doc_workflow::preflight_policy::preset_item_id_collision_warning",),
-        "orchestration preflight should call the focused workflow identity warning policy directly"
+        "focused preflight warnings should call the workflow identity warning policy directly"
     );
 
     let backlog_cmd =
@@ -26706,6 +26763,8 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_only.rs")).unwrap();
     let route_cycle_ack =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/cycle_ack.rs")).unwrap();
+    let preflight_debounce =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/debounce.rs")).unwrap();
     let turn_cycle_ack =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/cycle_ack.rs")).unwrap();
     let preflight_source =
@@ -26782,7 +26841,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             && preflight_source.contains(
                 "agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare",
             )
-            && preflight_source.contains("agent_doc_debounce::preflight_debounce_max_wait")
+            && preflight_debounce.contains("agent_doc_debounce::preflight_debounce_max_wait")
             && route_dispatch_only
                 .contains("agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source"),
         "route/preflight should call route-dispatch queue policy through focused effect adapters and agent-doc-queue directly"

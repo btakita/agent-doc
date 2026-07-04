@@ -39,7 +39,11 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     let response = read_response_input()?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_for_strict_closeout(file, &flags)? {
+        if crate::repair::recover_empty_response_for_strict_closeout(
+            file,
+            flags.strict_closeout,
+            flags.has_pending_mutation,
+        )? {
             return Ok(());
         }
         anyhow::bail!("empty response — nothing to write");
@@ -221,7 +225,11 @@ pub fn run_template(
     let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_for_strict_closeout(file, &flags)? {
+        if crate::repair::recover_empty_response_for_strict_closeout(
+            file,
+            flags.strict_closeout,
+            flags.has_pending_mutation,
+        )? {
             return Ok(());
         }
         anyhow::bail!("empty response — nothing to write");
@@ -559,7 +567,11 @@ pub fn run_stream(
     let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_for_strict_closeout(file, &flags)? {
+        if crate::repair::recover_empty_response_for_strict_closeout(
+            file,
+            flags.strict_closeout,
+            flags.has_pending_mutation,
+        )? {
             return Ok(());
         }
         anyhow::bail!("empty response — nothing to write");
@@ -1283,7 +1295,11 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_for_strict_closeout(file, &flags)? {
+        if crate::repair::recover_empty_response_for_strict_closeout(
+            file,
+            flags.strict_closeout,
+            flags.has_pending_mutation,
+        )? {
             return Ok(());
         }
         anyhow::bail!("empty response — nothing to write");

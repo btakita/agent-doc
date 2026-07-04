@@ -262,7 +262,6 @@ use agent_doc_template as template;
 use agent_doc_template::structure_guard::TemplateStructureGuardReason;
 use agent_doc_template_io::log_template_structure_guard_event;
 
-use crate::repair;
 use agent_doc_template::stale_baseline::{
     exchange_append_patch_can_rebase_to_head, is_stale_baseline, patch_touches_exchange,
 };
@@ -1743,33 +1742,7 @@ fn log_closeout_guard(
     agent_doc_flow_io::closeout::log_closeout_guard_event(file, stage, outcome, reason);
 }
 
-fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -> Result<bool> {
-    if flags.strict_closeout {
-        let outcome = repair::run(file)?;
-        if recover_missing_committed_head_response(file)? {
-            return Ok(true);
-        }
-        if outcome.repaired() {
-            eprintln!(
-                "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
-                outcome
-            );
-            return Ok(true);
-        }
-        if recover_dedupe_only_drift(file)? {
-            return Ok(true);
-        }
-    }
-    if flags.has_pending_mutation {
-        eprintln!(
-            "[write] empty response stdin; committing pending mutations without a response body"
-        );
-        return Ok(true);
-    }
-    Ok(false)
-}
-
-fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
+pub(crate) fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
     let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
@@ -1810,7 +1783,7 @@ fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
 /// "empty response — nothing to write", forcing a manual `git commit` and
 /// defeating the binary-owned closeout contract. This branch keeps the
 /// closeout binary-owned by recognizing the dedupe-only drift signature.
-fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
+pub(crate) fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
     let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
@@ -5445,12 +5418,8 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, visible, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
 
-        let strict = WriteFlags {
-            strict_closeout: true,
-            ..Default::default()
-        };
         assert!(
-            recover_empty_response_for_strict_closeout(&doc, &strict).unwrap(),
+            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false).unwrap(),
             "strict empty response recovery should continue past stale preflight repair"
         );
 

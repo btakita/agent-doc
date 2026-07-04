@@ -2105,9 +2105,7 @@ Can you preserve the second paragraph too?
 #[cfg(test)]
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
-    use super::{
-        WriteFlags, recover_dedupe_only_drift, recover_empty_response_for_strict_closeout, try_ipc,
-    };
+    use super::{recover_dedupe_only_drift, try_ipc};
     use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
     use agent_doc_ipc_protocol::{
         EditorBadStateFingerprint, FullContentRepairRedelivery, IpcDiskRepairReason,
@@ -3376,13 +3374,10 @@ Implemented.
         fs::write(&doc, &deduped).unwrap();
         agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
-        let strict = WriteFlags {
-            strict_closeout: true,
-            ..Default::default()
-        };
         let head_before = head_count(root);
-        let recovered = recover_empty_response_for_strict_closeout(&doc, &strict)
-            .expect("strict-closeout empty-stdin path should recognize dedupe-only drift");
+        let recovered =
+            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false)
+                .expect("strict-closeout empty-stdin path should recognize dedupe-only drift");
         assert!(
             recovered,
             "empty stdin + strict closeout + dedupe-only drift must commit through the binary path"
@@ -3431,9 +3426,9 @@ Implemented.
         fs::write(&doc, &deduped).unwrap();
         agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
-        let lenient = WriteFlags::default();
         let head_before = head_count(root);
-        let recovered = recover_empty_response_for_strict_closeout(&doc, &lenient).unwrap();
+        let recovered =
+            crate::repair::recover_empty_response_for_strict_closeout(&doc, false, false).unwrap();
         assert!(
             !recovered,
             "non-strict empty-stdin path must not silently auto-commit dedupe drift"

@@ -11,18 +11,24 @@ name = "agent_doc_supervisor_io"
 
 [dependencies]
 agent-doc-config = { path = "../agent-doc-config", version = "0.34.67" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.67" }
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }
 interprocess = { version = "2", default-features = false }
 libc = "0.2"
+portable-pty = "0.9"
 serde_json = "1"
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }
 
 [dev-dependencies]
 tempfile = "3"

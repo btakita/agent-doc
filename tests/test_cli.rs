@@ -2604,7 +2604,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "use agent_doc_hooks_io::fire_doc_hooks;",
         ),
         (
-            "agent-doc-orchestration/src/start/detection.rs",
+            "agent-doc-orchestration/src/start.rs",
             "use agent_doc_hooks_io::fire_doc_hooks;",
         ),
     ] {
@@ -9697,7 +9697,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 56,
+        ledger_rows.len() >= 57,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10234,6 +10234,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/start/supervisor_io.rs",
             "agent-doc-supervisor-io/src/ipc.rs",
             "Split the `SupervisorIpcHandlerState` adapter",
+        ),
+        (
+            "Supervisor live detection adapter graph",
+            "agent-doc-orchestration/src/start/detection.rs",
+            "agent-doc-supervisor-io/src/detection.rs",
+            "Split the `SupervisorDetectionState` adapter",
         ),
     ] {
         let row_text = ledger_rows
@@ -11768,7 +11774,6 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-supervisor-io/src/config.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/run.rs",
-        "agent-doc-orchestration/src/start/detection.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -13616,7 +13621,7 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
         "agent-doc-route-io/src/cycle_ack.rs",
         "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-orchestration/src/route.rs",
-        "agent-doc-orchestration/src/start/detection.rs",
+        "agent-doc-supervisor-io/src/detection.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in [
@@ -13646,14 +13651,13 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
     let route_direct_pane_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
             .unwrap();
-    let start_detection =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
-            .unwrap();
+    let supervisor_io_detection =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/detection.rs")).unwrap();
     assert!(
         route_direct_pane_dispatch
             .contains("route_trigger_visible_in_current_draft(&content, &trigger")
-            && start_detection.contains("dispatch_payload_pending_in_current_input("),
-        "route direct-pane IO and start detection should call focused controller dispatch visibility policy directly"
+            && supervisor_io_detection.contains("dispatch_payload_pending_in_current_input("),
+        "route direct-pane IO and supervisor detection IO should call focused controller dispatch visibility policy directly"
     );
 }
 
@@ -16284,6 +16288,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-supervisor-io/src/detection.rs")
+            .exists(),
+        "agent-doc-supervisor-io must own live supervisor detection adapters"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-supervisor-crdt-io/src/lib.rs")
             .exists(),
         "agent-doc-supervisor-crdt-io must own CRDT replica IPC response adapters"
@@ -16311,6 +16321,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .join("agent-doc-orchestration/src/supervisor/cwd.rs")
             .exists(),
         "orchestration must not keep a supervisor::cwd facade over supervisor-io CWD resolution"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/start/detection.rs")
+            .exists(),
+        "orchestration must not keep a start::detection facade after supervisor-io owns live detection adapters"
     );
 
     let supervisor_lib =
@@ -16373,6 +16389,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/cwd.rs")).unwrap();
     let supervisor_io_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/ipc.rs")).unwrap();
+    let supervisor_io_detection =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/detection.rs")).unwrap();
     let orchestration_supervisor_io =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/supervisor_io.rs"))
             .unwrap();
@@ -16618,8 +16636,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .contains("agent_doc_supervisor_crdt_io::handle_replica_register(file, identity)")
             && orchestration_supervisor_io
                 .contains("agent_doc_supervisor_crdt_io::handle_replica_awareness(")
-            && orchestration_supervisor_io
-                .contains("impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShared"),
+            && orchestration_supervisor_io.contains(
+                "impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShared"
+            ),
         "orchestration supervisor IPC dispatch should call the focused CRDT adapter crate directly"
     );
     for required_snippet in [
@@ -17332,9 +17351,6 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
 
-    let start_detection =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
-            .unwrap();
     for forbidden_snippet in [
         "pub(crate) fn ready_busy_conflict_reconcile_decision(",
         "pub(crate) fn stale_busy_idle_reconcile_decision(",
@@ -17346,8 +17362,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "harness.is_help_screen_output(",
     ] {
         assert!(
-            !start_detection.contains(forbidden_snippet),
-            "start::detection must not re-own pure supervisor reconcile/detection policy: {forbidden_snippet}"
+            !supervisor_io_detection.contains(forbidden_snippet),
+            "supervisor detection IO must not re-own pure supervisor reconcile/detection policy: {forbidden_snippet}"
         );
     }
     for required_snippet in [
@@ -17367,14 +17383,19 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     assert!(
         supervisor_lib.contains("pub mod detection;")
-            && start_detection
+            && supervisor_io_lib.contains("pub mod detection;")
+            && supervisor_io_detection
                 .contains("use agent_doc_supervisor::detection as supervisor_detection;")
-            && start_detection.contains("supervisor_detection::idle_queue_prompt_visibility")
-            && start_detection.contains("supervisor_detection::ready_busy_blocker_reason")
-            && start_detection.contains("supervisor_detection::pane_dispatch_ready")
-            && start_detection.contains("supervisor_detection::pane_has_busy_cue")
-            && start_detection.contains("supervisor_detection::help_screen_visible"),
-        "start::detection should adapt live buffers and call focused supervisor detection policy directly"
+            && supervisor_io_detection.contains("pub trait SupervisorDetectionState")
+            && supervisor_io_detection.contains("supervisor_detection::idle_queue_prompt_visibility")
+            && supervisor_io_detection.contains("supervisor_detection::ready_busy_blocker_reason")
+            && supervisor_io_detection.contains("supervisor_detection::pane_dispatch_ready")
+            && supervisor_io_detection.contains("supervisor_detection::pane_has_busy_cue")
+            && supervisor_io_detection.contains("supervisor_detection::help_screen_visible")
+            && orchestration_start.contains(
+                "impl agent_doc_supervisor_io::detection::SupervisorDetectionState for SupervisorShared"
+            ),
+        "supervisor-io detection should adapt live buffers and call focused supervisor detection policy directly while start.rs keeps only the concrete state adapter"
     );
     let idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
@@ -19827,16 +19848,15 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
             && harness_source.contains("is_codex_idle_placeholder_prompt"),
         "agent-doc-harness should call focused Codex prompt placeholder policy directly"
     );
-    let start_detection_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
-            .unwrap();
+    let supervisor_io_detection_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/detection.rs")).unwrap();
     let session_actor_source =
         fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
     let sim_world_engine_source =
         fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
     for source in [
         &harness_source,
-        &start_detection_source,
+        &supervisor_io_detection_source,
         &session_actor_source,
         &sim_world_engine_source,
     ] {
@@ -19946,9 +19966,8 @@ fn test_agent_doc_turn_executor_tmux_owns_context_clear_submit_policy() {
         "session_actor_cmd.rs should call focused context-clear policy directly"
     );
 
-    let start_detection_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
-            .unwrap();
+    let supervisor_io_detection_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/detection.rs")).unwrap();
     let controller_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
     for forbidden in [
@@ -19959,14 +19978,14 @@ fn test_agent_doc_turn_executor_tmux_owns_context_clear_submit_policy() {
         "fn strip_context_clear_prompt_prefix(",
     ] {
         assert!(
-            !start_detection_source.contains(forbidden),
-            "start/detection.rs must not duplicate context-clear visibility policy: {forbidden}"
+            !supervisor_io_detection_source.contains(forbidden),
+            "supervisor detection IO must not duplicate context-clear visibility policy: {forbidden}"
         );
     }
     assert!(
-        start_detection_source.contains("dispatch_payload_pending_in_current_input(")
+        supervisor_io_detection_source.contains("dispatch_payload_pending_in_current_input(")
             && controller_dispatch.contains("agent_doc_turn_executor_tmux::context_clear::context_clear_command_visible_in_active_input("),
-        "start/detection.rs should call controller payload policy, and controller dispatch should call focused context-clear policy directly"
+        "supervisor detection IO should call controller payload policy, and controller dispatch should call focused context-clear policy directly"
     );
 
     for forbidden in [

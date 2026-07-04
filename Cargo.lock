@@ -1777,19 +1777,25 @@ name = "agent-doc-supervisor-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-config",
+ "agent-doc-controller",
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-log-time",
  "agent-doc-project-config-io",
  "agent-doc-session-registry-io",
  "agent-doc-supervisor",
+ "agent-doc-tmux-io",
+ "agent-doc-turn-executor-tmux",
  "anyhow",
  "indexmap",
  "interprocess",
  "libc",
+ "portable-pty",
  "serde_json",
  "tempfile",
+ "tmux-router",
 ]
 
 [[package]]

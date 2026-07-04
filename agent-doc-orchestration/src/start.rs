@@ -159,6 +159,7 @@ use agent_doc_supervisor::session_owner::{
     format_existing_pane_conflict_error as format_existing_pane_conflict_error_from_facts,
 };
 use agent_doc_supervisor_io::cwd;
+use agent_doc_supervisor_io::detection::*;
 use agent_doc_supervisor_io::ipc::SupervisorIpc;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
@@ -768,9 +769,6 @@ fn dispatch_submit_text_to_pane(pane: &str, text: &str, harness: &str) -> Result
     let tmux = tmux_router::Tmux::default_server();
     dispatch_submit_text_to_tmux(&tmux, pane, text, harness)
 }
-
-mod detection;
-pub(crate) use detection::*;
 
 fn spawn_auto_trigger_thread(
     shared: Arc<SupervisorShared>,
@@ -1709,6 +1707,67 @@ impl SupervisorShared {
     }
 }
 
+impl agent_doc_supervisor_io::detection::SupervisorDetectionState for SupervisorShared {
+    fn record_recent_output(&self, bytes: &[u8]) {
+        self.output.record_recent_output(bytes);
+    }
+
+    fn record_terminal_screen(&self, bytes: &[u8]) {
+        self.output.record_terminal_screen(bytes);
+    }
+
+    fn reset_terminal_screen(&self, size: PtySize) {
+        self.output.reset_terminal_screen(size);
+    }
+
+    fn child_output_for_detection(&self) -> String {
+        self.output.child_output_for_detection()
+    }
+
+    fn mark_prompt_visible_once(&self) -> bool {
+        !self.prompt_visible_once.swap(true, Ordering::Relaxed)
+    }
+
+    fn actor_known_non_ready(&self) -> bool {
+        self.actor_state
+            .lock()
+            .unwrap()
+            .is_some_and(|state| state != agent_doc_sqlite::state_store::ActorState::Ready)
+    }
+
+    fn actor_ready(&self) -> bool {
+        self.actor_state
+            .lock()
+            .unwrap()
+            .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
+    }
+
+    fn actor_busy_or_starting(&self) -> bool {
+        self.actor_state.lock().unwrap().is_some_and(|state| {
+            matches!(
+                state,
+                agent_doc_sqlite::state_store::ActorState::Busy
+                    | agent_doc_sqlite::state_store::ActorState::Starting
+            )
+        })
+    }
+
+    fn owned_pane_id(&self) -> Option<String> {
+        self.inject_pane.clone().or_else(|| {
+            self.actor_runtime
+                .as_ref()
+                .map(|runtime| runtime.pane_id.clone())
+        })
+    }
+
+    fn with_recent_output<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&[u8]) -> R,
+    {
+        self.output.with_recent_output(f)
+    }
+}
+
 /// Whether an IPC method is a prompt dispatch that must pass the managed
 /// capability proof gate before delivery. Only
 /// [`agent_doc_supervisor::ipc_protocol::IpcMethod::Inject`] is a real
@@ -1993,6 +2052,212 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
+
+    #[test]
+    fn stale_busy_reconcile_preserves_already_dispatched_head_dedup() {
+        let mut idle_busy_ticks = STALE_BUSY_RECONCILE_TICKS;
+        let last_dispatched =
+            agent_doc_supervisor::idle_reconcile::reconcile_stale_busy_idle_queue_state(
+                Some("do [#learn-ohio-duplicate-gate]".to_string()),
+                &mut idle_busy_ticks,
+            );
+
+        assert_eq!(idle_busy_ticks, 0);
+        assert_eq!(
+            idle_queue_drain_decision(
+                false,
+                true,
+                false,
+                false,
+                false,
+                Some("do [#learn-ohio-duplicate-gate]"),
+                last_dispatched.as_deref(),
+            ),
+            IdleQueueDrainDecision::SkipAlreadyDispatched
+        );
+    }
+
+    #[test]
+    fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::claude();
+        *shared.actor_state.lock().unwrap() =
+            Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        record_recent_output(&shared, b"turn committed, renderer tail has no composer\n");
+
+        assert!(
+            !current_child_prompt_visible(&shared, &harness),
+            "stale output alone should not prove an idle composer"
+        );
+        assert!(
+            idle_queue_prompt_visible(&shared, &harness),
+            "the supervisor's ready actor state should let the idle queue drain"
+        );
+    }
+
+    #[test]
+    fn idle_queue_prompt_visible_keeps_blocker_over_ready_actor() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::claude();
+        *shared.actor_state.lock().unwrap() =
+            Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        record_recent_output(
+            &shared,
+            concat!(
+                "✶ Generating… (3s · esc to interrupt)\n",
+                "❯\n",
+                "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n",
+                "  ⏵⏵ bypass permissions on · 1 shell\n",
+            )
+            .as_bytes(),
+        );
+
+        assert!(
+            !idle_queue_prompt_visible(&shared, &harness),
+            "active-turn blockers must win over a stale ready actor state"
+        );
+    }
+
+    #[test]
+    fn route_owned_live_pane_busy_requires_idle_prompt_before_reap() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        record_recent_output(&shared, b"exploring repository\n");
+
+        let reason = route_owned_live_pane_busy_reason(&shared, &harness)
+            .expect("running child without prompt should block route-owned reap");
+
+        assert!(reason.contains("live_pane_busy_no_idle_prompt"));
+        assert!(reason.contains("exploring repository"));
+    }
+
+    #[test]
+    fn route_owned_live_pane_busy_trusts_ready_actor_over_stale_renderer_tail() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock().unwrap() =
+            Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"Working...\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
+        );
+
+        assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
+    }
+
+    #[test]
+    fn route_owned_live_pane_busy_keeps_ready_actor_for_blocking_prompt_state() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock().unwrap() =
+            Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"tab to queue message\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
+        );
+
+        let reason = route_owned_live_pane_busy_reason(&shared, &harness)
+            .expect("queued composer state must still block route-owned reap");
+
+        assert!(reason.contains("live_pane_busy_blocked_prompt"));
+        assert!(reason.contains("queued draft in composer"));
+    }
+
+    #[test]
+    fn ready_busy_blocker_reason_filters_to_recoverable_queue_draft() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"tab to queue message\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 41% used\n".as_bytes(),
+        );
+
+        assert_eq!(
+            ready_busy_blocker_reason(&shared, &harness).as_deref(),
+            Some("queued draft in composer")
+        );
+
+        let active_shared = SupervisorShared::new("test", "test-instance".to_string());
+        record_recent_output(
+            &active_shared,
+            "• Working (1m 34s • esc to interrupt)\n\n› Write tests\n".as_bytes(),
+        );
+        record_recent_output(
+            &active_shared,
+            "gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n".as_bytes(),
+        );
+        assert_eq!(ready_busy_blocker_reason(&active_shared, &harness), None);
+    }
+
+    #[test]
+    fn route_owned_live_pane_busy_allows_idle_prompt_reap() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        record_recent_output(&shared, b"done\n");
+        record_recent_output(&shared, "›\n".as_bytes());
+
+        assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
+    }
+
+    #[test]
+    fn is_help_screen_visible_detects_opencode_help() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::opencode();
+        record_recent_output(
+            &shared,
+            b"opencode [project]           start opencode tui\n",
+        );
+        record_recent_output(
+            &shared,
+            b"opencode run [message..]     run opencode with a message\n",
+        );
+        record_recent_output(
+            &shared,
+            b"opencode debug               debugging and troubleshooting tools\n",
+        );
+        assert!(is_help_screen_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn is_help_screen_visible_rejects_normal_opencode_output() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::opencode();
+        record_recent_output(&shared, b"some normal output\n");
+        record_recent_output(&shared, b">\n");
+        assert!(!is_help_screen_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn prompt_visible_requires_ready_transition_on_first_prompt() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        assert!(prompt_visible_requires_ready_transition(&shared));
+        assert!(
+            !prompt_visible_requires_ready_transition(&shared),
+            "a repeated prompt without an intervening busy transition should not retrigger ready"
+        );
+    }
+
+    #[test]
+    fn prompt_visible_requires_ready_transition_after_busy_dispatch() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        shared.prompt_visible_once.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock().unwrap() = Some(agent_doc_sqlite::state_store::ActorState::Busy);
+        assert!(
+            prompt_visible_requires_ready_transition(&shared),
+            "a busy actor that surfaces the prompt again must return to ready"
+        );
+    }
+
     #[test]
     fn model_injected_from_claude_model_frontmatter() {
         let fm = Frontmatter {

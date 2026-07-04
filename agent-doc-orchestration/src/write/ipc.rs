@@ -4,8 +4,8 @@ use super::*;
 use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;
 use agent_doc_document_realtime::write_policy::{
     ack_content_contains_latest_response, dropped_prompt_lines_after_content_ours,
-    first_response_heading, ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
-    new_agent_response_headings, response_already_in_current, response_converged_in_visible_target,
+    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, new_agent_response_headings,
+    response_already_in_current, response_converged_in_visible_target,
     response_target_disjoint_from_user_edit,
 };
 #[cfg(test)]
@@ -15,17 +15,15 @@ use agent_doc_element_exchange::verify_sidecar_normalization;
 use agent_doc_element_exchange::{
     normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
 };
-use agent_doc_ipc_protocol::{
-    AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, IpcDiskRepairReason,
-    IpcRepairDecision, IpcSnapshotSource,
-};
-use agent_doc_template::response_materialization::{
-    extract_response_headings_from_patches, response_materialization_probe_from_response,
-};
+#[cfg(test)]
+use agent_doc_ipc_protocol::IpcDiskRepairReason;
+use agent_doc_ipc_protocol::{AlreadyAppliedSnapshotOutcome, IpcRepairDecision, IpcSnapshotSource};
+use agent_doc_template::response_materialization::extract_response_headings_from_patches;
 use agent_doc_turn::response_replay::materialize_response_in_current_exchange;
 use agent_doc_write_converge_io::{
     ack_content_disk_write_proof, ipc_repair_decision_from_sidecar,
-    mark_ack_content_live_buffer_synced_after_write, poll_ack_content_sidecar,
+    log_ipcfullprompt_corruption_if_any, mark_ack_content_live_buffer_synced_after_write,
+    materialize_missing_response_for_socket_ack_drift, poll_ack_content_sidecar,
     reconcile_ack_snapshot_to_newer_operator_buffer, save_document_snapshot_and_crdt,
     write_ack_content_through_to_disk,
 };
@@ -701,146 +699,6 @@ pub(crate) fn log_ipc_snapshot_adoption_allowed(
             dup_recheck,
         ),
     );
-}
-
-/// #ipcfullprompt-recur2 — default-on forensic capture. The fail-closed snapshot
-/// guards above protect what gets *committed*, but a full-document editor-side
-/// IPC mutation (e.g. `PatchWatcher.setText`) can still corrupt the
-/// editor-visible buffer — deleting or duplicating a previously-committed
-/// `### Re:` response block — while the user types a live prompt. This records
-/// every such occurrence to `ops.log` and preserves the candidate buffer, so the
-/// bug (which is not reliably reproducible) is captured the next time it happens
-/// without any manual editor debug opt-in. Detection only: it never changes the
-/// adoption decision — the guards above own that.
-///
-/// `candidate` must be the live editor buffer as received (capture it before the
-/// guards replace `decision.snapshot_content`).
-pub(crate) fn log_ipcfullprompt_corruption_if_any(
-    file: &Path,
-    source: &str,
-    patch_id: Option<&str>,
-    baseline: Option<&str>,
-    candidate: &str,
-) {
-    // Scaffold duplication is a self-check on the candidate (the full-tail
-    // duplication shape — two `<!-- /agent:exchange -->` markers — captured live in
-    // brandon-cinquegrana.md), so it runs even when no baseline is available.
-    let mut findings =
-        agent_doc_document_realtime::ipc_corruption::detect_duplicated_scaffold(candidate);
-    // Response-block delete/duplicate needs the prior committed baseline.
-    if let Some(base) = baseline {
-        findings.extend(
-            agent_doc_document_realtime::ipc_corruption::detect_response_block_corruption(
-                base, candidate,
-            ),
-        );
-    }
-    if findings.is_empty() {
-        return;
-    }
-    let base = baseline.unwrap_or("");
-    let summary = agent_doc_document_realtime::ipc_corruption::summarize_findings(&findings);
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "ipcfullprompt_corruption_suspected file={} source={} patch_id={} candidate_len={} candidate_hash={} baseline_len={} baseline_hash={} {}",
-            file.display(),
-            source,
-            patch_id.unwrap_or("-"),
-            candidate.len(),
-            agent_doc_hash::content_hash(candidate),
-            base.len(),
-            agent_doc_hash::content_hash(base),
-            summary,
-        ),
-    );
-    let _ = agent_doc_ipc_forensics_io::preserve_ipcfullprompt_forensic(
-        file, patch_id, base, candidate,
-    );
-}
-
-pub(crate) fn materialize_missing_response_for_socket_ack_drift(
-    file: &Path,
-    patch_id: Option<&str>,
-    content_ours: Option<&str>,
-    expected_response: &str,
-    drift_fired: bool,
-    decision: &mut IpcRepairDecision,
-) -> bool {
-    if !drift_fired || decision.snap_source != IpcSnapshotSource::AckContentSidecar {
-        return false;
-    }
-    // #ackdriftprefixmaterialize: a prefix-normalization / dedupe repair
-    // (`PrefixDivergence`, `IpcDedupe`, `PrefixDivergenceThenIpcDedupe`) only
-    // rewrites operator-visible prefixes or removes duplicate blocks — it never
-    // restores the agent response. When such a repair leaves a drifted ACK
-    // snapshot still missing the response, this missing-response materialization
-    // is exactly the intended rescue, so those reasons must NOT gate it off. The
-    // old blanket `disk_repair_reason.is_some()` bail dead-ended a stale
-    // prefix-diverged ACK into a `retry_without_disk_write` spin until supervisor
-    // supersession. Only a repair that already replaced the snapshot with a
-    // response-bearing buffer (`LivePromptDrift`, which also sets
-    // `snap_source == ContentOurs` and is excluded above) skips the rescue.
-    if matches!(
-        decision.disk_repair_reason,
-        Some(IpcDiskRepairReason::LivePromptDrift)
-    ) {
-        return false;
-    }
-    let response = response_materialization_probe_from_response(expected_response);
-    if response.trim().is_empty()
-        || response_materialized_in_content(&response, &decision.snapshot_content)
-    {
-        return false;
-    }
-    let Some(ours) = content_ours else {
-        return false;
-    };
-    if !response_materialized_in_content(&response, ours) {
-        return false;
-    }
-    if first_response_heading(&response).is_some_and(|heading| {
-        decision
-            .snapshot_content
-            .lines()
-            .any(|line| line.trim() == heading)
-    }) {
-        return false;
-    }
-    let Some(repaired) =
-        materialize_response_in_current_exchange(&decision.snapshot_content, &response)
-    else {
-        return false;
-    };
-    if repaired == decision.snapshot_content
-        || !response_materialized_in_content(&response, &repaired)
-    {
-        return false;
-    }
-
-    let pre_materialize = decision.snapshot_content.clone();
-    decision.snapshot_content = repaired;
-    decision.disk_repair_reason = Some(IpcDiskRepairReason::LivePromptDrift);
-    // Preserve an already-recorded editor bad state (e.g. from a prior prefix
-    // repair whose normalized content was never delivered to the editor) so
-    // redelivery still verifies against what the editor actually holds; only fall
-    // back to the pre-materialize snapshot when none was recorded.
-    if decision.editor_bad_state.is_none() {
-        decision.editor_bad_state = Some(EditorBadStateFingerprint::new(pre_materialize));
-    }
-    decision.redeliver_editor = true;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "ipc_socket_ack_drift_missing_response_materialized file={} patch_id={} repaired_len={} repaired_hash={} response_sha256={}",
-            file.display(),
-            patch_id.unwrap_or("-"),
-            decision.snapshot_content.len(),
-            agent_doc_hash::content_hash(&decision.snapshot_content),
-            agent_doc_hash::content_hash(&response),
-        ),
-    );
-    true
 }
 
 struct StaleAckContentContext<'a> {

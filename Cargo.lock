@@ -2146,6 +2146,7 @@ dependencies = [
  "agent-doc-fs",
  "agent-doc-git-io",
  "agent-doc-hash",
+ "agent-doc-ipc-forensics-io",
  "agent-doc-ipc-io",
  "agent-doc-ipc-protocol",
  "agent-doc-markdown-ast",

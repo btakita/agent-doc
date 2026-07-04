@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 74,
+        ledger_rows.len() >= 75,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10221,6 +10221,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
             "Split snapshot-adoption guards",
+        ),
+        (
+            "Write IPC snapshot adoption repair and forensics IO graph",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Move the remaining snapshot-adoption guard decisions",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -21258,12 +21264,16 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     );
     let write_ipc_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let write_converge_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
         !write_ipc_source.contains("pub(crate) fn preserve_ipcfullprompt_forensic(")
             && !write_ipc_source.contains("agent_doc_fs::find_project_root(")
-            && write_ipc_source
+            && !write_ipc_source
+                .contains("agent_doc_ipc_forensics_io::preserve_ipcfullprompt_forensic(")
+            && write_converge_source
                 .contains("agent_doc_ipc_forensics_io::preserve_ipcfullprompt_forensic("),
-        "write/ipc.rs should call focused IPC forensic sidecar IO instead of owning root/path capture"
+        "IPC write convergence should call focused IPC forensic sidecar IO instead of orchestration owning root/path capture"
     );
 
     assert!(
@@ -24048,6 +24058,8 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             .unwrap();
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let write_converge =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     let write_ipc_transport =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
             .unwrap();
@@ -24079,8 +24091,9 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             && write_ipc.contains("dropped_prompt_lines_after_content_ours")
             && write_ipc.contains("new_agent_response_headings")
             && write_ipc.contains("ack_content_contains_latest_response")
-            && write_ipc.contains("first_response_heading"),
-        "write/ipc.rs should import focused realtime snapshot/live-drift policy directly"
+            && write_converge.contains("materialize_missing_response_for_socket_ack_drift(")
+            && write_converge.contains("first_response_heading"),
+        "write IPC paths should import focused realtime snapshot/live-drift policy directly from their current owner"
     );
     assert!(
         write_ipc_transport

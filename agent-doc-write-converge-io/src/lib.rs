@@ -12,9 +12,9 @@ use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, FullContentSourceProof, OperatorReconcileStep, WholeBufferAuthority,
     WholeBufferAuthorityFacts, WholeBufferDelivery, WholeBufferDeliveryAction,
     classify_ack_mismatch_recovery, decide_whole_buffer_delivery,
-    exchange_change_is_safe_historical_reduction, live_prompt_drift_recovery_target,
-    normalize_visible_recovery_compare, operator_reconcile_step, should_refuse_disk_fallback,
-    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
+    exchange_change_is_safe_historical_reduction, first_response_heading,
+    live_prompt_drift_recovery_target, normalize_visible_recovery_compare, operator_reconcile_step,
+    should_refuse_disk_fallback, snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::{
@@ -26,10 +26,13 @@ use agent_doc_ipc_io::editor_target::{
     live_editor_delivery_has_operator_authority, target_payload_to_live_editor,
 };
 use agent_doc_ipc_protocol::{
-    FullContentIpcMode, FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision,
-    is_socket_ack_timeout_error, is_socket_status_error,
+    EditorBadStateFingerprint, FullContentIpcMode, FullContentRepairRedelivery,
+    IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, is_socket_ack_timeout_error,
+    is_socket_status_error,
 };
-use agent_doc_turn::response_replay::response_materialized_in_content;
+use agent_doc_turn::response_replay::{
+    materialize_response_in_current_exchange, response_materialized_in_content,
+};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -89,6 +92,120 @@ pub fn save_ipc_snapshot_and_crdt_nonfatal(
     if let Some(message) = success_message {
         eprintln!("{message}");
     }
+    true
+}
+
+/// #ipcfullprompt-recur2 — default-on forensic capture for live editor
+/// full-prompt corruption candidates.
+pub fn log_ipcfullprompt_corruption_if_any(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    candidate: &str,
+) {
+    let mut findings =
+        agent_doc_document_realtime::ipc_corruption::detect_duplicated_scaffold(candidate);
+    if let Some(base) = baseline {
+        findings.extend(
+            agent_doc_document_realtime::ipc_corruption::detect_response_block_corruption(
+                base, candidate,
+            ),
+        );
+    }
+    if findings.is_empty() {
+        return;
+    }
+    let base = baseline.unwrap_or("");
+    let summary = agent_doc_document_realtime::ipc_corruption::summarize_findings(&findings);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipcfullprompt_corruption_suspected file={} source={} patch_id={} candidate_len={} candidate_hash={} baseline_len={} baseline_hash={} {}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            candidate.len(),
+            agent_doc_hash::content_hash(candidate),
+            base.len(),
+            agent_doc_hash::content_hash(base),
+            summary,
+        ),
+    );
+    let _ = agent_doc_ipc_forensics_io::preserve_ipcfullprompt_forensic(
+        file, patch_id, base, candidate,
+    );
+}
+
+pub fn materialize_missing_response_for_socket_ack_drift(
+    file: &Path,
+    patch_id: Option<&str>,
+    content_ours: Option<&str>,
+    expected_response: &str,
+    drift_fired: bool,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    if !drift_fired || decision.snap_source != IpcSnapshotSource::AckContentSidecar {
+        return false;
+    }
+    if matches!(
+        decision.disk_repair_reason,
+        Some(IpcDiskRepairReason::LivePromptDrift)
+    ) {
+        return false;
+    }
+    let response =
+        agent_doc_template::response_materialization::response_materialization_probe_from_response(
+            expected_response,
+        );
+    if response.trim().is_empty()
+        || response_materialized_in_content(&response, &decision.snapshot_content)
+    {
+        return false;
+    }
+    let Some(ours) = content_ours else {
+        return false;
+    };
+    if !response_materialized_in_content(&response, ours) {
+        return false;
+    }
+    if first_response_heading(&response).is_some_and(|heading| {
+        decision
+            .snapshot_content
+            .lines()
+            .any(|line| line.trim() == heading)
+    }) {
+        return false;
+    }
+    let Some(repaired) =
+        materialize_response_in_current_exchange(&decision.snapshot_content, &response)
+    else {
+        return false;
+    };
+    if repaired == decision.snapshot_content
+        || !response_materialized_in_content(&response, &repaired)
+    {
+        return false;
+    }
+
+    let pre_materialize = decision.snapshot_content.clone();
+    decision.snapshot_content = repaired;
+    decision.disk_repair_reason = Some(IpcDiskRepairReason::LivePromptDrift);
+    if decision.editor_bad_state.is_none() {
+        decision.editor_bad_state = Some(EditorBadStateFingerprint::new(pre_materialize));
+    }
+    decision.redeliver_editor = true;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_socket_ack_drift_missing_response_materialized file={} patch_id={} repaired_len={} repaired_hash={} response_sha256={}",
+            file.display(),
+            patch_id.unwrap_or("-"),
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            agent_doc_hash::content_hash(&response),
+        ),
+    );
     true
 }
 

@@ -1656,7 +1656,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     .map(|canonical| {
                         let project_root =
                             agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-                        crate::write::editor_ipc_write_wedged(&project_root, &canonical)
+                        agent_doc_write_converge_io::editor_ipc_write_wedged(
+                            &project_root,
+                            &canonical,
+                        )
                     })
                     .unwrap_or(false);
                 let recycle_action = supervisor_recycle_action(

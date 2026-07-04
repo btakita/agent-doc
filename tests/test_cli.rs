@@ -9694,7 +9694,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 62,
+        ledger_rows.len() >= 63,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10147,6 +10147,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/converge.rs",
             "agent-doc-write-converge-io/src/lib.rs",
             "Split live-prompt drift recovery, editor convergence, and IPC fallback adapters",
+        ),
+        (
+            "Write IPC de-wedge and stale-supervisor recycle IO graph",
+            "agent-doc-orchestration/src/write/{ipc.rs,ipc/transport.rs,converge.rs}",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Split editor convergence payload construction",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -16946,9 +16952,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let route_authoritative_actor =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_actor.rs"))
             .unwrap();
-    let write_converge =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
-            .unwrap();
+    let write_converge_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
         fs_lib.contains("pub mod install_freshness;"),
         "agent-doc-fs must expose install freshness filesystem probes"
@@ -17008,7 +17013,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
                 .contains("agent_doc_supervisor_io::config::supervisor_auto_install_enabled")
             && route_authoritative_actor
                 .contains("agent_doc_supervisor_io::config::agent_change_restart_enabled")
-            && write_converge
+            && write_converge_io
                 .contains("agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled"),
         "orchestration should call file/env-backed supervisor config readers through agent-doc-supervisor-io directly"
     );
@@ -17316,8 +17321,14 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
     assert!(
-        write_ipc.contains("agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures"),
-        "write::ipc should call focused supervisor write-wedge classification directly"
+        !write_converge.contains("pub fn write_wedged_from_ipc_failures(")
+            && !write_ipc.contains("pub fn write_wedged_from_ipc_failures("),
+        "orchestration write modules must not re-own pure supervisor write-wedge classification"
+    );
+    assert!(
+        write_converge_io
+            .contains("agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures"),
+        "write convergence IO should call focused supervisor write-wedge classification directly"
     );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -21049,13 +21060,12 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "compact should call focused project-root IO instead of owning archive root fallback resolution"
     );
     let write_converge_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
         !write_converge_source.contains("agent_doc_fs::find_project_root(file)")
             && write_converge_source
                 .contains("agent_doc_project_root_io::project_root_containing(file)"),
-        "write converge should call focused project-root IO instead of owning stale-supervisor recycle root discovery"
+        "write converge IO should call focused project-root IO instead of owning stale-supervisor recycle root discovery"
     );
 
     let ipc_io_manifest =
@@ -25856,11 +25866,29 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let write_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let write_ipc_transport =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
+            .unwrap();
+    let idle_watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    let flow_closeout =
+        fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/closeout.rs")).unwrap();
     for required_snippet in [
         "pub fn guard_no_stale_snapshot_reset_drift",
         "stale_snapshot_reset_drift(snapshot_doc, current_doc)",
         "fn classify_stale_snapshot_visible_rebase",
         "fn component_change_is_turn_independent",
+        "pub fn read_ack_content_sidecar",
+        "pub fn ipc_direct_disk_degraded",
+        "pub fn record_ipc_socket_ack_timeout",
+        "pub fn clear_ipc_socket_ack_timeouts",
+        "pub fn poll_ack_content_sidecar",
+        "pub fn editor_ipc_write_wedged",
+        "pub fn stale_supervisor_write_short_circuit",
+        "pub fn schedule_stale_supervisor_pcp_recycle",
     ] {
         assert!(
             write_converge_io.contains(required_snippet),
@@ -25900,13 +25928,35 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     }
     assert!(
         !converge.contains("pub use agent_doc_write_converge_io")
-            && converge
-                .contains("agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift")
+            && converge.contains("use agent_doc_write_converge_io::{")
             && converge.contains("agent_doc_document_realtime::write_policy::{")
             && converge.contains("live_prompt_drift_recovery_target(")
             && !converge.contains("stale_snapshot_reset_drift(snapshot_doc, current_doc)")
             && !converge.contains("fn classify_stale_snapshot_visible_rebase"),
         "write/converge.rs should delegate stale-snapshot convergence IO while adapting live-prompt recovery policy"
+    );
+    for forbidden_snippet in [
+        "pub(crate) fn editor_ipc_write_wedged",
+        "pub(crate) fn schedule_stale_supervisor_pcp_recycle",
+        "pub(crate) fn stale_supervisor_write_short_circuit",
+        "pub(crate) fn record_ipc_socket_ack_timeout",
+        "pub(crate) fn ipc_direct_disk_degraded",
+        "pub(crate) const IPC_DEWEDGE_TIMEOUT_THRESHOLD",
+    ] {
+        assert!(
+            !converge.contains(forbidden_snippet) && !write_ipc.contains(forbidden_snippet),
+            "orchestration write/converge and write/ipc must not re-own write convergence sidecar IO: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        write_ipc_transport.contains("use agent_doc_write_converge_io::{")
+            && !write_ipc_transport
+                .contains("crate::write::converge::stale_supervisor_write_short_circuit")
+            && !write_source.contains("ipc_direct_disk_degraded_for_file")
+            && idle_watch.contains("agent_doc_write_converge_io::editor_ipc_write_wedged")
+            && !flow_closeout.contains("ipc_direct_disk_degraded_for_file")
+            && flow_closeout.contains("agent_doc_write_converge_io::ipc_direct_disk_degraded"),
+        "write IPC, idle-watch, and closeout callers must import write-converge IO directly instead of routing through orchestration facades"
     );
 }
 

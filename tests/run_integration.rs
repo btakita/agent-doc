@@ -257,25 +257,14 @@ fn append_doc() -> String {
     "---\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n# Session\n\n## User\n\nPlease reply\n".to_string()
 }
 
-fn read_cycle_phase(root: &Path) -> String {
-    let state_dir = root.join(".agent-doc/state/cycles");
-    let entry = fs::read_dir(&state_dir)
-        .unwrap()
-        .next()
-        .expect("expected cycle state file")
-        .unwrap();
-    let value: Value = serde_json::from_str(&fs::read_to_string(entry.path()).unwrap()).unwrap();
-    value["phase"].as_str().unwrap().to_string()
+fn read_cycle_phase(file: &Path) -> String {
+    read_cycle_state(file).phase.as_str().to_string()
 }
 
-fn read_cycle_state(root: &Path) -> Value {
-    let state_dir = root.join(".agent-doc/state/cycles");
-    let entry = fs::read_dir(&state_dir)
+fn read_cycle_state(file: &Path) -> cycle_state::CycleState {
+    cycle_state::load(file)
         .unwrap()
-        .next()
         .expect("expected cycle state file")
-        .unwrap();
-    serde_json::from_str(&fs::read_to_string(entry.path()).unwrap()).unwrap()
 }
 
 fn assert_terminal_closeout_proof(root: &Path, doc: &Path) {
@@ -393,7 +382,7 @@ fn run_template_mode_writes_inside_exchange_and_commits() {
     let head_blob = String::from_utf8_lossy(&head.stdout);
     assert!(head_blob.contains("### Re: topic — gpt-5"));
     assert!(head_blob.contains("resume: sess-123"));
-    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+    assert_eq!(read_cycle_phase(&doc), "committed");
 }
 
 #[test]
@@ -672,14 +661,9 @@ fn run_times_out_agent_child_and_marks_recoverable_preflight() {
         ))
         .stderr(predicate::str::contains("timed out after waiting 2s"));
 
-    let state = read_cycle_state(tmp.path());
-    assert_eq!(state["phase"].as_str().unwrap(), "preflight_started");
-    assert!(
-        state["last_event"]
-            .as_str()
-            .unwrap()
-            .contains("direct_invocation_timeout")
-    );
+    let state = read_cycle_state(&doc);
+    assert_eq!(state.phase.as_str(), "preflight_started");
+    assert!(state.last_event.contains("direct_invocation_timeout"));
 }
 
 #[test]
@@ -741,7 +725,7 @@ fn run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff() {
     );
     let content = fs::read_to_string(&doc).unwrap();
     assert!(!content.contains("should not run"));
-    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+    assert_eq!(read_cycle_phase(&doc), "committed");
 }
 
 #[test]
@@ -772,10 +756,9 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
     let mut saw_persisted_heartbeat = false;
     for _ in 0..50 {
         std::thread::sleep(Duration::from_millis(100));
-        if let Ok(state) = std::panic::catch_unwind(|| read_cycle_state(tmp.path()))
-            && state["last_event"]
-                .as_str()
-                .unwrap_or("")
+        if let Ok(Some(state)) = cycle_state::load(&doc)
+            && state
+                .last_event
                 .contains("run_heartbeat phase=child_agent_wait")
         {
             saw_persisted_heartbeat = true;
@@ -792,7 +775,7 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: delayed — gpt-5"));
-    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+    assert_eq!(read_cycle_phase(&doc), "committed");
 }
 
 #[test]
@@ -832,10 +815,9 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
     let mut saw_persisted_heartbeat = false;
     for _ in 0..50 {
         std::thread::sleep(Duration::from_millis(100));
-        if let Ok(state) = std::panic::catch_unwind(|| read_cycle_state(tmp.path()))
-            && state["last_event"]
-                .as_str()
-                .unwrap_or("")
+        if let Ok(Some(state)) = cycle_state::load(&doc)
+            && state
+                .last_event
                 .contains("run_heartbeat phase=child_agent_wait")
         {
             saw_persisted_heartbeat = true;
@@ -876,7 +858,7 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
             .unwrap()
             .contains("### Re: delayed — gpt-5")
     );
-    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+    assert_eq!(read_cycle_phase(&doc), "committed");
 }
 
 #[test]
@@ -1341,7 +1323,7 @@ fn orchestrate_handles_already_open_preflight_cycle_for_first_step() {
         .assert()
         .success();
 
-    assert_eq!(read_cycle_phase(tmp.path()), "preflight_started");
+    assert_eq!(read_cycle_phase(&doc), "preflight_started");
 
     let script = write_mock_agent(
         tmp.path(),
@@ -1368,7 +1350,7 @@ fn orchestrate_handles_already_open_preflight_cycle_for_first_step() {
         "❯ do #opcc. update spec + tests. build + install for local testing. commit + push"
     ));
     assert!(content.contains("### Re: orchestrate step — gpt-5"));
-    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+    assert_eq!(read_cycle_phase(&doc), "committed");
 }
 
 #[test]
@@ -1480,7 +1462,7 @@ fn orchestrate_accepts_clean_plain_template_response() {
         1,
         "plain orchestrate closeout should be synthesized once into exchange"
     );
-    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+    assert_eq!(read_cycle_phase(&doc), "committed");
 }
 
 #[test]
@@ -1544,7 +1526,7 @@ fn run_append_mode_keeps_inline_response_shape() {
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("## Assistant\n\nAppend answer."));
     assert!(content.contains("resume: sess-123"));
-    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+    assert_eq!(read_cycle_phase(&doc), "committed");
 }
 
 #[test]
@@ -1576,7 +1558,7 @@ fn interrupted_run_leaves_write_applied_and_preflight_finishes_commit() {
         content_after_abort.contains("### Re: interrupted closeout — gpt-5"),
         "response should already be in the document after the simulated abort"
     );
-    assert_eq!(read_cycle_phase(tmp.path()), "write_applied");
+    assert_eq!(read_cycle_phase(&doc), "write_applied");
 
     agent_doc()
         .current_dir(tmp.path())
@@ -1593,7 +1575,7 @@ fn interrupted_run_leaves_write_applied_and_preflight_finishes_commit() {
         1,
         "preflight recovery should finish the pending commit without duplicating the response"
     );
-    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+    assert_eq!(read_cycle_phase(&doc), "committed");
 
     let head = ProcessCommand::new("git")
         .current_dir(tmp.path())

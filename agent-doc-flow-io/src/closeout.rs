@@ -27,8 +27,6 @@ pub trait CloseoutEffects {
 
     fn cancel_preflight_cycle(&self, file: &Path) -> Result<()>;
 
-    fn ipc_direct_disk_degraded_for_file(&self, project_root: &Path, file: &Path) -> Result<bool>;
-
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool>;
 
     fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>>;
@@ -810,16 +808,14 @@ fn closeout_queue_only_drift_evidence(
 fn closeout_editor_ipc_evidence(
     file: &Path,
     visible: &str,
-    effects: &dyn CloseoutEffects,
+    _effects: &dyn CloseoutEffects,
 ) -> CloseoutEditorIpcEvidence {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let file_key = canonical.to_string_lossy().to_string();
     let live_buffers = agent_doc_debounce::live_buffer_snapshots(&file_key);
     let socket_degraded = agent_doc_project_root_io::project_root_containing(&canonical)
         .and_then(|root| {
-            effects
-                .ipc_direct_disk_degraded_for_file(&root, &canonical)
-                .ok()
+            agent_doc_write_converge_io::ipc_direct_disk_degraded(&root, &canonical).ok()
         })
         .unwrap_or(false);
     if let Some(diverged) =

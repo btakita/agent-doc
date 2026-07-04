@@ -9,8 +9,374 @@ use agent_doc_document_realtime::write_policy::{
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_turn::response_replay::response_materialized_in_content;
-use anyhow::Result;
-use std::path::Path;
+use anyhow::{Context, Result};
+use std::path::{Path, PathBuf};
+
+/// Read the ack-content sidecar file written by the plugin after apply.
+/// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).
+/// Deletes the sidecar on success. Returns None if no sidecar present (old plugin).
+pub fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Option<String>> {
+    let sidecar = project_root
+        .join(".agent-doc/ack-content")
+        .join(format!("{patch_id}.md"));
+    if !sidecar.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&sidecar)
+        .with_context(|| format!("failed to read ack-content sidecar {sidecar:?}"))?;
+    let _ = std::fs::remove_file(&sidecar);
+    Ok(Some(content))
+}
+
+pub fn cleanup_legacy_ipc_degraded(project_root: &Path) {
+    let marker = project_root.join(".agent-doc/ipc-degraded");
+    if marker.is_file()
+        && let Err(e) = std::fs::remove_file(&marker)
+    {
+        eprintln!(
+            "[write] WARNING: failed to remove legacy IPC degraded marker {}: {}",
+            marker.display(),
+            e
+        );
+    }
+}
+
+pub const IPC_DEWEDGE_TIMEOUT_THRESHOLD: u64 = 2;
+
+pub fn ipc_dewedge_marker_path(project_root: &Path, file: &Path) -> Result<PathBuf> {
+    let hash = agent_doc_fs::document_state_hash(file)?;
+    Ok(project_root
+        .join(".agent-doc/ipc-degraded")
+        .join(format!("{hash}.json")))
+}
+
+pub fn ipc_dewedge_marker_for_current_session(
+    project_root: &Path,
+    file: &Path,
+) -> Result<Option<serde_json::Value>> {
+    let marker = ipc_dewedge_marker_path(project_root, file)?;
+    if !marker.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&marker)
+        .with_context(|| format!("failed to read IPC degraded marker {}", marker.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse IPC degraded marker {}", marker.display()))?;
+    let marker_session = value
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
+    let session_id =
+        agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_else(|| "-".to_string());
+    if marker_session != session_id {
+        return Ok(None);
+    }
+    Ok(Some(value))
+}
+
+pub fn ipc_direct_disk_degraded(project_root: &Path, file: &Path) -> Result<bool> {
+    let degraded = ipc_dewedge_marker_for_current_session(project_root, file)?
+        .and_then(|value| value.get("degraded").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    if !degraded {
+        return Ok(false);
+    }
+    // `#ipc-degrade-self-heal`: the degrade latch is a circuit breaker, not a
+    // permanent session verdict. It may clear only when the plugin proves it can
+    // accept AND ack a lightweight message.
+    match agent_doc_ipc_io::probe_listener_ack(project_root, ipc_dewedge_probe_timeout()) {
+        Ok(true) => {
+            remove_ipc_dewedge_marker(project_root, file, "listener_ack_recovered")?;
+            return Ok(false);
+        }
+        Ok(false) => {}
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_socket_degraded_self_heal_probe_failed file={} reason={}",
+                    file.display(),
+                    err.to_string().replace(char::is_whitespace, "_")
+                ),
+            );
+        }
+    }
+    Ok(true)
+}
+
+fn ipc_dewedge_probe_timeout() -> std::time::Duration {
+    if cfg!(test) {
+        std::time::Duration::from_millis(250)
+    } else {
+        std::time::Duration::from_millis(750)
+    }
+}
+
+pub fn log_ipc_dewedge_direct_disk_skip(file: &Path, transport: &str) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_listener_degraded_direct_disk file={} transport={} reason=repeated_ack_timeout",
+            file.display(),
+            transport
+        ),
+    );
+}
+
+/// `#ipc-degraded-prefers-file-ipc`: a latched-degraded socket means only the
+/// plugin's *socket* listener is wedged. The file-IPC patch queue uses a
+/// separate plugin file watcher that is very likely still alive, so a degraded
+/// write routes through it (the plugin applies via the Document API) instead of
+/// a raw disk write that manufactures an IDEA "File Cache Conflict". If file IPC
+/// also fails to prove delivery, the write fails closed for retry.
+pub fn log_ipc_dewedge_prefer_file_ipc(file: &Path, transport: &str) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_socket_degraded_prefer_file_ipc file={} transport={} reason=repeated_ack_timeout disk_write=disabled",
+            file.display(),
+            transport
+        ),
+    );
+}
+
+pub fn record_ipc_socket_ack_timeout(
+    project_root: &Path,
+    file: &Path,
+    patch_id: Option<&str>,
+    transport: &str,
+) -> Result<bool> {
+    cleanup_legacy_ipc_degraded(project_root);
+    let marker = ipc_dewedge_marker_path(project_root, file)?;
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create IPC degraded marker directory {}",
+                parent.display()
+            )
+        })?;
+    }
+    let prior = ipc_dewedge_marker_for_current_session(project_root, file)?;
+    let prior_timeouts = prior
+        .as_ref()
+        .and_then(|value| value.get("consecutive_timeouts").and_then(|v| v.as_u64()))
+        .unwrap_or(0);
+    let consecutive_timeouts = prior_timeouts.saturating_add(1);
+    let degraded = agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures(
+        consecutive_timeouts,
+        true,
+        IPC_DEWEDGE_TIMEOUT_THRESHOLD,
+    );
+    let value = serde_json::json!({
+        "session_id": agent_doc_frontmatter_io::session::read_session_id(file)
+            .unwrap_or_else(|| "-".to_string()),
+        "consecutive_timeouts": consecutive_timeouts,
+        "degraded": degraded,
+        "last_patch_id": patch_id.unwrap_or("-"),
+        "last_transport": transport,
+    });
+    atomic_write(&marker, &serde_json::to_string_pretty(&value)?)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_socket_ack_timeout_recorded file={} transport={} patch_id={} consecutive_timeouts={} degraded={}",
+            file.display(),
+            transport,
+            patch_id.unwrap_or("-"),
+            consecutive_timeouts,
+            degraded
+        ),
+    );
+    Ok(degraded)
+}
+
+pub fn remove_ipc_dewedge_marker(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
+    let marker = ipc_dewedge_marker_path(project_root, file)?;
+    if marker.exists() {
+        std::fs::remove_file(&marker).with_context(|| {
+            format!("failed to remove IPC degraded marker {}", marker.display())
+        })?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_socket_ack_timeouts_cleared file={} reason={}",
+                file.display(),
+                reason
+            ),
+        );
+    }
+    Ok(())
+}
+
+pub fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
+    let Some(value) = ipc_dewedge_marker_for_current_session(project_root, file)? else {
+        return Ok(());
+    };
+    // A routine successful write clears accrued timeout votes, but it must NOT
+    // clear a *degraded* latch on its own. The degraded latch is cleared only by
+    // a proven-live listener re-probe (`#ipc-degrade-self-heal`).
+    if value
+        .get("degraded")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    remove_ipc_dewedge_marker(project_root, file, reason)
+}
+
+/// Poll for the ack-content sidecar with timeout.
+pub fn poll_ack_content_sidecar(
+    project_root: &Path,
+    patch_id: &str,
+    timeout: std::time::Duration,
+    poll_interval: std::time::Duration,
+) -> Result<Option<String>> {
+    let start = std::time::Instant::now();
+    loop {
+        match read_ack_content_sidecar(project_root, patch_id)? {
+            Some(content) => return Ok(Some(content)),
+            None if start.elapsed() >= timeout => return Ok(None),
+            None => std::thread::sleep(poll_interval),
+        }
+    }
+}
+
+/// `#supselfheal` Phase 2 — read the persisted editor-IPC wedge fact for `file`
+/// so the route-owned supervisor idle watch can feed `write_wedged` into
+/// `supervisor_recycle_action`. Best effort: a missing/unreadable marker is
+/// "not wedged".
+pub fn editor_ipc_write_wedged(project_root: &Path, file: &Path) -> bool {
+    ipc_dewedge_marker_for_current_session(project_root, file)
+        .ok()
+        .flatten()
+        .and_then(|value| value.get("degraded").and_then(|v| v.as_bool()))
+        .unwrap_or(false)
+}
+
+/// `#supselfheal` Phase 2 — log that a wedged editor-IPC write is now requesting
+/// a supervisor recycle through the policy owner.
+pub fn log_write_wedge_requests_supervisor_recycle(file: &Path, source: &str) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "write_wedged_supervisor_recycle_requested file={} source={} action=request_recycle_through_owner reason=repeated_ack_timeout_active_listener",
+            file.display(),
+            source
+        ),
+    );
+}
+
+/// `#turnsaferecycle` Goal 2 — pure: given stale-supervisor evidence at a proven
+/// IPC drift, does the workflow kernel say to schedule an immediate forced PCP
+/// recycle (`RecycleNow`) rather than only surface advisory guidance?
+pub fn stale_ipc_drift_forces_pcp_recycle(stale: bool, auto_recycle: bool) -> bool {
+    matches!(
+        agent_doc_workflow::decide_stale_supervisor(agent_doc_workflow::StaleSupervisorEvidence {
+            stale,
+            auto_recycle,
+            turn_boundary: true,
+            queue_head_pending: true,
+        })
+        .decision,
+        agent_doc_workflow::WorkflowDecision::Supervisor(
+            agent_doc_workflow::SupervisorWorkflowDecision::RecycleNow
+        )
+    )
+}
+
+/// `#turnsaferecycle` Goal 2 — schedule a forced PCP recycle for a proven stale
+/// supervisor IPC drift. Fail-open: missing root, fresh supervisor, opted-out
+/// auto-recycle, or scheduling failure leaves existing retry/advisory behavior.
+pub fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> bool {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return false;
+    };
+    if agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file).is_none()
+    {
+        return false;
+    }
+    let auto_recycle = agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(file);
+    if !stale_ipc_drift_forces_pcp_recycle(true, auto_recycle) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "stale_supervisor_ipc_drift_surfaced file={} source={} action=advisory_only reason=auto_recycle_opted_out",
+                file.display(),
+                source
+            ),
+        );
+        return false;
+    }
+    match agent_doc_controller_io::project_controller::recycle_controller_force(&project_root, true)
+    {
+        Ok(scheduled) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "stale_supervisor_ipc_drift_forced_recycle file={} source={} scheduled={} action=recycle_controller_force reason=stale_supervisor_ipc",
+                    file.display(),
+                    source,
+                    scheduled
+                ),
+            );
+            eprintln!(
+                "[write] stale-supervisor IPC drift for {} ({source}); scheduling an immediate forced PCP recycle instead of thrashing the doomed write",
+                file.display()
+            );
+            scheduled
+        }
+        Err(err) => {
+            eprintln!(
+                "[write] warning: failed to schedule forced PCP recycle on stale-supervisor IPC drift for {}: {err:#}",
+                file.display()
+            );
+            false
+        }
+    }
+}
+
+/// `#turnsaferecycle` Goal 3 — the shared stale-supervisor write-entry
+/// short-circuit for IPC write entry points.
+pub fn stale_supervisor_write_short_circuit(
+    file: &Path,
+    source: &str,
+) -> Option<agent_doc_flow::outcome::UserFacingOutcome> {
+    let base = file
+        .canonicalize()
+        .ok()
+        .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))?;
+    if !agent_doc_turn_status_io::supervisor_stale(&base) {
+        return None;
+    }
+    schedule_stale_supervisor_pcp_recycle(file, source);
+    if let Err(err) = agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
+        file,
+        agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT,
+    ) {
+        eprintln!(
+            "[write] warning: failed to mark supervisor recycle-request for {}: {err:#}",
+            file.display()
+        );
+    }
+    let binary = agent_doc_flow::outcome::supervisor_stale_self_recycled_outcome();
+    let ui = agent_doc_flow::outcome::deferred_for_recycle_outcome();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "stale_supervisor_write_short_circuit file={} source={} {} {}",
+            file.display(),
+            source,
+            binary.log_fields(),
+            ui.log_fields()
+        ),
+    );
+    eprintln!(
+        "[write] stale supervisor hosting {} ({source}); deferring the IPC write for a recycle instead of thrashing the doomed buffer (deferred_for_recycle)",
+        file.display()
+    );
+    Some(ui)
+}
 
 pub fn guard_no_stale_snapshot_reset_drift(
     file: &Path,
@@ -225,11 +591,143 @@ fn component_change_is_turn_independent(
     })
 }
 
+fn atomic_write(path: &Path, content: &str) -> Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, content)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn ipc_ack_timeouts_degrade_current_session_to_file_ipc_retry() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: test-session\n---\n\ncontent").unwrap();
+
+        assert!(
+            !record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap(),
+            "first timeout should only record health state"
+        );
+        assert!(
+            record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap(),
+            "second consecutive timeout should mark the listener degraded"
+        );
+        assert!(
+            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "current session should now bypass IPC"
+        );
+
+        fs::write(&doc, "---\nsession: next-session\n---\n\ncontent").unwrap();
+        assert!(
+            !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "a new session id must not inherit the old session's degraded marker"
+        );
+    }
+
+    #[test]
+    fn degraded_latch_self_heals_when_listener_recovers() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: heal-session\n---\n\ncontent").unwrap();
+
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+        assert!(
+            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "two timeouts with no live listener should stay degraded"
+        );
+
+        let root_clone = dir.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            let _ = agent_doc_ipc_io::start_listener(&root_clone, |_msg| {
+                Some(r#"{"type":"ack","id":"x"}"#.to_string())
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        assert!(
+            !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
+            "a recovered live listener must self-heal the degrade latch"
+        );
+        let marker = ipc_dewedge_marker_path(dir.path(), &doc).unwrap();
+        assert!(
+            !marker.exists(),
+            "self-heal must remove the degraded marker"
+        );
+
+        let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(dir.path()));
+        drop(server);
+    }
+
+    #[test]
+    fn stale_supervisor_write_short_circuit_passes_through_when_fresh() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        assert!(stale_supervisor_write_short_circuit(&file, "unit_test").is_none());
+    }
+
+    #[test]
+    fn stale_supervisor_write_short_circuit_defers_when_marker_present() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let base = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+        agent_doc_turn_status_io::set_supervisor_stale_marker(&base, true).unwrap();
+
+        let outcome = stale_supervisor_write_short_circuit(&file, "unit_test")
+            .expect("stale marker must short-circuit the write");
+        assert_eq!(
+            outcome.outcome,
+            agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForRecycle
+        );
+
+        agent_doc_turn_status_io::set_supervisor_stale_marker(&base, false).unwrap();
+    }
+
+    #[test]
+    fn stale_ipc_drift_forces_pcp_recycle_only_when_stale_and_auto_recycle_on() {
+        assert!(
+            stale_ipc_drift_forces_pcp_recycle(true, true),
+            "stale + auto-recycle must force RecycleNow"
+        );
+        assert!(
+            !stale_ipc_drift_forces_pcp_recycle(true, false),
+            "auto-recycle opted out must stay advisory"
+        );
+        assert!(
+            !stale_ipc_drift_forces_pcp_recycle(false, true),
+            "a fresh supervisor is never a recycle candidate"
+        );
+    }
+
+    #[test]
+    fn editor_ipc_write_wedged_reads_latched_degraded_marker() {
+        let dir = TempDir::new().unwrap();
+        let project_root = dir.path();
+        let file = project_root.join("plan.md");
+        fs::write(&file, "# plan\n").unwrap();
+        assert!(!editor_ipc_write_wedged(project_root, &file));
+        for _ in 0..IPC_DEWEDGE_TIMEOUT_THRESHOLD {
+            record_ipc_socket_ack_timeout(project_root, &file, Some("p1"), "finalize").unwrap();
+        }
+        assert!(
+            editor_ipc_write_wedged(project_root, &file),
+            "a latched degraded marker should read as a write wedge"
+        );
+    }
 
     #[test]
     fn stale_snapshot_reset_drift_blocks_large_snapshot_only_content() {

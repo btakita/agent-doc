@@ -1778,7 +1778,8 @@ fn ipc_response_materialized_or_fallback(
         response,
         content,
         |file, source| {
-            let _ = converge::schedule_stale_supervisor_pcp_recycle(file, source);
+            let _ =
+                agent_doc_write_converge_io::schedule_stale_supervisor_pcp_recycle(file, source);
         },
     )
 }
@@ -1799,7 +1800,8 @@ fn log_ipc_proof_failure(
         recovery,
         detail,
         |file, source| {
-            let _ = converge::schedule_stale_supervisor_pcp_recycle(file, source);
+            let _ =
+                agent_doc_write_converge_io::schedule_stale_supervisor_pcp_recycle(file, source);
         },
     );
 }
@@ -1810,10 +1812,6 @@ fn log_partial_response_materialization_for_retry(
     response: &str,
 ) -> Result<()> {
     agent_doc_template_io::log_partial_response_materialization_for_retry(file, source, response)
-}
-
-pub(crate) fn ipc_direct_disk_degraded_for_file(project_root: &Path, file: &Path) -> Result<bool> {
-    ipc::ipc_direct_disk_degraded(project_root, file)
 }
 
 pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) -> String {

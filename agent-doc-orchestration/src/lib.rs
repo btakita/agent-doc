@@ -182,14 +182,6 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffec
         crate::repair::cancel_preflight_cycle(file).map(|_| ())
     }
 
-    fn ipc_direct_disk_degraded_for_file(
-        &self,
-        project_root: &std::path::Path,
-        file: &std::path::Path,
-    ) -> anyhow::Result<bool> {
-        crate::write::ipc_direct_disk_degraded_for_file(project_root, file)
-    }
-
     fn detect_jb_cache_conflict_cancel_recoverable(
         &self,
         file: &std::path::Path,

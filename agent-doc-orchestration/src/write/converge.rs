@@ -14,6 +14,11 @@ use agent_doc_document_realtime::write_policy::{
 };
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};
+use agent_doc_write_converge_io::{
+    cleanup_legacy_ipc_degraded, clear_ipc_socket_ack_timeouts, ipc_direct_disk_degraded,
+    log_ipc_dewedge_prefer_file_ipc, log_write_wedge_requests_supervisor_recycle,
+    poll_ack_content_sidecar, record_ipc_socket_ack_timeout, schedule_stale_supervisor_pcp_recycle,
+};
 use std::collections::HashSet;
 
 /// `#exch-intermix`: auto-recover the `live_prompt_drift_after_preflight`
@@ -192,175 +197,6 @@ pub(crate) fn log_live_prompt_drift_auto_recovered(
             transport
         ),
     );
-}
-
-/// `#supselfheal` Phase 2 — read the persisted editor-IPC wedge fact for `file` so
-/// the route-owned supervisor idle watch can feed `write_wedged` into
-/// `supervisor_recycle_action`. Returns `true` once the de-wedge circuit breaker
-/// has latched `degraded` for the current session (the converge closeout path's
-/// repeated refusals against a nominally-active listener). This is the wedge → owner
-/// "request a recycle" channel: the converge process persists the latch, the
-/// supervisor reads it here and combines it with its own staleness probe. The
-/// converge side self-heals the marker the moment the socket recovers
-/// (`ipc_direct_disk_degraded` → `listener_ack_recovered`), so a read of the raw
-/// latch is intentional — the supervisor must not run its own socket probe. Best
-/// effort: a missing/unreadable marker is "not wedged".
-pub(crate) fn editor_ipc_write_wedged(project_root: &Path, file: &Path) -> bool {
-    ipc_dewedge_marker_for_current_session(project_root, file)
-        .ok()
-        .flatten()
-        .and_then(|value| value.get("degraded").and_then(|v| v.as_bool()))
-        .unwrap_or(false)
-}
-
-/// `#supselfheal` Phase 2 — log that a wedged editor-IPC write is now requesting a
-/// supervisor recycle through the policy owner, instead of the converge path
-/// silently looping refusals. Emitted once when the de-wedge latch first trips so
-/// the wedge → recycle escalation is attributable in `ops.log`.
-pub(crate) fn log_write_wedge_requests_supervisor_recycle(file: &Path, source: &str) {
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "write_wedged_supervisor_recycle_requested file={} source={} action=request_recycle_through_owner reason=repeated_ack_timeout_active_listener",
-            file.display(),
-            source
-        ),
-    );
-}
-
-/// `#turnsaferecycle` Goal 2 — pure: given stale-supervisor evidence at a proven
-/// IPC drift, does the workflow kernel say to schedule an IMMEDIATE forced PCP
-/// recycle (`RecycleNow`) rather than only surface advisory guidance? Routes through
-/// the shared `decide_stale_supervisor` kernel so the stale-IPC path and the idle
-/// watch make the same decision. An active IPC-drift closeout is treated as a
-/// `turn_boundary` with pending work, so the only remaining gate is the operator's
-/// auto-recycle opt-out.
-pub(crate) fn stale_ipc_drift_forces_pcp_recycle(stale: bool, auto_recycle: bool) -> bool {
-    matches!(
-        agent_doc_workflow::decide_stale_supervisor(agent_doc_workflow::StaleSupervisorEvidence {
-            stale,
-            auto_recycle,
-            turn_boundary: true,
-            queue_head_pending: true,
-        })
-        .decision,
-        agent_doc_workflow::WorkflowDecision::Supervisor(
-            agent_doc_workflow::SupervisorWorkflowDecision::RecycleNow
-        )
-    )
-}
-
-/// `#turnsaferecycle` Goal 2 — when a stale-supervisor IPC drift is proven at write
-/// closeout, immediately schedule a FORCED PCP recycle (`recycle_controller_force(..,
-/// true)`) instead of only retrying the doomed buffer or emitting advisory guidance.
-/// Fail-open: a missing project root, a fresh supervisor, or an opted-out auto-recycle
-/// leaves the existing retry/advisory behavior in place. Returns `true` only when a
-/// forced recycle was scheduled.
-pub(crate) fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> bool {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
-        return false;
-    };
-    if agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file).is_none()
-    {
-        return false;
-    }
-    let auto_recycle = agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(file);
-    if !stale_ipc_drift_forces_pcp_recycle(true, auto_recycle) {
-        // Auto-recycle opted out → SurfaceStale: record advisory guidance, do not
-        // force. The existing stale-supervisor warning already surfaces the manual
-        // refresh path to the operator.
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "stale_supervisor_ipc_drift_surfaced file={} source={} action=advisory_only reason=auto_recycle_opted_out",
-                file.display(),
-                source
-            ),
-        );
-        return false;
-    }
-    match agent_doc_controller_io::project_controller::recycle_controller_force(&project_root, true)
-    {
-        Ok(scheduled) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "stale_supervisor_ipc_drift_forced_recycle file={} source={} scheduled={} action=recycle_controller_force reason=stale_supervisor_ipc",
-                    file.display(),
-                    source,
-                    scheduled
-                ),
-            );
-            eprintln!(
-                "[write] stale-supervisor IPC drift for {} ({source}); scheduling an immediate forced PCP recycle instead of thrashing the doomed write",
-                file.display()
-            );
-            scheduled
-        }
-        Err(err) => {
-            eprintln!(
-                "[write] warning: failed to schedule forced PCP recycle on stale-supervisor IPC drift for {}: {err:#}",
-                file.display()
-            );
-            false
-        }
-    }
-}
-
-/// `#turnsaferecycle` Goal 3 — the ONE shared stale-supervisor write-entry
-/// short-circuit. Both IPC write entry points (`try_ipc`, `try_ipc_full_content`)
-/// funnel through this before their proof-retry work, so every turn phase (preflight,
-/// route, stream, session-check, finalize) defers UNIFORMLY instead of each phase
-/// thrashing a doomed IPC write against a stale binary.
-///
-/// The staleness probe is the cheap on-disk marker the supervisor idle watch
-/// publishes each tick (`agent_doc_turn_status_io::supervisor_stale`), so this adds no
-/// RPC/`/proc` cost to the hot path and is absent (fresh) in unit tests. When stale it
-/// schedules the recycle (Goal 2 forced PCP recycle + Goal 1 supervisor
-/// recycle-request), records the recoverable `supervisor_freshness` binary outcome and
-/// the `deferred_for_recycle` user-facing outcome, and returns the latter. `None` means
-/// "supervisor fresh, proceed with the normal IPC write".
-pub(crate) fn stale_supervisor_write_short_circuit(
-    file: &Path,
-    source: &str,
-) -> Option<agent_doc_flow::outcome::UserFacingOutcome> {
-    let base = file
-        .canonicalize()
-        .ok()
-        .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))?;
-    if !agent_doc_turn_status_io::supervisor_stale(&base) {
-        return None;
-    }
-    // Schedule the recycle so the stale process is replaced rather than thrashed:
-    // the Goal 2 forced PCP recycle (re-gated on the authoritative staleness probe
-    // inside the helper) plus the Goal 1 route-owned supervisor recycle-request.
-    schedule_stale_supervisor_pcp_recycle(file, source);
-    if let Err(err) = agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
-        file,
-        agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT,
-    ) {
-        eprintln!(
-            "[write] warning: failed to mark supervisor recycle-request for {}: {err:#}",
-            file.display()
-        );
-    }
-    let binary = agent_doc_flow::outcome::supervisor_stale_self_recycled_outcome();
-    let ui = agent_doc_flow::outcome::deferred_for_recycle_outcome();
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "stale_supervisor_write_short_circuit file={} source={} {} {}",
-            file.display(),
-            source,
-            binary.log_fields(),
-            ui.log_fields()
-        ),
-    );
-    eprintln!(
-        "[write] stale supervisor hosting {} ({source}); deferring the IPC write for a recycle instead of thrashing the doomed buffer (deferred_for_recycle)",
-        file.display()
-    );
-    Some(ui)
 }
 
 pub(crate) fn try_editor_converge_live_prompt_drift(
@@ -1452,61 +1288,6 @@ mod core_tests {
     use std::time::Duration;
     use tempfile::TempDir;
 
-    #[test]
-    fn stale_supervisor_write_short_circuit_passes_through_when_fresh() {
-        // `#turnsaferecycle` Goal 3: with no stale-supervisor marker present (the
-        // supervisor idle watch never ran in a unit context), the shared guard is a
-        // no-op and returns None so the normal IPC write proceeds. This is what keeps
-        // every existing write test unaffected by the guard.
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let file = dir.path().join("plan.md");
-        std::fs::write(&file, "body").unwrap();
-        assert!(stale_supervisor_write_short_circuit(&file, "unit_test").is_none());
-    }
-
-    #[test]
-    fn stale_supervisor_write_short_circuit_defers_when_marker_present() {
-        // `#turnsaferecycle` Goal 3: when the idle-watch stale marker is present, the
-        // shared guard short-circuits with the `deferred_for_recycle` user-facing
-        // outcome (skip the doomed write, defer for the scheduled recycle).
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let file = dir.path().join("plan.md");
-        std::fs::write(&file, "body").unwrap();
-        let canonical = file.canonicalize().unwrap();
-        let base = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-        agent_doc_turn_status_io::set_supervisor_stale_marker(&base, true).unwrap();
-
-        let outcome = stale_supervisor_write_short_circuit(&file, "unit_test")
-            .expect("stale marker must short-circuit the write");
-        assert_eq!(
-            outcome.outcome,
-            agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForRecycle
-        );
-
-        agent_doc_turn_status_io::set_supervisor_stale_marker(&base, false).unwrap();
-    }
-
-    #[test]
-    fn stale_ipc_drift_forces_pcp_recycle_only_when_stale_and_auto_recycle_on() {
-        // `#turnsaferecycle` Goal 2: a proven stale-supervisor IPC drift with
-        // auto-recycle ON schedules an immediate forced PCP recycle (RecycleNow);
-        // opted-out auto-recycle stays advisory; a fresh supervisor never recycles.
-        assert!(
-            stale_ipc_drift_forces_pcp_recycle(true, true),
-            "stale + auto-recycle must force RecycleNow"
-        );
-        assert!(
-            !stale_ipc_drift_forces_pcp_recycle(true, false),
-            "auto-recycle opted out must stay advisory (SurfaceStale)"
-        );
-        assert!(
-            !stale_ipc_drift_forces_pcp_recycle(false, true),
-            "a fresh supervisor is never a recycle candidate"
-        );
-    }
-
     fn doc_with_queue_and_exchange(queue_body: &str, response: &str) -> String {
         format!(
             "---\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}\n<!-- /agent:queue -->\n"
@@ -1552,27 +1333,6 @@ mod core_tests {
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
         })
-    }
-
-    #[test]
-    fn editor_ipc_write_wedged_reads_latched_degraded_marker() {
-        // `#supselfheal` Phase 2: the supervisor-facing reader returns true once the
-        // de-wedge latch has persisted `degraded` for the current session, and false
-        // when there is no marker. Drive it through the real persistence path.
-        let dir = TempDir::new().unwrap();
-        let project_root = dir.path();
-        let file = project_root.join("plan.md");
-        fs::write(&file, "# plan\n").unwrap();
-        // No marker yet → not wedged.
-        assert!(!editor_ipc_write_wedged(project_root, &file));
-        // Record ack timeouts up to the latch threshold → degraded persisted.
-        for _ in 0..IPC_DEWEDGE_TIMEOUT_THRESHOLD {
-            record_ipc_socket_ack_timeout(project_root, &file, Some("p1"), "finalize").unwrap();
-        }
-        assert!(
-            editor_ipc_write_wedged(project_root, &file),
-            "a latched degraded marker should read as a write wedge"
-        );
     }
 
     #[test]

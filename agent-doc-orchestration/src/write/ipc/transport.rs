@@ -15,6 +15,11 @@ use agent_doc_ipc_protocol::{
     existing_patch_is_reposition_only, is_already_applied_ack_error_message,
     is_socket_ack_timeout_error,
 };
+use agent_doc_write_converge_io::{
+    cleanup_legacy_ipc_degraded, clear_ipc_socket_ack_timeouts, ipc_direct_disk_degraded,
+    log_ipc_dewedge_direct_disk_skip, log_ipc_dewedge_prefer_file_ipc, poll_ack_content_sidecar,
+    record_ipc_socket_ack_timeout, stale_supervisor_write_short_circuit,
+};
 
 pub fn queue_file_ipc_reposition_boundary(
     file: &Path,
@@ -148,7 +153,7 @@ pub fn try_ipc(
     // doomed IPC write, schedule the recycle, and defer uniformly (returns a
     // non-success result so the caller retains the response for the post-recycle
     // retry — never a disk write). Fresh supervisor → `None`, proceed normally.
-    if crate::write::converge::stale_supervisor_write_short_circuit(file, "try_ipc").is_some() {
+    if stale_supervisor_write_short_circuit(file, "try_ipc").is_some() {
         return Ok(IpcResult {
             success: false,
             patch_id,
@@ -1162,9 +1167,7 @@ pub(crate) fn try_ipc_full_content_with_mode(
     // as `try_ipc`): a stale hosting supervisor makes this full-content IPC write
     // doomed. Skip it, schedule the recycle, and defer uniformly (return `false` so the
     // caller's guarded fallback retains the response without a direct disk write).
-    if crate::write::converge::stale_supervisor_write_short_circuit(file, mode.source_label())
-        .is_some()
-    {
+    if stale_supervisor_write_short_circuit(file, mode.source_label()).is_some() {
         return Ok(false);
     }
     let effective_source_content = match (mode, source_content) {

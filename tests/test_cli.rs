@@ -2618,7 +2618,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
         ),
         (
             "agent-doc-orchestration/src/git.rs",
-            "agent_doc_hooks_io::fire_post_commit(file, &session_id, None)",
+            "agent_doc_hooks_io::fire_post_commit(file, session_id, None)",
         ),
         (
             "src/main.rs",
@@ -2630,7 +2630,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
         ),
         (
             "agent-doc-orchestration/src/git.rs",
-            "agent_doc_hooks_io::fire_doc_event(file, \"post_commit\")",
+            "agent_doc_hooks_io::fire_doc_event(file, event)",
         ),
         (
             "agent-doc-start-io/src/lib.rs",
@@ -10985,6 +10985,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/git.rs",
             "agent-doc-git-io/src/post_commit_cleanup.rs",
             "Split `PostCommitCleanupEffects` into lifecycle-log, flow-event, cycle-state, capture-state, queue-continuation, read, and log ports",
+        ),
+        (
+            "Git successful commit reconciliation IO graph",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-git-io/src/post_commit_cleanup.rs",
+            "Split `PostCommitCleanupEffects` into lifecycle-log, flow-event, cycle-state, capture-state, queue-journal, queue-continuation, session, hooks, read, and log ports",
         ),
         (
             "Codex hook user-prompt-submit tracking IO graph",

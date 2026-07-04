@@ -303,6 +303,10 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
         Ok(std::fs::read_to_string(file)?)
     }
 
+    fn load_snapshot(&self, file: &Path) -> Option<String> {
+        agent_doc_snapshot_io::load(file).ok().flatten()
+    }
+
     fn log_cycle(
         &self,
         file: &Path,
@@ -351,8 +355,33 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
         agent_doc_capture_io::mark_committed(file)
     }
 
-    fn reconcile_queue_continuation(&self, file: &Path, phase: &str) {
-        agent_doc_queue_io::queue_continuation::reconcile_marker(file, phase);
+    fn clear_queue_journal(&self, file: &Path) {
+        agent_doc_queue_io::queue_journal::clear(file);
+    }
+
+    fn reconcile_queue_continuation(
+        &self,
+        file: &Path,
+        phase: &str,
+    ) -> Option<agent_doc_git_io::post_commit_cleanup::QueueContinuationProof> {
+        agent_doc_queue_io::queue_continuation::reconcile_marker(file, phase).map(|continuation| {
+            agent_doc_git_io::post_commit_cleanup::QueueContinuationProof {
+                head_prompt: continuation.head_prompt,
+                head_id: continuation.head_id,
+            }
+        })
+    }
+
+    fn read_session_id(&self, file: &Path) -> String {
+        agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_default()
+    }
+
+    fn fire_post_commit(&self, file: &Path, session_id: &str) {
+        agent_doc_hooks_io::fire_post_commit(file, session_id, None);
+    }
+
+    fn fire_doc_event(&self, file: &Path, event: &str) {
+        agent_doc_hooks_io::fire_doc_event(file, event);
     }
 }
 
@@ -1134,80 +1163,11 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 &git_root,
                 &resolved,
             );
-            agent_doc_ops_log_io::log_cycle(file, "commit", None, None);
-            agent_doc_ops_log_io::log_op(file, &format!("commit_success file={}", file.display()));
-            agent_doc_flow_io::log_flow_event(
+            agent_doc_git_io::post_commit_cleanup::finalize_successful_commit(
+                &POST_COMMIT_CLEANUP_EFFECTS,
                 file,
-                agent_doc_flow::types::FlowEvent::new(
-                    agent_doc_flow::types::FlowName::Closeout,
-                    agent_doc_flow::types::FlowStage::Commit,
-                    agent_doc_flow::types::FlowOutcome::Completed,
-                )
-                .with_reason("commit_success"),
-                agent_doc_ops_log_io::log_op,
+                head_doc.as_deref(),
             );
-            let snap = agent_doc_snapshot_io::load(file).ok().flatten();
-            let file_content = std::fs::read_to_string(file).ok();
-            if let Err(e) = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-                &crate::PIPELINE_FRONTMATTER_EFFECTS,
-                file,
-                "commit_success",
-                snap.as_deref(),
-                file_content.as_deref(),
-            ) {
-                eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
-            }
-            if let Err(e) = agent_doc_capture_io::mark_committed(file) {
-                eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
-            }
-            // `#qdurcrash`: a successful commit makes the queue state durable in
-            // the snapshot, so the crash-durability journal is emptied. This
-            // bounds the journal (and thus any replay) to operator queue
-            // additions observed since the last commit — the crash window.
-            agent_doc_queue_io::queue_journal::clear(file);
-            // Reconcile the durable auto-queue continuation marker: write it when
-            // a clean closeout still owes an `agent:queue auto` continuation,
-            // clear it otherwise. Binary-owned proof that survives missing Codex
-            // hook session state. (#codex-auto-queue-stalled-final-gate)
-            if let Some(continuation) =
-                agent_doc_queue_io::queue_continuation::reconcile_marker(file, "commit")
-            {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "queue_continuation_required file={} head={}",
-                        file.display(),
-                        continuation.head_prompt.replace('\n', " ")
-                    ),
-                );
-                // #mphaseloop (multi-phase auto-loop policy): a phase routed to
-                // `agent:review` this cycle must NOT terminate the go-mode drain.
-                // When this closeout still owes a drainable continuation AND it
-                // added an open review item (a phase moved to review rather than
-                // completed or genuinely blocked), emit the proof that the drain
-                // advances to the next drainable head instead of stalling.
-                if let (Some(prior), Some(current)) = (head_doc.as_deref(), snap.as_deref())
-                    && agent_doc_queue::queue_continuation::review_phase_routed(prior, current)
-                {
-                    let next_head = continuation
-                        .head_id
-                        .as_deref()
-                        .unwrap_or(continuation.head_prompt.as_str());
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "drain_continue_after_review file={} next_head={} (#mphaseloop)",
-                            file.display(),
-                            next_head.replace('\n', " ")
-                        ),
-                    );
-                }
-            }
-            // Fire post_commit hook for cross-session coordination
-            let session_id =
-                agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_default();
-            agent_doc_hooks_io::fire_post_commit(file, &session_id, None);
-            agent_doc_hooks_io::fire_doc_event(file, "post_commit");
         }
         Ok(s) => {
             agent_doc_ops_log_io::log_op(

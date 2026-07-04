@@ -817,6 +817,7 @@ dependencies = [
  "agent-doc-git",
  "agent-doc-hash",
  "agent-doc-merge",
+ "agent-doc-queue",
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",

@@ -1,6 +1,145 @@
 use crate::PreflightWarning;
+use indexmap::IndexMap;
 use std::collections::HashSet;
 use std::path::Path;
+
+/// Collect warnings that can be evaluated before preflight mutates document or
+/// sidecar state. These are read-only checks over harness selection, live
+/// controller/supervisor freshness, and harness-specific config compatibility.
+pub fn initial_warnings(
+    file: &Path,
+    document_agent: Option<&str>,
+    active_harness: &str,
+    codex_network_access_configured: bool,
+) -> Vec<PreflightWarning> {
+    let mut warnings = Vec::new();
+    if let Some(warning) =
+        agent_doc_model_tier::harness_mismatch_warning(document_agent, active_harness)
+    {
+        warnings.push(PreflightWarning {
+            code: warning.code.to_string(),
+            message: warning.message,
+            document_agent: Some(warning.document_agent),
+            active_harness: Some(warning.active_harness),
+        });
+    }
+
+    // #fccsupwarn: read-only WARN when the live controller/supervisor hosting
+    // this document is serving a stale agent-doc binary. Fail-open: any
+    // status/stat error yields no warning and never blocks the cycle.
+    if let Some(message) =
+        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
+    {
+        warnings.push(PreflightWarning {
+            code: "supervisor_binary_stale".to_string(),
+            message,
+            document_agent: None,
+            active_harness: None,
+        });
+    }
+
+    if let Some(warning) = agent_doc_model_tier::codex_network_access_non_codex_harness_warning(
+        &file.display().to_string(),
+        document_agent,
+        active_harness,
+        codex_network_access_configured,
+    ) {
+        warnings.push(PreflightWarning {
+            code: warning.code.to_string(),
+            message: warning.message,
+            document_agent: warning.document_agent,
+            active_harness: Some(warning.active_harness),
+        });
+    }
+    warnings
+}
+
+/// Collect late preflight warnings that need the resolved document body and
+/// prompt presets after diff/preset resolution has stabilized.
+pub fn content_and_staleness_warnings(
+    file: &Path,
+    content: &str,
+    prompt_presets: &IndexMap<String, String>,
+) -> Vec<PreflightWarning> {
+    let mut warnings = Vec::new();
+    if let Some(warning) =
+        agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning(
+            &file.display().to_string(),
+            content,
+            prompt_presets,
+        )
+        .map(PreflightWarning::from)
+    {
+        warnings.push(warning);
+    }
+    if let Some(warning) = agent_doc_workflow::preflight_policy::component_attr_preflight_warning(
+        &file.display().to_string(),
+        content,
+    )
+    .map(PreflightWarning::from)
+    {
+        warnings.push(warning);
+    }
+    if let Some(warning) =
+        agent_doc_workflow::preflight_policy::preset_item_id_collision_warning(content)
+            .map(PreflightWarning::from)
+    {
+        warnings.push(warning);
+    }
+    if let Ok((git_root, _)) = agent_doc_git_io::dirs::resolve_to_git_root(file)
+        && let Some(warning) = stale_install_warning(&git_root)
+    {
+        warnings.push(warning);
+    }
+    warnings.extend(stale_plugin_warnings(file));
+    warnings
+}
+
+/// Surface semantic memory matches for likely completed work and fail-open
+/// retrieval issues as ordinary preflight warnings.
+pub fn semantic_completion_warnings(file: &Path) -> Vec<PreflightWarning> {
+    match agent_doc_memory_io::session::semantic_completion_matches(file, None, 5) {
+        Ok(matches) => matches
+            .into_iter()
+            .map(|semantic_match| PreflightWarning {
+                code: "semantic_completion_match".to_string(),
+                message: agent_doc_memory::format_semantic_completion_warning(&semantic_match),
+                document_agent: None,
+                active_harness: None,
+            })
+            .collect(),
+        Err(err) => vec![PreflightWarning {
+            code: "semantic_completion_retrieval_unavailable".to_string(),
+            message: format!("semantic completion retrieval unavailable: {err}"),
+            document_agent: None,
+            active_harness: None,
+        }],
+    }
+}
+
+/// Build the warning companion for semantic-merge acks carried from the prior
+/// cycle into this preflight output.
+pub fn semantic_merge_ack_warning(
+    semantic_merge_acks: &[agent_doc_cycle_state_io::PendingSemanticMergeAck],
+) -> Option<PreflightWarning> {
+    if semantic_merge_acks.is_empty() {
+        return None;
+    }
+    let summary = semantic_merge_acks
+        .iter()
+        .map(|ack| format!("{}:{} ({})", ack.component, ack.id, ack.reason))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(PreflightWarning {
+        code: "semantic_merge_ack_pending".to_string(),
+        message: format!(
+            "{} node-keyed semantic-merge ack(s) from the prior cycle: {summary}. The operator's concurrent edit won these node(s); acknowledge the non-applied agent change(s) in an exchange turn this cycle.",
+            semantic_merge_acks.len()
+        ),
+        document_agent: None,
+        active_harness: None,
+    })
+}
 
 /// Warn when the installed/built `agent-doc` artifacts predate the latest local
 /// source edit, so live sessions (tmux, JetBrains) do not silently run stale code

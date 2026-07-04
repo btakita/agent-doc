@@ -110,7 +110,6 @@ use agent_doc_preflight_io::layout::detect_duplicate_claims;
 use agent_doc_preflight_io::{
     GateVerifyResult, PreflightMaintenanceWriteEffects, PreflightWarning,
     layout::{check_layout, maybe_auto_repair_base_index, maybe_auto_resync_on_drift},
-    warnings::{stale_install_warning, stale_plugin_warnings},
 };
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionLevel;

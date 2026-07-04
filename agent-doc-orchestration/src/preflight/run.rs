@@ -70,49 +70,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     )?;
     let active_harness = rc.harness();
     let mut warnings = Vec::new();
-    if let Some(warning) = agent_doc_model_tier::harness_mismatch_warning(
-        initial_frontmatter.agent.as_deref(),
-        &active_harness,
-    ) {
-        eprintln!("[preflight] warning: {}", warning.message);
-        warnings.push(PreflightWarning {
-            code: warning.code.to_string(),
-            message: warning.message,
-            document_agent: Some(warning.document_agent),
-            active_harness: Some(warning.active_harness),
-        });
-    }
-    // #fccsupwarn: read-only WARN when the live controller/supervisor hosting this
-    // document is serving a STALE agent-doc binary (a newer build is installed but the
-    // long-running process hasn't been recycled). Surfaces the silent failure mode
-    // instead of leaving the operator to re-file File-Cache-Conflict dialogs. Fail-open
-    // — any status/stat error yields no warning and never blocks the cycle.
-    if let Some(message) =
-        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
-    {
-        let warning = PreflightWarning {
-            code: "supervisor_binary_stale".to_string(),
-            message,
-            document_agent: None,
-            active_harness: None,
-        };
-        eprintln!("[preflight] warning: {}", warning.message);
-        warnings.push(warning);
-    }
-
-    if let Some(warning) = agent_doc_model_tier::codex_network_access_non_codex_harness_warning(
-        &file.display().to_string(),
+    for warning in agent_doc_preflight_io::warnings::initial_warnings(
+        file,
         initial_frontmatter.agent.as_deref(),
         &active_harness,
         initial_frontmatter.codex_network_access.is_some(),
     ) {
         eprintln!("[preflight] warning: {}", warning.message);
-        warnings.push(PreflightWarning {
-            code: warning.code.to_string(),
-            message: warning.message,
-            document_agent: warning.document_agent,
-            active_harness: Some(warning.active_harness),
-        });
+        warnings.push(warning);
     }
 
     // Step 0a: Auto-GC (at most once per day).
@@ -1086,44 +1051,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     }
     let prompt_presets_requested = prompt_preset_resolution.requested;
     if let Ok(content) = std::fs::read_to_string(file) {
-        if let Some(warning) =
-            agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning(
-                &file.display().to_string(),
-                &content,
-                &frontmatter_prompt_presets,
-            )
-            .map(PreflightWarning::from)
-        {
+        for warning in agent_doc_preflight_io::warnings::content_and_staleness_warnings(
+            file,
+            &content,
+            &frontmatter_prompt_presets,
+        ) {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
         }
-        if let Some(warning) =
-            agent_doc_workflow::preflight_policy::component_attr_preflight_warning(
-                &file.display().to_string(),
-                &content,
-            )
-            .map(PreflightWarning::from)
-        {
-            eprintln!("[preflight] warning: {}", warning.message);
-            warnings.push(warning);
-        }
-        if let Some(warning) =
-            agent_doc_workflow::preflight_policy::preset_item_id_collision_warning(&content)
-                .map(PreflightWarning::from)
-        {
-            eprintln!("[preflight] warning: {}", warning.message);
-            warnings.push(warning);
-        }
-    }
-    if let Ok((git_root, _)) = agent_doc_git_io::dirs::resolve_to_git_root(file)
-        && let Some(warning) = stale_install_warning(&git_root)
-    {
-        eprintln!("[preflight] warning: {}", warning.message);
-        warnings.push(warning);
-    }
-    for warning in stale_plugin_warnings(file) {
-        eprintln!("[preflight] warning: {}", warning.message);
-        warnings.push(warning);
     }
     let backlog_capture_required = agent_doc_prompt_contract::prompt_requests_backlog_work(
         &prompt_targets,
@@ -1246,24 +1181,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             pending_callbacks.len()
         );
     }
-    match agent_doc_memory_io::session::semantic_completion_matches(file, None, 5) {
-        Ok(matches) => {
-            for semantic_match in matches {
-                warnings.push(PreflightWarning {
-                    code: "semantic_completion_match".to_string(),
-                    message: agent_doc_memory::format_semantic_completion_warning(&semantic_match),
-                    document_agent: None,
-                    active_harness: None,
-                });
-            }
-        }
-        Err(err) => warnings.push(PreflightWarning {
-            code: "semantic_completion_retrieval_unavailable".to_string(),
-            message: format!("semantic completion retrieval unavailable: {err}"),
-            document_agent: None,
-            active_harness: None,
-        }),
-    }
+    warnings.extend(agent_doc_preflight_io::warnings::semantic_completion_warnings(file));
 
     let agent_model = agent_doc_model_tier::resolve_agent_model(
         frontmatter_model.as_deref(),
@@ -1349,21 +1267,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         .flatten()
         .map(|state| state.pending_semantic_merge_acks)
         .unwrap_or_default();
-    if !semantic_merge_acks.is_empty() {
-        let summary = semantic_merge_acks
-            .iter()
-            .map(|ack| format!("{}:{} ({})", ack.component, ack.id, ack.reason))
-            .collect::<Vec<_>>()
-            .join(", ");
-        warnings.push(PreflightWarning {
-            code: "semantic_merge_ack_pending".to_string(),
-            message: format!(
-                "{} node-keyed semantic-merge ack(s) from the prior cycle: {summary}. The operator's concurrent edit won these node(s); acknowledge the non-applied agent change(s) in an exchange turn this cycle.",
-                semantic_merge_acks.len()
-            ),
-            document_agent: None,
-            active_harness: None,
-        });
+    if let Some(warning) =
+        agent_doc_preflight_io::warnings::semantic_merge_ack_warning(&semantic_merge_acks)
+    {
+        warnings.push(warning);
     }
 
     // `#wd40` / `#staleloop-recycle-restart`: a stale route-owned supervisor that

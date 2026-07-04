@@ -10658,6 +10658,18 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split stale install freshness from live editor plugin version warnings",
         ),
         (
+            "Preflight harness and content-policy warning IO graph",
+            "agent-doc-orchestration/src/preflight/run.rs",
+            "agent-doc-preflight-io/src/warnings.rs",
+            "Split model-tier/harness warnings from content-policy warnings",
+        ),
+        (
+            "Preflight semantic advisory warning graph",
+            "agent-doc-orchestration/src/preflight/run.rs",
+            "agent-doc-preflight-io/src/warnings.rs",
+            "Split semantic completion advisory retrieval from semantic merge-ack formatting",
+        ),
+        (
             "Session-check guard IO adapter batch",
             "agent-doc-orchestration/src/session_check/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs}",
             "agent-doc-session-check-io/src/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs,guard_modes.rs}",
@@ -19110,9 +19122,9 @@ fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
         "orchestration build.rs must not own editor plugin version baking after warning extraction"
     );
     assert!(
-        orchestration_preflight_run.contains("stale_install_warning(&git_root)")
-            && orchestration_preflight_run.contains("stale_plugin_warnings(file)"),
-        "preflight command should call focused stale warning adapters directly"
+        orchestration_preflight_run
+            .contains("agent_doc_preflight_io::warnings::content_and_staleness_warnings("),
+        "preflight command should reach stale warning adapters through focused warning aggregation"
     );
     for required in [
         "pub fn stale_install_warning(",
@@ -19120,6 +19132,8 @@ fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
         "pub fn plugin_version_is_older(",
         "pub fn stale_plugin_warnings(",
         "pub fn stale_plugin_warnings_from_snapshots(",
+        "stale_install_warning(&git_root)",
+        "stale_plugin_warnings(file)",
         "agent_doc_fs::install_freshness::locate_agent_doc_source_repo",
         "agent_doc_supervisor::config::classify_stale_install_artifacts",
         "agent_doc_debounce::live_buffer_snapshots",
@@ -19140,6 +19154,115 @@ fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
         assert!(
             preflight_build.contains(required),
             "agent-doc-preflight-io build.rs should own plugin version baking: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_warning_collection_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let preflight_warnings =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
+    let preflight_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+
+    assert!(
+        preflight_manifest.contains("agent-doc-model-tier =")
+            && preflight_manifest.contains("agent-doc-git-io =")
+            && preflight_manifest.contains("indexmap ="),
+        "agent-doc-preflight-io must own focused deps for warning collection"
+    );
+    for forbidden in [
+        "agent_doc_model_tier::harness_mismatch_warning(",
+        "agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)",
+        "agent_doc_model_tier::codex_network_access_non_codex_harness_warning(",
+        "agent_doc_workflow::preflight_policy::component_attr_preflight_warning(",
+        "agent_doc_workflow::preflight_policy::preset_item_id_collision_warning(",
+        "agent_doc_git_io::dirs::resolve_to_git_root(file)",
+        "stale_plugin_warnings(file)",
+    ] {
+        assert!(
+            !orchestration_preflight_run.contains(forbidden),
+            "orchestration preflight/run.rs must not own moved warning collection IO: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_preflight_run.contains("agent_doc_preflight_io::warnings::initial_warnings(")
+            && orchestration_preflight_run
+                .contains("agent_doc_preflight_io::warnings::content_and_staleness_warnings("),
+        "preflight command should call focused warning collection adapters"
+    );
+    for required in [
+        "pub fn initial_warnings(",
+        "pub fn content_and_staleness_warnings(",
+        "agent_doc_model_tier::harness_mismatch_warning",
+        "agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc",
+        "agent_doc_model_tier::codex_network_access_non_codex_harness_warning",
+        "agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning",
+        "agent_doc_workflow::preflight_policy::component_attr_preflight_warning",
+        "agent_doc_workflow::preflight_policy::preset_item_id_collision_warning",
+        "agent_doc_git_io::dirs::resolve_to_git_root",
+        "warnings.extend(stale_plugin_warnings(file))",
+    ] {
+        assert!(
+            preflight_warnings.contains(required),
+            "agent-doc-preflight-io warnings module should own warning collection IO: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_semantic_advisory_warning_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let preflight_warnings =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
+    let preflight_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+
+    assert!(
+        preflight_manifest.contains("agent-doc-memory =")
+            && preflight_manifest.contains("agent-doc-memory-io =")
+            && preflight_manifest.contains("agent-doc-cycle-state-io ="),
+        "agent-doc-preflight-io must own focused deps for semantic advisory warning collection"
+    );
+    for forbidden in [
+        "agent_doc_memory_io::session::semantic_completion_matches(file, None, 5)",
+        "agent_doc_memory::format_semantic_completion_warning",
+        "code: \"semantic_completion_match\".to_string()",
+        "code: \"semantic_completion_retrieval_unavailable\".to_string()",
+        "code: \"semantic_merge_ack_pending\".to_string()",
+        ".map(|ack| format!(\"{}:{} ({})\", ack.component, ack.id, ack.reason))",
+    ] {
+        assert!(
+            !orchestration_preflight_run.contains(forbidden),
+            "orchestration preflight/run.rs must not own moved semantic advisory warning graph: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_preflight_run
+            .contains("agent_doc_preflight_io::warnings::semantic_completion_warnings(file)")
+            && orchestration_preflight_run
+                .contains("agent_doc_preflight_io::warnings::semantic_merge_ack_warning("),
+        "preflight command should call focused semantic advisory warning adapters"
+    );
+    for required in [
+        "pub fn semantic_completion_warnings(",
+        "pub fn semantic_merge_ack_warning(",
+        "agent_doc_memory_io::session::semantic_completion_matches",
+        "agent_doc_memory::format_semantic_completion_warning",
+        "code: \"semantic_completion_match\".to_string()",
+        "code: \"semantic_completion_retrieval_unavailable\".to_string()",
+        "code: \"semantic_merge_ack_pending\".to_string()",
+    ] {
+        assert!(
+            preflight_warnings.contains(required),
+            "agent-doc-preflight-io warnings module should own semantic advisory warnings: {required}"
         );
     }
 }

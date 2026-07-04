@@ -145,10 +145,53 @@ pub struct SupervisorIpcStateSnapshot {
     pub child_pid: u32,
 }
 
+pub trait SupervisorIpcSnapshotState {
+    fn supervisor_running(&self) -> bool;
+    fn supervisor_state_label(&self) -> String;
+    fn actor_state_label(&self) -> Option<String>;
+    fn actor_session_id(&self) -> Option<String>;
+    fn actor_pane_id(&self) -> Option<String>;
+    fn actor_generation(&self) -> Option<u64>;
+    fn actor_file(&self) -> Option<String>;
+    fn restart_count(&self) -> u32;
+    fn cwd_source(&self) -> &'static str;
+    fn supervisor_pid(&self) -> u32;
+    fn supervisor_instance_id(&self) -> String;
+    fn child_pid(&self) -> u32;
+}
+
+pub fn supervisor_ipc_state_snapshot<S>(state: &S) -> SupervisorIpcStateSnapshot
+where
+    S: SupervisorIpcSnapshotState + ?Sized,
+{
+    let editor_sync = state.actor_file().map(|file| {
+        let statuses = agent_doc_debounce::editor_sync_statuses(&file);
+        let in_flight = statuses.iter().any(|status| status.in_flight);
+        serde_json::json!({
+            "file": file,
+            "in_flight": in_flight,
+            "statuses": statuses,
+        })
+    });
+    SupervisorIpcStateSnapshot {
+        running: state.supervisor_running(),
+        state: state.supervisor_state_label(),
+        actor_state: state.actor_state_label(),
+        actor_session_id: state.actor_session_id(),
+        actor_pane_id: state.actor_pane_id(),
+        actor_generation: state.actor_generation(),
+        editor_sync,
+        restart_count: state.restart_count(),
+        cwd_source: state.cwd_source(),
+        supervisor_pid: state.supervisor_pid(),
+        supervisor_instance_id: state.supervisor_instance_id(),
+        child_pid: state.child_pid(),
+    }
+}
+
 /// Effect boundary for handling supervisor IPC methods.
-pub trait SupervisorIpcHandlerState {
+pub trait SupervisorIpcHandlerState: SupervisorIpcSnapshotState {
     fn capability_dispatch_blocker(&self) -> Option<String>;
-    fn state_snapshot(&self) -> SupervisorIpcStateSnapshot;
     fn deliver_ipc_inject(&self, bytes: &str, diag_op: &str) -> Result<(), String>;
     fn mark_inject_dispatched(&self);
     fn mark_clear_dispatched(&self);
@@ -237,7 +280,7 @@ where
     }
     match method {
         IpcMethod::State => {
-            let snapshot = state.state_snapshot();
+            let snapshot = supervisor_ipc_state_snapshot(state);
             IpcResponse::ok(serde_json::json!({
                 "running": snapshot.running,
                 "state": snapshot.state,
@@ -254,7 +297,7 @@ where
             }))
         }
         IpcMethod::Pid => {
-            let snapshot = state.state_snapshot();
+            let snapshot = supervisor_ipc_state_snapshot(state);
             if snapshot.supervisor_pid > 0 {
                 IpcResponse::ok(serde_json::json!({
                     "pid": snapshot.supervisor_pid,

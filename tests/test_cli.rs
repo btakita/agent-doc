@@ -9697,7 +9697,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 59,
+        ledger_rows.len() >= 60,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10234,6 +10234,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/start/supervisor_io.rs",
             "agent-doc-supervisor-io/src/ipc.rs",
             "Split the `SupervisorIpcHandlerState` adapter",
+        ),
+        (
+            "Supervisor IPC state snapshot adapter graph",
+            "agent-doc-orchestration/src/start/supervisor_io.rs",
+            "agent-doc-supervisor-io/src/ipc.rs",
+            "Split the `SupervisorIpcSnapshotState` adapter",
         ),
         (
             "Supervisor IPC inject delivery adapter graph",
@@ -16349,6 +16355,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-crdt-io/src/lib.rs")).unwrap();
     let supervisor_crdt_io_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-crdt-io/Cargo.toml")).unwrap();
+    let supervisor_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/Cargo.toml")).unwrap();
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/supervisor/mod.rs")
@@ -16595,6 +16603,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor-io must expose supervisor IPC transport through its owning module"
     );
     assert!(
+        supervisor_io_manifest.contains("agent-doc-debounce"),
+        "agent-doc-supervisor-io must own the debounce dependency for IPC editor-sync snapshots"
+    );
+    assert!(
         !supervisor_io_lib.contains("pub mod crdt_replica;"),
         "agent-doc-supervisor-io must not own CRDT relay adapters because that creates a relay/supervisor IO cycle"
     );
@@ -16667,6 +16679,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn active_supervisor_pids(",
         "pub struct SupervisorIpc",
         "pub struct SupervisorIpcStateSnapshot",
+        "pub trait SupervisorIpcSnapshotState",
+        "pub fn supervisor_ipc_state_snapshot",
         "pub trait SupervisorIpcHandlerState",
         "pub trait SupervisorInjectDeliveryState",
         "pub fn deliver_supervisor_inject",
@@ -16682,8 +16696,15 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     assert!(
         supervisor_io_ipc.contains("ipc_method_requires_capability_gate(&method)")
+            && supervisor_io_ipc.contains("agent_doc_debounce::editor_sync_statuses(&file)")
             && !orchestration_start.contains("ipc_method_requires_capability_gate"),
-        "agent-doc-supervisor-io should own supervisor IPC command gating while start.rs keeps only concrete state/effect adapters"
+        "agent-doc-supervisor-io should own supervisor IPC command gating and state snapshot assembly while start.rs keeps only concrete state/effect adapters"
+    );
+    assert!(
+        orchestration_supervisor_io.contains(
+            "impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShared"
+        ) && !orchestration_supervisor_io.contains("agent_doc_debounce::editor_sync_statuses"),
+        "orchestration supervisor IPC adapter should expose snapshot fields without assembling editor-sync JSON"
     );
     for relative in [
         "agent-doc-controller-io/src/project_controller/rpc.rs",

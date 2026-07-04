@@ -1779,6 +1779,7 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-config",
  "agent-doc-controller",
+ "agent-doc-debounce",
  "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-harness",

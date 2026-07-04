@@ -50,54 +50,71 @@ impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorS
     }
 }
 
+impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShared {
+    fn supervisor_running(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
+    }
+
+    fn supervisor_state_label(&self) -> String {
+        let state = self.supervisor_state.lock().unwrap();
+        state.as_str().to_string()
+    }
+
+    fn actor_state_label(&self) -> Option<String> {
+        self.actor_state
+            .lock()
+            .unwrap()
+            .map(|state| state.as_str().to_string())
+    }
+
+    fn actor_session_id(&self) -> Option<String> {
+        self.actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.session_id.clone())
+    }
+
+    fn actor_pane_id(&self) -> Option<String> {
+        self.actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.pane_id.clone())
+    }
+
+    fn actor_generation(&self) -> Option<u64> {
+        self.actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.generation)
+    }
+
+    fn actor_file(&self) -> Option<String> {
+        self.actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.file.display().to_string())
+    }
+
+    fn restart_count(&self) -> u32 {
+        self.restart_count.load(Ordering::Relaxed)
+    }
+
+    fn cwd_source(&self) -> &'static str {
+        self.cwd_source
+    }
+
+    fn supervisor_pid(&self) -> u32 {
+        self.supervisor_pid
+    }
+
+    fn supervisor_instance_id(&self) -> String {
+        self.supervisor_instance_id.clone()
+    }
+
+    fn child_pid(&self) -> u32 {
+        self.child_pid.load(Ordering::Relaxed)
+    }
+}
+
 impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShared {
     fn capability_dispatch_blocker(&self) -> Option<String> {
         SupervisorShared::capability_dispatch_blocker(self)
-    }
-
-    fn state_snapshot(&self) -> agent_doc_supervisor_io::ipc::SupervisorIpcStateSnapshot {
-        let state = self.supervisor_state.lock().unwrap();
-        let actor_state = self
-            .actor_state
-            .lock()
-            .unwrap()
-            .map(|state| state.as_str().to_string());
-        let actor_session_id = self
-            .actor_runtime
-            .as_ref()
-            .map(|runtime| runtime.session_id.clone());
-        let actor_pane_id = self
-            .actor_runtime
-            .as_ref()
-            .map(|runtime| runtime.pane_id.clone());
-        let actor_generation = self
-            .actor_runtime
-            .as_ref()
-            .map(|runtime| runtime.generation);
-        let editor_sync = self.actor_runtime.as_ref().map(|runtime| {
-            let file = runtime.file.display().to_string();
-            let statuses = agent_doc_debounce::editor_sync_statuses(&file);
-            let in_flight = statuses.iter().any(|status| status.in_flight);
-            serde_json::json!({
-                "file": file,
-                "in_flight": in_flight,
-                "statuses": statuses,
-            })
-        });
-        agent_doc_supervisor_io::ipc::SupervisorIpcStateSnapshot {
-            running: self.running.load(Ordering::Relaxed),
-            state: state.as_str().to_string(),
-            actor_state,
-            actor_session_id,
-            actor_pane_id,
-            actor_generation,
-            editor_sync,
-            restart_count: self.restart_count.load(Ordering::Relaxed),
-            cwd_source: self.cwd_source,
-            supervisor_pid: self.supervisor_pid,
-            supervisor_instance_id: self.supervisor_instance_id.clone(),
-            child_pid: self.child_pid.load(Ordering::Relaxed),
-        }
     }
 
     fn deliver_ipc_inject(&self, bytes: &str, diag_op: &str) -> Result<(), String> {

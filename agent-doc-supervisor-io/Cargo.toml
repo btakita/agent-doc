@@ -12,6 +12,7 @@ name = "agent_doc_supervisor_io"
 [dependencies]
 agent-doc-config = { path = "../agent-doc-config", version = "0.34.67" }
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }

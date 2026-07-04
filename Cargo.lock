@@ -2138,6 +2138,8 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
+ "agent-doc-element-exchange",
+ "agent-doc-element-exchange-io",
  "agent-doc-flow",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",

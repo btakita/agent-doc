@@ -12,10 +12,10 @@ use agent_doc_document_realtime::write_policy::{
 };
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
+#[cfg(test)]
+use agent_doc_element_exchange::verify_sidecar_normalization;
 use agent_doc_element_exchange::{
-    duplicate_prompt_line_count, normalization_prefix_observation_counts,
-    normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
-    verify_sidecar_normalization,
+    duplicate_prompt_line_count, normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
 };
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentRepairRedelivery,
@@ -26,9 +26,9 @@ use agent_doc_template::response_materialization::{
 };
 use agent_doc_turn::response_replay::materialize_response_in_current_exchange;
 use agent_doc_write_converge_io::{
-    ack_content_disk_write_proof, mark_ack_content_live_buffer_synced_after_write,
-    poll_ack_content_sidecar, reconcile_ack_snapshot_to_newer_operator_buffer,
-    write_ack_content_through_to_disk,
+    ack_content_disk_write_proof, ipc_repair_decision_from_sidecar,
+    mark_ack_content_live_buffer_synced_after_write, poll_ack_content_sidecar,
+    reconcile_ack_snapshot_to_newer_operator_buffer, write_ack_content_through_to_disk,
 };
 #[cfg(test)]
 use agent_doc_write_converge_io::{
@@ -1267,60 +1267,6 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         ),
     );
     Ok(AlreadyAppliedSnapshotOutcome::Persisted)
-}
-
-pub(crate) fn ipc_repair_decision_from_sidecar(
-    file: &Path,
-    patch_id: Option<&str>,
-    baseline: Option<&str>,
-    snap_content: String,
-    _content_ours: Option<&str>,
-    normalize_prefix_lines: Option<&[String]>,
-) -> IpcRepairDecision {
-    if let Some(lines) = normalize_prefix_lines
-        && !lines.is_empty()
-        && !verify_sidecar_normalization(&snap_content, lines)
-    {
-        let bad_state = snap_content;
-        let normalized = normalize_exchange_prefixes_for_targets(&bad_state, lines);
-        let repaired = agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
-            &normalized,
-            file,
-            DuplicatePromptRepairOptions::new("normalization_sidecar_retry")
-                .with_before(baseline)
-                .preserving(baseline)
-                .without_residue_guard(),
-            agent_doc_ops_log_io::log_op,
-            log_duplicate_prompt_residue_guard,
-        )
-        .map(|(repaired, _)| repaired)
-        .unwrap_or(normalized);
-        let (required_prefix_count, observed_prefix_count) =
-            normalization_prefix_observation_counts(&bad_state, lines);
-        let duplicate_prompt_count = duplicate_prompt_line_count(&bad_state);
-        eprintln!(
-            "[write] sidecar normalization diverged — retrying from ACK sidecar ({} bytes)",
-            repaired.len()
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "sidecar_normalization_fallback file={} patch_id={} snap_source=ack_content_sidecar reason=prefix_divergence bad_len={} bad_hash={} fallback_len={} fallback_hash={} required_prefix_count={} observed_prefix_count={} duplicate_prompt_count={}",
-                file.display(),
-                patch_id.unwrap_or("-"),
-                bad_state.len(),
-                agent_doc_hash::content_hash(&bad_state),
-                repaired.len(),
-                agent_doc_hash::content_hash(&repaired),
-                required_prefix_count,
-                observed_prefix_count,
-                duplicate_prompt_count
-            ),
-        );
-        return IpcRepairDecision::ack_content_prefix_repair(repaired, bad_state, lines);
-    }
-
-    IpcRepairDecision::ack_content(snap_content)
 }
 
 pub(crate) fn redeliver_full_content_repair_to_editor(

@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 69,
+        ledger_rows.len() >= 70,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10191,6 +10191,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
             "Split the remaining full-content visible repair redelivery",
+        ),
+        (
+            "Write IPC sidecar repair-decision builder",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Move `repair_ipc_decision_visible_state`, full-content visible redelivery",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -25946,6 +25952,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub struct FileIpcDeliveryOptions",
         "pub fn write_file_ipc_and_poll_delivery(",
         "fn log_file_ipc_proof_failure(",
+        "pub fn ipc_repair_decision_from_sidecar(",
         "pub fn redelivery_missing_operator_text_authority(",
         "pub fn verify_normalization_repair_observed(",
         "pub fn try_ipc_normalization_repair_patch(",
@@ -26011,6 +26018,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub(crate) fn record_ipc_socket_ack_timeout",
         "pub(crate) fn ipc_direct_disk_degraded",
         "pub(crate) const IPC_DEWEDGE_TIMEOUT_THRESHOLD",
+        "pub(crate) fn ipc_repair_decision_from_sidecar(",
         "fn redelivery_missing_operator_text_authority(",
         "pub(crate) fn verify_normalization_repair_observed(",
         "pub(crate) fn try_ipc_normalization_repair_patch(",

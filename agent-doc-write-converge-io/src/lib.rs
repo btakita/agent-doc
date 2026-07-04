@@ -17,6 +17,11 @@ use agent_doc_document_realtime::write_policy::{
     snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use agent_doc_element::element::is_backlog_component;
+use agent_doc_element_exchange::{
+    duplicate_prompt_line_count, normalization_prefix_observation_counts,
+    normalize_exchange_prefixes_for_targets, verify_sidecar_normalization,
+};
+use agent_doc_element_exchange_io::DuplicatePromptRepairOptions;
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{
     IpcRepairDecision, is_socket_ack_timeout_error, is_socket_status_error,
@@ -1190,6 +1195,60 @@ fn content_matches_recent_committed_blob(file: &Path, content: &str, limit: usiz
         }
     }
     false
+}
+
+pub fn ipc_repair_decision_from_sidecar(
+    file: &Path,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    snap_content: String,
+    _content_ours: Option<&str>,
+    normalize_prefix_lines: Option<&[String]>,
+) -> IpcRepairDecision {
+    if let Some(lines) = normalize_prefix_lines
+        && !lines.is_empty()
+        && !verify_sidecar_normalization(&snap_content, lines)
+    {
+        let bad_state = snap_content;
+        let normalized = normalize_exchange_prefixes_for_targets(&bad_state, lines);
+        let repaired = agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+            &normalized,
+            file,
+            DuplicatePromptRepairOptions::new("normalization_sidecar_retry")
+                .with_before(baseline)
+                .preserving(baseline)
+                .without_residue_guard(),
+            agent_doc_ops_log_io::log_op,
+            |_| {},
+        )
+        .map(|(repaired, _)| repaired)
+        .unwrap_or(normalized);
+        let (required_prefix_count, observed_prefix_count) =
+            normalization_prefix_observation_counts(&bad_state, lines);
+        let duplicate_prompt_count = duplicate_prompt_line_count(&bad_state);
+        eprintln!(
+            "[write] sidecar normalization diverged — retrying from ACK sidecar ({} bytes)",
+            repaired.len()
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "sidecar_normalization_fallback file={} patch_id={} snap_source=ack_content_sidecar reason=prefix_divergence bad_len={} bad_hash={} fallback_len={} fallback_hash={} required_prefix_count={} observed_prefix_count={} duplicate_prompt_count={}",
+                file.display(),
+                patch_id.unwrap_or("-"),
+                bad_state.len(),
+                agent_doc_hash::content_hash(&bad_state),
+                repaired.len(),
+                agent_doc_hash::content_hash(&repaired),
+                required_prefix_count,
+                observed_prefix_count,
+                duplicate_prompt_count
+            ),
+        );
+        return IpcRepairDecision::ack_content_prefix_repair(repaired, bad_state, lines);
+    }
+
+    IpcRepairDecision::ack_content(snap_content)
 }
 
 pub fn redelivery_missing_operator_text_authority(

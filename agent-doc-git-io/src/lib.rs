@@ -6,6 +6,7 @@ pub mod branch;
 pub mod capture_materialization_guard;
 pub mod checkpoint;
 pub mod commit;
+pub mod commit_result_reporting;
 pub mod dirs;
 pub mod guard_marker_cleanup;
 pub mod index;

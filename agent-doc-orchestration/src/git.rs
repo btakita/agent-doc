@@ -115,6 +115,11 @@ struct OrchestrationCommitPreStageRepairEffects;
 static COMMIT_PRE_STAGE_REPAIR_EFFECTS: OrchestrationCommitPreStageRepairEffects =
     OrchestrationCommitPreStageRepairEffects;
 
+struct OrchestrationCommitResultReportingEffects;
+
+static COMMIT_RESULT_REPORTING_EFFECTS: OrchestrationCommitResultReportingEffects =
+    OrchestrationCommitResultReportingEffects;
+
 struct OrchestrationCaptureMaterializationGuardEffects;
 
 static CAPTURE_MATERIALIZATION_GUARD_EFFECTS: OrchestrationCaptureMaterializationGuardEffects =
@@ -141,6 +146,14 @@ impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
         agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
     }
 
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+impl agent_doc_git_io::commit_result_reporting::CommitResultReportingEffects
+    for OrchestrationCommitResultReportingEffects
+{
     fn log_op(&self, file: &Path, message: &str) {
         agent_doc_ops_log_io::log_op(file, message);
     }
@@ -1163,52 +1176,32 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 ));
             }
             Err(CommitTransactionError::IgnoredPath { path }) => {
-                eprintln!(
-                    "[commit] skipped ignored untracked path {} (matched .gitignore); not staging",
-                    path
-                );
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "commit_skipped_ignored_path file={} rel_path={}",
-                        file.display(),
-                        path
+                break Err(
+                    agent_doc_git_io::commit_result_reporting::ignored_untracked_path_error(
+                        &COMMIT_RESULT_REPORTING_EFFECTS,
+                        file,
+                        &path,
                     ),
                 );
-                break Err(anyhow::anyhow!(
-                    "refusing to commit ignored untracked path {} (matched .gitignore)",
-                    path
-                ));
             }
             Err(CommitTransactionError::Fatal(err)) => break Err(err),
         }
     };
-    let commit_status = commit_output.as_ref().map(|o| o.status);
     let elapsed_commit = t_commit.elapsed().as_millis();
     if elapsed_commit > 0 {
         eprintln!("[perf] commit.git_commit: {}ms", elapsed_commit);
     }
 
-    // Log commit result line to stderr (suppress verbose git status output)
-    if let Ok(ref o) = commit_output {
-        let stdout = String::from_utf8_lossy(&o.stdout);
-        for line in stdout.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            // Only print the commit result line (e.g. "[main abc123] message")
-            // and skip git status output (branch info, file listings, etc.)
-            if trimmed.starts_with('[') && trimmed.contains(']') {
-                eprintln!("{}", line);
-            }
-        }
-    }
+    let commit_outcome = agent_doc_git_io::commit_result_reporting::report_commit_output(
+        &COMMIT_RESULT_REPORTING_EFFECTS,
+        file,
+        commit_output.as_ref(),
+    );
 
     // Log commit result
     let mut did_commit = false;
-    match &commit_status {
-        Ok(s) if s.success() => {
+    match commit_outcome {
+        agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Success => {
             did_commit = true;
             agent_doc_git_io::boundary_invariant::enforce_committed_single_boundary_invariant(
                 &BOUNDARY_INVARIANT_EFFECTS,
@@ -1222,22 +1215,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 head_doc.as_deref(),
             );
         }
-        Ok(s) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "commit_failed file={} exit_code={}",
-                    file.display(),
-                    s.code().unwrap_or(-1)
-                ),
-            );
-        }
-        Err(e) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!("commit_error file={} err={}", file.display(), e),
-            );
-        }
+        agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Failed
+        | agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Error => {}
     }
 
     // Post-commit housekeeping. The staged blob is already clean (commit
@@ -1245,9 +1224,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // `git hash-object`), and post-commit cleanup keeps the snapshot /
     // visible document in that same clean shape.
     let mut vcs_refresh_signaled = None;
-    if let Ok(ref s) = commit_status
-        && s.success()
-    {
+    if commit_outcome == agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Success {
         // Boundary reposition happens pre-commit now (see above) so the
         // new boundary id lands in the same commit as the response.
         // The post-commit IPC reposition signal is intentionally skipped when

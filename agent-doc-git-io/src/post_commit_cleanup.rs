@@ -3,10 +3,28 @@ use std::path::Path;
 
 use agent_doc_document::transient_markers::normalize_for_replay_hash;
 use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
+use agent_doc_git::PostCommitLocalDriftKind;
 
 pub trait PostCommitCleanupEffects {
     fn read_to_string(&self, file: &Path) -> Result<String>;
+    fn log_cycle(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    );
     fn log_op(&self, file: &Path, message: &str);
+    fn log_closeout_commit_completed(&self, file: &Path, reason: &str);
+    fn mark_pipeline_committed(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<()>;
+    fn mark_capture_committed(&self, file: &Path) -> Result<()>;
+    fn reconcile_queue_continuation(&self, file: &Path, phase: &str);
 }
 
 /// Emit a post-commit working-tree-vs-HEAD proof line without mutating disk.
@@ -63,4 +81,39 @@ pub fn should_send_post_commit_ipc_reposition(file: &Path) -> bool {
         return false;
     };
     post_commit_ipc_reposition_only_exchange_safe(&parent_doc, &head_doc)
+}
+
+pub fn finalize_already_committed_noop(
+    effects: &impl PostCommitCleanupEffects,
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    drift_kind: Option<PostCommitLocalDriftKind>,
+) {
+    effects.log_cycle(file, "commit_noop", snapshot_content, file_content);
+    let drift_kind = drift_kind
+        .map(PostCommitLocalDriftKind::as_str)
+        .unwrap_or("none");
+    effects.log_op(
+        file,
+        &format!(
+            "commit_noop file={} reason=already_current drift_kind={} basis=head",
+            file.display(),
+            drift_kind
+        ),
+    );
+    let closeout_reason = format!("already_current_{drift_kind}");
+    effects.log_closeout_commit_completed(file, &closeout_reason);
+    effects.log_op(
+        file,
+        &format!("commit_already_current file={} basis=head", file.display()),
+    );
+    if let Err(e) = effects.mark_pipeline_committed(file, event, snapshot_content, file_content) {
+        eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
+    }
+    if let Err(e) = effects.mark_capture_committed(file) {
+        eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
+    }
+    effects.reconcile_queue_continuation(file, "commit_already_current");
 }

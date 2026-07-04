@@ -303,8 +303,56 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
         Ok(std::fs::read_to_string(file)?)
     }
 
+    fn log_cycle(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) {
+        agent_doc_ops_log_io::log_cycle(file, event, snapshot_content, file_content);
+    }
+
     fn log_op(&self, file: &Path, message: &str) {
         agent_doc_ops_log_io::log_op(file, message);
+    }
+
+    fn log_closeout_commit_completed(&self, file: &Path, reason: &str) {
+        agent_doc_flow_io::log_flow_event(
+            file,
+            agent_doc_flow::types::FlowEvent::new(
+                agent_doc_flow::types::FlowName::Closeout,
+                agent_doc_flow::types::FlowStage::Commit,
+                agent_doc_flow::types::FlowOutcome::Completed,
+            )
+            .with_reason(reason),
+            agent_doc_ops_log_io::log_op,
+        );
+    }
+
+    fn mark_pipeline_committed(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<()> {
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            event,
+            snapshot_content,
+            file_content,
+        )?;
+        Ok(())
+    }
+
+    fn mark_capture_committed(&self, file: &Path) -> Result<()> {
+        agent_doc_capture_io::mark_committed(file)
+    }
+
+    fn reconcile_queue_continuation(&self, file: &Path, phase: &str) {
+        agent_doc_queue_io::queue_continuation::reconcile_marker(file, phase);
     }
 }
 
@@ -872,7 +920,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 &file_content,
             )?
             .unwrap_or((snapshot_content.clone(), file_content.clone()));
-        finalize_already_committed_noop(
+        agent_doc_git_io::post_commit_cleanup::finalize_already_committed_noop(
+            &POST_COMMIT_CLEANUP_EFFECTS,
             file,
             "commit_already_current",
             snapshot_after_noop.as_deref(),
@@ -1495,56 +1544,6 @@ fn live_buffer_insertions_are_materialized_in_file(
         }
     }
     saw_insert
-}
-
-fn finalize_already_committed_noop(
-    file: &Path,
-    event: &str,
-    snapshot_content: Option<&str>,
-    file_content: Option<&str>,
-    drift_kind: Option<PostCommitLocalDriftKind>,
-) {
-    agent_doc_ops_log_io::log_cycle(file, "commit_noop", snapshot_content, file_content);
-    let drift_kind = drift_kind
-        .map(PostCommitLocalDriftKind::as_str)
-        .unwrap_or("none");
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "commit_noop file={} reason=already_current drift_kind={} basis=head",
-            file.display(),
-            drift_kind
-        ),
-    );
-    agent_doc_flow_io::log_flow_event(
-        file,
-        agent_doc_flow::types::FlowEvent::new(
-            agent_doc_flow::types::FlowName::Closeout,
-            agent_doc_flow::types::FlowStage::Commit,
-            agent_doc_flow::types::FlowOutcome::Completed,
-        )
-        .with_reason(format!("already_current_{drift_kind}")),
-        agent_doc_ops_log_io::log_op,
-    );
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!("commit_already_current file={} basis=head", file.display()),
-    );
-    if let Err(e) = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-        &crate::PIPELINE_FRONTMATTER_EFFECTS,
-        file,
-        event,
-        snapshot_content,
-        file_content,
-    ) {
-        eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
-    }
-    if let Err(e) = agent_doc_capture_io::mark_committed(file) {
-        eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
-    }
-    // Reconcile the durable auto-queue continuation marker on the
-    // already-committed closeout path too. (#codex-auto-queue-stalled-final-gate)
-    agent_doc_queue_io::queue_continuation::reconcile_marker(file, "commit_already_current");
 }
 
 fn cycle_is_terminal(file: &Path) -> bool {

@@ -10981,6 +10981,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split `PostCommitCleanupEffects` into read and log ports",
         ),
         (
+            "Git already-committed closeout finalization IO graph",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-git-io/src/post_commit_cleanup.rs",
+            "Split `PostCommitCleanupEffects` into lifecycle-log, flow-event, cycle-state, capture-state, queue-continuation, read, and log ports",
+        ),
+        (
             "Codex hook user-prompt-submit tracking IO graph",
             "agent-doc-orchestration/src/codex_hook.rs",
             "agent-doc-codex-hook-io/src/lib.rs",

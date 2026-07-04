@@ -11,12 +11,13 @@ use agent_doc_document::write_normalization::{
 use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, FullContentSourceProof, OperatorReconcileStep, WholeBufferAuthority,
     WholeBufferAuthorityFacts, WholeBufferDelivery, WholeBufferDeliveryAction,
-    classify_ack_mismatch_recovery, decide_whole_buffer_delivery,
-    dropped_prompt_lines_after_content_ours, exchange_change_is_safe_historical_reduction,
-    first_response_heading, ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
-    live_prompt_drift_recovery_target, new_agent_response_headings,
-    normalize_visible_recovery_compare, operator_reconcile_step, should_refuse_disk_fallback,
-    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
+    ack_content_contains_latest_response, classify_ack_mismatch_recovery,
+    decide_whole_buffer_delivery, dropped_prompt_lines_after_content_ours,
+    exchange_change_is_safe_historical_reduction, first_response_heading,
+    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, live_prompt_drift_recovery_target,
+    new_agent_response_headings, normalize_visible_recovery_compare, operator_reconcile_step,
+    response_converged_in_visible_target, response_target_disjoint_from_user_edit,
+    should_refuse_disk_fallback, snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::{
@@ -33,7 +34,9 @@ use agent_doc_ipc_protocol::{
     IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, is_socket_ack_timeout_error,
     is_socket_status_error,
 };
-use agent_doc_queue::queue_prompt_drift::dropped_queue_prompt_lines_after_content_ours;
+use agent_doc_queue::queue_prompt_drift::{
+    dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
+};
 use agent_doc_turn::response_replay::{
     materialize_response_in_current_exchange, response_materialized_in_content,
 };
@@ -179,6 +182,434 @@ pub fn log_ipc_snapshot_adoption_allowed(
                 .unwrap_or_else(|| "-".to_string()),
             drift_recheck,
             dup_recheck,
+        ),
+    );
+}
+
+fn stale_supervisor_content_ours_adoption_warning(file: &Path) -> Option<String> {
+    agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
+}
+
+pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    content_ours: Option<&str>,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
+        file,
+        source,
+        patch_id,
+        baseline,
+        content_ours,
+        decision,
+        stale_supervisor_content_ours_adoption_warning,
+    )
+}
+
+#[doc(hidden)]
+pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    content_ours: Option<&str>,
+    decision: &mut IpcRepairDecision,
+    stale_supervisor_warning: impl Fn(&Path) -> Option<String>,
+) -> bool {
+    if decision.snap_source == IpcSnapshotSource::ContentOurs {
+        return false;
+    }
+    let (Some(base), Some(ours)) = (baseline, content_ours) else {
+        return false;
+    };
+    if let Some(reason) = agent_doc_element::element::structural_corruption_reason(ours) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "content_ours_adoption_refused_structural file={} source={} patch_id={} reason={} content_ours_len={} content_ours_hash={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                reason,
+                ours.len(),
+                agent_doc_hash::content_hash(ours),
+            ),
+        );
+        return false;
+    }
+    if !ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+        base,
+        &decision.snapshot_content,
+        ours,
+    ) {
+        return false;
+    }
+    if let Some(stale_message) = stale_supervisor_warning(file) {
+        log_content_ours_adoption_refused_stale_supervisor(
+            file,
+            source,
+            patch_id,
+            "live_prompt_drift",
+            ours,
+            &stale_message,
+        );
+        let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
+        return false;
+    }
+
+    let prior_source = decision.snap_source.label();
+    log_flow_event(
+        file,
+        agent_doc_flow::types::FlowEvent::new(
+            agent_doc_flow::types::FlowName::DocumentMutation,
+            agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+            agent_doc_flow::types::FlowOutcome::Blocked,
+        )
+        .with_reason("live_prompt_drift_after_preflight"),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=live_prompt_drift_after_preflight candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            prior_source,
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            ours.len(),
+            agent_doc_hash::content_hash(ours)
+        ),
+    );
+    log_ipc_proof_failure_with_recycle(
+        file,
+        source,
+        patch_id,
+        "live_prompt_drift_after_preflight",
+        "visible_repair_required",
+        &format!(
+            "snap_source={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            prior_source,
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            ours.len(),
+            agent_doc_hash::content_hash(ours)
+        ),
+    );
+    let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
+
+    let candidate = decision.snapshot_content.clone();
+    let (queue_reconciled_ours, ignored_queue_deletions) =
+        preserve_content_ours_over_live_queue_deletions(base, &candidate, ours);
+    if !ignored_queue_deletions.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_live_deletion_ignored file={} source={} patch_id={} count={} reason=unproven_ipc_candidate_queue_deletion",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                ignored_queue_deletions.len()
+            ),
+        );
+    }
+
+    if let Some(sm) = try_semantic_merge_convergence(base, &candidate, &queue_reconciled_ours) {
+        let merged_doc = sm.merged_doc.clone();
+        let outcome_count = sm.outcomes.len();
+        let ack_count = sm.requires_ack.len();
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "live_prompt_drift_semantic_merged file={} source={} patch_id={} base_len={} base_hash={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={} merged_len={} merged_hash={} outcomes={} acks={} reason=node_keyed_semantic_merge",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                base.len(),
+                agent_doc_hash::content_hash(base),
+                candidate.len(),
+                agent_doc_hash::content_hash(&candidate),
+                queue_reconciled_ours.len(),
+                agent_doc_hash::content_hash(&queue_reconciled_ours),
+                merged_doc.len(),
+                agent_doc_hash::content_hash(&merged_doc),
+                outcome_count,
+                ack_count,
+            ),
+        );
+        if ack_count > 0 {
+            let reasons: Vec<String> = sm
+                .requires_ack
+                .iter()
+                .map(|ack| format!("{}:{}:{}", ack.component, ack.id, ack.reason.token()))
+                .collect();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "semantic_merge_ack_pending file={} source={} patch_id={} ack_count={} reasons={}",
+                    file.display(),
+                    source,
+                    patch_id.unwrap_or("-"),
+                    ack_count,
+                    reasons.join(","),
+                ),
+            );
+            if let Err(e) =
+                agent_doc_cycle_state_io::record_semantic_merge_acks(file, &sm.requires_ack)
+            {
+                eprintln!(
+                    "[write] warning: failed to record semantic_merge acks for carry-forward: {e}"
+                );
+            }
+        }
+        let visible_repair_required =
+            !response_converged_in_visible_target(base, &candidate, &merged_doc);
+        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
+            &merged_doc,
+            visible_repair_required,
+        );
+        return true;
+    }
+
+    if response_target_disjoint_from_user_edit(
+        base,
+        &queue_reconciled_ours,
+        &candidate,
+        |base, ours, theirs| agent_doc_merge_io::merge_contents(base, ours, theirs).ok(),
+    ) && let Ok(union) =
+        agent_doc_merge_io::merge_contents(base, &queue_reconciled_ours, &candidate)
+        && !union.contains("<<<<<<<")
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "live_prompt_drift_forward_merged file={} source={} patch_id={} candidate_len={} candidate_hash={} union_len={} union_hash={} reason=independent_concurrent_edit",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                candidate.len(),
+                agent_doc_hash::content_hash(&candidate),
+                union.len(),
+                agent_doc_hash::content_hash(&union),
+            ),
+        );
+        let visible_repair_required =
+            !response_converged_in_visible_target(base, &candidate, &union);
+        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
+            &union,
+            visible_repair_required,
+        );
+        return true;
+    }
+
+    let dropped = dropped_prompt_lines_after_content_ours(base, &candidate, ours);
+    if !dropped.is_empty() {
+        if let Err(e) = agent_doc_cycle_state_io::record_dropped_exchange_prompts(file, &dropped) {
+            eprintln!(
+                "[write] warning: failed to record dropped exchange prompt(s) for {}: {}",
+                file.display(),
+                e
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "dropped_exchange_prompt_recorded file={} source={} patch_id={} count={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                dropped.len()
+            ),
+        );
+    }
+    let dropped_queue =
+        dropped_queue_prompt_lines_after_content_ours(base, &candidate, &queue_reconciled_ours);
+    if !dropped_queue.is_empty() {
+        if let Err(e) = agent_doc_cycle_state_io::record_dropped_queue_prompts(file, &dropped_queue)
+        {
+            eprintln!(
+                "[write] warning: failed to record dropped queue prompt(s) for {}: {}",
+                file.display(),
+                e
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "dropped_queue_prompt_recorded file={} source={} patch_id={} count={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                dropped_queue.len()
+            ),
+        );
+    }
+    let live_candidate_contains_response =
+        ack_content_contains_latest_response(&candidate, &queue_reconciled_ours);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "live_prompt_drift_agent_target_not_snapshot_authority file={} source={} patch_id={} live_candidate_contains_response={} candidate_len={} candidate_hash={} agent_target_len={} agent_target_hash={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            live_candidate_contains_response,
+            candidate.len(),
+            agent_doc_hash::content_hash(&candidate),
+            queue_reconciled_ours.len(),
+            agent_doc_hash::content_hash(&queue_reconciled_ours),
+        ),
+    );
+    true
+}
+
+pub fn guard_ipc_snapshot_adoption_against_prompt_duplication(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    content_ours: Option<&str>,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
+        file,
+        source,
+        patch_id,
+        content_ours,
+        decision,
+        stale_supervisor_content_ours_adoption_warning,
+    )
+}
+
+#[doc(hidden)]
+pub fn guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    content_ours: Option<&str>,
+    decision: &mut IpcRepairDecision,
+    stale_supervisor_warning: impl Fn(&Path) -> Option<String>,
+) -> bool {
+    if decision.snap_source == IpcSnapshotSource::ContentOurs {
+        return false;
+    }
+    let Some(ours) = content_ours else {
+        return false;
+    };
+    if let Some(reason) = agent_doc_element::element::structural_corruption_reason(ours) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "content_ours_adoption_refused_structural file={} source={} patch_id={} reason={} guard=prompt_duplication content_ours_len={} content_ours_hash={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                reason,
+                ours.len(),
+                agent_doc_hash::content_hash(ours),
+            ),
+        );
+        return false;
+    }
+    let duplicate_count = user_prompt_count_growth(ours, &decision.snapshot_content);
+    if duplicate_count == 0 {
+        return false;
+    }
+    if let Some(stale_message) = stale_supervisor_warning(file) {
+        log_content_ours_adoption_refused_stale_supervisor(
+            file,
+            source,
+            patch_id,
+            "prompt_duplication",
+            ours,
+            &stale_message,
+        );
+        let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
+        return false;
+    }
+
+    let prior_source = decision.snap_source.label();
+    let bad_state = decision.snapshot_content.clone();
+    log_flow_event(
+        file,
+        agent_doc_flow::types::FlowEvent::new(
+            agent_doc_flow::types::FlowName::DocumentMutation,
+            agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+            agent_doc_flow::types::FlowOutcome::Blocked,
+        )
+        .with_reason("prompt_duplication_in_ack_content"),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=prompt_duplication_in_ack_content duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            prior_source,
+            duplicate_count,
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            ours.len(),
+            agent_doc_hash::content_hash(ours)
+        ),
+    );
+    log_ipc_proof_failure_with_recycle(
+        file,
+        source,
+        patch_id,
+        "prompt_duplication_in_ack_content",
+        "content_ours_snapshot_and_visible_repair",
+        &format!(
+            "snap_source={} duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            prior_source,
+            duplicate_count,
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            ours.len(),
+            agent_doc_hash::content_hash(ours)
+        ),
+    );
+    let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
+    decision.replace_snapshot_with_content_ours_for_prompt_duplication(ours, bad_state);
+    true
+}
+
+fn log_content_ours_adoption_refused_stale_supervisor(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    guard: &str,
+    content_ours: &str,
+    stale_message: &str,
+) {
+    let stale_message = stale_message.replace('\n', " ");
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "content_ours_adoption_refused_stale_supervisor file={} source={} patch_id={} guard={} reason=supervisor_binary_stale content_ours_len={} content_ours_hash={} warning={:?}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            guard,
+            content_ours.len(),
+            agent_doc_hash::content_hash(content_ours),
+            stale_message
+        ),
+    );
+    log_ipc_proof_failure_with_recycle(
+        file,
+        source,
+        patch_id,
+        "supervisor_binary_stale",
+        "candidate_snapshot_kept",
+        &format!(
+            "guard={} content_ours_len={} content_ours_hash={}",
+            guard,
+            content_ours.len(),
+            agent_doc_hash::content_hash(content_ours)
         ),
     );
 }

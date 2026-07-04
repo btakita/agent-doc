@@ -4275,6 +4275,8 @@ fn test_agent_doc_queue_owns_queue_prompt_drift_policy() {
 
     let orchestration_write =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let write_converge =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn queue_component_text(",
         "fn queue_prompt_texts(",
@@ -4286,13 +4288,14 @@ fn test_agent_doc_queue_owns_queue_prompt_drift_policy() {
         "fn preserve_content_ours_over_live_queue_deletions(",
     ] {
         assert!(
-            !orchestration_write.contains(forbidden),
-            "write.rs must not re-own queue prompt drift policy: {forbidden}"
+            !orchestration_write.contains(forbidden) && !write_converge.contains(forbidden),
+            "write/write-converge IO must not re-own queue prompt drift policy: {forbidden}"
         );
     }
     assert!(
-        orchestration_write.contains("agent_doc_queue::queue_prompt_drift::{"),
-        "write.rs should call queue prompt drift policy through agent-doc-queue directly"
+        write_converge.contains("agent_doc_queue::queue_prompt_drift::{")
+            && write_converge.contains("preserve_content_ours_over_live_queue_deletions"),
+        "write-converge IO should call queue prompt drift policy through agent-doc-queue directly"
     );
 }
 
@@ -9696,7 +9699,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 76,
+        ledger_rows.len() >= 77,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10233,6 +10236,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
             "Move the remaining snapshot-adoption guard decisions",
+        ),
+        (
+            "Write IPC snapshot adoption guard IO graph",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Split already-applied socket snapshot adoption",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -23363,7 +23372,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
     assert!(
-        write_ipc.contains("use agent_doc_element_exchange::{"),
+        write_ipc.contains("use agent_doc_element_exchange::normalize_exchange_prefixes_for_targets;"),
         "write IPC should import exchange prefix policy from the focused crate"
     );
 
@@ -24093,14 +24102,16 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
     assert!(
         write_ipc.contains("agent_doc_document_realtime::write_policy::{")
             && write_ipc.contains("ipc_snapshot_would_absorb_live_prompt_drift_after_preflight")
-            && write_ipc.contains("response_target_disjoint_from_user_edit")
-            && write_ipc.contains("dropped_prompt_lines_after_content_ours")
-            && write_ipc.contains("ack_content_contains_latest_response")
+            && write_ipc.contains("guard_ipc_snapshot_adoption_against_live_prompt_drift")
+            && write_converge.contains("guard_ipc_snapshot_adoption_against_live_prompt_drift(")
+            && write_converge.contains("response_target_disjoint_from_user_edit")
+            && write_converge.contains("dropped_prompt_lines_after_content_ours")
+            && write_converge.contains("ack_content_contains_latest_response")
             && write_converge.contains("materialize_missing_response_for_socket_ack_drift(")
             && write_converge.contains("try_semantic_merge_convergence(")
             && write_converge.contains("new_agent_response_headings")
             && write_converge.contains("first_response_heading"),
-        "write IPC paths should import focused realtime snapshot/live-drift policy directly from their current owner"
+        "write IPC paths should route snapshot/live-drift adoption decisions through the focused write-converge owner"
     );
     assert!(
         write_ipc_transport
@@ -26049,6 +26060,10 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn redeliver_normalization_fallback_to_editor(",
         "pub fn repair_ipc_decision_visible_state(",
         "pub fn redeliver_full_content_repair_to_editor(",
+        "pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(",
+        "pub fn guard_ipc_snapshot_adoption_against_prompt_duplication(",
+        "pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(",
+        "content_ours_adoption_refused_stale_supervisor",
     ] {
         assert!(
             write_converge_io.contains(required_snippet),
@@ -26118,6 +26133,12 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub(crate) fn repair_ipc_decision_visible_state(",
         "pub(crate) fn redeliver_full_content_repair_to_editor(",
         "pub(crate) fn redeliver_ipc_dedupe_to_editor(",
+        "pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(",
+        "fn guard_ipc_snapshot_adoption_against_live_prompt_drift(",
+        "pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(",
+        "fn guard_ipc_snapshot_adoption_against_prompt_duplication(",
+        "fn stale_supervisor_content_ours_adoption_warning(",
+        "fn log_content_ours_adoption_refused_stale_supervisor(",
     ] {
         assert!(
             !converge.contains(forbidden_snippet) && !write_ipc.contains(forbidden_snippet),

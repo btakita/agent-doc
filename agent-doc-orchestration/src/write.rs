@@ -236,6 +236,7 @@ pub(crate) use agent_doc_document_realtime_io::{
     VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS, guard_visible_write_idle_and_current,
     guard_visible_write_idle_current_or_target, guard_visible_write_reconcile_with_target,
 };
+#[cfg(test)]
 use agent_doc_element::element;
 use agent_doc_element_backlog_io::backlog_cmd;
 use agent_doc_element_exchange::{
@@ -245,9 +246,6 @@ use agent_doc_element_exchange::{
 };
 use agent_doc_queue::queue_consume::{
     queue_consumption_allowed_for_response, queue_targeted_completion_id_for_current_head,
-};
-use agent_doc_queue::queue_prompt_drift::{
-    dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
 };
 use agent_doc_queue_io::queue_consume::{self, QueueConsumeWriteEffects, QueueConsumptionOutcome};
 use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;

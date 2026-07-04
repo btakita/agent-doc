@@ -3,33 +3,32 @@
 use super::*;
 use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;
 use agent_doc_document_realtime::write_policy::{
-    ack_content_contains_latest_response, dropped_prompt_lines_after_content_ours,
     ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, response_already_in_current,
-    response_converged_in_visible_target, response_target_disjoint_from_user_edit,
 };
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
+use agent_doc_element_exchange::normalize_exchange_prefixes_for_targets;
 #[cfg(test)]
 use agent_doc_element_exchange::verify_sidecar_normalization;
-use agent_doc_element_exchange::{
-    normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
-};
 #[cfg(test)]
 use agent_doc_ipc_protocol::IpcDiskRepairReason;
 use agent_doc_ipc_protocol::{AlreadyAppliedSnapshotOutcome, IpcRepairDecision, IpcSnapshotSource};
 use agent_doc_template::response_materialization::extract_response_headings_from_patches;
 use agent_doc_turn::response_replay::materialize_response_in_current_exchange;
 use agent_doc_write_converge_io::{
-    ack_content_disk_write_proof, ipc_repair_decision_from_sidecar,
+    ack_content_disk_write_proof, guard_ipc_snapshot_adoption_against_live_prompt_drift,
+    guard_ipc_snapshot_adoption_against_prompt_duplication, ipc_repair_decision_from_sidecar,
     log_ipc_snapshot_adoption_allowed, log_ipcfullprompt_corruption_if_any,
     mark_ack_content_live_buffer_synced_after_write,
     materialize_missing_response_for_socket_ack_drift, poll_ack_content_sidecar,
     reconcile_ack_snapshot_to_newer_operator_buffer, save_document_snapshot_and_crdt,
-    try_semantic_merge_convergence, write_ack_content_through_to_disk,
+    write_ack_content_through_to_disk,
 };
 #[cfg(test)]
 use agent_doc_write_converge_io::{
-    ipc_direct_disk_degraded, read_ack_content_sidecar, record_ipc_socket_ack_timeout,
+    guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning,
+    guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning, ipc_direct_disk_degraded,
+    read_ack_content_sidecar, record_ipc_socket_ack_timeout, try_semantic_merge_convergence,
 };
 
 /// Return `true` when every `### Re:` response heading carried in the
@@ -165,406 +164,6 @@ pub(crate) fn normalized_content_ours_fallback(
     )
     .map(|(repaired, _)| repaired)
     .unwrap_or(normalized)
-}
-
-pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
-    file: &Path,
-    source: &str,
-    patch_id: Option<&str>,
-    baseline: Option<&str>,
-    content_ours: Option<&str>,
-    decision: &mut IpcRepairDecision,
-) -> bool {
-    if decision.snap_source == IpcSnapshotSource::ContentOurs {
-        return false;
-    }
-    let (Some(base), Some(ours)) = (baseline, content_ours) else {
-        return false;
-    };
-    // #dupcontent: never adopt a structurally-corrupt `content_ours` buffer (a
-    // bad prior CRDT merge with duplicate singleton component blocks or a
-    // split/unterminated attribute). Refuse the adoption so the clean candidate
-    // snapshot stays as the base — the corrupt buffer never reaches disk, where
-    // the lint-gate could only flag it after the fact.
-    if let Some(reason) = element::structural_corruption_reason(ours) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "content_ours_adoption_refused_structural file={} source={} patch_id={} reason={} content_ours_len={} content_ours_hash={}",
-                file.display(),
-                source,
-                patch_id.unwrap_or("-"),
-                reason,
-                ours.len(),
-                agent_doc_hash::content_hash(ours),
-            ),
-        );
-        return false;
-    }
-    if !ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
-        base,
-        &decision.snapshot_content,
-        ours,
-    ) {
-        return false;
-    }
-    if let Some(stale_message) = stale_supervisor_content_ours_adoption_warning(file) {
-        log_content_ours_adoption_refused_stale_supervisor(
-            file,
-            source,
-            patch_id,
-            "live_prompt_drift",
-            ours,
-            &stale_message,
-        );
-        let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
-        return false;
-    }
-
-    let prior_source = decision.snap_source.label();
-    agent_doc_flow_io::log_flow_event(
-        file,
-        agent_doc_flow::types::FlowEvent::new(
-            agent_doc_flow::types::FlowName::DocumentMutation,
-            agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
-            agent_doc_flow::types::FlowOutcome::Blocked,
-        )
-        .with_reason("live_prompt_drift_after_preflight"),
-        agent_doc_ops_log_io::log_op,
-    );
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=live_prompt_drift_after_preflight candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
-            file.display(),
-            source,
-            patch_id.unwrap_or("-"),
-            prior_source,
-            decision.snapshot_content.len(),
-            agent_doc_hash::content_hash(&decision.snapshot_content),
-            ours.len(),
-            agent_doc_hash::content_hash(ours)
-        ),
-    );
-    log_ipc_proof_failure(
-        file,
-        source,
-        patch_id,
-        "live_prompt_drift_after_preflight",
-        "visible_repair_required",
-        &format!(
-            "snap_source={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
-            prior_source,
-            decision.snapshot_content.len(),
-            agent_doc_hash::content_hash(&decision.snapshot_content),
-            ours.len(),
-            agent_doc_hash::content_hash(ours)
-        ),
-    );
-    let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
-
-    let candidate = decision.snapshot_content.clone();
-    // #qdelipc: live queue deletion in the IPC candidate is not proof of
-    // operator intent; stale editor/ack content can present an old empty queue.
-    // Preserve content_ours and log the ignored deletion count. Normal
-    // queue-consume / done-id paths remain the only closeout-time deletion proof.
-    let (queue_reconciled_ours, ignored_queue_deletions) =
-        preserve_content_ours_over_live_queue_deletions(base, &candidate, ours);
-    if !ignored_queue_deletions.is_empty() {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_live_deletion_ignored file={} source={} patch_id={} count={} reason=unproven_ipc_candidate_queue_deletion",
-                file.display(),
-                source,
-                patch_id.unwrap_or("-"),
-                ignored_queue_deletions.len()
-            ),
-        );
-    }
-
-    // #smconv: node-keyed semantic merge — apply BOTH change-sets when the
-    // operator and agent edited disjoint nodes (the common case), operator-wins on
-    // same-node conflicts, instead of dropping the agent's changes by adopting
-    // content_ours. Falls through to the line-based #fintol2 / content_ours path
-    // only when the AST merge is not safely applicable (structural corruption,
-    // would still drop agent content, or the AST model does not apply).
-    if let Some(sm) = try_semantic_merge_convergence(base, &candidate, &queue_reconciled_ours) {
-        let merged_doc = sm.merged_doc.clone();
-        let outcome_count = sm.outcomes.len();
-        let ack_count = sm.requires_ack.len();
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "live_prompt_drift_semantic_merged file={} source={} patch_id={} base_len={} base_hash={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={} merged_len={} merged_hash={} outcomes={} acks={} reason=node_keyed_semantic_merge",
-                file.display(),
-                source,
-                patch_id.unwrap_or("-"),
-                base.len(),
-                agent_doc_hash::content_hash(base),
-                candidate.len(),
-                agent_doc_hash::content_hash(&candidate),
-                queue_reconciled_ours.len(),
-                agent_doc_hash::content_hash(&queue_reconciled_ours),
-                merged_doc.len(),
-                agent_doc_hash::content_hash(&merged_doc),
-                outcome_count,
-                ack_count,
-            ),
-        );
-        if ack_count > 0 {
-            // #semmerge-ack-turn (Phase 4): operator-wins is already encoded in
-            // `merged_doc`, but the agent's non-applied change must be acknowledged
-            // in an exchange turn the NEXT cycle. Persist the acks to cycle_state so
-            // `start_preflight` carries them forward and preflight surfaces them as
-            // `semantic_merge_acks`. Also log the proof marker so a forensic reader
-            // (or `session-check`) can recover the reasons.
-            let reasons: Vec<String> = sm
-                .requires_ack
-                .iter()
-                .map(|ack| format!("{}:{}:{}", ack.component, ack.id, ack.reason.token()))
-                .collect();
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "semantic_merge_ack_pending file={} source={} patch_id={} ack_count={} reasons={}",
-                    file.display(),
-                    source,
-                    patch_id.unwrap_or("-"),
-                    ack_count,
-                    reasons.join(","),
-                ),
-            );
-            if let Err(e) =
-                agent_doc_cycle_state_io::record_semantic_merge_acks(file, &sm.requires_ack)
-            {
-                eprintln!(
-                    "[write] warning: failed to record semantic_merge acks for carry-forward: {e}"
-                );
-            }
-        }
-        // #adoc-live-prompt-drift-operator-edit: the reconciled `merged_doc` is the
-        // operator-visible converged state (semantic merge, operator-wins on the
-        // response node). It is proven — no editor redelivery required — as soon as
-        // it presents this cycle's response heading(s) with a body, even if the
-        // operator edited the response text. Requiring the agent's exact bytes here
-        // is what wedged the closeout on an operator body-edit.
-        let visible_repair_required =
-            !response_converged_in_visible_target(base, &candidate, &merged_doc);
-        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
-            &merged_doc,
-            visible_repair_required,
-        );
-        return true;
-    }
-
-    // #fintol2 — forward-merge tolerance for an independent concurrent edit. When
-    // the user's concurrent edit is a DISJOINT, plain content edit outside
-    // `exchange` (proven by `response_target_disjoint_from_user_edit`: confined
-    // outside the response component, carrying no prompt/directive, and yielding a
-    // conflict-free union that preserves both sides), commit that union so the
-    // response lands AND the user's edit is preserved this cycle. Anything
-    // prompt-/directive-bearing, in-`exchange`, or colliding returns false and
-    // falls through to a visible-repair-required content_ours adoption. The
-    // caller must prove the editor/worktree accepted that repaired state before
-    // closeout can commit.
-    if response_target_disjoint_from_user_edit(
-        base,
-        &queue_reconciled_ours,
-        &candidate,
-        |base, ours, theirs| agent_doc_merge_io::merge_contents(base, ours, theirs).ok(),
-    ) && let Ok(union) =
-        agent_doc_merge_io::merge_contents(base, &queue_reconciled_ours, &candidate)
-        && !union.contains("<<<<<<<")
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "live_prompt_drift_forward_merged file={} source={} patch_id={} candidate_len={} candidate_hash={} union_len={} union_hash={} reason=independent_concurrent_edit",
-                file.display(),
-                source,
-                patch_id.unwrap_or("-"),
-                candidate.len(),
-                agent_doc_hash::content_hash(&candidate),
-                union.len(),
-                agent_doc_hash::content_hash(&union),
-            ),
-        );
-        // #adoc-live-prompt-drift-operator-edit: same operator-edit tolerance for the
-        // forward-merge union — proven once it presents this cycle's response
-        // heading(s) with a body, regardless of operator body-edits.
-        let visible_repair_required =
-            !response_converged_in_visible_target(base, &candidate, &union);
-        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
-            &union,
-            visible_repair_required,
-        );
-        return true;
-    }
-
-    // #exchange-prompt-dropped-on-merge: persist the dropped user prompt lines
-    // now, while the divergent candidate still carries them. The post-commit
-    // session-check disk diff cannot win the race against an editor that
-    // overwrites disk with the converged content_ours buffer, so the dropped
-    // prompt guard reads this persisted evidence to fail closed instead.
-    let dropped = dropped_prompt_lines_after_content_ours(base, &candidate, ours);
-    if !dropped.is_empty() {
-        if let Err(e) = agent_doc_cycle_state_io::record_dropped_exchange_prompts(file, &dropped) {
-            eprintln!(
-                "[write] warning: failed to record dropped exchange prompt(s) for {}: {}",
-                file.display(),
-                e
-            );
-        }
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "dropped_exchange_prompt_recorded file={} source={} patch_id={} count={}",
-                file.display(),
-                source,
-                patch_id.unwrap_or("-"),
-                dropped.len()
-            ),
-        );
-    }
-    // #queue-user-edit-overwrite: same silent-loss race for user-authored queue
-    // edits. Record the dropped `do [#id]` queue lines now; session-check
-    // filters them against committed HEAD (preserved or consumed → cleared,
-    // silently deleted → fail closed).
-    let dropped_queue =
-        dropped_queue_prompt_lines_after_content_ours(base, &candidate, &queue_reconciled_ours);
-    if !dropped_queue.is_empty() {
-        if let Err(e) = agent_doc_cycle_state_io::record_dropped_queue_prompts(file, &dropped_queue)
-        {
-            eprintln!(
-                "[write] warning: failed to record dropped queue prompt(s) for {}: {}",
-                file.display(),
-                e
-            );
-        }
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "dropped_queue_prompt_recorded file={} source={} patch_id={} count={}",
-                file.display(),
-                source,
-                patch_id.unwrap_or("-"),
-                dropped_queue.len()
-            ),
-        );
-    }
-    let live_candidate_contains_response =
-        ack_content_contains_latest_response(&candidate, &queue_reconciled_ours);
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "live_prompt_drift_agent_target_not_snapshot_authority file={} source={} patch_id={} live_candidate_contains_response={} candidate_len={} candidate_hash={} agent_target_len={} agent_target_hash={}",
-            file.display(),
-            source,
-            patch_id.unwrap_or("-"),
-            live_candidate_contains_response,
-            candidate.len(),
-            agent_doc_hash::content_hash(&candidate),
-            queue_reconciled_ours.len(),
-            agent_doc_hash::content_hash(&queue_reconciled_ours),
-        ),
-    );
-    true
-}
-
-pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
-    file: &Path,
-    source: &str,
-    patch_id: Option<&str>,
-    content_ours: Option<&str>,
-    decision: &mut IpcRepairDecision,
-) -> bool {
-    if decision.snap_source == IpcSnapshotSource::ContentOurs {
-        return false;
-    }
-    let Some(ours) = content_ours else {
-        return false;
-    };
-    // #dupcontent: same fail-closed refusal on the prompt-duplication path — a
-    // structurally-corrupt `content_ours` buffer must never become the snapshot.
-    if let Some(reason) = element::structural_corruption_reason(ours) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "content_ours_adoption_refused_structural file={} source={} patch_id={} reason={} guard=prompt_duplication content_ours_len={} content_ours_hash={}",
-                file.display(),
-                source,
-                patch_id.unwrap_or("-"),
-                reason,
-                ours.len(),
-                agent_doc_hash::content_hash(ours),
-            ),
-        );
-        return false;
-    }
-    let duplicate_count = user_prompt_count_growth(ours, &decision.snapshot_content);
-    if duplicate_count == 0 {
-        return false;
-    }
-    if let Some(stale_message) = stale_supervisor_content_ours_adoption_warning(file) {
-        log_content_ours_adoption_refused_stale_supervisor(
-            file,
-            source,
-            patch_id,
-            "prompt_duplication",
-            ours,
-            &stale_message,
-        );
-        let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
-        return false;
-    }
-
-    let prior_source = decision.snap_source.label();
-    let bad_state = decision.snapshot_content.clone();
-    agent_doc_flow_io::log_flow_event(
-        file,
-        agent_doc_flow::types::FlowEvent::new(
-            agent_doc_flow::types::FlowName::DocumentMutation,
-            agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
-            agent_doc_flow::types::FlowOutcome::Blocked,
-        )
-        .with_reason("prompt_duplication_in_ack_content"),
-        agent_doc_ops_log_io::log_op,
-    );
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=prompt_duplication_in_ack_content duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
-            file.display(),
-            source,
-            patch_id.unwrap_or("-"),
-            prior_source,
-            duplicate_count,
-            decision.snapshot_content.len(),
-            agent_doc_hash::content_hash(&decision.snapshot_content),
-            ours.len(),
-            agent_doc_hash::content_hash(ours)
-        ),
-    );
-    log_ipc_proof_failure(
-        file,
-        source,
-        patch_id,
-        "prompt_duplication_in_ack_content",
-        "content_ours_snapshot_and_visible_repair",
-        &format!(
-            "snap_source={} duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
-            prior_source,
-            duplicate_count,
-            decision.snapshot_content.len(),
-            agent_doc_hash::content_hash(&decision.snapshot_content),
-            ours.len(),
-            agent_doc_hash::content_hash(ours)
-        ),
-    );
-    let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
-    decision.replace_snapshot_with_content_ours_for_prompt_duplication(ours, bad_state);
-    true
 }
 
 struct StaleAckContentContext<'a> {
@@ -1051,73 +650,6 @@ pub fn dedupe_ipc_snapshot_content(
         );
     }
     Ok((deduped, changed))
-}
-
-fn stale_supervisor_content_ours_adoption_warning(file: &Path) -> Option<String> {
-    #[cfg(test)]
-    if TEST_FORCE_STALE_SUPERVISOR_CONTENT_OURS_REFUSAL.with(|flag| flag.get()) {
-        return Some("test supervisor_binary_stale".to_string());
-    }
-
-    #[cfg(test)]
-    {
-        let _ = file;
-        None
-    }
-
-    #[cfg(not(test))]
-    agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
-}
-
-fn log_content_ours_adoption_refused_stale_supervisor(
-    file: &Path,
-    source: &str,
-    patch_id: Option<&str>,
-    guard: &str,
-    content_ours: &str,
-    stale_message: &str,
-) {
-    let stale_message = stale_message.replace('\n', " ");
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "content_ours_adoption_refused_stale_supervisor file={} source={} patch_id={} guard={} reason=supervisor_binary_stale content_ours_len={} content_ours_hash={} warning={:?}",
-            file.display(),
-            source,
-            patch_id.unwrap_or("-"),
-            guard,
-            content_ours.len(),
-            agent_doc_hash::content_hash(content_ours),
-            stale_message
-        ),
-    );
-    log_ipc_proof_failure(
-        file,
-        source,
-        patch_id,
-        "supervisor_binary_stale",
-        "candidate_snapshot_kept",
-        &format!(
-            "guard={} content_ours_len={} content_ours_hash={}",
-            guard,
-            content_ours.len(),
-            agent_doc_hash::content_hash(content_ours)
-        ),
-    );
-}
-
-#[cfg(test)]
-thread_local! {
-    static TEST_FORCE_STALE_SUPERVISOR_CONTENT_OURS_REFUSAL: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-}
-
-#[cfg(test)]
-fn with_test_stale_supervisor_content_ours_refusal<T>(f: impl FnOnce() -> T) -> T {
-    TEST_FORCE_STALE_SUPERVISOR_CONTENT_OURS_REFUSAL.with(|flag| flag.set(true));
-    let result = f();
-    TEST_FORCE_STALE_SUPERVISOR_CONTENT_OURS_REFUSAL.with(|flag| flag.set(false));
-    result
 }
 
 /// Result of an IPC write attempt, including the patch_id used.
@@ -1747,16 +1279,15 @@ mod ack_content_snapshot_tests {
         let clean_ours = "<!-- agent:status -->\nC\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
         let mut decision = IpcRepairDecision::file_read(DC_CANDIDATE.to_string());
 
-        let adopted = with_test_stale_supervisor_content_ours_refusal(|| {
-            guard_ipc_snapshot_adoption_against_live_prompt_drift(
-                &file,
-                "test",
-                Some("p-stale"),
-                Some(DC_BASELINE),
-                Some(clean_ours),
-                &mut decision,
-            )
-        });
+        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
+            &file,
+            "test",
+            Some("p-stale"),
+            Some(DC_BASELINE),
+            Some(clean_ours),
+            &mut decision,
+            |_| Some("test supervisor_binary_stale".to_string()),
+        );
 
         assert!(
             !adopted,
@@ -1775,15 +1306,14 @@ mod ack_content_snapshot_tests {
             "<!-- agent:exchange -->\n❯ do [#x]\n❯ do [#x]\n<!-- /agent:exchange -->\n";
         let mut decision = IpcRepairDecision::file_read(duplicate_candidate.to_string());
 
-        let adopted = with_test_stale_supervisor_content_ours_refusal(|| {
-            guard_ipc_snapshot_adoption_against_prompt_duplication(
-                &file,
-                "test",
-                Some("p-stale-dup"),
-                Some(content_ours),
-                &mut decision,
-            )
-        });
+        let adopted = guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
+            &file,
+            "test",
+            Some("p-stale-dup"),
+            Some(content_ours),
+            &mut decision,
+            |_| Some("test supervisor_binary_stale".to_string()),
+        );
 
         assert!(
             !adopted,

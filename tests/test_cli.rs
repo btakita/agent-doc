@@ -10634,6 +10634,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split command rendering from document mutation adapters",
         ),
         (
+            "Preflight layout health and repair IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/layout.rs",
+            "move remaining preflight command body",
+        ),
+        (
             "Session-check guard IO adapter batch",
             "agent-doc-orchestration/src/session_check/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs}",
             "agent-doc-session-check-io/src/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs,guard_modes.rs}",
@@ -13272,8 +13278,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         );
     }
     assert!(
-        orchestration_route_startup_source
-            .contains("agent_doc_route_io::startup::provision_pane("),
+        orchestration_route_startup_source.contains("agent_doc_route_io::startup::provision_pane("),
         "retained route-startup tests should call the focused startup IO API directly"
     );
     let route_startup_locks =
@@ -18873,6 +18878,61 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
             && queue_cmd.contains("OneShotQueueSyncResult")
             && queue_cmd.contains("pub trait QueueCommandEffects"),
         "agent-doc-queue-io queue_cmd should own command rendering and inject remaining write effects"
+    );
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_layout_health_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_layout =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/layout.rs")).unwrap();
+    let preflight_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+
+    assert!(
+        preflight_io_lib.contains("pub mod layout;"),
+        "agent-doc-preflight-io must expose the focused layout health module"
+    );
+    for forbidden in [
+        "fn maybe_auto_resync_on_drift(",
+        "fn close_superseded_drift_sessions(",
+        "fn clear_base_index_repair_counter(",
+        "fn current_tmux_session_name(",
+        "fn maybe_auto_repair_base_index(",
+        "pub fn check_layout(",
+        "fn detect_duplicate_claims(",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight.rs must not own moved layout health IO: {forbidden}"
+        );
+    }
+    for required in [
+        "pub fn maybe_auto_resync_on_drift(",
+        "fn close_superseded_drift_sessions(",
+        "fn clear_base_index_repair_counter(",
+        "fn current_tmux_session_name(",
+        "pub fn maybe_auto_repair_base_index(",
+        "pub fn check_layout(",
+        "pub fn detect_duplicate_claims(",
+        "agent_doc_sync_io::resync::run(true, None, None)",
+        "agent_doc_sync_io::sync::repair_layout",
+        "agent_doc_tmux_io::list_windows",
+    ] {
+        assert!(
+            preflight_layout.contains(required),
+            "agent-doc-preflight-io layout module should own layout health IO: {required}"
+        );
+    }
+    assert!(
+        orchestration_preflight.contains("use agent_doc_preflight_io::{")
+            && orchestration_preflight.contains("layout::{")
+            && orchestration_preflight.contains("maybe_auto_resync_on_drift")
+            && orchestration_preflight.contains("maybe_auto_repair_base_index")
+            && orchestration_preflight.contains("check_layout"),
+        "orchestration preflight should import focused layout adapters directly"
     );
 }
 

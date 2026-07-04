@@ -1231,16 +1231,20 @@ dependencies = [
  "agent-doc-project-root-io",
  "agent-doc-queue",
  "agent-doc-queue-io",
+ "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-sync-io",
  "agent-doc-template",
+ "agent-doc-tmux-io",
  "agent-doc-turn",
  "agent-doc-workflow",
  "anyhow",
  "serde",
  "serde_json",
  "tempfile",
+ "tmux-router",
 ]
 
 [[package]]

@@ -1,5 +1,7 @@
 //! Preflight maintenance I/O adapters.
 
+pub mod layout;
+
 use agent_doc_document::queue_projection::{
     set_in_progress_work_item_markers, strip_in_progress_marker, strip_priority_markers,
     sync_in_progress_marker_regions,

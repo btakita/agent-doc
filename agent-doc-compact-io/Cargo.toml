@@ -36,5 +36,6 @@ uuid = { version = "1", features = ["v4"] }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.67" }
 agent-doc-orchestration = { path = "../agent-doc-orchestration", version = "0.34.67" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.67" }
 serde_json = "1"
 tempfile = "3"

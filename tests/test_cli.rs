@@ -4707,12 +4707,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_guard.rs")).unwrap();
     let recovery_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_recovery.rs")).unwrap();
-    for required in ["pub fn line_is_carry_forward_signal"] {
-        assert!(
-            turn_source.contains(required),
-            "agent-doc-turn must own carry-forward closeout signal policy: {required}"
-        );
-    }
+    let required = "pub fn line_is_carry_forward_signal";
+    assert!(
+        turn_source.contains(required),
+        "agent-doc-turn must own carry-forward closeout signal policy: {required}"
+    );
     let write_adapter =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let realtime_write_policy =
@@ -8258,17 +8257,16 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             "{relative_manifest} should depend on the versioned lease crate"
         );
     }
-    for relative_manifest in ["agent-doc-hooks-io/Cargo.toml"] {
-        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
-        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
-        let dependencies = parsed["dependencies"].as_table().unwrap();
-        let dependency = dependencies["agent-doc-lease-io"].as_table().unwrap();
-        assert_eq!(
-            dependency.get("version").and_then(toml::Value::as_str),
-            package_version,
-            "{relative_manifest} should depend on the versioned lease IO crate"
-        );
-    }
+    let relative_manifest = "agent-doc-hooks-io/Cargo.toml";
+    let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
+    let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    let dependency = dependencies["agent-doc-lease-io"].as_table().unwrap();
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version,
+        "{relative_manifest} should depend on the versioned lease IO crate"
+    );
 
     let lease_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-lease/Cargo.toml")).unwrap();
@@ -8408,19 +8406,18 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
             "{relative_manifest} should depend on the versioned plugin-owner crate"
         );
     }
-    for relative_manifest in ["agent-doc-hooks-io/Cargo.toml"] {
-        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
-        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
-        let dependencies = parsed["dependencies"].as_table().unwrap();
-        let dependency = dependencies["agent-doc-plugin-owner-io"]
-            .as_table()
-            .unwrap();
-        assert_eq!(
-            dependency.get("version").and_then(toml::Value::as_str),
-            package_version,
-            "{relative_manifest} should depend on the versioned plugin-owner IO crate"
-        );
-    }
+    let relative_manifest = "agent-doc-hooks-io/Cargo.toml";
+    let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
+    let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    let dependency = dependencies["agent-doc-plugin-owner-io"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version,
+        "{relative_manifest} should depend on the versioned plugin-owner IO crate"
+    );
 
     let focused =
         fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner/src/lib.rs")).unwrap();
@@ -17039,12 +17036,11 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
     let start_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
-    for forbidden_snippet in ["fn resolve_agent_args("] {
-        assert!(
-            !start_source.contains(forbidden_snippet),
-            "start.rs must not re-own pure supervisor launch-args precedence: {forbidden_snippet}"
-        );
-    }
+    let forbidden_snippet = "fn resolve_agent_args(";
+    assert!(
+        !start_source.contains(forbidden_snippet),
+        "start.rs must not re-own pure supervisor launch-args precedence: {forbidden_snippet}"
+    );
     assert!(
         start_source.contains("fn agent_launch_args_sources(")
             && start_run_source
@@ -17136,18 +17132,16 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
                 .contains("agent_doc_supervisor::input::strip_stale_ctrl_d_before_prompt"),
         "start/supervisor process paths should call focused supervisor input byte policy directly"
     );
-    for required_snippet in ["pub fn build_reexec_candidates("] {
-        assert!(
-            supervisor_reexec_policy.contains(required_snippet),
-            "agent-doc-supervisor reexec should own supervisor reexec candidate policy directly: {required_snippet}"
-        );
-    }
-    for forbidden_snippet in ["fn build_reexec_candidates("] {
-        assert!(
-            !start_source.contains(forbidden_snippet),
-            "start.rs must not re-own pure supervisor reexec candidate policy: {forbidden_snippet}"
-        );
-    }
+    let required_snippet = "pub fn build_reexec_candidates(";
+    assert!(
+        supervisor_reexec_policy.contains(required_snippet),
+        "agent-doc-supervisor reexec should own supervisor reexec candidate policy directly: {required_snippet}"
+    );
+    let forbidden_snippet = "fn build_reexec_candidates(";
+    assert!(
+        !start_source.contains(forbidden_snippet),
+        "start.rs must not re-own pure supervisor reexec candidate policy: {forbidden_snippet}"
+    );
     assert!(
         supervisor_lib.contains("pub mod reexec;")
             && start_source.contains("agent_doc_supervisor::reexec::build_reexec_candidates("),
@@ -22143,12 +22137,11 @@ fn test_agent_doc_document_owns_tracked_work_projection_policy() {
     );
     let preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
-    for forbidden in ["fn tracked_work_component_fingerprint("] {
-        assert!(
-            !preflight.contains(forbidden),
-            "preflight must not re-own tracked-work projection policy: {forbidden}"
-        );
-    }
+    let forbidden = "fn tracked_work_component_fingerprint(";
+    assert!(
+        !preflight.contains(forbidden),
+        "preflight must not re-own tracked-work projection policy: {forbidden}"
+    );
     assert!(
         preflight.contains("agent_doc_document::tracked_work_projection::tracked_work_fingerprint")
             && preflight.contains(
@@ -25906,7 +25899,9 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         );
     }
     assert!(
-        converge.contains("agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift")
+        !converge.contains("pub use agent_doc_write_converge_io")
+            && converge
+                .contains("agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift")
             && converge.contains("agent_doc_document_realtime::write_policy::{")
             && converge.contains("live_prompt_drift_recovery_target(")
             && !converge.contains("stale_snapshot_reset_drift(snapshot_doc, current_doc)")
@@ -26622,7 +26617,7 @@ fn test_preflight_active_auto_queue_head_is_not_user_intent() {
     // value is omitted (null) — exactly what we want here.
     let user_intent_empty = parsed["user_intent_prompt_changes"]
         .as_array()
-        .map_or(true, |a| a.is_empty());
+        .is_none_or(|a| a.is_empty());
     assert!(
         user_intent_empty,
         "synthetic auto-queue head must NOT count as user intent (would stall the auto-loop): {}",
@@ -26640,8 +26635,8 @@ fn test_preflight_active_auto_queue_head_is_not_user_intent() {
 /// depend on. A go-mode active queue whose only materialized heads are
 /// `[operator-verify]` + inert-noise must emit `queue_continuation_required:false`
 /// + `queue_drainable_head_count:0` (the `#qchurn` no-op-loop guard) WITHOUT the
-/// non-stall guidance, so the auto-loop stops instead of churning. `[clean-session]`
-/// heads stay drainable in place (`#qcontdrain`).
+///   non-stall guidance, so the auto-loop stops instead of churning. `[clean-session]`
+///   heads stay drainable in place (`#qcontdrain`).
 fn preflight_json(root: &Path, doc: &Path) -> serde_json::Value {
     let mut preflight = agent_doc_cmd();
     preflight.current_dir(root);
@@ -26976,7 +26971,7 @@ fn test_preflight_warns_but_does_not_target_inactive_queue_edit() {
         "<!-- agent:queue -->\n<!-- /agent:queue -->",
         "<!-- agent:queue -->\n- do [#gdbpropscan]\n<!-- /agent:queue -->",
     );
-    fs::write(&doc, &baseline).unwrap();
+    fs::write(&doc, baseline).unwrap();
     init_git_repo(root, &doc);
     seed_snapshot(root, &doc, baseline);
     fs::write(&doc, current).unwrap();

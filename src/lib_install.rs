@@ -530,15 +530,7 @@ mod tests {
     fn lib_install_accepts_source_with_editor_authority_abi() {
         let tmp = tempfile::tempdir().unwrap();
         let source = tmp.path().join(platform_lib_name());
-        fs::write(
-            &source,
-            REQUIRED_EDITOR_ABI_SYMBOLS
-                .iter()
-                .copied()
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-        .unwrap();
+        fs::write(&source, REQUIRED_EDITOR_ABI_SYMBOLS.to_vec().join("\n")).unwrap();
 
         validate_required_editor_abi_symbols(&source).unwrap();
     }

@@ -298,6 +298,7 @@ dependencies = [
  "agent-doc-sqlite",
  "agent-doc-template",
  "agent-doc-topic",
+ "agent-doc-write-converge-io",
  "anyhow",
  "serde_json",
  "tempfile",

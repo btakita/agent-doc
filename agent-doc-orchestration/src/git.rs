@@ -179,7 +179,7 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     )
     .is_none()
     {
-        if crate::write::guard_no_stale_snapshot_reset_drift(
+        if agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
             file,
             Some(&head_doc),
             &current_doc,
@@ -417,7 +417,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         file_content = recovered;
         snapshot_content = agent_doc_snapshot_io::load(file)?;
     }
-    if crate::write::guard_no_stale_snapshot_reset_drift(
+    if agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
         file,
         snapshot_content.as_deref(),
         &file_content,

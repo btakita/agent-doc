@@ -211,7 +211,7 @@ pub fn mark_lifecycle(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        return handle_mark_lifecycle(
+        handle_mark_lifecycle(
             &bootstrap,
             None,
             ControllerRequest {
@@ -229,7 +229,7 @@ pub fn mark_lifecycle(
                 command_kind: None,
                 diagnostic_payload: None,
             },
-        );
+        )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -271,7 +271,7 @@ pub fn refresh_supervisor_lease(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        return handle_supervisor_heartbeat(
+        handle_supervisor_heartbeat(
             &bootstrap,
             None,
             ControllerRequest {
@@ -289,7 +289,7 @@ pub fn refresh_supervisor_lease(
                 command_kind: None,
                 diagnostic_payload: None,
             },
-        );
+        )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -323,7 +323,7 @@ pub fn authoritative_actor_binding(
             project_root,
             &file.to_string_lossy(),
         );
-        return load_actor_record(project_root, &document_id);
+        load_actor_record(project_root, &document_id)
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -429,11 +429,12 @@ pub fn authorize_dispatch(
                             target
                         ),
                     );
-                    return handle_dispatch(&bootstrap, None, dispatch_request(target));
+                    handle_dispatch(&bootstrap, None, dispatch_request(target))
+                } else {
+                    Err(err)
                 }
-                return Err(err);
             }
-            ok => return ok,
+            ok => ok,
         }
     }
 
@@ -505,7 +506,7 @@ pub fn session_operator_status(project_root: &Path, file: &Path) -> Result<Sessi
         );
         let mut conn = open_state_db(project_root)?;
         migrate_legacy_actor_projection(project_root, &mut conn)?;
-        return load_session_operator_status_from_db(&conn, &document_id);
+        load_session_operator_status_from_db(&conn, &document_id)
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -551,7 +552,7 @@ pub fn inspect_actor(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        return handle_inspect_actor(
+        handle_inspect_actor(
             &bootstrap,
             ControllerRequest {
                 command: "inspect_actor".to_string(),
@@ -568,7 +569,7 @@ pub fn inspect_actor(
                 command_kind: None,
                 diagnostic_payload: None,
             },
-        );
+        )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -614,7 +615,7 @@ pub fn control_queue(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        return handle_queue_control(
+        handle_queue_control(
             &bootstrap,
             ControllerRequest {
                 command: "queue_control".to_string(),
@@ -631,7 +632,7 @@ pub fn control_queue(
                 command_kind: Some(action.to_string()),
                 diagnostic_payload: item_id.map(ToOwned::to_owned),
             },
-        );
+        )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -677,7 +678,7 @@ pub fn admin_reap(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        return handle_admin_control(
+        handle_admin_control(
             &bootstrap,
             ControllerRequest {
                 command: "admin_control".to_string(),
@@ -694,7 +695,7 @@ pub fn admin_reap(
                 command_kind: Some("reap".to_string()),
                 diagnostic_payload: None,
             },
-        );
+        )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -739,7 +740,7 @@ pub fn admin_handoff(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        return handle_admin_control(
+        handle_admin_control(
             &bootstrap,
             ControllerRequest {
                 command: "admin_control".to_string(),
@@ -756,7 +757,7 @@ pub fn admin_handoff(
                 command_kind: Some("handoff".to_string()),
                 diagnostic_payload: None,
             },
-        );
+        )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -801,7 +802,7 @@ pub fn repair_projection(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        return handle_projection_repair(
+        handle_projection_repair(
             &bootstrap,
             ControllerRequest {
                 command: "projection_repair".to_string(),
@@ -818,7 +819,7 @@ pub fn repair_projection(
                 command_kind: Some("projection_repair".to_string()),
                 diagnostic_payload: None,
             },
-        );
+        )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -885,7 +886,7 @@ pub fn authorize_operator_command(
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        return handle_operator_command(
+        handle_operator_command(
             &bootstrap,
             None,
             ControllerRequest {
@@ -903,7 +904,7 @@ pub fn authorize_operator_command(
                 command_kind: Some(command_kind.to_string()),
                 diagnostic_payload: Some("session operator command".to_string()),
             },
-        );
+        )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]

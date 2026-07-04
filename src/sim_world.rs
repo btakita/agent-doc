@@ -565,7 +565,7 @@ impl SyncProjection {
         }
 
         let replacement_count = missing.len();
-        for (doc, index) in missing.into_iter().zip(detachable_unwanted.into_iter()) {
+        for (doc, index) in missing.into_iter().zip(detachable_unwanted) {
             self.stashed.remove(&doc);
             self.stashed.insert(self.visible[index].clone());
             self.visible[index] = doc;
@@ -6139,7 +6139,7 @@ fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
 #[test]
 fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
     let response = response_patch("baseline drift");
-    let (dir, doc, capture, mut world) = setup_baseline_drift_capture(2026_05_25 + 10, &response);
+    let (dir, doc, capture, mut world) = setup_baseline_drift_capture(20260525 + 10, &response);
     apply_response_and_save_current(&doc, &mut world, &response).unwrap();
 
     world
@@ -6175,7 +6175,7 @@ fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
 #[test]
 fn baseline_drift_user_edit_inside_committed_response_fails_closed() {
     let response = response_patch("baseline drift");
-    let (_dir, doc, capture, mut world) = setup_baseline_drift_capture(2026_05_25 + 11, &response);
+    let (_dir, doc, capture, mut world) = setup_baseline_drift_capture(20260525 + 11, &response);
     apply_response_and_save_current(&doc, &mut world, &response).unwrap();
 
     world.doc = world.doc.replace(
@@ -6197,7 +6197,7 @@ fn baseline_drift_user_edit_inside_committed_response_fails_closed() {
 #[test]
 fn baseline_drift_user_edit_matches_normalized_response_adopts() {
     let response = "<!-- patch:exchange -->\n### Re: baseline drift normalized — gpt-5\n\nImplemented and verified.\n❯ Submodule pointer updated.\n<!-- /patch:exchange -->\n";
-    let (_dir, doc, capture, mut world) = setup_baseline_drift_capture(2026_05_25 + 12, response);
+    let (_dir, doc, capture, mut world) = setup_baseline_drift_capture(20260525 + 12, response);
     apply_response_and_save_current(&doc, &mut world, response).unwrap();
 
     world.doc = world
@@ -6267,7 +6267,7 @@ fn apply_jb_cache_conflict_cancel(world: &mut SimWorld) {
 
 #[test]
 fn jb_cache_conflict_no_dialog_commits_cleanly() {
-    let mut world = SimWorld::new(2026_05_25);
+    let mut world = SimWorld::new(20260525);
     world.apply(SimCommand::EditPrompt).unwrap();
     world.apply(SimCommand::CaptureResponse).unwrap();
     world.apply(SimCommand::ApplyCapturedResponse).unwrap();
@@ -6279,7 +6279,7 @@ fn jb_cache_conflict_no_dialog_commits_cleanly() {
 
 #[test]
 fn jb_cache_conflict_accept_branch_commits_cleanly() {
-    let mut world = SimWorld::new(2026_05_25 + 1);
+    let mut world = SimWorld::new(20260525 + 1);
     world.apply(SimCommand::EditPrompt).unwrap();
     world.apply(SimCommand::CaptureResponse).unwrap();
     apply_jb_cache_conflict_accept(&mut world);
@@ -6302,7 +6302,7 @@ fn jb_cache_conflict_cancel_branch_wedges_at_write_applied_today() {
     // inverted) by `jb_cache_conflict_cancel_branch_auto_recovers_via_preflight`
     // that drives a recovery and asserts phase == Committed without a manual
     // `write --commit`.
-    let mut world = SimWorld::new(2026_05_25 + 2);
+    let mut world = SimWorld::new(20260525 + 2);
     world.apply(SimCommand::EditPrompt).unwrap();
     world.apply(SimCommand::CaptureResponse).unwrap();
     apply_jb_cache_conflict_cancel(&mut world);
@@ -6338,7 +6338,7 @@ fn jb_cache_conflict_cancel_branch_recovers_via_explicit_write_commit_today() {
     // cancel-induced wedge. In the simulator, that's a follow-up `Commit` from
     // the WriteApplied phase. This test pins the recovery exit so #jbccc3 can
     // automate it inside preflight without regressing the manual escape hatch.
-    let mut world = SimWorld::new(2026_05_25 + 3);
+    let mut world = SimWorld::new(20260525 + 3);
     world.apply(SimCommand::EditPrompt).unwrap();
     world.apply(SimCommand::CaptureResponse).unwrap();
     apply_jb_cache_conflict_cancel(&mut world);
@@ -6361,7 +6361,7 @@ fn jb_cache_conflict_cancel_branch_recovers_via_explicit_write_commit_today() {
 /// clean.
 #[test]
 fn jb_cache_conflict_cancel_branch_auto_recovers_via_preflight() {
-    let mut world = SimWorld::new(2026_05_25 + 4);
+    let mut world = SimWorld::new(20260525 + 4);
     world.apply(SimCommand::EditPrompt).unwrap();
     world.apply(SimCommand::CaptureResponse).unwrap();
     apply_jb_cache_conflict_cancel(&mut world);
@@ -6421,7 +6421,7 @@ fn jb_cache_conflict_accept_late_replays_duplicate_response_today() {
     // IPC apply path will revalidate against HEAD before mutation and skip
     // the replay. This test should then be replaced (or its assertions
     // inverted) by `jb_cache_conflict_accept_late_replay_rejected_at_apply`.
-    let mut world = SimWorld::new(2026_05_27);
+    let mut world = SimWorld::new(20260527);
     world.apply(SimCommand::EditPrompt).unwrap();
     world.apply(SimCommand::CaptureResponse).unwrap();
     apply_jb_cache_conflict_accept(&mut world);
@@ -6463,7 +6463,7 @@ fn jb_cache_conflict_accept_late_replay_manual_repair_recovers_today() {
     // snapshot catches up. This test pins the recovery exit so a future
     // binary-side replay guard can automate it without regressing the manual
     // escape hatch.
-    let mut world = SimWorld::new(2026_05_27 + 1);
+    let mut world = SimWorld::new(20260527 + 1);
     world.apply(SimCommand::EditPrompt).unwrap();
     world.apply(SimCommand::CaptureResponse).unwrap();
     apply_jb_cache_conflict_accept(&mut world);
@@ -6862,7 +6862,7 @@ fn simeditor_unsaved_buffer_edit_resolves_to_editor_buffer_and_survives_commit()
 
     // The agent's response commits on top of the buffer the cycle read, so the
     // unsaved edit crosses the commit boundary instead of being clobbered.
-    let world = finalize_on_resolved(2026_06_11, &reconciliation.content);
+    let world = finalize_on_resolved(20260611, &reconciliation.content);
     assert_eq!(world.phase, CyclePhase::Committed);
     assert!(
         world.snapshot.contains("#buffer-only-edit"),
@@ -7121,7 +7121,7 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
     assert!(reconciliation.content.contains("#queued-followup"));
 
     // 2. The queue trigger routes to the owner pane and is accepted + proven.
-    let mut world = SimWorld::new(2026_06_11 + 1);
+    let mut world = SimWorld::new(20260611 + 1);
     world.doc = reconciliation.content.clone();
     world.snapshot = reconciliation.content.clone();
     world.apply(SimCommand::SupervisorReady).unwrap();
@@ -7203,7 +7203,7 @@ fn simworld_jb_run_and_clear_share_codex_enter_submit_contract() {
     // #jbcodexsubmit: JB `Run Agent Doc` and `Clear Session Context` both route
     // through the shared live-pane submit primitive. SimWorld drives the two
     // operator-facing actions, then pins the production helper's submit contract.
-    let mut world = SimWorld::new(2026_06_16);
+    let mut world = SimWorld::new(20260616);
     world.apply(SimCommand::SupervisorReady).unwrap();
     world.apply(SimCommand::DispatchOperatorPrompt).unwrap();
     world.apply(SimCommand::SessionClear).unwrap();

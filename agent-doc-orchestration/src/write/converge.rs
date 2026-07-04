@@ -14,7 +14,6 @@ use agent_doc_document_realtime::write_policy::{
 };
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};
-pub use agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift;
 use std::collections::HashSet;
 
 /// `#exch-intermix`: auto-recover the `live_prompt_drift_after_preflight`
@@ -1446,6 +1445,7 @@ pub(crate) fn live_prompt_drift_convergence_frontmatter(
 mod core_tests {
     #![allow(unused_imports)]
     use super::*;
+    use agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift;
     use fs2::FileExt;
     use std::fs;
     use std::fs::OpenOptions;

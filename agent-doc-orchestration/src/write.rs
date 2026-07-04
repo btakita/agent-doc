@@ -950,7 +950,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         let current_content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-        guard_no_stale_snapshot_reset_drift(
+        agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
             file,
             snapshot_doc.as_deref(),
             &current_content,

@@ -786,6 +786,7 @@ impl SimWorld {
     ///   supervisor (mirrors `cold_start_supervisor_for` + route `auto_start`).
     /// - `Guidance(msg)` → refuse the unsafe cold-start; the supervisor stays `Dead`
     ///   and the actionable message is surfaced (never a raw ECONNREFUSED).
+    ///
     /// Returns the production decision so callers/tests can assert on it directly.
     pub(crate) fn recover_dead_supervisor(
         &mut self,
@@ -2512,14 +2513,12 @@ impl SimWorld {
                     self.trace
                 )
             }
-            CyclePhase::WriteApplied => {
-                if self.has_duplicate_response_heading() {
-                    bail!(
-                        "duplicate response patchback before commit; seed={} trace={:?}",
-                        self.seed,
-                        self.trace
-                    );
-                }
+            CyclePhase::WriteApplied if self.has_duplicate_response_heading() => {
+                bail!(
+                    "duplicate response patchback before commit; seed={} trace={:?}",
+                    self.seed,
+                    self.trace
+                );
             }
             _ => {}
         }

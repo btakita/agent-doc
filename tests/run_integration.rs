@@ -1301,7 +1301,7 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
     );
     let user_intent_empty = json["user_intent_prompt_changes"]
         .as_array()
-        .map_or(true, |changes| changes.is_empty());
+        .is_none_or(|changes| changes.is_empty());
     assert!(
         user_intent_empty,
         "independent queue edit must not count as user intent: {json}"

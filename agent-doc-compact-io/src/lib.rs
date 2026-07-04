@@ -194,7 +194,7 @@ impl CompactRuntimeEffects for TestCompactRuntimeEffects {
         visible: &str,
         stage: &str,
     ) -> Result<bool> {
-        agent_doc_orchestration::write::guard_no_stale_snapshot_reset_drift(
+        agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
             file, projected, visible, stage,
         )
     }

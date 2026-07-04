@@ -236,7 +236,7 @@ pub fn run_template(
     let mut current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-    guard_no_stale_snapshot_reset_drift(
+    agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
         file,
         snapshot_doc.as_deref(),
         &current_content,
@@ -575,7 +575,7 @@ pub fn run_stream(
     let mut current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let mut snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-    if guard_no_stale_snapshot_reset_drift(
+    if agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
         file,
         snapshot_doc.as_deref(),
         &current_content,
@@ -1313,7 +1313,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let mut current_content =
         agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-    guard_no_stale_snapshot_reset_drift(
+    agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
         file,
         snapshot_doc.as_deref(),
         &current_content,

@@ -294,7 +294,7 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
         visible: &str,
         stage: &str,
     ) -> anyhow::Result<bool> {
-        agent_doc_orchestration::write::guard_no_stale_snapshot_reset_drift(
+        agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
             file, projected, visible, stage,
         )
     }

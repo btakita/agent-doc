@@ -93,8 +93,8 @@ use agent_doc_document_realtime::write_policy::{
     detect_reintroduced_reaped_pending_ids, is_empty_template_scaffold_snapshot,
 };
 use agent_doc_git::{
-    PostCommitLocalDriftKind, agent_doc_commit_message_for_file, classify_post_commit_local_drift,
-    commit_retry_backoff, has_blocking_non_exchange_component_drift,
+    agent_doc_commit_message_for_file, classify_post_commit_local_drift, commit_retry_backoff,
+    has_blocking_non_exchange_component_drift,
 };
 use agent_doc_git_io::{
     dirs::{narrow_to_submodule, resolve_to_git_root},
@@ -377,6 +377,13 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
 
     fn load_snapshot(&self, file: &Path) -> Option<String> {
         agent_doc_snapshot_io::load(file).ok().flatten()
+    }
+
+    fn cycle_is_terminal(&self, file: &Path) -> bool {
+        agent_doc_cycle_state_io::load(file)
+            .ok()
+            .flatten()
+            .is_some_and(|state| !state.is_open())
     }
 
     fn log_cycle(
@@ -964,53 +971,23 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             "already_current",
             snapshot_content.as_deref().or(head_doc.as_deref()),
         )?;
-        if let Some(kind) = post_commit_local_drift {
-            if kind == PostCommitLocalDriftKind::UserFollowUp {
-                eprintln!(
-                    "[commit] prior response is already committed in HEAD for {} — leaving later local user follow-up edits uncommitted for the next response cycle. This is not a full closeout for the follow-up prompt; run `agent-doc {}` to answer it or pipe the response through `agent-doc write --commit {}`.",
-                    file.display(),
-                    file.display(),
-                    file.display()
-                );
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "post_commit_user_follow_up file={} basis=head",
-                        file.display()
-                    ),
-                );
-                if cycle_is_terminal(file) {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "commit_prompt_handoff_noop file={} basis=head",
-                            file.display()
-                        ),
-                    );
-                    let elapsed_total = t_total.elapsed().as_millis();
-                    if elapsed_total > 0 {
-                        eprintln!("[perf] commit total: {}ms", elapsed_total);
-                    }
-                    return Ok(CommitOutcome {
-                        did_commit: false,
-                        vcs_refresh_signaled: None,
-                    });
-                }
-            } else {
-                eprintln!(
-                    "[commit] detected post-commit local drift for {} — HEAD already contains the committed response; leaving {} uncommitted",
-                    file.display(),
-                    kind.describe()
-                );
-            }
-            agent_doc_ops_log_io::log_op(
+        let disposition =
+            agent_doc_git_io::post_commit_cleanup::log_already_current_local_drift_handoff(
+                &POST_COMMIT_CLEANUP_EFFECTS,
                 file,
-                &format!(
-                    "post_commit_local_drift file={} kind={} basis=head",
-                    file.display(),
-                    kind.as_str()
-                ),
+                post_commit_local_drift,
             );
+        if disposition
+            == agent_doc_git_io::post_commit_cleanup::AlreadyCurrentLocalDriftDisposition::PromptHandoffNoop
+        {
+            let elapsed_total = t_total.elapsed().as_millis();
+            if elapsed_total > 0 {
+                eprintln!("[perf] commit total: {}ms", elapsed_total);
+            }
+            return Ok(CommitOutcome {
+                did_commit: false,
+                vcs_refresh_signaled: None,
+            });
         }
         eprintln!(
             "[commit] staged snapshot already matches HEAD for {} — closing cycle as already committed",
@@ -1388,13 +1365,6 @@ fn exchange_append_is_prompt_target_only(snapshot_doc: &str, current_doc: &str) 
         && changes
             .iter()
             .all(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
-}
-
-fn cycle_is_terminal(file: &Path) -> bool {
-    agent_doc_cycle_state_io::load(file)
-        .ok()
-        .flatten()
-        .is_some_and(|state| !state.is_open())
 }
 
 fn chrono_timestamp() -> String {

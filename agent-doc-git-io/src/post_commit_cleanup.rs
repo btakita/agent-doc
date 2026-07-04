@@ -10,9 +10,16 @@ pub struct QueueContinuationProof {
     pub head_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlreadyCurrentLocalDriftDisposition {
+    ContinueCloseout,
+    PromptHandoffNoop,
+}
+
 pub trait PostCommitCleanupEffects {
     fn read_to_string(&self, file: &Path) -> Result<String>;
     fn load_snapshot(&self, file: &Path) -> Option<String>;
+    fn cycle_is_terminal(&self, file: &Path) -> bool;
     fn log_cycle(
         &self,
         file: &Path,
@@ -148,6 +155,56 @@ pub fn finalize_successful_commit(
     let session_id = effects.read_session_id(file);
     effects.fire_post_commit(file, &session_id);
     effects.fire_doc_event(file, "post_commit");
+}
+
+pub fn log_already_current_local_drift_handoff(
+    effects: &impl PostCommitCleanupEffects,
+    file: &Path,
+    drift_kind: Option<PostCommitLocalDriftKind>,
+) -> AlreadyCurrentLocalDriftDisposition {
+    let Some(kind) = drift_kind else {
+        return AlreadyCurrentLocalDriftDisposition::ContinueCloseout;
+    };
+    if kind == PostCommitLocalDriftKind::UserFollowUp {
+        eprintln!(
+            "[commit] prior response is already committed in HEAD for {} - leaving later local user follow-up edits uncommitted for the next response cycle. This is not a full closeout for the follow-up prompt; run `agent-doc {}` to answer it or pipe the response through `agent-doc write --commit {}`.",
+            file.display(),
+            file.display(),
+            file.display()
+        );
+        effects.log_op(
+            file,
+            &format!(
+                "post_commit_user_follow_up file={} basis=head",
+                file.display()
+            ),
+        );
+        if effects.cycle_is_terminal(file) {
+            effects.log_op(
+                file,
+                &format!(
+                    "commit_prompt_handoff_noop file={} basis=head",
+                    file.display()
+                ),
+            );
+            return AlreadyCurrentLocalDriftDisposition::PromptHandoffNoop;
+        }
+    } else {
+        eprintln!(
+            "[commit] detected post-commit local drift for {} - HEAD already contains the committed response; leaving {} uncommitted",
+            file.display(),
+            kind.describe()
+        );
+    }
+    effects.log_op(
+        file,
+        &format!(
+            "post_commit_local_drift file={} kind={} basis=head",
+            file.display(),
+            kind.as_str()
+        ),
+    );
+    AlreadyCurrentLocalDriftDisposition::ContinueCloseout
 }
 
 pub fn finalize_already_committed_noop(

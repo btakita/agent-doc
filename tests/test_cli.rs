@@ -9697,7 +9697,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 61,
+        ledger_rows.len() >= 62,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10144,6 +10144,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write.rs",
             "agent-doc-document-realtime-io",
             "Move the remaining visible-write convergence sequencing out of `write.rs`",
+        ),
+        (
+            "Write stale-snapshot convergence IO graph",
+            "agent-doc-orchestration/src/write/converge.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Split live-prompt drift recovery, editor convergence, and IPC fallback adapters",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -25823,6 +25829,15 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
 #[test]
 fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-write-converge-io")),
+        "agent-doc-write-converge-io must stay a first-class workspace crate for write convergence sidecar adapters"
+    );
     let realtime_write_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
             .unwrap();
@@ -25844,8 +25859,26 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     let converge =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
             .unwrap();
+    let write_converge_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    for required_snippet in [
+        "pub fn guard_no_stale_snapshot_reset_drift",
+        "stale_snapshot_reset_drift(snapshot_doc, current_doc)",
+        "fn classify_stale_snapshot_visible_rebase",
+        "fn component_change_is_turn_independent",
+    ] {
+        assert!(
+            write_converge_io.contains(required_snippet),
+            "agent-doc-write-converge-io must own stale-snapshot convergence IO: {required_snippet}"
+        );
+    }
+    assert!(
+        !write_converge_io.contains("agent_doc_orchestration")
+            && !write_converge_io.contains("crate::write"),
+        "agent-doc-write-converge-io must not depend on orchestration write facades"
+    );
     for forbidden_snippet in [
         "pub fn live_prompt_drift_auto_recovery_safe",
         "fn live_prompt_drift_recovery_target",
@@ -25873,10 +25906,12 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         );
     }
     assert!(
-        converge.contains("agent_doc_document_realtime::write_policy::{")
+        converge.contains("agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift")
+            && converge.contains("agent_doc_document_realtime::write_policy::{")
             && converge.contains("live_prompt_drift_recovery_target(")
-            && converge.contains("stale_snapshot_reset_drift("),
-        "write/converge.rs should adapt effect gates into focused realtime recovery policy"
+            && !converge.contains("stale_snapshot_reset_drift(snapshot_doc, current_doc)")
+            && !converge.contains("fn classify_stale_snapshot_visible_rebase"),
+        "write/converge.rs should delegate stale-snapshot convergence IO while adapting live-prompt recovery policy"
     );
 }
 

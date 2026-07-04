@@ -122,6 +122,7 @@ dependencies = [
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-doc-workflow-io",
+ "agent-doc-write-converge-io",
  "agent-kit",
  "anyhow",
  "assert_cmd",
@@ -1118,6 +1119,7 @@ dependencies = [
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-doc-workflow-io",
+ "agent-doc-write-converge-io",
  "anyhow",
  "base64 0.22.1",
  "clap",
@@ -2120,6 +2122,29 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-write-converge-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-capture-io",
+ "agent-doc-cycle-state-io",
+ "agent-doc-document",
+ "agent-doc-document-realtime",
+ "agent-doc-element",
+ "agent-doc-frontmatter",
+ "agent-doc-markdown-ast",
+ "agent-doc-merge",
+ "agent-doc-merge-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-session-accretion-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-template",
+ "agent-doc-turn",
+ "agent-doc-turn-scope-io",
+ "anyhow",
  "tempfile",
 ]
 

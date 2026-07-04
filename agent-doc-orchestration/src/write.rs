@@ -236,7 +236,7 @@ pub(crate) use agent_doc_document_realtime_io::{
     VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS, guard_visible_write_idle_and_current,
     guard_visible_write_idle_current_or_target, guard_visible_write_reconcile_with_target,
 };
-use agent_doc_element::element::{self, is_backlog_component};
+use agent_doc_element::element;
 use agent_doc_element_backlog_io::backlog_cmd;
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,

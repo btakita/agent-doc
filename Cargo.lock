@@ -2177,6 +2177,8 @@ name = "agent-doc-write-ipc-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-cycle-state-io",
+ "agent-doc-document-realtime",
+ "agent-doc-element",
  "agent-doc-element-boundary",
  "agent-doc-element-exchange",
  "agent-doc-flow-io",

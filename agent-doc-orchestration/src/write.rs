@@ -264,8 +264,7 @@ use agent_doc_template_io::log_template_structure_guard_event;
 
 use crate::repair;
 use agent_doc_template::stale_baseline::{
-    exchange_append_patch_can_rebase_to_head, is_append_mode_component, is_stale_baseline,
-    patch_touches_exchange,
+    exchange_append_patch_can_rebase_to_head, is_stale_baseline, patch_touches_exchange,
 };
 use agent_doc_turn::response_replay::{dedupe_responses, response_materialized_in_content};
 
@@ -4574,132 +4573,6 @@ mod tests {
         assert!(without.contains("Hello"));
         assert!(without.contains("World"));
     }
-    // --- build_ipc_patches_json / synthesis dedup tests ---
-    #[test]
-    fn synthesis_dedup_skips_when_content_already_present() {
-        // If the unmatched content already exists in the target component,
-        // synthesis should be skipped (idempotent write guard).
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        let existing = "This is the agent response.";
-        let doc_content = format!(
-            "<!-- agent:exchange patch=append -->\n{}\n<!-- /agent:exchange -->\n",
-            existing
-        );
-        fs::write(&doc, &doc_content).unwrap();
-
-        // No explicit patches (simulates skill sending raw content)
-        let patches: Vec<agent_doc_template::PatchBlock> = vec![];
-        // Unmatched content is identical to what's already in the exchange
-        let result = build_ipc_patches_json(&doc, &patches, existing, None, None).unwrap();
-
-        assert!(
-            result.is_empty(),
-            "synthesis should be skipped when content already exists in target component, \
-             got {} patches: {:?}",
-            result.len(),
-            result
-        );
-    }
-    #[test]
-    fn synthesis_proceeds_when_content_is_new() {
-        // When unmatched content is NOT present in the target component,
-        // synthesis should create an IPC patch.
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        let doc_content =
-            "<!-- agent:exchange patch=append -->\nExisting content.\n<!-- /agent:exchange -->\n";
-        fs::write(&doc, doc_content).unwrap();
-
-        let patches: Vec<agent_doc_template::PatchBlock> = vec![];
-        let new_content = "Completely new agent response.";
-        let result = build_ipc_patches_json(&doc, &patches, new_content, None, None).unwrap();
-
-        assert_eq!(
-            result.len(),
-            1,
-            "synthesis should produce one patch for new content"
-        );
-        assert_eq!(
-            result[0]["component"].as_str().unwrap(),
-            "exchange",
-            "synthesized patch should target exchange"
-        );
-        assert_eq!(
-            result[0]["content"].as_str().unwrap(),
-            new_content,
-            "synthesized patch content should match unmatched"
-        );
-    }
-    #[test]
-    fn build_ipc_patches_json_preserves_leading_code_fence_content() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        let doc_content = concat!(
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ show fenced prompt\n",
-            "```\n",
-            "prompt body\n",
-            "```\n",
-            "<!-- /agent:exchange -->\n",
-        );
-        fs::write(&doc, doc_content).unwrap();
-
-        let patches = vec![agent_doc_template::PatchBlock::new(
-            "exchange",
-            "```\nresponse body\n```\n",
-        )];
-        let result = build_ipc_patches_json(&doc, &patches, "", None, None).unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0]["component"].as_str().unwrap(), "exchange");
-        assert_eq!(result[0]["op"].as_str().unwrap(), "append");
-        assert_eq!(
-            result[0]["content"].as_str().unwrap(),
-            "```\nresponse body\n```\n",
-            "IPC payload must keep a leading code fence byte-for-byte"
-        );
-    }
-    #[test]
-    fn synthesis_normalizes_prefix_lines_for_unmatched_exchange_content() {
-        // Regression for the JB-plugin bare `do #expatch...` shape: when IPC
-        // synthesizes an exchange patch from unmatched content, it must bake the
-        // computed `normalize_prefix_lines` into that synthesized patch because
-        // the plugin normalizes before applying patches.
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        let doc_content =
-            "<!-- agent:exchange patch=append -->\nPrevious response.\n<!-- /agent:exchange -->\n";
-        fs::write(&doc, doc_content).unwrap();
-
-        let patches: Vec<agent_doc_template::PatchBlock> = vec![];
-        let unmatched = "do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.\n";
-        let prefix_lines = vec!["do #expatch. spec-test-build-install-commit-push".to_string()];
-        let result = build_ipc_patches_json(
-            &doc,
-            &patches,
-            unmatched,
-            Some(prefix_lines.as_slice()),
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(
-            result.len(),
-            1,
-            "synthesis should still produce one exchange patch"
-        );
-        assert_eq!(
-            result[0]["component"].as_str().unwrap(),
-            "exchange",
-            "synthesized patch should target exchange"
-        );
-        assert_eq!(
-            result[0]["content"].as_str().unwrap(),
-            "❯ do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.",
-            "synthesized unmatched exchange content must carry the prefixed prompt line"
-        );
-    }
     #[test]
     fn file_ipc_synthesized_exchange_patch_omits_full_content() {
         let dir = TempDir::new().unwrap();
@@ -5398,10 +5271,10 @@ mod tests {
         let prefix_lines = vec!["- [ ] Build Gutenberg replacement HTML for home page".to_string()];
         // Simulate the guard: only apply normalize_patch_content for exchange (append-mode) components.
         // For pending (replace-mode), content must pass through unchanged.
-        let is_pending = !is_append_mode_component("pending");
+        let is_pending = !agent_doc_template::stale_baseline::is_append_mode_component("pending");
         assert!(is_pending, "pending should not be an append-mode component");
         // If the guard is respected, pending content is not normalized.
-        let result = if is_append_mode_component("pending") {
+        let result = if agent_doc_template::stale_baseline::is_append_mode_component("pending") {
             agent_doc_document_realtime::write_policy::normalize_patch_content(
                 pending_content,
                 &prefix_lines,

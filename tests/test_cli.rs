@@ -9699,7 +9699,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 79,
+        ledger_rows.len() >= 80,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10374,6 +10374,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/ipc/transport.rs",
             "agent-doc-write-ipc-io/src/lib.rs",
             "Split file-patch payload construction from socket send/fallback handling",
+        ),
+        (
+            "Write IPC patch payload synthesis IO graph",
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "agent-doc-write-ipc-io/src/lib.rs",
+            "Split pure payload policy from file read/eprintln diagnostics",
         ),
     ] {
         let row_text = ledger_rows
@@ -21452,9 +21458,13 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && write_ipc_io_source.contains("is_socket_ack_timeout_error")
             && write_ipc_io_source.contains("pub fn queue_file_ipc_reposition_boundary(")
             && write_ipc_io_source.contains("pub fn try_ipc_reposition_boundary(")
+            && write_ipc_io_source.contains("pub fn build_ipc_patches_json(")
+            && write_ipc_io_source.contains("normalize_patch_content(")
+            && write_ipc_io_source.contains("boundary_id_from_seed_with_summary")
+            && write_ipc_io_source.contains("find_boundary_id")
             && write_ipc_io_source
                 .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor"),
-        "agent-doc-write-ipc-io should own reposition IPC transport and protocol imports"
+        "agent-doc-write-ipc-io should own reposition IPC transport and payload synthesis imports"
     );
     for forbidden in [
         "pub enum FullContentIpcMode",
@@ -21472,6 +21482,8 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "fn try_ipc_full_content_with_mode(",
         "pub(crate) fn log_full_content_ipc_disabled(",
         "pub(crate) fn full_content_ipc_scope_allows(",
+        "pub(crate) fn build_ipc_patches_json(",
+        "fn build_ipc_patches_json(",
     ] {
         assert!(
             !write_ipc_transport_source.contains(forbidden),
@@ -23403,14 +23415,16 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     let write_ipc_transport =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
             .unwrap();
+    let write_ipc_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
     let realtime_write_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
             .unwrap();
     assert!(
-        write_ipc_transport.contains("normalize_patch_content")
+        write_ipc_io.contains("normalize_patch_content")
             && realtime_write_policy.contains("use agent_doc_element_exchange::{")
             && realtime_write_policy.contains("normalization_target_counts"),
-        "write IPC transport should call realtime patch normalization, and realtime should import exchange prefix policy from the focused crate"
+        "write IPC payload synthesis should call realtime patch normalization, and realtime should import exchange prefix policy from the focused crate"
     );
 
     let write_main =
@@ -24102,6 +24116,8 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
     let write_ipc_transport =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
             .unwrap();
+    let write_ipc_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
     let preflight_run =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
@@ -24138,11 +24154,11 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "write IPC paths should route snapshot/live-drift adoption decisions through the focused write-converge owner"
     );
     assert!(
-        write_ipc_transport
-            .contains("use agent_doc_document_realtime::write_policy::normalize_patch_content;")
-            || (write_ipc_transport.contains("agent_doc_document_realtime::write_policy::{")
-                && write_ipc_transport.contains("normalize_patch_content")),
-        "write/ipc/transport.rs should import focused IPC patch normalization policy directly"
+        write_ipc_transport.contains("use agent_doc_write_ipc_io::{")
+            && write_ipc_transport.contains("build_ipc_patches_json")
+            && write_ipc_io
+                .contains("agent_doc_document_realtime::write_policy::normalize_patch_content("),
+        "write/ipc/transport.rs should call focused write IPC payload synthesis, which imports realtime patch normalization directly"
     );
     for forbidden_snippet in [
         "fn new_agent_response_headings(",
@@ -25108,8 +25124,10 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
     );
     assert!(
         write_ipc_io.contains("extract_response_headings_from_patches")
-            && write_ipc_io.contains("pub fn patch_response_headings_already_in_head("),
-        "agent-doc-write-ipc-io should own the response heading HEAD gate while calling the focused extractor directly"
+            && write_ipc_io.contains("pub fn patch_response_headings_already_in_head(")
+            && write_ipc_io.contains("pub fn build_ipc_patches_json(")
+            && write_ipc_io.contains("agent_doc_template::response_materialization::"),
+        "agent-doc-write-ipc-io should own the response heading HEAD gate and IPC payload builder while calling focused template APIs directly"
     );
 
     let focused_callers = [

@@ -16,6 +16,7 @@ use agent_doc_template_io::{
     enforce_imperative_response_contract, normalize_user_prompts_in_exchange_safe,
     template_mode_overrides_for_current_doc,
 };
+use agent_doc_write_ipc_io::build_ipc_patches_json;
 
 // Deeper root cause A superseded the interim `#qftlossdelta` recovery-sidecar
 // safety net (`preserve_dropped_operator_buffer_if_needed`): the committed
@@ -2056,64 +2057,5 @@ mod tests {
             "rejected patchback must not mutate the document"
         );
         assert!(!after.contains("### Re: churn"));
-    }
-    #[test]
-    fn build_ipc_patches_json_seeded_boundary_is_stable_across_rebuilds() {
-        // #finalize-visible-buffer-ipc-timeout-race ROOT-CAUSE REGRESSION:
-        // a single write builds its IPC patches more than once (socket attempt →
-        // file-IPC fallback → old run_stream timeout re-write). Each rebuild used to
-        // mint a FRESH random boundary, so the plugin saw the same response under
-        // two different boundary IDs and appended it twice — doubling the editor
-        // buffer (live repro: 57970 → 107235 bytes). Seeding the boundary from the
-        // stable patch_id must make every rebuild carry an IDENTICAL boundary.
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("agent-doc-bugs2.md");
-        let doc_content =
-            "<!-- agent:exchange patch=append -->\nPrior response.\n<!-- /agent:exchange -->\n";
-        fs::write(&doc, doc_content).unwrap();
-
-        let patches = vec![agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: fix\n\nNew response body.",
-        )];
-        let seed = "2ffa57c0-24e8-441c-aca9-46e6aa6f1c2a";
-
-        // Two rebuilds of the SAME write (same seed) → identical boundary.
-        let build_a = build_ipc_patches_json(&doc, &patches, "", None, Some(seed)).unwrap();
-        let build_b = build_ipc_patches_json(&doc, &patches, "", None, Some(seed)).unwrap();
-        let bid_a = build_a[0]["boundary_id"].as_str();
-        let bid_b = build_b[0]["boundary_id"].as_str();
-        assert!(
-            bid_a.is_some(),
-            "patch should carry a boundary_id: {build_a:?}"
-        );
-        assert_eq!(
-            build_a[0]["op"].as_str(),
-            Some("append"),
-            "append-mode patches should carry an explicit IPC op"
-        );
-        assert_eq!(
-            build_a[0]["node_id"].as_str(),
-            bid_a,
-            "append-mode patches should address the boundary node"
-        );
-        assert_eq!(
-            bid_a, bid_b,
-            "same patch_id seed must yield the SAME boundary across rebuilds (no double-apply)"
-        );
-        assert_eq!(
-            bid_a,
-            Some("2ffa57c0:agent-doc-bugs2"),
-            "boundary must derive from the patch_id hex prefix + doc-stem slug"
-        );
-
-        // A different write (different seed) must NOT collide on one boundary.
-        let other_seed = "99887766-1111-2222-3333-444455556666";
-        let build_c = build_ipc_patches_json(&doc, &patches, "", None, Some(other_seed)).unwrap();
-        assert_ne!(
-            build_c[0]["boundary_id"].as_str(),
-            bid_a,
-            "distinct writes must derive distinct boundaries"
-        );
     }
 }

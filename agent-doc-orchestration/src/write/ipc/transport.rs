@@ -1,8 +1,6 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_document_realtime::write_policy::normalize_patch_content;
-use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{
@@ -24,7 +22,9 @@ use agent_doc_write_converge_io::{
     record_ipc_socket_ack_timeout, save_ipc_snapshot_and_crdt_nonfatal,
     stale_supervisor_write_short_circuit, write_ack_content_through_to_disk,
 };
-use agent_doc_write_ipc_io::{IpcResult, patch_response_headings_already_in_head};
+use agent_doc_write_ipc_io::{
+    IpcResult, build_ipc_patches_json, patch_response_headings_already_in_head,
+};
 
 /// Attempt to write via IPC (socket-first, file-based fallback).
 ///
@@ -1235,139 +1235,6 @@ pub(crate) fn write_ipc_and_poll(
         );
         Ok(true)
     }
-}
-
-/// Build the IPC patches JSON array (shared between socket and file-based paths).
-///
-/// Reads the document to find boundary IDs, filters frontmatter patches,
-/// synthesizes exchange patches for unmatched content.
-///
-/// When `normalize_prefix_lines` is provided, applies `❯ ` prefix to matching
-/// lines inside each patch's content so newly-appended lines already carry the
-/// prefix. (The plugin runs normalization *before* applying patches, so it
-/// cannot normalize lines that the patch is about to append.)
-pub(crate) fn build_ipc_patches_json(
-    file: &Path,
-    patches: &[agent_doc_template::PatchBlock],
-    unmatched: &str,
-    normalize_prefix_lines: Option<&[String]>,
-    boundary_seed: Option<&str>,
-) -> Result<Vec<serde_json::Value>> {
-    let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
-    let summary = file.file_stem().and_then(|s| s.to_str());
-    // #finalize-visible-buffer-ipc-timeout-race: when a stable seed (the IPC
-    // patch_id) is supplied, derive a deterministic boundary so this write's
-    // socket / file / fallback rebuilds all carry the SAME boundary. Without it,
-    // each rebuild minted a fresh random boundary and the plugin appended the
-    // response a second time, doubling the editor buffer.
-    let current_doc = match boundary_seed {
-        Some(seed) => {
-            let bid = agent_doc_element::id::boundary_id_from_seed_with_summary(seed, summary);
-            template::reposition_boundary_to_end_clean_with_summary_and_id(
-                &raw_doc,
-                Some(&bid),
-                summary,
-            )
-        }
-        None => template::reposition_boundary_to_end_clean_with_summary(&raw_doc, summary),
-    };
-
-    let mut ipc_patches: Vec<serde_json::Value> = patches
-        .iter()
-        .filter(|p| p.name != "frontmatter")
-        .map(|p| {
-            let content = match normalize_prefix_lines {
-                Some(prefix_lines)
-                    if !prefix_lines.is_empty() && is_append_mode_component(&p.name) =>
-                {
-                    normalize_patch_content(&p.content, prefix_lines)
-                }
-                _ => p.content.clone(),
-            };
-            let mut patch_json = serde_json::json!({
-                "component": p.name,
-                "content": content,
-                "op": if is_append_mode_component(&p.name) {
-                    "append"
-                } else {
-                    "replace"
-                },
-            });
-            if let Some(bid) = find_boundary_id(&current_doc, &p.name) {
-                patch_json["boundary_id"] = serde_json::Value::String(bid.clone());
-                patch_json["node_id"] = serde_json::Value::String(bid);
-            } else if is_append_mode_component(&p.name) {
-                patch_json["ensure_boundary"] = serde_json::Value::Bool(true);
-            }
-            patch_json
-        })
-        .collect();
-
-    let effective_unmatched = unmatched.trim().to_string();
-    if ipc_patches.is_empty() && !effective_unmatched.is_empty() {
-        // Dedup guard: parse components once, check before synthesizing.
-        let parsed_comps = agent_doc_element::element::parse(&current_doc).unwrap_or_default();
-        for target in &["exchange", "output"] {
-            // Skip synthesis if the content already exists in the target component.
-            // This makes the write idempotent even when called twice with the same content.
-            let already_present = parsed_comps.iter().any(|c| {
-                c.name == *target && {
-                    let body = &current_doc[c.open_end..c.close_start];
-                    body.contains(effective_unmatched.as_str())
-                }
-            });
-            if already_present {
-                eprintln!(
-                    "[write] dedup: content already present in {} — skipping synthesis",
-                    target
-                );
-                break;
-            }
-            if let Some(bid) = find_boundary_id(&current_doc, target) {
-                let synthesized_content = match normalize_prefix_lines {
-                    Some(prefix_lines)
-                        if !prefix_lines.is_empty() && is_append_mode_component(target) =>
-                    {
-                        normalize_patch_content(&effective_unmatched, prefix_lines)
-                    }
-                    _ => effective_unmatched.clone(),
-                };
-                eprintln!(
-                    "[write] synthesizing {} patch for unmatched content (boundary {})",
-                    target,
-                    &bid[..8.min(bid.len())]
-                );
-                ipc_patches.push(serde_json::json!({
-                    "component": target,
-                    "content": synthesized_content,
-                    "op": "append",
-                    "boundary_id": bid,
-                    "node_id": bid,
-                }));
-                break;
-            } else if is_append_mode_component(target) {
-                let synthesized_content = match normalize_prefix_lines {
-                    Some(prefix_lines) if !prefix_lines.is_empty() => {
-                        normalize_patch_content(&effective_unmatched, prefix_lines)
-                    }
-                    _ => effective_unmatched.clone(),
-                };
-                eprintln!(
-                    "[write] synthesizing {} patch for unmatched content (ensure_boundary)",
-                    target
-                );
-                ipc_patches.push(serde_json::json!({
-                    "component": target,
-                    "content": synthesized_content,
-                    "op": "append",
-                    "ensure_boundary": true,
-                }));
-                break;
-            }
-        }
-    }
-
-    Ok(ipc_patches)
 }
 
 #[cfg(test)]

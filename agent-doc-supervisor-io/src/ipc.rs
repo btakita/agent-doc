@@ -124,6 +124,147 @@ pub fn active_supervisor_pids(project_root: &Path) -> Vec<(String, u32)> {
     active
 }
 
+/// Serializable supervisor state projected for the `state` IPC method.
+///
+/// The concrete supervisor runtime owns actor stores, PTY writers, and process
+/// handles. This focused IPC layer only needs the JSON-facing facts.
+#[derive(Debug, Clone)]
+pub struct SupervisorIpcStateSnapshot {
+    pub running: bool,
+    pub state: String,
+    pub actor_state: Option<String>,
+    pub actor_session_id: Option<String>,
+    pub actor_pane_id: Option<String>,
+    pub actor_generation: Option<u64>,
+    pub editor_sync: Option<serde_json::Value>,
+    pub restart_count: u32,
+    pub cwd_source: &'static str,
+    pub supervisor_pid: u32,
+    pub supervisor_instance_id: String,
+    pub child_pid: u32,
+}
+
+/// Effect boundary for handling supervisor IPC methods.
+pub trait SupervisorIpcHandlerState {
+    fn capability_dispatch_blocker(&self) -> Option<String>;
+    fn state_snapshot(&self) -> SupervisorIpcStateSnapshot;
+    fn deliver_ipc_inject(&self, bytes: &str, diag_op: &str) -> Result<(), String>;
+    fn mark_inject_dispatched(&self);
+    fn mark_clear_dispatched(&self);
+    fn request_restart(&self, mode: String);
+    fn request_stop(&self);
+    fn request_stop_agent(&self);
+    fn handle_replica_register(&self, file: &str, identity: &str) -> IpcResponse;
+    fn handle_replica_deregister(&self, file: &str, identity: &str) -> IpcResponse;
+    fn handle_replica_update(&self, file: &str, identity: &str, update_b64: &str) -> IpcResponse;
+    fn handle_replica_pull(&self, file: &str, identity: &str) -> IpcResponse;
+    fn handle_replica_ack(
+        &self,
+        file: &str,
+        identity: &str,
+        patch_id: &str,
+        generation: u64,
+    ) -> IpcResponse;
+    fn handle_replica_awareness(
+        &self,
+        file: &str,
+        identity: &str,
+        awareness_b64: &str,
+    ) -> IpcResponse;
+}
+
+/// Handle one decoded supervisor IPC method against a concrete supervisor
+/// runtime state adapter.
+pub fn handle_supervisor_ipc<S>(method: IpcMethod, state: &S) -> IpcResponse
+where
+    S: SupervisorIpcHandlerState + ?Sized,
+{
+    if agent_doc_supervisor::ipc_protocol::ipc_method_requires_capability_gate(&method)
+        && let Some(reason) = state.capability_dispatch_blocker()
+    {
+        return IpcResponse::err(reason);
+    }
+    match method {
+        IpcMethod::State => {
+            let snapshot = state.state_snapshot();
+            IpcResponse::ok(serde_json::json!({
+                "running": snapshot.running,
+                "state": snapshot.state,
+                "actor_state": snapshot.actor_state,
+                "actor_session_id": snapshot.actor_session_id,
+                "actor_pane_id": snapshot.actor_pane_id,
+                "actor_generation": snapshot.actor_generation,
+                "editor_sync": snapshot.editor_sync,
+                "restart_count": snapshot.restart_count,
+                "cwd_source": snapshot.cwd_source,
+                "supervisor_pid": snapshot.supervisor_pid,
+                "supervisor_instance_id": snapshot.supervisor_instance_id,
+                "child_pid": snapshot.child_pid,
+            }))
+        }
+        IpcMethod::Pid => {
+            let snapshot = state.state_snapshot();
+            if snapshot.supervisor_pid > 0 {
+                IpcResponse::ok(serde_json::json!({
+                    "pid": snapshot.supervisor_pid,
+                    "supervisor_instance_id": snapshot.supervisor_instance_id,
+                }))
+            } else {
+                IpcResponse::ok(serde_json::json!({ "pid": null }))
+            }
+        }
+        IpcMethod::Inject { bytes } => match state.deliver_ipc_inject(&bytes, "ipc_inject") {
+            Ok(()) => {
+                state.mark_inject_dispatched();
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            Err(err) => IpcResponse::err(err),
+        },
+        IpcMethod::Clear { bytes } => match state.deliver_ipc_inject(&bytes, "ipc_clear") {
+            Ok(()) => {
+                state.mark_clear_dispatched();
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            Err(err) => IpcResponse::err(err),
+        },
+        IpcMethod::Restart { mode } => {
+            state.request_restart(mode);
+            IpcResponse::ok_empty()
+        }
+        IpcMethod::Stop { graceful: _ } => {
+            state.request_stop();
+            IpcResponse::ok_empty()
+        }
+        IpcMethod::StopAgent { reason: _ } => {
+            state.request_stop_agent();
+            IpcResponse::ok_empty()
+        }
+        IpcMethod::ReplicaRegister { file, identity } => {
+            state.handle_replica_register(&file, &identity)
+        }
+        IpcMethod::ReplicaDeregister { file, identity } => {
+            state.handle_replica_deregister(&file, &identity)
+        }
+        IpcMethod::ReplicaUpdate {
+            file,
+            identity,
+            update_b64,
+        } => state.handle_replica_update(&file, &identity, &update_b64),
+        IpcMethod::ReplicaPull { file, identity } => state.handle_replica_pull(&file, &identity),
+        IpcMethod::ReplicaAck {
+            file,
+            identity,
+            patch_id,
+            generation,
+        } => state.handle_replica_ack(&file, &identity, &patch_id, generation),
+        IpcMethod::ReplicaAwareness {
+            file,
+            identity,
+            awareness_b64,
+        } => state.handle_replica_awareness(&file, &identity, &awareness_b64),
+    }
+}
+
 /// Count of in-flight per-connection supervisor-IPC handler threads. Mirrors the
 /// editor-IPC listener (`ipc_socket.rs`, `#jbacceptwedge`): the accept loop
 /// spawns one short-lived thread per connection so a slow/half-open client can

@@ -9697,7 +9697,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 55,
+        ledger_rows.len() >= 56,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10228,6 +10228,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/test_support.rs",
             "agent-doc-test-support/src/lib.rs",
             "Move remaining orchestration integration fixtures into focused IO crate test helpers",
+        ),
+        (
+            "Supervisor IPC command handler graph",
+            "agent-doc-orchestration/src/start/supervisor_io.rs",
+            "agent-doc-supervisor-io/src/ipc.rs",
+            "Split the `SupervisorIpcHandlerState` adapter",
         ),
     ] {
         let row_text = ledger_rows
@@ -16598,12 +16604,6 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor-crdt-io must stay independent of orchestration"
     );
     for forbidden_snippet in [
-        "fn handle_replica_register(",
-        "fn handle_replica_deregister(",
-        "fn handle_replica_update(",
-        "fn handle_replica_pull(",
-        "fn handle_replica_ack(",
-        "fn handle_replica_awareness(",
         "agent_doc_crdt_relay_io::register_replica_for_file(",
         "agent_doc_crdt_relay_io::relay_replica_update_for_file(",
         "agent_doc_crdt_relay_io::set_replica_awareness_for_file(",
@@ -16615,9 +16615,11 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     assert!(
         orchestration_supervisor_io
-            .contains("agent_doc_supervisor_crdt_io::handle_replica_register(&file, &identity)")
+            .contains("agent_doc_supervisor_crdt_io::handle_replica_register(file, identity)")
             && orchestration_supervisor_io
-                .contains("agent_doc_supervisor_crdt_io::handle_replica_awareness("),
+                .contains("agent_doc_supervisor_crdt_io::handle_replica_awareness(")
+            && orchestration_supervisor_io
+                .contains("impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShared"),
         "orchestration supervisor IPC dispatch should call the focused CRDT adapter crate directly"
     );
     for required_snippet in [
@@ -16626,6 +16628,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn socket_path(",
         "pub fn active_supervisor_pids(",
         "pub struct SupervisorIpc",
+        "pub struct SupervisorIpcStateSnapshot",
+        "pub trait SupervisorIpcHandlerState",
+        "pub fn handle_supervisor_ipc",
         "pub enum SocketLiveness",
         "pub fn probe_socket(",
         "pub fn send_command(",
@@ -16636,8 +16641,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     assert!(
-        orchestration_start.contains("ipc_method_requires_capability_gate"),
-        "start keeps focused supervisor protocol gating while IPC transport lives in supervisor-io"
+        supervisor_io_ipc.contains("ipc_method_requires_capability_gate(&method)")
+            && !orchestration_start.contains("ipc_method_requires_capability_gate"),
+        "agent-doc-supervisor-io should own supervisor IPC command gating while start.rs keeps only concrete state/effect adapters"
     );
     for relative in [
         "agent-doc-controller-io/src/project_controller/rpc.rs",

@@ -152,9 +152,7 @@ use agent_doc_supervisor::crash_policy::{
     supervisor_policy_exit_code, supervisor_resume_handoff_failed,
 };
 use agent_doc_supervisor::input::{normalize_supervisor_inject_bytes, prompt_input_summary};
-use agent_doc_supervisor::ipc_protocol::{
-    IpcMethod, IpcResponse, ipc_method_requires_capability_gate, submit_bytes,
-};
+use agent_doc_supervisor::ipc_protocol::submit_bytes;
 use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
 use agent_doc_supervisor::session_owner::{
     ExistingPaneConflictFacts, ExistingSessionPaneAction,
@@ -1712,8 +1710,10 @@ impl SupervisorShared {
 }
 
 /// Whether an IPC method is a prompt dispatch that must pass the managed
-/// capability proof gate before delivery. Only [`IpcMethod::Inject`] is a real
-/// dispatch; operator control methods ([`IpcMethod::Clear`], `Stop`, `Restart`)
+/// capability proof gate before delivery. Only
+/// [`agent_doc_supervisor::ipc_protocol::IpcMethod::Inject`] is a real
+/// dispatch; operator control methods
+/// ([`agent_doc_supervisor::ipc_protocol::IpcMethod::Clear`], `Stop`, `Restart`)
 /// and read-only methods (`State`, `Pid`) are gate-exempt so a session whose
 /// proof failed can still be inspected, cleared, and stopped without `kill -9`.
 /// Pure and deterministic for unit testing the gate-exemption classification.

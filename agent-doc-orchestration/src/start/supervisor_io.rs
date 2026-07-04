@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_supervisor::ipc_protocol::IpcResponse;
 pub(crate) use agent_doc_supervisor_process::io_threads::{
     spawn_reader_thread, spawn_writer_thread,
 };
@@ -90,173 +91,143 @@ pub(crate) fn deliver_ipc_inject(
     }
 }
 
-pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
-    // Central dispatch gate: only real prompt dispatch is gated behind the
-    // managed-capability proof. Operator/read-only methods are gate-exempt.
-    if ipc_method_requires_capability_gate(&method)
-        && let Some(reason) = shared.capability_dispatch_blocker()
-    {
-        return IpcResponse::err(reason);
+impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShared {
+    fn capability_dispatch_blocker(&self) -> Option<String> {
+        SupervisorShared::capability_dispatch_blocker(self)
     }
-    match method {
-        IpcMethod::State => {
-            let state = shared.supervisor_state.lock().unwrap();
-            let actor_state = shared
-                .actor_state
-                .lock()
-                .unwrap()
-                .map(|state| state.as_str().to_string());
-            let actor_session_id = shared
-                .actor_runtime
-                .as_ref()
-                .map(|runtime| runtime.session_id.clone());
-            let actor_pane_id = shared
-                .actor_runtime
-                .as_ref()
-                .map(|runtime| runtime.pane_id.clone());
-            let actor_generation = shared
-                .actor_runtime
-                .as_ref()
-                .map(|runtime| runtime.generation);
-            let editor_sync = shared.actor_runtime.as_ref().map(|runtime| {
-                let file = runtime.file.display().to_string();
-                let statuses = agent_doc_debounce::editor_sync_statuses(&file);
-                let in_flight = statuses.iter().any(|status| status.in_flight);
-                serde_json::json!({
-                    "file": file,
-                    "in_flight": in_flight,
-                    "statuses": statuses,
-                })
-            });
-            IpcResponse::ok(serde_json::json!({
-                "running": shared.running.load(Ordering::Relaxed),
-                "state": state.as_str(),
-                "actor_state": actor_state,
-                "actor_session_id": actor_session_id,
-                "actor_pane_id": actor_pane_id,
-                "actor_generation": actor_generation,
-                "editor_sync": editor_sync,
-                "restart_count": shared.restart_count.load(Ordering::Relaxed),
-                "cwd_source": shared.cwd_source,
-                "supervisor_pid": shared.supervisor_pid,
-                "supervisor_instance_id": shared.supervisor_instance_id,
-                "child_pid": shared.child_pid.load(Ordering::Relaxed),
-            }))
+
+    fn state_snapshot(&self) -> agent_doc_supervisor_io::ipc::SupervisorIpcStateSnapshot {
+        let state = self.supervisor_state.lock().unwrap();
+        let actor_state = self
+            .actor_state
+            .lock()
+            .unwrap()
+            .map(|state| state.as_str().to_string());
+        let actor_session_id = self
+            .actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.session_id.clone());
+        let actor_pane_id = self
+            .actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.pane_id.clone());
+        let actor_generation = self
+            .actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.generation);
+        let editor_sync = self.actor_runtime.as_ref().map(|runtime| {
+            let file = runtime.file.display().to_string();
+            let statuses = agent_doc_debounce::editor_sync_statuses(&file);
+            let in_flight = statuses.iter().any(|status| status.in_flight);
+            serde_json::json!({
+                "file": file,
+                "in_flight": in_flight,
+                "statuses": statuses,
+            })
+        });
+        agent_doc_supervisor_io::ipc::SupervisorIpcStateSnapshot {
+            running: self.running.load(Ordering::Relaxed),
+            state: state.as_str().to_string(),
+            actor_state,
+            actor_session_id,
+            actor_pane_id,
+            actor_generation,
+            editor_sync,
+            restart_count: self.restart_count.load(Ordering::Relaxed),
+            cwd_source: self.cwd_source,
+            supervisor_pid: self.supervisor_pid,
+            supervisor_instance_id: self.supervisor_instance_id.clone(),
+            child_pid: self.child_pid.load(Ordering::Relaxed),
         }
-        IpcMethod::Pid => {
-            if shared.supervisor_pid > 0 {
-                IpcResponse::ok(serde_json::json!({
-                    "pid": shared.supervisor_pid,
-                    "supervisor_instance_id": shared.supervisor_instance_id,
-                }))
-            } else {
-                IpcResponse::ok(serde_json::json!({ "pid": null }))
-            }
+    }
+
+    fn deliver_ipc_inject(&self, bytes: &str, diag_op: &str) -> Result<(), String> {
+        deliver_ipc_inject(self, bytes, diag_op)
+    }
+
+    fn mark_inject_dispatched(&self) {
+        self.transition_actor_state(
+            agent_doc_sqlite::state_store::ActorState::Busy,
+            "dispatch",
+            "ipc_inject",
+        );
+    }
+
+    fn mark_clear_dispatched(&self) {
+        self.transition_actor_state(
+            agent_doc_sqlite::state_store::ActorState::Busy,
+            "operator",
+            "ipc_clear",
+        );
+    }
+
+    fn request_restart(&self, mode: String) {
+        self.transition_actor_state(
+            agent_doc_sqlite::state_store::ActorState::Busy,
+            "supervisor",
+            "ipc_restart_requested",
+        );
+        *self.restart_mode.lock().unwrap() = mode;
+        self.restart_requested.store(true, Ordering::Relaxed);
+        // `#supkill-bg` — blue/green drain-and-supersede. When the supervisor's own
+        // binary is stale (the `restart-supervisor ... generation closed` / `#fcc0`
+        // case), route the restart through the idle-watch in-place `execve` reexec.
+        let reexec = self.binary_stale.load(Ordering::Relaxed);
+        self.restart_reexec.store(reexec, Ordering::Relaxed);
+        if !reexec {
+            self.kill_child();
         }
-        IpcMethod::Inject { bytes } => {
-            // `Inject` is a real prompt dispatch; the central gate above already
-            // refused it when the managed-capability proof failed.
-            match deliver_ipc_inject(shared, &bytes, "ipc_inject") {
-                Ok(()) => {
-                    shared.transition_actor_state(
-                        agent_doc_sqlite::state_store::ActorState::Busy,
-                        "dispatch",
-                        "ipc_inject",
-                    );
-                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                }
-                Err(err) => IpcResponse::err(err),
-            }
-        }
-        IpcMethod::Clear { bytes } => {
-            // Gate-exempt operator control channel: clearing a session is a
-            // recovery action, not a dispatch, so it must succeed even when the
-            // capability proof has failed (#codex-capability-proof-unrecoverable).
-            match deliver_ipc_inject(shared, &bytes, "ipc_clear") {
-                Ok(()) => {
-                    shared.transition_actor_state(
-                        agent_doc_sqlite::state_store::ActorState::Busy,
-                        "operator",
-                        "ipc_clear",
-                    );
-                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                }
-                Err(err) => IpcResponse::err(err),
-            }
-        }
-        IpcMethod::Restart { mode } => {
-            shared.transition_actor_state(
-                agent_doc_sqlite::state_store::ActorState::Busy,
-                "supervisor",
-                "ipc_restart_requested",
-            );
-            *shared.restart_mode.lock().unwrap() = mode;
-            shared.restart_requested.store(true, Ordering::Relaxed);
-            // `#supkill-bg` — blue/green drain-and-supersede. When the supervisor's own
-            // binary is stale (the `restart-supervisor … generation closed` / `#fcc0`
-            // case), do NOT kill the child here: route the restart through the
-            // idle-watch in-place `execve` reexec so it drains the in-flight turn, then
-            // hot-reloads onto the fresh binary preserving the live child + pane. The
-            // in-process host loop honors this flag and defers its restart-kill. A
-            // fresh binary has nothing to upgrade, so it keeps the immediate
-            // kill-child → relaunch path.
-            let reexec = shared.binary_stale.load(Ordering::Relaxed);
-            shared.restart_reexec.store(reexec, Ordering::Relaxed);
-            if !reexec {
-                shared.kill_child();
-            }
-            IpcResponse::ok_empty()
-        }
-        IpcMethod::Stop { graceful: _ } => {
-            shared.stop_requested.store(true, Ordering::Relaxed);
-            shared.kill_child();
-            IpcResponse::ok_empty()
-        }
-        IpcMethod::StopAgent { reason: _ } => {
-            // "Stop Agent": kill the harness child but keep the supervisor alive.
-            // Unlike `Stop`, this must NOT set `stop_requested` (which exits the
-            // supervisor) and must NOT set `restart_requested` (which auto-restarts).
-            // The run loop observes `stop_agent_requested` after the child exits and
-            // lands on the restart-or-quit keepalive prompt so the operator can
-            // restart manually.
-            shared.transition_actor_state(
-                agent_doc_sqlite::state_store::ActorState::WaitingInput,
-                "supervisor",
-                "ipc_stop_agent_requested",
-            );
-            shared.stop_agent_requested.store(true, Ordering::Relaxed);
-            shared.kill_child();
-            IpcResponse::ok_empty()
-        }
-        IpcMethod::ReplicaRegister { file, identity } => {
-            agent_doc_supervisor_crdt_io::handle_replica_register(&file, &identity)
-        }
-        IpcMethod::ReplicaDeregister { file, identity } => {
-            agent_doc_supervisor_crdt_io::handle_replica_deregister(&file, &identity)
-        }
-        IpcMethod::ReplicaUpdate {
-            file,
-            identity,
-            update_b64,
-        } => agent_doc_supervisor_crdt_io::handle_replica_update(&file, &identity, &update_b64),
-        IpcMethod::ReplicaPull { file, identity } => {
-            agent_doc_supervisor_crdt_io::handle_replica_pull(&file, &identity)
-        }
-        IpcMethod::ReplicaAck {
-            file,
-            identity,
-            patch_id,
-            generation,
-        } => agent_doc_supervisor_crdt_io::handle_replica_ack(
-            &file, &identity, &patch_id, generation,
-        ),
-        IpcMethod::ReplicaAwareness {
-            file,
-            identity,
-            awareness_b64,
-        } => {
-            agent_doc_supervisor_crdt_io::handle_replica_awareness(&file, &identity, &awareness_b64)
-        }
+    }
+
+    fn request_stop(&self) {
+        self.stop_requested.store(true, Ordering::Relaxed);
+        self.kill_child();
+    }
+
+    fn request_stop_agent(&self) {
+        // "Stop Agent": kill the harness child but keep the supervisor alive.
+        self.transition_actor_state(
+            agent_doc_sqlite::state_store::ActorState::WaitingInput,
+            "supervisor",
+            "ipc_stop_agent_requested",
+        );
+        self.stop_agent_requested.store(true, Ordering::Relaxed);
+        self.kill_child();
+    }
+
+    fn handle_replica_register(&self, file: &str, identity: &str) -> IpcResponse {
+        agent_doc_supervisor_crdt_io::handle_replica_register(file, identity)
+    }
+
+    fn handle_replica_deregister(&self, file: &str, identity: &str) -> IpcResponse {
+        agent_doc_supervisor_crdt_io::handle_replica_deregister(file, identity)
+    }
+
+    fn handle_replica_update(&self, file: &str, identity: &str, update_b64: &str) -> IpcResponse {
+        agent_doc_supervisor_crdt_io::handle_replica_update(file, identity, update_b64)
+    }
+
+    fn handle_replica_pull(&self, file: &str, identity: &str) -> IpcResponse {
+        agent_doc_supervisor_crdt_io::handle_replica_pull(file, identity)
+    }
+
+    fn handle_replica_ack(
+        &self,
+        file: &str,
+        identity: &str,
+        patch_id: &str,
+        generation: u64,
+    ) -> IpcResponse {
+        agent_doc_supervisor_crdt_io::handle_replica_ack(file, identity, patch_id, generation)
+    }
+
+    fn handle_replica_awareness(
+        &self,
+        file: &str,
+        identity: &str,
+        awareness_b64: &str,
+    ) -> IpcResponse {
+        agent_doc_supervisor_crdt_io::handle_replica_awareness(file, identity, awareness_b64)
     }
 }
 
@@ -268,6 +239,7 @@ mod tests {
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use agent_doc_hooks_io::fire_doc_hooks;
     use agent_doc_project_config_io as project_config_io;
+    use agent_doc_supervisor::ipc_protocol::IpcMethod;
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
@@ -317,7 +289,9 @@ mod tests {
         let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             &project_root,
             session_id,
-            move |method| handle_ipc(method, &shared_for_ipc),
+            move |method| {
+                agent_doc_supervisor_io::ipc::handle_supervisor_ipc(method, shared_for_ipc.as_ref())
+            },
         )
         .expect("start supervisor ipc");
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -476,7 +450,9 @@ mod tests {
         let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             &project_root,
             session_id,
-            move |method| handle_ipc(method, &shared_for_ipc),
+            move |method| {
+                agent_doc_supervisor_io::ipc::handle_supervisor_ipc(method, shared_for_ipc.as_ref())
+            },
         )
         .expect("start supervisor ipc");
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -516,11 +492,11 @@ mod tests {
             Box::new(RecordingWriter(written.clone())),
         ))));
 
-        let response = handle_ipc(
+        let response = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
             IpcMethod::Inject {
                 bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
             },
-            &shared,
+            shared.as_ref(),
         );
 
         assert!(response.ok);
@@ -556,7 +532,8 @@ mod tests {
             None,
         ));
 
-        let response = handle_ipc(IpcMethod::State, &shared);
+        let response =
+            agent_doc_supervisor_io::ipc::handle_supervisor_ipc(IpcMethod::State, shared.as_ref());
         assert!(response.ok, "{response:?}");
         let data = response.data.expect("state data");
         let sync = data.get("editor_sync").expect("editor_sync field");
@@ -577,11 +554,11 @@ mod tests {
         *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
             Box::new(RecordingWriter(written.clone())),
         ))));
-        let response = handle_ipc(
+        let response = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
             IpcMethod::Inject {
                 bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
             },
-            &shared,
+            shared.as_ref(),
         );
 
         assert!(response.ok, "{response:?}");
@@ -599,11 +576,11 @@ mod tests {
             CapabilityProofGate::Failed,
             Some("network denied".to_string()),
         );
-        let response = handle_ipc(
+        let response = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
             IpcMethod::Inject {
                 bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
             },
-            &shared,
+            shared.as_ref(),
         );
 
         assert!(!response.ok);
@@ -627,11 +604,11 @@ mod tests {
             Some("network denied".to_string()),
         );
 
-        let inject = handle_ipc(
+        let inject = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
             IpcMethod::Inject {
                 bytes: "/clear".to_string(),
             },
-            &shared,
+            shared.as_ref(),
         );
         assert!(!inject.ok);
         assert!(
@@ -647,11 +624,11 @@ mod tests {
         *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
             Box::new(RecordingWriter(written.clone())),
         ))));
-        let clear = handle_ipc(
+        let clear = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
             IpcMethod::Clear {
                 bytes: "/clear".to_string(),
             },
-            &shared,
+            shared.as_ref(),
         );
         assert!(clear.ok, "clear must bypass the dispatch gate: {clear:?}");
         // Delivery matches the Inject path: trailing-newline normalization only,
@@ -667,7 +644,10 @@ mod tests {
             CapabilityProofGate::Failed,
             Some("network denied".to_string()),
         );
-        let response = handle_ipc(IpcMethod::Stop { graceful: false }, &shared);
+        let response = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
+            IpcMethod::Stop { graceful: false },
+            shared.as_ref(),
+        );
         assert!(response.ok, "{response:?}");
         assert!(shared.stop_requested.load(Ordering::Relaxed));
     }

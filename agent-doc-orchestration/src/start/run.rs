@@ -967,7 +967,7 @@ pub fn run_with_reap_policy(
     // Start IPC listener
     let shared_for_ipc = shared.clone();
     let mut ipc = SupervisorIpc::start(&project_root, &session_id, move |method| {
-        handle_ipc(method, &shared_for_ipc)
+        agent_doc_supervisor_io::ipc::handle_supervisor_ipc(method, shared_for_ipc.as_ref())
     })?;
     log_event(
         &mut session_log,
@@ -2035,6 +2035,7 @@ mod tests {
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use agent_doc_hooks_io::fire_doc_hooks;
     use agent_doc_project_config_io as project_config_io;
+    use agent_doc_supervisor::ipc_protocol::IpcMethod;
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
@@ -2450,7 +2451,12 @@ mod tests {
         let shared_for_ipc = shared.clone();
         let mut ipc =
             agent_doc_supervisor_io::ipc::SupervisorIpc::start(tmp.path(), "test-session", {
-                move |method| handle_ipc(method, &shared_for_ipc)
+                move |method| {
+                    agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
+                        method,
+                        shared_for_ipc.as_ref(),
+                    )
+                }
             })
             .unwrap();
 

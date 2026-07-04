@@ -1448,442 +1448,362 @@ pub(crate) fn write_ipc_and_poll(
     options: IpcPollOptions<'_>,
 ) -> Result<bool> {
     let before_content = std::fs::read_to_string(doc_file).ok();
-    let patch_id_for_diagnostics = payload.get("patch_id").and_then(|value| value.as_str());
-    // Atomic write of patch file
-    atomic_write(patch_file, &serde_json::to_string_pretty(payload)?)?;
+    let delivered = agent_doc_write_converge_io::write_file_ipc_and_poll_delivery(
+        &crate::write::WRITE_CONVERGENCE_EFFECTS,
+        patch_file,
+        payload,
+        doc_file,
+        patch_count,
+        agent_doc_write_converge_io::FileIpcDeliveryOptions {
+            guard_committed_cycle: options.guard_committed_cycle,
+        },
+    )?;
+    if !delivered {
+        return Ok(false);
+    }
 
-    eprintln!(
-        "[write] IPC patch written to {} ({} components)",
-        patch_file.display(),
-        patch_count
-    );
+    {
+        // Plugin consumed the patch — poll for ack-content sidecar (authoritative
+        // post-apply snapshot). Falls back to file read after timeout.
+        let patch_id = payload
+            .get("patch_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let (mut current_on_disk, mut repair_decision, ack_content_proven) = if !patch_id.is_empty()
+        {
+            match poll_ack_content_sidecar(
+                options.project_root,
+                patch_id,
+                std::time::Duration::from_millis(500),
+                std::time::Duration::from_millis(25),
+            ) {
+                Ok(Some(content)) => {
+                    let baseline = payload
+                        .get("baseline")
+                        .and_then(|value| value.as_str())
+                        .filter(|value| !value.is_empty());
+                    let decision = ipc_repair_decision_from_sidecar(
+                        doc_file,
+                        Some(patch_id),
+                        baseline,
+                        content,
+                        options.content_ours,
+                        options.normalize_prefix_lines,
+                    );
+                    if decision.snap_source == IpcSnapshotSource::AckContentSidecar {
+                        eprintln!(
+                            "[write] snapshot from ack-content sidecar ({} bytes)",
+                            decision.snapshot_content.len()
+                        );
+                    }
+                    let ack_content_proven = decision.ack_content_proven();
+                    let snapshot_content = decision.snapshot_content.clone();
+                    (snapshot_content, decision, ack_content_proven)
+                }
+                _ => {
+                    eprintln!(
+                        "[write] snapshot from file read (ack-content sidecar not available after 500ms)"
+                    );
+                    let content = std::fs::read_to_string(doc_file).unwrap_or_default();
+                    let decision = IpcRepairDecision::file_read(content.clone());
+                    (content, decision, false)
+                }
+            }
+        } else {
+            eprintln!("[write] snapshot from file read (no patch_id for sidecar lookup)");
+            let content = std::fs::read_to_string(doc_file).unwrap_or_default();
+            let decision = IpcRepairDecision::file_read(content.clone());
+            (content, decision, false)
+        };
+        let baseline_content = payload
+            .get("baseline")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-    // Poll for ACK (plugin deletes file after applying)
-    let timeout = std::time::Duration::from_secs(2);
-    let poll_interval = std::time::Duration::from_millis(100);
-    let start = std::time::Instant::now();
+        if !baseline_content.is_empty() && current_on_disk == baseline_content {
+            // File on disk hasn't changed — plugin likely failed to apply the patch.
+            // Don't save snapshot with content that was never applied.
+            eprintln!(
+                "[write] IPC patch consumed but file unchanged on disk — plugin may have failed to apply; retry required."
+            );
+            return Ok(false);
+        }
 
-    while start.elapsed() < timeout {
-        if options.guard_committed_cycle
-            && let Some(ref cycle_id) = cycle_already_committed(doc_file)
+        if let Some(full_content) = payload
+            .get("fullContent")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            && current_on_disk != full_content
         {
             eprintln!(
-                "[write] IPC poll skipped: cycle {} already committed for {}",
-                cycle_id,
-                doc_file.display()
-            );
-            log_closeout_guard(
-                doc_file,
-                agent_doc_flow::types::FlowStage::TerminalGuard,
-                agent_doc_flow::types::FlowOutcome::Blocked,
-                agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
+                "[write] IPC full-content patch consumed but final content does not match payload — retry required."
             );
             agent_doc_ops_log_io::log_op(
                 doc_file,
                 &format!(
-                    "file_ipc_poll_skip file={} cycle_id={} reason=already_committed",
+                    "full_content_ipc_post_apply_mismatch file={} expected_len={} actual_len={}",
                     doc_file.display(),
-                    cycle_id
-                ),
-            );
-            cleanup_fallback_patch_files(doc_file);
-            return Ok(false);
-        }
-        // #af88 file-IPC negative-ack: a plugin that attempted the apply and failed
-        // writes a `<patch>.nack` sidecar. Detect it immediately instead of waiting
-        // out the full no_ack timeout, and surface a distinct `nack` proof failure so
-        // callers / session-check can tell an explicit plugin rejection from silence.
-        let nack_file = patch_file.with_extension("nack");
-        if nack_file.exists() {
-            let detail = std::fs::read_to_string(&nack_file).unwrap_or_default();
-            let _ = std::fs::remove_file(&nack_file);
-            // Drop the unconsumed patch too: the plugin just told us this apply
-            // fails, so leaving it for an editor retry would only repeat the failure.
-            let _ = std::fs::remove_file(patch_file);
-            eprintln!(
-                "[write] IPC negative-ack: plugin rejected patch {} — refusing direct document write",
-                patch_file.display()
-            );
-            log_ipc_proof_failure(
-                doc_file,
-                "file_ipc",
-                patch_id_for_diagnostics,
-                "nack",
-                "retry_without_disk_write",
-                &format!(
-                    "nack_detail={} patch_file={}",
-                    detail.trim(),
-                    patch_file.display()
+                    full_content.len(),
+                    current_on_disk.len()
                 ),
             );
             return Ok(false);
         }
-        if !patch_file.exists() {
-            // Plugin consumed the patch — poll for ack-content sidecar (authoritative
-            // post-apply snapshot). Falls back to file read after timeout.
-            let patch_id = payload
-                .get("patch_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let (mut current_on_disk, mut repair_decision, ack_content_proven) = if !patch_id
-                .is_empty()
-            {
-                match poll_ack_content_sidecar(
-                    options.project_root,
-                    patch_id,
-                    std::time::Duration::from_millis(500),
-                    std::time::Duration::from_millis(25),
-                ) {
-                    Ok(Some(content)) => {
-                        let baseline = payload
-                            .get("baseline")
-                            .and_then(|value| value.as_str())
-                            .filter(|value| !value.is_empty());
-                        let decision = ipc_repair_decision_from_sidecar(
-                            doc_file,
-                            Some(patch_id),
-                            baseline,
-                            content,
-                            options.content_ours,
-                            options.normalize_prefix_lines,
-                        );
-                        if decision.snap_source == IpcSnapshotSource::AckContentSidecar {
-                            eprintln!(
-                                "[write] snapshot from ack-content sidecar ({} bytes)",
-                                decision.snapshot_content.len()
-                            );
-                        }
-                        let ack_content_proven = decision.ack_content_proven();
-                        let snapshot_content = decision.snapshot_content.clone();
-                        (snapshot_content, decision, ack_content_proven)
-                    }
-                    _ => {
-                        eprintln!(
-                            "[write] snapshot from file read (ack-content sidecar not available after 500ms)"
-                        );
-                        let content = std::fs::read_to_string(doc_file).unwrap_or_default();
-                        let decision = IpcRepairDecision::file_read(content.clone());
-                        (content, decision, false)
-                    }
-                }
-            } else {
-                eprintln!("[write] snapshot from file read (no patch_id for sidecar lookup)");
-                let content = std::fs::read_to_string(doc_file).unwrap_or_default();
-                let decision = IpcRepairDecision::file_read(content.clone());
-                (content, decision, false)
-            };
-            let baseline_content = payload
-                .get("baseline")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
 
-            if !baseline_content.is_empty() && current_on_disk == baseline_content {
-                // File on disk hasn't changed — plugin likely failed to apply the patch.
-                // Don't save snapshot with content that was never applied.
-                eprintln!(
-                    "[write] IPC patch consumed but file unchanged on disk — plugin may have failed to apply; retry required."
-                );
-                return Ok(false);
-            }
-
-            if let Some(full_content) = payload
-                .get("fullContent")
-                .and_then(|value| value.as_str())
-                .filter(|value| !value.is_empty())
-                && current_on_disk != full_content
-            {
-                eprintln!(
-                    "[write] IPC full-content patch consumed but final content does not match payload — retry required."
-                );
-                agent_doc_ops_log_io::log_op(
-                    doc_file,
-                    &format!(
-                        "full_content_ipc_post_apply_mismatch file={} expected_len={} actual_len={}",
-                        doc_file.display(),
-                        full_content.len(),
-                        current_on_disk.len()
-                    ),
-                );
-                return Ok(false);
-            }
-
-            // Verify patch content is present in the file (catches partial application).
-            // Check that at least one non-empty patch's content appears in the result.
-            let patch_list = payload.get("patches").and_then(|v| v.as_array());
-            if let Some(patches) = patch_list {
-                let has_content_patch = patches.iter().any(|p| {
+        // Verify patch content is present in the file (catches partial application).
+        // Check that at least one non-empty patch's content appears in the result.
+        let patch_list = payload.get("patches").and_then(|v| v.as_array());
+        if let Some(patches) = patch_list {
+            let has_content_patch = patches.iter().any(|p| {
+                let content = p.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                !content.trim().is_empty()
+            });
+            if has_content_patch {
+                let any_present = patches.iter().any(|p| {
                     let content = p.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                    !content.trim().is_empty()
-                });
-                if has_content_patch {
-                    let any_present = patches.iter().any(|p| {
-                        let content = p.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        if content.trim().is_empty() {
-                            return true;
-                        }
-                        // Check first meaningful line of content appears in file
-                        content
-                            .lines()
-                            .find(|l| !l.trim().is_empty())
-                            .is_none_or(|first_line| current_on_disk.contains(first_line.trim()))
-                    });
-                    if !any_present {
-                        eprintln!(
-                            "[write] IPC patch consumed but response content not found in file — plugin may have partially failed. Retry required without direct disk write."
-                        );
-                        return Ok(false);
+                    if content.trim().is_empty() {
+                        return true;
                     }
+                    // Check first meaningful line of content appears in file
+                    content
+                        .lines()
+                        .find(|l| !l.trim().is_empty())
+                        .is_none_or(|first_line| current_on_disk.contains(first_line.trim()))
+                });
+                if !any_present {
+                    eprintln!(
+                        "[write] IPC patch consumed but response content not found in file — plugin may have partially failed. Retry required without direct disk write."
+                    );
+                    return Ok(false);
                 }
             }
-            let expected_response =
-                agent_doc_template_io::response_materialization_probe_from_ipc_payload(payload);
-            if prefer_visible_content_over_stale_ack_content(
+        }
+        let expected_response =
+            agent_doc_template_io::response_materialization_probe_from_ipc_payload(payload);
+        if prefer_visible_content_over_stale_ack_content(
+            doc_file,
+            "file_ipc",
+            Some(patch_id),
+            payload
+                .get("baseline")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty()),
+            options.content_ours,
+            &expected_response,
+            &mut repair_decision,
+        ) {
+            current_on_disk = repair_decision.snapshot_content.clone();
+        }
+        if !ipc_response_materialized_or_fallback(
+            doc_file,
+            "file_ipc",
+            &expected_response,
+            &current_on_disk,
+        ) {
+            log_partial_response_materialization_for_retry(
                 doc_file,
                 "file_ipc",
-                Some(patch_id),
-                payload
-                    .get("baseline")
-                    .and_then(|value| value.as_str())
-                    .filter(|value| !value.is_empty()),
-                options.content_ours,
                 &expected_response,
-                &mut repair_decision,
-            ) {
-                current_on_disk = repair_decision.snapshot_content.clone();
-            }
-            if !ipc_response_materialized_or_fallback(
-                doc_file,
-                "file_ipc",
-                &expected_response,
-                &current_on_disk,
-            ) {
-                log_partial_response_materialization_for_retry(
-                    doc_file,
-                    "file_ipc",
-                    &expected_response,
-                )?;
-                return Ok(false);
-            }
-            if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
-                doc_file,
-                "file_ipc",
-                Some(patch_id),
-                payload
-                    .get("baseline")
-                    .and_then(|value| value.as_str())
-                    .filter(|value| !value.is_empty()),
-                before_content.as_deref(),
-                &current_on_disk,
-                ack_content_proven,
-                agent_doc_ops_log_io::log_op,
-                log_ipc_proof_failure,
-            ) {
-                return Ok(false);
-            }
-
-            // Plugin applied the patch — update snapshot as actual post-write disk state.
-            // `current_on_disk` is from ack-content sidecar when available, or 200ms file read.
-            // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-            let pre_dedupe_content = repair_decision.snapshot_content.clone();
-            let (snap_content, dedupe_repair) = dedupe_ipc_snapshot_content(
-                doc_file,
-                before_content.as_deref(),
-                &repair_decision.snapshot_content,
-                repair_decision.snap_source.label(),
             )?;
-            if dedupe_repair {
-                repair_decision =
-                    repair_decision.apply_ipc_dedupe(snap_content, pre_dedupe_content);
-            } else {
-                repair_decision.snapshot_content = snap_content;
-            }
-            if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
+            return Ok(false);
+        }
+        if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
+            doc_file,
+            "file_ipc",
+            Some(patch_id),
+            payload
+                .get("baseline")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty()),
+            before_content.as_deref(),
+            &current_on_disk,
+            ack_content_proven,
+            agent_doc_ops_log_io::log_op,
+            log_ipc_proof_failure,
+        ) {
+            return Ok(false);
+        }
+
+        // Plugin applied the patch — update snapshot as actual post-write disk state.
+        // `current_on_disk` is from ack-content sidecar when available, or 200ms file read.
+        // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
+        let pre_dedupe_content = repair_decision.snapshot_content.clone();
+        let (snap_content, dedupe_repair) = dedupe_ipc_snapshot_content(
+            doc_file,
+            before_content.as_deref(),
+            &repair_decision.snapshot_content,
+            repair_decision.snap_source.label(),
+        )?;
+        if dedupe_repair {
+            repair_decision = repair_decision.apply_ipc_dedupe(snap_content, pre_dedupe_content);
+        } else {
+            repair_decision.snapshot_content = snap_content;
+        }
+        if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
+            doc_file,
+            "file_ipc",
+            Some(patch_id),
+            payload
+                .get("baseline")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty()),
+            before_content.as_deref(),
+            &repair_decision.snapshot_content,
+            ack_content_proven,
+            agent_doc_ops_log_io::log_op,
+            log_ipc_proof_failure,
+        ) {
+            return Ok(false);
+        }
+        let file_baseline = payload
+            .get("baseline")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty());
+        // Capture the live editor buffer before the guards replace it, so the
+        // #ipcfullprompt forensic detector sees the candidate.
+        let ipcfullprompt_candidate = repair_decision.snapshot_content.clone();
+        let drift_fired = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            doc_file,
+            "file_ipc",
+            Some(patch_id),
+            file_baseline,
+            options.content_ours,
+            &mut repair_decision,
+        );
+        let dup_fired = guard_ipc_snapshot_adoption_against_prompt_duplication(
+            doc_file,
+            "file_ipc",
+            Some(patch_id),
+            options.content_ours,
+            &mut repair_decision,
+        );
+        log_ipc_snapshot_adoption_allowed(
+            doc_file,
+            "file_ipc",
+            Some(patch_id),
+            file_baseline,
+            options.content_ours,
+            &repair_decision,
+            drift_fired || dup_fired,
+        );
+        log_ipcfullprompt_corruption_if_any(
+            doc_file,
+            "file_ipc",
+            Some(patch_id),
+            file_baseline,
+            &ipcfullprompt_candidate,
+        );
+        repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
+        if repair_decision.snap_source.is_ack_content_proven() {
+            let editor_id = payload.get("editor_id").and_then(|value| value.as_str());
+            let proof = ack_content_disk_write_proof(
                 doc_file,
-                "file_ipc",
-                Some(patch_id),
-                payload
-                    .get("baseline")
-                    .and_then(|value| value.as_str())
-                    .filter(|value| !value.is_empty()),
-                before_content.as_deref(),
+                editor_id,
                 &repair_decision.snapshot_content,
-                ack_content_proven,
-                agent_doc_ops_log_io::log_op,
-                log_ipc_proof_failure,
-            ) {
+            );
+            let disk_synced = write_ack_content_through_to_disk(
+                doc_file,
+                patch_id,
+                &repair_decision.snapshot_content,
+                proof,
+            )?;
+            if !disk_synced {
                 return Ok(false);
             }
-            let file_baseline = payload
+            mark_ack_content_live_buffer_synced_after_write(
+                doc_file,
+                patch_id,
+                editor_id,
+                &repair_decision.snapshot_content,
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            doc_file,
+            &format!(
+                "ipc_file_delivered file={} snap_len={}",
+                doc_file.display(),
+                repair_decision.snapshot_content.len()
+            ),
+        );
+        if let Some(before) = before_content.as_deref() {
+            let patch_id = payload.get("patch_id").and_then(|value| value.as_str());
+            let baseline = payload
                 .get("baseline")
                 .and_then(|value| value.as_str())
                 .filter(|value| !value.is_empty());
-            // Capture the live editor buffer before the guards replace it, so the
-            // #ipcfullprompt forensic detector sees the candidate.
-            let ipcfullprompt_candidate = repair_decision.snapshot_content.clone();
-            let drift_fired = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            let payload_patches: Vec<template::PatchBlock> = payload
+                .get("patches")
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| {
+                            let name = item
+                                .get("component")
+                                .or_else(|| item.get("name"))
+                                .and_then(|value| value.as_str())?;
+                            let content = item.get("content").and_then(|value| value.as_str())?;
+                            Some(template::PatchBlock::new(name, content))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let unmatched = payload
+                .get("unmatched")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            log_exchange_write_diagnostic(
                 doc_file,
+                "write_ipc_and_poll",
                 "file_ipc",
-                Some(patch_id),
-                file_baseline,
-                options.content_ours,
-                &mut repair_decision,
+                patch_id,
+                baseline,
+                before,
+                &repair_decision.snapshot_content,
+                &payload_patches,
+                unmatched,
             );
-            let dup_fired = guard_ipc_snapshot_adoption_against_prompt_duplication(
-                doc_file,
-                "file_ipc",
-                Some(patch_id),
-                options.content_ours,
-                &mut repair_decision,
+        }
+        if let Err(e) = agent_doc_snapshot_io::save(
+            doc_file,
+            &repair_decision.snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        ) {
+            eprintln!(
+                "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
+                     Commit will auto-recover via divergence detection.",
+                e
             );
-            log_ipc_snapshot_adoption_allowed(
-                doc_file,
-                "file_ipc",
-                Some(patch_id),
-                file_baseline,
-                options.content_ours,
-                &repair_decision,
-                drift_fired || dup_fired,
-            );
-            log_ipcfullprompt_corruption_if_any(
-                doc_file,
-                "file_ipc",
-                Some(patch_id),
-                file_baseline,
-                &ipcfullprompt_candidate,
-            );
-            repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
-            if repair_decision.snap_source.is_ack_content_proven() {
-                let editor_id = payload.get("editor_id").and_then(|value| value.as_str());
-                let proof = ack_content_disk_write_proof(
-                    doc_file,
-                    editor_id,
-                    &repair_decision.snapshot_content,
-                );
-                let disk_synced = write_ack_content_through_to_disk(
-                    doc_file,
-                    patch_id,
-                    &repair_decision.snapshot_content,
-                    proof,
-                )?;
-                if !disk_synced {
-                    return Ok(false);
-                }
-                mark_ack_content_live_buffer_synced_after_write(
-                    doc_file,
-                    patch_id,
-                    editor_id,
-                    &repair_decision.snapshot_content,
-                );
-            }
             agent_doc_ops_log_io::log_op(
                 doc_file,
                 &format!(
-                    "ipc_file_delivered file={} snap_len={}",
+                    "snapshot_save_failed_after_ipc file={} error={}",
+                    doc_file.display(),
+                    e
+                ),
+            );
+        } else {
+            agent_doc_ops_log_io::log_op(
+                doc_file,
+                &format!(
+                    "snapshot_saved_file_ipc file={} snap_len={}",
                     doc_file.display(),
                     repair_decision.snapshot_content.len()
                 ),
             );
-            if let Some(before) = before_content.as_deref() {
-                let patch_id = payload.get("patch_id").and_then(|value| value.as_str());
-                let baseline = payload
-                    .get("baseline")
-                    .and_then(|value| value.as_str())
-                    .filter(|value| !value.is_empty());
-                let payload_patches: Vec<template::PatchBlock> = payload
-                    .get("patches")
-                    .and_then(|value| value.as_array())
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter_map(|item| {
-                                let name = item
-                                    .get("component")
-                                    .or_else(|| item.get("name"))
-                                    .and_then(|value| value.as_str())?;
-                                let content =
-                                    item.get("content").and_then(|value| value.as_str())?;
-                                Some(template::PatchBlock::new(name, content))
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let unmatched = payload
-                    .get("unmatched")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("");
-                log_exchange_write_diagnostic(
-                    doc_file,
-                    "write_ipc_and_poll",
-                    "file_ipc",
-                    patch_id,
-                    baseline,
-                    before,
-                    &repair_decision.snapshot_content,
-                    &payload_patches,
-                    unmatched,
-                );
-            }
-            if let Err(e) = agent_doc_snapshot_io::save(
+            let crdt_doc =
+                agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
+            if let Err(e) = agent_doc_merge_io::save_document_crdt(
                 doc_file,
+                &crdt_doc.encode_state(),
                 &repair_decision.snapshot_content,
-                agent_doc_ops_log_io::log_op,
             ) {
-                eprintln!(
-                    "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
-                     Commit will auto-recover via divergence detection.",
-                    e
-                );
-                agent_doc_ops_log_io::log_op(
-                    doc_file,
-                    &format!(
-                        "snapshot_save_failed_after_ipc file={} error={}",
-                        doc_file.display(),
-                        e
-                    ),
-                );
-            } else {
-                agent_doc_ops_log_io::log_op(
-                    doc_file,
-                    &format!(
-                        "snapshot_saved_file_ipc file={} snap_len={}",
-                        doc_file.display(),
-                        repair_decision.snapshot_content.len()
-                    ),
-                );
-                let crdt_doc =
-                    agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
-                if let Err(e) = agent_doc_merge_io::save_document_crdt(
-                    doc_file,
-                    &crdt_doc.encode_state(),
-                    &repair_decision.snapshot_content,
-                ) {
-                    eprintln!("[write] WARNING: CRDT state save failed: {}", e);
-                }
-                eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
+                eprintln!("[write] WARNING: CRDT state save failed: {}", e);
             }
-            return Ok(true);
+            eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
         }
-        std::thread::sleep(poll_interval);
+        Ok(true)
     }
-
-    // Timeout — leave the unconsumed patch for editor-owned retry.
-    eprintln!(
-        "[write] IPC timeout ({}s) — leaving patch for editor retry; refusing direct document write",
-        timeout.as_secs()
-    );
-    log_ipc_proof_failure(
-        doc_file,
-        "file_ipc",
-        patch_id_for_diagnostics,
-        "no_ack",
-        "retry_without_disk_write",
-        &format!(
-            "timeout_secs={} patch_file={}",
-            timeout.as_secs(),
-            patch_file.display()
-        ),
-    );
-    Ok(false)
 }
 
 /// Build the IPC patches JSON array (shared between socket and file-based paths).

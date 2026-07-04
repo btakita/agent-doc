@@ -1676,10 +1676,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // branches; the convergence decision routes through the realtime model's
         // `operator_reconcile_step`.
         ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 32,
-        // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
-        // centralizes the existing committed-cycle file-IPC poll guard for
-        // convergence callers; this is a constructor for the existing guard, not
-        // a new flow guard boundary.
+        // +1 `guard_` (#fcc0-degraded-file-ipc): focused
+        // `FileIpcDeliveryOptions` carries the existing committed-cycle file-IPC
+        // poll guard for convergence and transport callers; this is an option for
+        // the existing guard, not a new flow guard boundary.
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 9,
         // 10 -> 14 (#whole-buffer-authority): full-content IPC now logs disabled
         // and authority-rejected outcomes from `decide_whole_buffer_delivery`,
@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 65,
+        ledger_rows.len() >= 66,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );

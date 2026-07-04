@@ -49,6 +49,16 @@ What the experience actually is (the hard-won, non-one-shottable part):
 
 **Marketing channels**: sanitized failure-taxonomy writing series ("field notes from human+agent realtime merges"), localfirst.fm, FOSDEM local-first devroom, SyncConf, lofi.so community, open-source lazily/agent-doc merge layer as proof artifacts.
 
+## 5. Marketing the lazily → signal-space → Patchboard stack (2026-07-04)
+
+Existing motion: lazily LinkedIn series (Mar 16, Jun 15/16/26 — primitives, cell family, architecture), realtime-agentic post (Jun 28) already using the music-loop metaphor, YouTube live coding, briantakita.me blog, corky publish pipeline with tracked post_ids.
+
+**Strategy: one narrative at three altitudes, not three projects.** Patchboard is the headline (people share products, not libraries); lazily and signal-space are the credibility layers underneath. Every lazily post should ladder upward ("this is the substrate of the patchboard"); every Patchboard post grounds downward. Own the music metaphor as the personal brand thread — it's already established and distinctive.
+
+Concrete series (next ~8 posts): (1) signal-space intro — why signals need a shared cross-language spec; (2) Cell/Slot/Signal → ports/jacks mapping; (3) Patchboard vision announce + build-in-public commitment; (4) #spb1 typed ports; (5) #spb2 MLP mixer "learnable knobs on the rack"; (6) #spb4 first Slint rack render — first VIDEO demo (inflection point: visual cables/scopes outperform diagrams); (7) #spb5 live cabling demo — the shareable moment; (8) #spb8 agent-supervisor rack — bridges to the agent-tooling audience and the merge-expertise positioning.
+
+Discipline: concentrate ~70% of posts on the signals narrative for a quarter so the audience associates Brian with it (current feed spreads across ontology/security/module-harness/resume topics). Cross-post technical rungs (benchmarks, lazily-formal) to HN/lobste.rs; pitch localfirst.fm / FOSDEM with the demo-driven "music patchboard for signals" talk once #spb5 footage exists. Marketing plan therefore reinforces starting #spb1→#spb5: the stack only becomes visually marketable at Phase 4/5.
+
 ## Open threads
 
 - [ ] Run `tsift dci-benchmark` memory-retrieval parity eval + one clean session cycle → then retire direct claude-mem reads.

@@ -45,6 +45,121 @@ pub fn save_blocked_repair_payload(file: &Path, response: &str, reason: &str) ->
     Ok(path)
 }
 
+pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
+    let Some(snapshot_doc) = agent_doc_snapshot_io::load(file)? else {
+        return Ok(None);
+    };
+    let current_doc = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+    if current_doc == snapshot_doc {
+        return Ok(None);
+    }
+
+    let Some(head_doc) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(None);
+    };
+    let historical_mutation =
+        agent_doc_document_realtime::write_policy::classify_committed_historical_agent_doc_mutation(
+            &snapshot_doc,
+            &head_doc,
+        );
+    // #nm1x: intersect the drift against the current turn scope so independent
+    // out-of-scope edits (e.g. a queue item added beside the running one) do not
+    // block the historical snapshot repair.
+    let turn_scope = agent_doc_turn_scope_io::load(file);
+    let non_exchange_component_drift = agent_doc_git::has_blocking_non_exchange_component_drift(
+        &snapshot_doc,
+        &head_doc,
+        turn_scope.as_ref(),
+    );
+    let historical_response_marker =
+        agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+            &snapshot_doc,
+            &head_doc,
+        );
+    let historical_prompt_prefix_artifact = snapshot_doc != head_doc
+        && !non_exchange_component_drift
+        && agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+            &snapshot_doc,
+        ) == agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+            &head_doc,
+        );
+    let Some(reason) = (match historical_mutation {
+        Some("exchange") => Some("exchange"),
+        None if !non_exchange_component_drift && historical_response_marker.is_some() => {
+            Some("exchange")
+        }
+        None if historical_prompt_prefix_artifact => Some("exchange"),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+
+    if agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+        &current_doc,
+    ) == agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+        &head_doc,
+    ) {
+        agent_doc_snapshot_io::save(file, &current_doc, agent_doc_ops_log_io::log_op)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "snapshot_repair file={} reason={} basis=head",
+                file.display(),
+                reason
+            ),
+        );
+        return Ok(Some(reason));
+    }
+
+    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+        &head_doc,
+        &current_doc,
+    )
+    .is_none()
+    {
+        if agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
+            file,
+            Some(&head_doc),
+            &current_doc,
+            "historical snapshot repair",
+        )? {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "snapshot_repair file={} reason={} basis=visible_rebase_guard",
+                    file.display(),
+                    reason
+                ),
+            );
+            return Ok(Some(reason));
+        }
+        let basis = if agent_doc_git::is_safe_user_only_follow_up_after_committed_head(
+            &head_doc,
+            &current_doc,
+        ) {
+            "head_follow_up"
+        } else {
+            "head_local_drift"
+        };
+        agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "snapshot_repair file={} reason={} basis={}",
+                file.display(),
+                reason,
+                basis
+            ),
+        );
+        return Ok(Some(reason));
+    }
+
+    Ok(None)
+}
+
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

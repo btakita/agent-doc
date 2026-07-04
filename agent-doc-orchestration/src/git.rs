@@ -99,7 +99,6 @@ use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
 use agent_doc_git::{
     PostCommitLocalDriftKind, agent_doc_commit_message_for_file, classify_post_commit_local_drift,
     commit_retry_backoff, has_blocking_non_exchange_component_drift,
-    is_safe_user_only_follow_up_after_committed_head,
 };
 use agent_doc_git_io::{
     dirs::{narrow_to_submodule, resolve_to_git_root},
@@ -115,166 +114,11 @@ pub struct CommitOutcome {
     pub vcs_refresh_signaled: Option<bool>,
 }
 
-pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
-    let Some(snapshot_doc) = agent_doc_snapshot_io::load(file)? else {
-        return Ok(None);
-    };
-    let current_doc = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(_) => return Ok(None),
-    };
-    if current_doc == snapshot_doc {
-        return Ok(None);
-    }
-
-    let Some(head_doc) = agent_doc_git_io::revision::show_head(file)? else {
-        return Ok(None);
-    };
-    let historical_mutation =
-        classify_committed_historical_agent_doc_mutation(&snapshot_doc, &head_doc);
-    // #nm1x: intersect the drift against the current turn scope so independent
-    // out-of-scope edits (e.g. a queue item added beside the running one) do not
-    // block the historical snapshot repair.
-    let turn_scope = agent_doc_turn_scope_io::load(file);
-    let non_exchange_component_drift =
-        has_blocking_non_exchange_component_drift(&snapshot_doc, &head_doc, turn_scope.as_ref());
-    let historical_response_marker =
-        agent_doc_turn::document_drift::detect_bypassed_response_write_between(
-            &snapshot_doc,
-            &head_doc,
-        );
-    let historical_prompt_prefix_artifact = snapshot_doc != head_doc
-        && !non_exchange_component_drift
-        && normalize_committed_exchange_artifacts(&snapshot_doc)
-            == normalize_committed_exchange_artifacts(&head_doc);
-    let Some(reason) = (match historical_mutation {
-        Some("exchange") => Some("exchange"),
-        None if !non_exchange_component_drift && historical_response_marker.is_some() => {
-            Some("exchange")
-        }
-        None if historical_prompt_prefix_artifact => Some("exchange"),
-        _ => None,
-    }) else {
-        return Ok(None);
-    };
-
-    if normalize_committed_exchange_artifacts(&current_doc)
-        == normalize_committed_exchange_artifacts(&head_doc)
-    {
-        agent_doc_snapshot_io::save(file, &current_doc, agent_doc_ops_log_io::log_op)?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "snapshot_repair file={} reason={} basis=head",
-                file.display(),
-                reason
-            ),
-        );
-        return Ok(Some(reason));
-    }
-
-    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
-        &head_doc,
-        &current_doc,
-    )
-    .is_none()
-    {
-        if agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
-            file,
-            Some(&head_doc),
-            &current_doc,
-            "historical snapshot repair",
-        )? {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "snapshot_repair file={} reason={} basis=visible_rebase_guard",
-                    file.display(),
-                    reason
-                ),
-            );
-            return Ok(Some(reason));
-        }
-        let basis = if is_safe_user_only_follow_up_after_committed_head(&head_doc, &current_doc) {
-            "head_follow_up"
-        } else {
-            "head_local_drift"
-        };
-        agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "snapshot_repair file={} reason={} basis={}",
-                file.display(),
-                reason,
-                basis
-            ),
-        );
-        return Ok(Some(reason));
-    }
-
-    Ok(None)
-}
-
 /// Commit a file with an auto-generated message. Skips hooks.
 /// Relative paths are resolved against the git root (superproject if in a submodule).
 /// Git commands run from the resolved git root, so this works even when CWD is a submodule.
 pub fn commit(file: &Path) -> Result<bool> {
     Ok(commit_with_outcome(file)?.did_commit)
-}
-
-/// `#qheadstrike` P2 — strike answered free-text queue heads at the commit seam.
-///
-/// Sources the answered response from the durable capture ledger (the
-/// cycle-state sidecar records the `capture_id`; the capture holds the
-/// `response_body`) and runs the same focused queue-consume free-text strike
-/// the finalize write path uses. This makes the strike a property of reaching
-/// `committed` regardless of which path committed, so a recovery-path closeout
-/// (`agent-doc commit` / `reset --from-current` then commit / `--force-disk`) no
-/// longer leaves an answered head unstruck. Best-effort: a missing capture, an
-/// inactive queue, or a strike error never blocks the commit.
-fn strike_answered_free_text_heads_at_commit_seam(file: &Path) {
-    let Some(response_body) = capture_response_body_for(file) else {
-        return;
-    };
-    if response_body.trim().is_empty() {
-        return;
-    }
-    // The commit seam is already the binary-owned closeout boundary and runs
-    // before staging under the commit lock; use the force-disk strike branch so
-    // recovery commits do not silently leave answered free-text heads live when
-    // no editor listener is attached.
-    match queue_consume::strike_answered_free_text_queue_heads(
-        file,
-        &response_body,
-        true,
-        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
-    ) {
-        Ok(0) => {}
-        Ok(n) => agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "commit_seam_free_text_strike file={} struck={} (#qheadstrike)",
-                file.display(),
-                n
-            ),
-        ),
-        Err(e) => {
-            eprintln!("[commit] warning: commit-seam free-text head strike failed: {e} (non-fatal)")
-        }
-    }
-}
-
-/// Load the captured `response_body` for `file`'s current cycle, if any
-/// (`#qheadstrike`). Returns `None` when there is no cycle state, no recorded
-/// `capture_id`, or no readable capture record.
-fn capture_response_body_for(file: &Path) -> Option<String> {
-    let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
-    let capture_id = state.capture_id?;
-    let record = agent_doc_capture_io::load_by_id(file, &capture_id)
-        .ok()
-        .flatten()?;
-    Some(record.response_body)
 }
 
 /// Commit a file and report whether the VCS refresh signal was written.
@@ -321,7 +165,10 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // (`#rt83`/`#qflood` churn). Idempotent (already-struck heads are skipped),
     // so the finalize path's earlier strike is unaffected; best-effort, never
     // blocks the commit.
-    strike_answered_free_text_heads_at_commit_seam(file);
+    queue_consume::strike_answered_free_text_heads_at_commit_seam(
+        file,
+        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+    );
 
     let timestamp = chrono_timestamp();
     let msg = agent_doc_commit_message_for_file(file, &timestamp);
@@ -430,18 +277,19 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         snapshot_content = agent_doc_snapshot_io::load(file)?;
     }
 
-    let repaired_committed_historical =
-        if let Some(reason) = repair_committed_historical_snapshot_drift(file)? {
-            eprintln!(
-                "[commit] repaired committed historical {} drift into snapshot for {}",
-                reason,
-                file.display()
-            );
-            snapshot_content = agent_doc_snapshot_io::load(file)?;
-            true
-        } else {
-            false
-        };
+    let repaired_committed_historical = if let Some(reason) =
+        agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)?
+    {
+        eprintln!(
+            "[commit] repaired committed historical {} drift into snapshot for {}",
+            reason,
+            file.display()
+        );
+        snapshot_content = agent_doc_snapshot_io::load(file)?;
+        true
+    } else {
+        false
+    };
 
     let cycle_state_for_commit = agent_doc_cycle_state_io::load(file)?;
     let ipc_snapshot_adoption_blocked = cycle_state_for_commit
@@ -4296,7 +4144,10 @@ Duplicate replay should stay live.
             "### Re: parser\n> **Queue prompt:** fix the parser bug in the lexer\n\nFixed.\n";
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
 
-        strike_answered_free_text_heads_at_commit_seam(&doc);
+        queue_consume::strike_answered_free_text_heads_at_commit_seam(
+            &doc,
+            &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+        );
 
         let after = fs::read_to_string(&doc).unwrap();
         assert!(
@@ -6556,7 +6407,7 @@ Compacted content:\n\
             agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
         agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
 
-        let repaired = repair_committed_historical_snapshot_drift(&doc)
+        let repaired = agent_doc_repair_io::repair_committed_historical_snapshot_drift(&doc)
             .expect("historical repair should not restore pre-compact HEAD");
 
         assert_eq!(repaired, Some("exchange"));

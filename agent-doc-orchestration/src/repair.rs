@@ -273,7 +273,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         return Ok(RepairOutcome::StalePreflightLockRepaired);
     }
 
-    if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
+    if let Some(reason) = agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)? {
         let repaired_snapshot = agent_doc_snapshot_io::load(file)?;
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &crate::PIPELINE_FRONTMATTER_EFFECTS,
@@ -453,7 +453,7 @@ pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Optio
                 .is_none()
             })
             .map(|_| "already-committed HEAD"),
-        _ => crate::git::repair_committed_historical_snapshot_drift(file)?
+        _ => agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)?
             .map(|_| "committed historical exchange snapshot drift"),
     };
     let Some(reason) = reason else {

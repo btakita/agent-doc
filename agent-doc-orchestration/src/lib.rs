@@ -145,7 +145,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionChe
         &self,
         file: &std::path::Path,
     ) -> anyhow::Result<Option<&'static str>> {
-        crate::git::repair_committed_historical_snapshot_drift(file)
+        agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)
     }
 
     fn recover_missing_commit_boundary(

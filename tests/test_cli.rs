@@ -3360,11 +3360,19 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     let repair_io_dependencies = repair_io_manifest["dependencies"].as_table().unwrap();
     for required in [
         "agent-doc-capture-io",
+        "agent-doc-document",
+        "agent-doc-document-realtime",
         "agent-doc-fs",
+        "agent-doc-git",
+        "agent-doc-git-io",
         "agent-doc-hash",
+        "agent-doc-ops-log-io",
         "agent-doc-project-root-io",
         "agent-doc-snapshot-io",
         "agent-doc-template-io",
+        "agent-doc-turn",
+        "agent-doc-turn-scope-io",
+        "agent-doc-write-converge-io",
         "anyhow",
         "serde",
         "serde_json",
@@ -3385,14 +3393,17 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     for required in [
         "pub fn save_blocked_repair_payload(",
+        "pub fn repair_committed_historical_snapshot_drift(",
         "struct BlockedRepairPayloadRecord",
         ".agent-doc/repair-blocked",
         "agent_doc_project_root_io::project_root_containing(",
         "agent_doc_hash::content_hash(",
+        "agent_doc_git_io::revision::show_head(",
+        "agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(",
     ] {
         assert!(
             repair_io.contains(required),
-            "agent-doc-repair-io should own blocked repair sidecar persistence: {required}"
+            "agent-doc-repair-io should own repair IO persistence and snapshot repair: {required}"
         );
     }
     assert!(
@@ -3419,6 +3430,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
 
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    let git = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     for forbidden in [
         "struct BlockedRepairPayloadRecord",
         "fn save_blocked_repair_payload(",
@@ -3438,6 +3450,11 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
             "repair.rs must not re-own repair sidecar persistence: {forbidden}"
         );
     }
+    assert!(
+        !git.contains("pub fn repair_committed_historical_snapshot_drift(")
+            && git.contains("agent_doc_repair_io::repair_committed_historical_snapshot_drift("),
+        "git.rs must call focused repair IO for committed historical snapshot drift repair"
+    );
     assert!(
         repair.contains("agent_doc_repair_io::save_blocked_repair_payload("),
         "repair.rs should call focused repair IO directly"
@@ -4278,6 +4295,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
 
     let queue_io_consume =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
+    let orchestration_git =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let orchestration_preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let orchestration_preflight_maintenance =
@@ -4317,6 +4336,16 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
             && queue_io_consume.contains("annotate_newly_struck_free_text_heads")
             && queue_io_consume.contains("cycle_answered_foreign_exchange_prompt"),
         "agent-doc-queue-io queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
+    );
+    assert!(
+        queue_io_consume.contains("pub fn strike_answered_free_text_heads_at_commit_seam(")
+            && queue_io_consume.contains("fn capture_response_body_for_commit(")
+            && queue_io_consume.contains("agent_doc_capture_io::load_by_id(")
+            && orchestration_git
+                .contains("queue_consume::strike_answered_free_text_heads_at_commit_seam(")
+            && !orchestration_git.contains("fn strike_answered_free_text_heads_at_commit_seam(")
+            && !orchestration_git.contains("fn capture_response_body_for("),
+        "agent-doc-queue-io should own the commit-seam answered free-text queue strike IO graph"
     );
     let orchestration_write_run_entry =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
@@ -10425,6 +10454,18 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/run.rs",
             "agent-doc-run-io/src/lib.rs",
             "Split `DirectRunEffects` into commit, writeback, queue-consume, closeout, and cycle-abandon ports",
+        ),
+        (
+            "Git committed historical snapshot repair IO graph",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-repair-io/src/lib.rs",
+            "Split visible-rebase guard and historical mutation classification",
+        ),
+        (
+            "Commit-seam free-text queue strike IO graph",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-queue-io/src/queue_consume.rs",
+            "Split capture lookup from queue strike writeback",
         ),
         (
             "Codex Stop continuation context IO graph",

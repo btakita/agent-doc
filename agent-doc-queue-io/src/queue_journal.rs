@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn queue_journal_path_returns_none_without_project_root() {
         let doc = Path::new("/__agent_doc_queue_io_no_project__/session.md");
-        assert_eq!(queue_journal_path(&doc), None);
+        assert_eq!(queue_journal_path(doc), None);
     }
 
     #[test]

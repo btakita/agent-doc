@@ -11,11 +11,19 @@ name = "agent_doc_repair_io"
 
 [dependencies]
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.67" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-git = { path = "../agent-doc-git", version = "0.34.67" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
 agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.34.67" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
+agent-doc-turn-scope-io = { path = "../agent-doc-turn-scope-io", version = "0.34.67" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.67" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

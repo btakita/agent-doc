@@ -1125,7 +1125,7 @@ mod tests {
 
         // The marker is found and re-confirmed against the live document.
         let found = pending_marker_continuation_for_roots_with_actor_binding(
-            &[root.clone()],
+            std::slice::from_ref(&root),
             None,
             no_actor_binding,
         )
@@ -1142,7 +1142,7 @@ mod tests {
         // continuation, returns None, and prunes the stale marker.
         assert!(
             pending_marker_continuation_for_roots_with_actor_binding(
-                &[root.clone()],
+                std::slice::from_ref(&root),
                 None,
                 no_actor_binding,
             )
@@ -1174,9 +1174,9 @@ mod tests {
         // From pane %74, the foreign-owned marker must be skipped → None.
         assert!(
             pending_marker_continuation_for_roots_with_actor_binding(
-                &[root.clone()],
+                std::slice::from_ref(&root),
                 Some("%74"),
-                &actor_binding,
+                actor_binding,
             )
             .unwrap()
             .is_none(),
@@ -1193,9 +1193,9 @@ mod tests {
 
         // The foreign doc's OWN pane (%70) still drives its marker.
         let owned = pending_marker_continuation_for_roots_with_actor_binding(
-            &[root.clone()],
+            std::slice::from_ref(&root),
             Some("%70"),
-            &actor_binding,
+            actor_binding,
         )
         .unwrap()
         .expect("same-pane owner drives its own marker");
@@ -1204,9 +1204,9 @@ mod tests {
         // Unknown pane context (None) preserves prior behavior — returns it.
         assert!(
             pending_marker_continuation_for_roots_with_actor_binding(
-                &[root.clone()],
+                std::slice::from_ref(&root),
                 None,
-                &actor_binding,
+                actor_binding,
             )
             .unwrap()
             .is_some(),
@@ -1246,7 +1246,7 @@ mod tests {
         let found = pending_marker_continuation_for_roots_with_actor_binding(
             &[foreign_root.clone(), valid_root.clone()],
             Some("%74"),
-            &actor_binding,
+            actor_binding,
         )
         .unwrap()
         .expect("scan must continue past foreign marker to the valid one");

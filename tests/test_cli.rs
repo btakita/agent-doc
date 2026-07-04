@@ -10969,6 +10969,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split `BoundaryInvariantEffects` into snapshot-store and log ports",
         ),
         (
+            "Git transient worktree and closeout sidecar cleanup IO graph",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-git-io/src/transient_cleanup.rs",
+            "Split `TransientCleanupEffects` into document-write, snapshot-store, sidecar-refresh, VCS-refresh, and log ports",
+        ),
+        (
             "Codex hook user-prompt-submit tracking IO graph",
             "agent-doc-orchestration/src/codex_hook.rs",
             "agent-doc-codex-hook-io/src/lib.rs",
@@ -13202,17 +13208,23 @@ fn test_agent_doc_frontmatter_owns_write_mode_detection_policy() {
             .unwrap();
     let git_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let git_transient_cleanup =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/transient_cleanup.rs")).unwrap();
     for forbidden in ["fn content_uses_crdt_write(", "fn document_uses_crdt("] {
         assert!(
-            !write_run_entry.contains(forbidden) && !git_source.contains(forbidden),
-            "orchestration must not re-own CRDT write-mode detection: {forbidden}"
+            !write_run_entry.contains(forbidden)
+                && !git_source.contains(forbidden)
+                && !git_transient_cleanup.contains(forbidden),
+            "callers must not re-own CRDT write-mode detection: {forbidden}"
         );
     }
     assert!(
         write_run_entry
             .contains("use agent_doc_frontmatter::frontmatter::content_uses_crdt_write;")
-            && git_source.contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write("),
-        "orchestration should call frontmatter-owned CRDT write-mode detection directly"
+            && git_transient_cleanup
+                .contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write(")
+            && !git_source.contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write("),
+        "write and git transient cleanup should call frontmatter-owned CRDT write-mode detection directly"
     );
 }
 
@@ -23598,10 +23610,13 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
     );
     let git_pre_stage_repair =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/pre_stage_repair.rs")).unwrap();
+    let git_transient_cleanup =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/transient_cleanup.rs")).unwrap();
     assert!(
         git_pre_stage_repair.contains("exchange_prompt_prefix_equivalent")
-            && git_source.contains("repair_stale_agent_response_collapse_doc"),
-        "git-io pre-stage repair and git.rs worktree adapters should call focused transient-marker repair policy"
+            && git_transient_cleanup.contains("repair_stale_agent_response_collapse_doc")
+            && !git_source.contains("repair_stale_agent_response_collapse_doc"),
+        "git-io pre-stage repair and transient cleanup should call focused transient-marker repair policy"
     );
     let realtime_write_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))

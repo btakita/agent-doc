@@ -79,8 +79,7 @@
 use agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts;
 use agent_doc_document::transient_markers::{
     normalize_for_replay_hash, normalize_post_commit_re_heading_drift,
-    normalize_transient_agent_doc_markers, repair_stale_agent_response_collapse_doc,
-    strip_head_markers,
+    normalize_transient_agent_doc_markers, strip_head_markers,
 };
 use anyhow::Result;
 use std::collections::HashSet;
@@ -180,6 +179,11 @@ struct OrchestrationBoundaryInvariantEffects;
 static BOUNDARY_INVARIANT_EFFECTS: OrchestrationBoundaryInvariantEffects =
     OrchestrationBoundaryInvariantEffects;
 
+struct OrchestrationTransientCleanupEffects;
+
+static TRANSIENT_CLEANUP_EFFECTS: OrchestrationTransientCleanupEffects =
+    OrchestrationTransientCleanupEffects;
+
 impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
     for OrchestrationBoundaryRepositionEffects
 {
@@ -249,6 +253,42 @@ impl agent_doc_git_io::boundary_invariant::BoundaryInvariantEffects
 
     fn log_op(&self, file: &Path, message: &str) {
         agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+impl agent_doc_git_io::transient_cleanup::TransientCleanupEffects
+    for OrchestrationTransientCleanupEffects
+{
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        crate::write::atomic_write_pub(file, content)
+    }
+
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn save_document_crdt(&self, file: &Path, legacy_state: &[u8], markdown: &str) -> Result<()> {
+        agent_doc_merge_io::save_document_crdt(file, legacy_state, markdown)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+
+    fn project_root_containing(&self, file: &Path) -> Option<PathBuf> {
+        agent_doc_project_root_io::project_root_containing(file)
+    }
+
+    fn ipc_listener_active(&self, project_root: &Path) -> bool {
+        agent_doc_ipc_io::is_listener_active(project_root)
+    }
+
+    fn send_vcs_refresh(&self, project_root: &Path) -> Result<bool> {
+        agent_doc_ipc_io::send_vcs_refresh(project_root)
+    }
+
+    fn write_vcs_refresh_signal(&self, signal_file: &Path) -> Result<()> {
+        Ok(std::fs::write(signal_file, "")?)
     }
 }
 
@@ -569,7 +609,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     if snapshot_matches_head
         && let Some(head) = head_doc.as_deref()
         && let Some(repaired) =
-            repair_stale_agent_response_collapse_worktree(file, head, &file_content)?
+            agent_doc_git_io::transient_cleanup::repair_stale_agent_response_collapse_worktree(
+                &TRANSIENT_CLEANUP_EFFECTS,
+                file,
+                head,
+                &file_content,
+            )?
     {
         file_content = repaired;
         stale_response_collapse_repaired = true;
@@ -805,8 +850,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             file.display()
         );
         let (snapshot_after_noop, file_after_noop) =
-            repair_clean_head_if_only_transient_worktree_drift(file, &file_content)?
-                .unwrap_or((snapshot_content.clone(), file_content.clone()));
+            agent_doc_git_io::transient_cleanup::repair_clean_head_if_only_transient_worktree_drift(
+                &TRANSIENT_CLEANUP_EFFECTS,
+                file,
+                &file_content,
+            )?
+            .unwrap_or((snapshot_content.clone(), file_content.clone()));
         finalize_already_committed_noop(
             file,
             "commit_already_current",
@@ -1141,18 +1190,10 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         // Uses file-based signal (vcs-refresh.signal) since the socket listener
         // may not be active — the plugin watches .agent-doc/patches/ for both
         // patch files and signal files.
-        if let Some(signal_file) = vcs_refresh_signal_path(file) {
-            match std::fs::write(&signal_file, "") {
-                Ok(()) => {
-                    eprintln!("[commit] VCS refresh signal written");
-                    vcs_refresh_signaled = Some(true);
-                }
-                Err(e) => {
-                    eprintln!("[commit] VCS refresh signal failed: {} (non-fatal)", e);
-                    vcs_refresh_signaled = Some(false);
-                }
-            }
-        }
+        vcs_refresh_signaled = agent_doc_git_io::transient_cleanup::signal_vcs_refresh(
+            &TRANSIENT_CLEANUP_EFFECTS,
+            file,
+        );
 
         // Strip ephemeral guard markers from snapshot and working tree so they
         // match the committed blob (which was already stripped during staging).
@@ -1161,10 +1202,21 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             file,
         );
         if let Ok(cleaned) = std::fs::read_to_string(file) {
-            match repair_clean_head_if_only_transient_worktree_drift(file, &cleaned) {
+            match agent_doc_git_io::transient_cleanup::repair_clean_head_if_only_transient_worktree_drift(
+                &TRANSIENT_CLEANUP_EFFECTS,
+                file,
+                &cleaned,
+            ) {
                 Ok(Some(_)) => {}
                 Ok(None) => {
-                    if let Err(e) = refresh_live_closeout_sidecars(file, &cleaned, false) {
+                    if let Err(e) =
+                        agent_doc_git_io::transient_cleanup::refresh_live_closeout_sidecars(
+                            &TRANSIENT_CLEANUP_EFFECTS,
+                            file,
+                            &cleaned,
+                            false,
+                        )
+                    {
                         eprintln!(
                             "[commit] warning: failed to refresh CRDT sidecars after post-commit cleanup: {}",
                             e
@@ -1201,134 +1253,6 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         did_commit,
         vcs_refresh_signaled,
     })
-}
-
-fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
-    let canonical = file.canonicalize().ok()?;
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
-    signal_file.parent().filter(|p| p.exists())?;
-    Some(signal_file)
-}
-
-fn refresh_live_closeout_sidecars(
-    file: &Path,
-    committed_doc: &str,
-    signal_editor_refresh: bool,
-) -> Result<Option<bool>> {
-    if agent_doc_frontmatter::frontmatter::content_uses_crdt_write(committed_doc) {
-        let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(committed_doc).encode_state();
-        agent_doc_merge_io::save_document_crdt(file, &crdt, committed_doc)?;
-    }
-
-    if !signal_editor_refresh {
-        return Ok(None);
-    }
-
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
-        return Ok(None);
-    };
-
-    if agent_doc_ipc_io::is_listener_active(&root)
-        && agent_doc_ipc_io::send_vcs_refresh(&root).unwrap_or(false)
-    {
-        return Ok(Some(true));
-    }
-
-    let Some(signal_file) = vcs_refresh_signal_path(file) else {
-        return Ok(None);
-    };
-    match std::fs::write(&signal_file, "") {
-        Ok(()) => Ok(Some(true)),
-        Err(e) => {
-            eprintln!(
-                "[commit] VCS refresh signal failed during closeout sidecar refresh: {}",
-                e
-            );
-            Ok(Some(false))
-        }
-    }
-}
-
-fn repair_stale_agent_response_collapse_worktree(
-    file: &Path,
-    head_doc: &str,
-    file_content: &str,
-) -> Result<Option<String>> {
-    let Some(repaired) = repair_stale_agent_response_collapse_doc(head_doc, file_content) else {
-        return Ok(None);
-    };
-
-    crate::write::atomic_write_pub(file, &repaired)?;
-    if repaired == head_doc {
-        agent_doc_snapshot_io::save(file, head_doc, agent_doc_ops_log_io::log_op)?;
-    }
-    refresh_live_closeout_sidecars(file, &repaired, true)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "stale_agent_response_collapse_cleanup file={} basis=head preserved_local_drift={}",
-            file.display(),
-            repaired != head_doc
-        ),
-    );
-    Ok(Some(repaired))
-}
-
-fn repair_clean_head_if_only_transient_worktree_drift(
-    file: &Path,
-    file_content: &str,
-) -> Result<Option<(Option<String>, String)>> {
-    let Some(head_doc) = agent_doc_git_io::revision::show_head(file)? else {
-        return Ok(None);
-    };
-    if file_content == head_doc {
-        return Ok(None);
-    }
-    if let Some(repaired) =
-        repair_stale_agent_response_collapse_worktree(file, &head_doc, file_content)?
-    {
-        return Ok(Some((Some(head_doc.clone()), repaired)));
-    }
-    if let Some(repaired) =
-        agent_doc_document::write_normalization::reconcile_postcommit_exchange_to_head(
-            file_content,
-            &head_doc,
-        )
-    {
-        crate::write::atomic_write_pub(file, &repaired)?;
-        if repaired == head_doc {
-            agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
-        }
-        refresh_live_closeout_sidecars(file, &repaired, true)?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "postcommit_exchange_reconcile_to_head file={} basis=head preserved_non_exchange_drift={}",
-                file.display(),
-                repaired != head_doc
-            ),
-        );
-        return Ok(Some((Some(head_doc.clone()), repaired)));
-    }
-    if normalize_transient_agent_doc_markers(file_content)
-        != normalize_transient_agent_doc_markers(&head_doc)
-        && normalize_post_commit_re_heading_drift(file_content)
-            != normalize_post_commit_re_heading_drift(&head_doc)
-    {
-        return Ok(None);
-    }
-
-    crate::write::atomic_write_pub(file, &head_doc)?;
-    agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
-    refresh_live_closeout_sidecars(file, &head_doc, true)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!("transient_cleanup file={} basis=head", file.display()),
-    );
-    Ok(Some((Some(head_doc.clone()), head_doc)))
 }
 
 /// `#postcommit-ipc-worktree-corruption` / `#realtimecutover` — emit a live

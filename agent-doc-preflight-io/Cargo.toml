@@ -48,6 +48,7 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.13" }
+tracing = "0.1"
 
 [dev-dependencies]
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }

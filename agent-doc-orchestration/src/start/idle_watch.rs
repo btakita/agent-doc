@@ -124,7 +124,7 @@ fn gather_convergence_facts(
 }
 
 fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
-    let debounce_ms = crate::preflight::preflight_debounce_ms(file);
+    let debounce_ms = agent_doc_preflight_io::debounce::preflight_debounce_ms(file);
     let file_str = file.to_string_lossy();
     if agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms) {
         return true;

@@ -1349,48 +1349,6 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
     }))
 }
 
-pub(crate) fn preflight_debounce_ms(file: &Path) -> u64 {
-    std::fs::read_to_string(file)
-        .ok()
-        .and_then(|content| {
-            frontmatter::parse(&content)
-                .ok()
-                .and_then(|(fm, _)| fm.debounce_ms)
-        })
-        .unwrap_or(2000)
-}
-
-fn wait_for_typing_idle_before_mutation(file: &Path, debounce_ms: u64) -> Result<()> {
-    let max_wait = agent_doc_debounce::preflight_debounce_max_wait(debounce_ms);
-    let poll = std::time::Duration::from_millis(100);
-    let start = std::time::Instant::now();
-    let file_str = file.to_string_lossy();
-
-    loop {
-        let typing_active = agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms);
-        if !typing_active {
-            return Ok(());
-        }
-        if start.elapsed() >= max_wait {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "preflight_visible_mutation_deferred_active_typing file={} debounce_ms={} timeout_ms={}",
-                    file.display(),
-                    debounce_ms,
-                    max_wait.as_millis()
-                ),
-            );
-            anyhow::bail!(
-                "preflight deferred for {}: editor typing did not settle within {}ms; retry after typing stops",
-                file.display(),
-                max_wait.as_millis()
-            );
-        }
-        std::thread::sleep(poll);
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SweepOwner {
     pane: String,

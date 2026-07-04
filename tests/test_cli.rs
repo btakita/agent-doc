@@ -10646,6 +10646,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "move remaining preflight command body",
         ),
         (
+            "Preflight debounce wait IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/debounce.rs",
+            "Split remaining private debounce config helper",
+        ),
+        (
             "Session-check guard IO adapter batch",
             "agent-doc-orchestration/src/session_check/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs}",
             "agent-doc-session-check-io/src/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs,guard_modes.rs}",
@@ -18989,6 +18995,69 @@ fn test_agent_doc_preflight_io_owns_auto_gc_graph() {
         assert!(
             preflight_gc.contains(required),
             "agent-doc-preflight-io gc module should own preflight auto-GC IO: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_debounce_wait_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let idle_watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    let preflight_debounce =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/debounce.rs")).unwrap();
+    let preflight_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+
+    assert!(
+        preflight_io_lib.contains("pub mod debounce;"),
+        "agent-doc-preflight-io must expose the focused preflight debounce module"
+    );
+    for forbidden in [
+        "pub(crate) fn preflight_debounce_ms(",
+        "fn wait_for_typing_idle_before_mutation(",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight.rs must not own moved debounce IO: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "let debounce = std::time::Duration::from_millis(debounce_ms)",
+        "agent_doc_debounce::preflight_debounce_max_wait(debounce_ms)",
+        "agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms)",
+    ] {
+        assert!(
+            !orchestration_preflight_run.contains(forbidden),
+            "orchestration preflight/run.rs must not retain the moved debounce wait loop: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_preflight_run.contains(
+            "agent_doc_preflight_io::debounce::wait_for_typing_idle_before_mutation(file)?;"
+        ) && orchestration_preflight_run
+            .contains("agent_doc_preflight_io::debounce::wait_for_preflight_debounce(file);")
+            && idle_watch.contains("agent_doc_preflight_io::debounce::preflight_debounce_ms(file)"),
+        "preflight and idle-watch callers should use focused debounce IO directly"
+    );
+    for required in [
+        "pub fn preflight_debounce_ms(",
+        "pub fn wait_for_typing_idle_before_mutation(",
+        "pub fn wait_for_preflight_debounce(",
+        "agent_doc_debounce::preflight_debounce_max_wait(debounce_ms)",
+        "agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms)",
+        "preflight_visible_mutation_deferred_active_typing",
+        "tracing::debug!",
+    ] {
+        assert!(
+            preflight_debounce.contains(required),
+            "agent-doc-preflight-io debounce module should own preflight debounce IO: {required}"
         );
     }
 }

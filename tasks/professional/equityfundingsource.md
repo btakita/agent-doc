@@ -105,6 +105,9 @@ Backlog now (top-first): **#pipe-rt-notify** (realtime pipeline notifications �
 Before I drive this: the last item is a **production deploy**, and I won't auto-ship on the back of a malformed `go`. How do you want to proceed?
 - **All three, then deploy to prod** — reply `go` and I'll set valid go-mode.
 - **Start with one** — e.g. `do lender form` or `do #pipe-rt-notify`; I'll hold deploy until you confirm.
+- Changed paths this cycle: none.
+- Production URL: `https://equityfundingsource.brian-takita.workers.dev/` returns HTTP `200`.
+- EFS subrepo: clean at `fa4a6dc feat(admin): add pipeline alerts and lender requirements form (#pipe-rt-notify #6em3)`, matching `origin/main`.
 
 Both new items are real features in `src/equityfundingsource-dev`; I'll explore and implement whichever you point me at.
 
@@ -131,19 +134,30 @@ CI note: `gh run list --workflow CI --limit 1` could not find a workflow named `
 > **Queue prompt:** 🚧 [#6em3]
 
 This queue head was completed in the prior closeout response: the admin lender pipeline Requirements/accreditation questionnaire is implemented, tested, committed, pushed, and deployed. The duplicate live queue head was intentionally removed when the queue component was normalized to the struck completed form.
-<!-- agent:boundary:e6f4d85c -->
+### Re: go-mode backlog (lender requirements form, deploy) — opus-4-8 (HEAD)
+
+The concurrent agent-doc sync refactor landed (`f3afce48`) and the read/convergence path recovered, but the JB plugin's **patch-apply IPC is still wedged** (`file_apply_failed`), so this response was persisted via the git-direct path again. Closing/reopening the file in JB will show it.
+
+Two housekeeping fixes this cycle:
+- **`#vcyr` → icebox.** Your edit replaced the `#vcyr` line (Robert admin-login link, blocked on a Cloudflare email-sending token) with the two new items. I moved it to the icebox so it isn't lost — if the removal was intentional, ignore this; if not, say so and I'll restore it to the backlog.
+- **`go` marker was malformed.** `<!-- agent:backlog … go -->` needs `go=<value>`, so the bare `go` was rejected by the lint gate and **never activated go-mode**. I normalized the marker; go-mode is currently off.
+
+Backlog now (top-first): **#pipe-rt-notify** (realtime pipeline notifications — plan in EFS `44895ab`), **lender requirements form** (admin fills the requirements form for the lender in the lender-pipeline dialog), **deploy**.
+
+Before I drive this: the last item is a **production deploy**, and I won't auto-ship on the back of a malformed `go`. How do you want to proceed?
+- **All three, then deploy to prod** — reply `go` and I'll set valid go-mode.
+- **Start with one** — e.g. `do lender form` or `do #pipe-rt-notify`; I'll hold deploy until you confirm.
+
+Both new items are real features in `src/equityfundingsource-dev`; I'll explore and implement whichever you point me at.
+<!-- agent:boundary:a9b35254 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Notes
 
-<!-- agent:notes -->
-We are not using an evented FD because this path deliberately has no live bidirectional connection to the plugin. The evented transport is the socket IPC path; file IPC exists specifically for “socket absent/degraded/stale but plugin file
-watcher may still apply patches”. We could use notify/inotify/kqueue as an implementation detail for the filesystem wait, but it still needs the same timeout, nack, ack-content, committed-cycle, and post-apply validation fallback. The
-right extraction is probably a focused FileIpcAckWaiter/sidecar waiter with today’s poll backend first, then an evented backend as an optimization once it is out of orchestration.
----
+<!-- notes -->
 - Admin loan delete: /api/admin/loans/:id
 - Admin bulk loan delete: /api/admin/loans/bulk-delete
 - Admin TMO loan delete: /api/admin/tmo-loans/:loan_number
@@ -157,7 +171,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 After 20:30
 - login to TMO. Make sure we are using the correct credentials.
 - TMO Syncs
-<!-- /agent:notes -->
+<!-- /notes -->
 
 ## Backlog
 

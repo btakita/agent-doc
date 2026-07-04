@@ -25,6 +25,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -110,7 +111,7 @@ Both new items are real features in `src/equityfundingsource-dev`; I'll explore 
 ### Re: wedge root-caused + fixed — opus-4-8
 
 Root cause: after repeated git-direct commits (my own wedge workaround), the JB plugin's native yrs CRDT node model diverged from disk, so `native node-patch apply` rejected every patch. Re-synced the plugin's native CRDT; this note verifies the editor apply path works again.
-<!-- agent:boundary:7fcb2394 -->
+<!-- agent:boundary:99448855 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -137,7 +138,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pipe-rt-notify] [recommended] Admin pipeline realtime + desktop notifications. Bus already exists (AdminEventsRoom / notify_admin_event_ / admin-events hub, #7djh) — do NOT add deal_pipeline_bus. Work: (1) client desktop Notification API + toast on pipeline event types, (2) emit lender_interest_created on investor self-service interest path, (3) preapproval trigger blocked on defining what 'preapproval' is. Plan: src/equityfundingsource-dev/prds/admin-pipeline-realtime-notifications.md
 - [ ] [#6em3] In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=96176122-b287-4c47-823e-88a71a831f7c&dialog=lender, allow the admin to fill out the requirements form for the lender.
 - [ ] [#7jj2] deploy
 <!-- /agent:backlog -->

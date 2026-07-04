@@ -1,5 +1,9 @@
 //! Codex hook sidecar persistence.
 
+use agent_doc_model_tier::context_transcript_io::{
+    latest_codex_transcript, transcript_context_pct,
+};
+use agent_doc_model_tier::context_usage::{Harness, clear_decision};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -246,6 +250,131 @@ pub fn load_latest_prompt_state_for_file(file: &Path) -> Result<Option<ActiveSes
 
 pub fn prompt_requests_clear(prompt: &str) -> bool {
     matches!(prompt.trim(), "/clear" | "/new")
+}
+
+pub fn agent_doc_mcp_configured_for(file: &Path) -> bool {
+    project_roots_for(file).iter().any(|root| {
+        let config_path = root.join(".codex/config.toml");
+        let Ok(content) = std::fs::read_to_string(&config_path) else {
+            return false;
+        };
+        let Ok(config) = toml::from_str::<toml::Value>(&content) else {
+            return false;
+        };
+        config
+            .get("mcp_servers")
+            .and_then(toml::Value::as_table)
+            .and_then(|servers| servers.get("agent-doc"))
+            .and_then(toml::Value::as_table)
+            .map(|server| {
+                server.get("command").and_then(toml::Value::as_str) == Some("agent-doc")
+                    || server.get("url").and_then(toml::Value::as_str).is_some()
+            })
+            .unwrap_or(false)
+    })
+}
+
+pub fn is_context_clear_prompt(prompt: &str) -> bool {
+    agent_doc_queue::queue_command::is_context_clear_command(prompt)
+}
+
+/// `#clearcodex`: resolve the Codex Stop-hook continuation context-reset reason
+/// and emit the structured proof lines an operator greps for in ops.log.
+pub fn codex_live_context_pct(file: &Path) -> Option<f64> {
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
+    let project_dir = project_roots_for(file)
+        .into_iter()
+        .next()
+        .or_else(|| std::env::current_dir().ok())?;
+    let transcript = latest_codex_transcript(Path::new(&home), &project_dir)?;
+    transcript_context_pct(Harness::Codex, &transcript, "codex")
+}
+
+pub fn codex_queue_context_reset_reason(
+    file: &Path,
+    last_context_clear_at: Option<u64>,
+) -> Result<Option<String>> {
+    let mut reason = agent_doc_session_accretion_io::queue_context_reset_reason_if_opted_in(
+        file,
+        last_context_clear_at,
+    )?;
+    if agent_doc_session_accretion_io::queue_context_reset_opted_in(file) {
+        let threshold = agent_doc_session_accretion_io::clear_threshold_for_doc(file);
+        let pct = codex_live_context_pct(file);
+        let decision = clear_decision(true, pct, threshold);
+        if reason.is_none() && decision.clear {
+            reason = Some(format!(
+                "transcript context {:.1}% >= clear threshold {}% (#clearcodex)",
+                pct.unwrap_or_default(),
+                threshold
+            ));
+        }
+    }
+    Ok(reason)
+}
+
+pub fn codex_continuation_clear_reason(
+    file: &Path,
+    last_context_clear_at: Option<u64>,
+) -> Option<String> {
+    let reason = match codex_queue_context_reset_reason(file, last_context_clear_at) {
+        Ok(reason) => reason,
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] codex stop hook: failed to resolve queue context-reset reason for {}: {err:#}",
+                file.display()
+            );
+            None
+        }
+    };
+    if agent_doc_session_accretion_io::queue_context_reset_opted_in(file) {
+        let threshold = agent_doc_session_accretion_io::clear_threshold_for_doc(file);
+        let pct = codex_live_context_pct(file);
+        let decision = clear_decision(true, pct, threshold);
+        agent_doc_ops_log_io::log_op(file, &decision.diagnostic);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "[clearcodex] codex-continuation optIn=true reason={:?} clear_instructed=false background_clear_suppressed={}",
+                reason.as_deref().unwrap_or(""),
+                reason.is_some()
+            ),
+        );
+    }
+    reason
+}
+
+pub fn log_codex_stop_queue_continuation(file: &Path, prompt: &str, source: &str) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "codex_stop_queue_continuation file={} source={} mcp_configured={} prompt_bytes={} prompt_sha256={}",
+            file.display(),
+            source,
+            agent_doc_mcp_configured_for(file),
+            prompt.len(),
+            agent_doc_hash::content_hash(prompt),
+        ),
+    );
+}
+
+pub fn log_codex_background_context_clear_suppressed(
+    file: &Path,
+    prompt: &str,
+    source: &str,
+    reason: &str,
+) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "codex_background_context_clear_suppressed file={} source={} result=in_pane_continuation prompt_bytes={} prompt_sha256={} reason={:?}",
+            file.display(),
+            source,
+            prompt.len(),
+            agent_doc_hash::content_hash(prompt),
+            reason,
+        ),
+    );
 }
 
 pub fn record_external_prompt_for_file(file: &Path, session_id: &str, prompt: &str) -> Result<()> {

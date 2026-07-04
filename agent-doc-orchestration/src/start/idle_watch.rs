@@ -2146,7 +2146,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         context_reset_policy_error_logged = false;
                         forced_context_reset_reason.map(str::to_string)
                     } else if harness.binary == "codex" {
-                        match crate::codex_hook::codex_queue_context_reset_reason(
+                        match agent_doc_codex_hook_io::codex_queue_context_reset_reason(
                             &path,
                             last_context_clear_at,
                         ) {
@@ -3146,7 +3146,7 @@ mod tests {
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
 
         let head = "ordinary queue head";
-        let reason = crate::codex_hook::codex_queue_context_reset_reason(&doc, None)
+        let reason = agent_doc_codex_hook_io::codex_queue_context_reset_reason(&doc, None)
             .unwrap()
             .expect("opted-in compaction should require fresh Codex context");
         assert!(

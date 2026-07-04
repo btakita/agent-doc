@@ -3129,14 +3129,22 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         "orchestration must not keep a context_pct adapter module after transcript IO extraction"
     );
 
+    let codex_hook_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-codex-hook-io/src/lib.rs")).unwrap();
+    assert!(
+        codex_hook_io.contains("use agent_doc_model_tier::context_usage::{")
+            && codex_hook_io.contains("use agent_doc_model_tier::context_transcript_io::{")
+            && codex_hook_io.contains("clear_decision")
+            && codex_hook_io.contains("Harness"),
+        "focused Codex hook IO should use focused context usage policy and transcript IO directly"
+    );
     let codex_hook =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
     assert!(
-        codex_hook.contains("use agent_doc_model_tier::context_usage::{")
-            && codex_hook.contains("use agent_doc_model_tier::context_transcript_io::{")
-            && codex_hook.contains("clear_decision")
-            && codex_hook.contains("Harness"),
-        "codex hook should use focused context usage policy and transcript IO directly"
+        !codex_hook.contains("agent_doc_model_tier::context_usage")
+            && !codex_hook.contains("agent_doc_model_tier::context_transcript_io")
+            && !codex_hook.contains("clear_decision"),
+        "orchestration Codex Stop handler must not re-own context usage policy or transcript IO"
     );
 }
 
@@ -3173,11 +3181,16 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
     let codex_hook_io_dependencies = codex_hook_io_manifest["dependencies"].as_table().unwrap();
     for required in [
         "agent-doc-hash",
+        "agent-doc-model-tier",
+        "agent-doc-ops-log-io",
         "agent-doc-prompt-contract",
         "agent-doc-project-root-io",
+        "agent-doc-queue",
+        "agent-doc-session-accretion-io",
         "anyhow",
         "serde",
         "serde_json",
+        "toml",
     ] {
         assert!(
             codex_hook_io_dependencies.contains_key(required),
@@ -3224,6 +3237,17 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
         "pub fn load_active_session_for_current_file(",
         "pub fn record_external_prompt_for_file(",
         "pub fn prompt_requests_clear(",
+        "pub fn agent_doc_mcp_configured_for(",
+        "pub fn is_context_clear_prompt(",
+        "pub fn codex_live_context_pct(",
+        "pub fn codex_queue_context_reset_reason(",
+        "pub fn codex_continuation_clear_reason(",
+        "pub fn log_codex_stop_queue_continuation(",
+        "pub fn log_codex_background_context_clear_suppressed(",
+        "latest_codex_transcript(",
+        "transcript_context_pct(Harness::Codex",
+        "clear_decision(true, pct, threshold)",
+        "queue_context_reset_reason_if_opted_in(",
         ".agent-doc/codex-hooks/sessions",
         "pub fn save_blocked_stop_payload(",
         "struct BlockedStopPayloadRecord",
@@ -3265,6 +3289,15 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
         "fn handle_user_prompt_submit(",
         "fn apply_user_prompt_submit(",
         "fn resolve_agent_doc_path(",
+        "fn agent_doc_mcp_configured_for(",
+        "fn is_context_clear_prompt(",
+        "fn codex_live_context_pct(",
+        "fn codex_queue_context_reset_reason(",
+        "fn codex_continuation_clear_reason(",
+        "fn log_codex_stop_queue_continuation(",
+        "fn log_codex_background_context_clear_suppressed(",
+        "latest_codex_transcript(",
+        "clear_decision(true,",
         "agent_doc_fs::find_project_root(",
         "resolve project root for blocked stop payload",
         "write blocked stop payload",
@@ -3280,7 +3313,9 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
             && codex_hook.contains("tracking_roots")
             && codex_hook.contains("load_state_any")
             && codex_hook.contains("save_state_across_roots")
-            && codex_hook.contains("agent_doc_codex_hook_io::save_blocked_stop_payload("),
+            && codex_hook.contains("agent_doc_codex_hook_io::save_blocked_stop_payload(")
+            && codex_hook.contains("agent_doc_codex_hook_io::codex_continuation_clear_reason")
+            && codex_hook.contains("agent_doc_codex_hook_io::agent_doc_mcp_configured_for"),
         "codex_hook.rs should call focused Codex hook IO directly"
     );
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
@@ -10324,6 +10359,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/run.rs",
             "agent-doc-run-io/src/lib.rs",
             "Move remaining direct-run prompt and queue tests into `agent-doc-run-io`",
+        ),
+        (
+            "Codex Stop continuation context IO graph",
+            "agent-doc-orchestration/src/codex_hook.rs",
+            "agent-doc-codex-hook-io/src/lib.rs",
+            "Split MCP config detection, transcript lookup, session-accretion reset policy",
         ),
         (
             "Write IPC repair decision model extraction",

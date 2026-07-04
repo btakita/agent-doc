@@ -43,10 +43,6 @@ use agent_doc_codex_hook_io::{
     UserPromptSubmitInput, apply_user_prompt_submit, load_state, save_state,
 };
 use agent_doc_document::queue_projection::strip_in_progress_marker;
-use agent_doc_model_tier::context_transcript_io::{
-    latest_codex_transcript, transcript_context_pct,
-};
-use agent_doc_model_tier::context_usage::{Harness, clear_decision};
 use agent_doc_queue_io::queue_consume;
 use agent_doc_turn::codex_stop_continuation::{
     render_prompt_continuation_instruction, render_slash_command_continuation_instruction,
@@ -322,149 +318,12 @@ fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
         .map(|prompt| strip_in_progress_marker(&prompt.text))
         .map(|prompt| prompt.trim().to_string())
         .find(|prompt| !prompt.is_empty())?;
-    if is_context_clear_prompt(&prompt)
+    if agent_doc_codex_hook_io::is_context_clear_prompt(&prompt)
         || agent_doc_queue::queue_command::slash_command_text(&prompt).is_some()
     {
         return None;
     }
     Some(prompt)
-}
-
-fn agent_doc_mcp_configured_for(file: &Path) -> bool {
-    project_roots_for(file).iter().any(|root| {
-        let config_path = root.join(".codex/config.toml");
-        let Ok(content) = std::fs::read_to_string(&config_path) else {
-            return false;
-        };
-        let Ok(config) = toml::from_str::<toml::Value>(&content) else {
-            return false;
-        };
-        config
-            .get("mcp_servers")
-            .and_then(toml::Value::as_table)
-            .and_then(|servers| servers.get("agent-doc"))
-            .and_then(toml::Value::as_table)
-            .map(|server| {
-                server.get("command").and_then(toml::Value::as_str) == Some("agent-doc")
-                    || server.get("url").and_then(toml::Value::as_str).is_some()
-            })
-            .unwrap_or(false)
-    })
-}
-
-fn is_context_clear_prompt(prompt: &str) -> bool {
-    agent_doc_queue::queue_command::is_context_clear_command(prompt)
-}
-
-/// `#clearcodex`: resolve the Codex Stop-hook continuation context-reset reason
-/// AND emit the structured proof lines an operator greps for in ops.log.
-///
-/// The supervisor idle-queue watch (`start.rs`, `#s760c`) already emits the
-/// canonical `[s760] clear-decision …` line before a pre-emptive `/clear`, but
-/// the Codex Stop-hook continuation decided its `/clear` instruction with no
-/// observable marker — so an operator driving a queue drain could never confirm
-/// or deny that a queue-turn boundary actually requested a reset. This helper
-/// restores parity: when the project is opted into `agent_doc_queue_context_reset`,
-/// it logs the canonical `[s760] clear-decision` line from the Codex session
-/// JSONL `token_count` event when available, plus a `[clearcodex]
-/// codex-continuation` companion line carrying the effective reset reason.
-/// Returns the effective reason so the caller wires it into the continuation
-/// instruction.
-fn codex_live_context_pct(file: &Path) -> Option<f64> {
-    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
-    let project_dir = project_roots_for(file)
-        .into_iter()
-        .next()
-        .or_else(|| std::env::current_dir().ok())?;
-    let transcript = latest_codex_transcript(Path::new(&home), &project_dir)?;
-    transcript_context_pct(Harness::Codex, &transcript, "codex")
-}
-
-pub(crate) fn codex_queue_context_reset_reason(
-    file: &Path,
-    last_context_clear_at: Option<u64>,
-) -> Result<Option<String>> {
-    let mut reason = agent_doc_session_accretion_io::queue_context_reset_reason_if_opted_in(
-        file,
-        last_context_clear_at,
-    )?;
-    if agent_doc_session_accretion_io::queue_context_reset_opted_in(file) {
-        let threshold = agent_doc_session_accretion_io::clear_threshold_for_doc(file);
-        let pct = codex_live_context_pct(file);
-        let decision = clear_decision(true, pct, threshold);
-        if reason.is_none() && decision.clear {
-            reason = Some(format!(
-                "transcript context {:.1}% >= clear threshold {}% (#clearcodex)",
-                pct.unwrap_or_default(),
-                threshold
-            ));
-        }
-    }
-    Ok(reason)
-}
-
-fn codex_continuation_clear_reason(
-    file: &Path,
-    last_context_clear_at: Option<u64>,
-) -> Option<String> {
-    let reason = match codex_queue_context_reset_reason(file, last_context_clear_at) {
-        Ok(reason) => reason,
-        Err(err) => {
-            eprintln!(
-                "[agent-doc] codex stop hook: failed to resolve queue context-reset reason for {}: {err:#}",
-                file.display()
-            );
-            None
-        }
-    };
-    if agent_doc_session_accretion_io::queue_context_reset_opted_in(file) {
-        let threshold = agent_doc_session_accretion_io::clear_threshold_for_doc(file);
-        let pct = codex_live_context_pct(file);
-        let decision = clear_decision(true, pct, threshold);
-        agent_doc_ops_log_io::log_op(file, &decision.diagnostic);
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "[clearcodex] codex-continuation optIn=true reason={:?} clear_instructed=false background_clear_suppressed={}",
-                reason.as_deref().unwrap_or(""),
-                reason.is_some()
-            ),
-        );
-    }
-    reason
-}
-
-fn log_codex_stop_queue_continuation(file: &Path, prompt: &str, source: &str) {
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "codex_stop_queue_continuation file={} source={} mcp_configured={} prompt_bytes={} prompt_sha256={}",
-            file.display(),
-            source,
-            agent_doc_mcp_configured_for(file),
-            prompt.len(),
-            agent_doc_hash::content_hash(prompt),
-        ),
-    );
-}
-
-fn log_codex_background_context_clear_suppressed(
-    file: &Path,
-    prompt: &str,
-    source: &str,
-    reason: &str,
-) {
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "codex_background_context_clear_suppressed file={} source={} result=in_pane_continuation prompt_bytes={} prompt_sha256={} reason={:?}",
-            file.display(),
-            source,
-            prompt.len(),
-            agent_doc_hash::content_hash(prompt),
-            reason,
-        ),
-    );
 }
 
 fn background_context_clear_suppression_response(
@@ -474,7 +333,9 @@ fn background_context_clear_suppression_response(
     context_reset_reason: Option<&str>,
 ) -> Option<StopResponse> {
     let reason = context_reset_reason?;
-    log_codex_background_context_clear_suppressed(file, prompt, source, reason);
+    agent_doc_codex_hook_io::log_codex_background_context_clear_suppressed(
+        file, prompt, source, reason,
+    );
     None
 }
 
@@ -688,7 +549,7 @@ fn repeated_queue_recovery_unavailable_response(
             note,
             render_prompt_continuation_instruction(
                 &file.display().to_string(),
-                agent_doc_mcp_configured_for(file),
+                agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
                 None,
             )
         ),
@@ -718,7 +579,7 @@ fn tracked_repeated_queue_recovery_response(
                 note,
                 render_prompt_continuation_instruction(
                     &file.display().to_string(),
-                    agent_doc_mcp_configured_for(file),
+                    agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
                     None,
                 )
             ),
@@ -733,7 +594,8 @@ fn tracked_repeated_queue_recovery_response(
         file,
         &next_prompt,
     );
-    let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
+    let context_reset_reason =
+        agent_doc_codex_hook_io::codex_continuation_clear_reason(file, state.last_context_clear_at);
     if let Some(response) = background_context_clear_suppression_response(
         file,
         &next_prompt,
@@ -758,7 +620,7 @@ fn tracked_repeated_queue_recovery_response(
                 } else {
                     render_prompt_continuation_instruction(
                         &display_path,
-                        agent_doc_mcp_configured_for(file),
+                        agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
                         context_reset_reason.as_deref(),
                     )
                 }
@@ -785,7 +647,7 @@ fn marker_repeated_queue_recovery_response(
                 note,
                 render_prompt_continuation_instruction(
                     &file.display().to_string(),
-                    agent_doc_mcp_configured_for(file),
+                    agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
                     None,
                 )
             ),
@@ -795,7 +657,7 @@ fn marker_repeated_queue_recovery_response(
         file,
         &next_prompt,
     )?;
-    let context_reset_reason = codex_continuation_clear_reason(file, None);
+    let context_reset_reason = agent_doc_codex_hook_io::codex_continuation_clear_reason(file, None);
     if let Some(response) = background_context_clear_suppression_response(
         file,
         &next_prompt,
@@ -820,7 +682,7 @@ fn marker_repeated_queue_recovery_response(
                 } else {
                     render_prompt_continuation_instruction(
                         &display_path,
-                        agent_doc_mcp_configured_for(file),
+                        agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
                         context_reset_reason.as_deref(),
                     )
                 }
@@ -839,7 +701,7 @@ fn auto_queue_continuation_response(
     let Some(prompt) = active_auto_queue_prompt(file)? else {
         return Ok(None);
     };
-    if is_context_clear_prompt(&prompt) {
+    if agent_doc_codex_hook_io::is_context_clear_prompt(&prompt) {
         return Ok(None);
     }
     if input.stop_hook_active && state.last_auto_queue_head.as_deref() == Some(&prompt) {
@@ -875,8 +737,9 @@ fn auto_queue_continuation_response(
     // missing session state still applies the non-advancing-head guard.
     let _ =
         agent_doc_queue_io::continuation_marker::record_continuation_requested_head(file, &prompt);
-    let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
-    log_codex_stop_queue_continuation(file, &prompt, "tracked_state");
+    let context_reset_reason =
+        agent_doc_codex_hook_io::codex_continuation_clear_reason(file, state.last_context_clear_at);
+    agent_doc_codex_hook_io::log_codex_stop_queue_continuation(file, &prompt, "tracked_state");
     if let Some(response) = background_context_clear_suppression_response(
         file,
         &prompt,
@@ -906,7 +769,7 @@ fn auto_queue_continuation_response(
                 } else {
                     render_prompt_continuation_instruction(
                         &display_path,
-                        agent_doc_mcp_configured_for(file),
+                        agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
                         context_reset_reason.as_deref(),
                     )
                 }
@@ -941,7 +804,7 @@ fn marker_fallback_continuation_response(
         return Ok(None);
     };
 
-    if is_context_clear_prompt(&continuation.head_prompt) {
+    if agent_doc_codex_hook_io::is_context_clear_prompt(&continuation.head_prompt) {
         return Ok(None);
     }
 
@@ -976,8 +839,13 @@ fn marker_fallback_continuation_response(
         &file,
         &continuation.head_prompt,
     )?;
-    let context_reset_reason = codex_continuation_clear_reason(&file, None);
-    log_codex_stop_queue_continuation(&file, &continuation.head_prompt, "durable_marker");
+    let context_reset_reason =
+        agent_doc_codex_hook_io::codex_continuation_clear_reason(&file, None);
+    agent_doc_codex_hook_io::log_codex_stop_queue_continuation(
+        &file,
+        &continuation.head_prompt,
+        "durable_marker",
+    );
     if let Some(response) = background_context_clear_suppression_response(
         &file,
         &continuation.head_prompt,
@@ -1003,7 +871,7 @@ fn marker_fallback_continuation_response(
                 } else {
                     render_prompt_continuation_instruction(
                         &display_path,
-                        agent_doc_mcp_configured_for(&file),
+                        agent_doc_codex_hook_io::agent_doc_mcp_configured_for(&file),
                         context_reset_reason.as_deref(),
                     )
                 }

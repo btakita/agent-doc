@@ -10640,6 +10640,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "move remaining preflight command body",
         ),
         (
+            "Preflight auto-GC and stale actor cleanup IO graph",
+            "agent-doc-orchestration/src/preflight/run.rs",
+            "agent-doc-preflight-io/src/gc.rs",
+            "move remaining preflight command body",
+        ),
+        (
             "Session-check guard IO adapter batch",
             "agent-doc-orchestration/src/session_check/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs}",
             "agent-doc-session-check-io/src/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs,guard_modes.rs}",
@@ -18934,6 +18940,57 @@ fn test_agent_doc_preflight_io_owns_layout_health_graph() {
             && orchestration_preflight.contains("check_layout"),
         "orchestration preflight should import focused layout adapters directly"
     );
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_auto_gc_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let preflight_gc =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/gc.rs")).unwrap();
+    let preflight_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    let preflight_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+
+    assert!(
+        preflight_io_lib.contains("pub mod gc;")
+            && preflight_manifest.contains("agent-doc-gc-io ="),
+        "agent-doc-preflight-io must expose the focused preflight GC module and depend on gc IO"
+    );
+    for forbidden in [
+        "struct PreflightGcControllerEffects",
+        "impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects",
+        "fn run_auto_gc(",
+        "close_stale_starting_actors_for_caller(",
+        "let stamp = root.join(\".agent-doc/gc.stamp\")",
+    ] {
+        assert!(
+            !orchestration_preflight_run.contains(forbidden),
+            "orchestration preflight/run.rs must not own moved auto-GC IO: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_preflight_run
+            .contains("agent_doc_preflight_io::gc::run_preflight_auto_gc(file);"),
+        "orchestration preflight/run.rs should call focused preflight GC IO directly"
+    );
+    for required in [
+        "struct PreflightGcControllerEffects",
+        "impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects",
+        "fn run_auto_gc(",
+        "pub fn run_preflight_auto_gc(",
+        "close_stale_starting_actors_for_caller(",
+        "let stamp = root.join(\".agent-doc/gc.stamp\")",
+        "agent_doc_gc_io::run_with_controller_effects(",
+    ] {
+        assert!(
+            preflight_gc.contains(required),
+            "agent-doc-preflight-io gc module should own preflight auto-GC IO: {required}"
+        );
+    }
 }
 
 #[test]

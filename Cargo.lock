@@ -1219,6 +1219,7 @@ dependencies = [
  "agent-doc-element-review",
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-gc-io",
  "agent-doc-git-io",
  "agent-doc-harness",
  "agent-doc-hash",

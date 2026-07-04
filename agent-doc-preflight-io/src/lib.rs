@@ -1,5 +1,6 @@
 //! Preflight maintenance I/O adapters.
 
+pub mod gc;
 pub mod layout;
 
 use agent_doc_document::queue_projection::{

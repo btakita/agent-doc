@@ -1227,7 +1227,8 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         &repair_decision,
         Some(patch_id),
         |file, repaired_content, expected_bad_state| {
-            try_ipc_full_content_response_fallback_from_source(
+            agent_doc_write_converge_io::try_ipc_full_content_response_fallback_from_source(
+                &super::WRITE_CONVERGENCE_EFFECTS,
                 file,
                 repaired_content,
                 expected_bad_state,
@@ -1474,7 +1475,8 @@ mod ack_content_snapshot_tests {
                     agent_doc_ipc_protocol::FullContentRepairRedelivery::NormalizationFallback,
                     source_patch_id,
                     &mut |file, repaired_content, expected_bad_state| {
-                        try_ipc_full_content_response_fallback_from_source(
+                        agent_doc_write_converge_io::try_ipc_full_content_response_fallback_from_source(
+                            &super::WRITE_CONVERGENCE_EFFECTS,
                             file,
                             repaired_content,
                             expected_bad_state,
@@ -3278,7 +3280,8 @@ Stale response that the operator cleared.
             agent_doc_ipc_protocol::FullContentRepairRedelivery::IpcDedupe,
             None,
             &mut |file, repaired_content, expected_bad_state| {
-                try_ipc_full_content_response_fallback_from_source(
+                agent_doc_write_converge_io::try_ipc_full_content_response_fallback_from_source(
+                    &super::WRITE_CONVERGENCE_EFFECTS,
                     file,
                     repaired_content,
                     expected_bad_state,

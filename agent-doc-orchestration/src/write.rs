@@ -4376,7 +4376,12 @@ mod tests {
         let doc = dir.path().join("test.md");
         fs::write(&doc, "content").unwrap();
 
-        let result = try_ipc_full_content(&doc, "new content").unwrap();
+        let result = agent_doc_write_converge_io::try_ipc_full_content(
+            &WRITE_CONVERGENCE_EFFECTS,
+            &doc,
+            "new content",
+        )
+        .unwrap();
         assert!(
             !result,
             "full-content IPC is disabled and should return false"

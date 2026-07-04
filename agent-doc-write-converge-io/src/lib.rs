@@ -22,9 +22,11 @@ use agent_doc_element_exchange::{
     normalize_exchange_prefixes_for_targets, verify_sidecar_normalization,
 };
 use agent_doc_element_exchange_io::DuplicatePromptRepairOptions;
-use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
+use agent_doc_ipc_io::editor_target::{
+    live_editor_delivery_has_operator_authority, target_payload_to_live_editor,
+};
 use agent_doc_ipc_protocol::{
-    FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision,
+    FullContentIpcMode, FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision,
     is_socket_ack_timeout_error, is_socket_status_error,
 };
 use agent_doc_turn::response_replay::response_materialized_in_content;
@@ -544,6 +546,294 @@ pub fn write_file_ipc_and_poll_delivery(
             patch_file.display()
         ),
     );
+    Ok(false)
+}
+
+#[allow(dead_code)]
+pub fn try_ipc_full_content(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    content: &str,
+) -> Result<bool> {
+    try_ipc_full_content_with_mode(
+        effects,
+        file,
+        content,
+        FullContentIpcMode::ResponseFallback,
+        None,
+    )
+}
+
+pub fn try_ipc_full_content_response_fallback_from_source(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    content: &str,
+    source_content: &str,
+) -> Result<bool> {
+    try_ipc_full_content_with_mode(
+        effects,
+        file,
+        content,
+        FullContentIpcMode::ResponseFallback,
+        Some(source_content),
+    )
+}
+
+#[allow(dead_code)]
+pub fn try_ipc_full_content_operator_mutation(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    content: &str,
+) -> Result<bool> {
+    try_ipc_full_content_with_mode(
+        effects,
+        file,
+        content,
+        FullContentIpcMode::OperatorMutation,
+        None,
+    )
+}
+
+#[allow(dead_code)]
+pub fn try_ipc_full_content_operator_mutation_from_source(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    content: &str,
+    source_content: &str,
+) -> Result<bool> {
+    try_ipc_full_content_with_mode(
+        effects,
+        file,
+        content,
+        FullContentIpcMode::OperatorMutation,
+        Some(source_content),
+    )
+}
+
+pub fn log_full_content_ipc_disabled(
+    file: &Path,
+    mode: FullContentIpcMode,
+    patch_id: &str,
+    target_content: &str,
+    source_content: Option<&str>,
+    current_content: Option<&str>,
+) {
+    let source = mode.source_label();
+    eprintln!(
+        "[write] full-content IPC disabled for {}: falling back to guarded disk path",
+        file.display()
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "full_content_ipc_disabled file={} source={} patch_id={} reason=disabled_by_default target_len={} target_hash={} source_len={} source_hash={} current_len={} current_hash={}",
+            file.display(),
+            source,
+            patch_id,
+            target_content.len(),
+            agent_doc_hash::content_hash(target_content),
+            source_content.map(str::len).unwrap_or(0),
+            source_content
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            current_content.map(str::len).unwrap_or(0),
+            current_content
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string())
+        ),
+    );
+}
+
+struct FullContentIpcAuthorityRejectionLog<'a> {
+    file: &'a Path,
+    mode: FullContentIpcMode,
+    patch_id: &'a str,
+    target_content: &'a str,
+    source_content: Option<&'a str>,
+    current_content: Option<&'a str>,
+    authority: WholeBufferAuthority,
+    reason: &'a str,
+}
+
+fn log_full_content_ipc_authority_rejected(facts: FullContentIpcAuthorityRejectionLog<'_>) {
+    let source = facts.mode.source_label();
+    eprintln!(
+        "[write] full-content IPC skipped for {}: whole-buffer delivery rejected ({})",
+        facts.file.display(),
+        facts.reason
+    );
+    agent_doc_ops_log_io::log_op(
+        facts.file,
+        &format!(
+            "full_content_ipc_authority_rejected file={} source={} patch_id={} authority={} reason={} target_len={} target_hash={} source_len={} source_hash={} current_len={} current_hash={}",
+            facts.file.display(),
+            source,
+            facts.patch_id,
+            facts.authority.as_str(),
+            facts.reason,
+            facts.target_content.len(),
+            agent_doc_hash::content_hash(facts.target_content),
+            facts.source_content.map(str::len).unwrap_or(0),
+            facts
+                .source_content
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            facts.current_content.map(str::len).unwrap_or(0),
+            facts
+                .current_content
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string())
+        ),
+    );
+}
+
+pub fn full_content_ipc_scope_allows(
+    file: &Path,
+    mode: FullContentIpcMode,
+    patch_id: &str,
+    target_content: &str,
+    source_content: Option<&str>,
+    current_content: Option<&str>,
+) -> bool {
+    let reason = agent_doc_document_realtime::write_policy::full_content_scope_rejection_reason(&[
+        Some(target_content),
+        source_content,
+        current_content,
+    ]);
+    let Some(reason) = reason else {
+        return true;
+    };
+
+    let reason = reason.as_str();
+    let source = mode.source_label();
+    eprintln!(
+        "[write] full-content IPC skipped for {}: {} is not eligible for whole-document editor replacement",
+        file.display(),
+        reason
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "full_content_ipc_scope_rejected file={} source={} patch_id={} scope={} target_len={} target_hash={} source_len={} source_hash={} current_len={} current_hash={}",
+            file.display(),
+            source,
+            patch_id,
+            reason,
+            target_content.len(),
+            agent_doc_hash::content_hash(target_content),
+            source_content.map(str::len).unwrap_or(0),
+            source_content
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            current_content.map(str::len).unwrap_or(0),
+            current_content
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string())
+        ),
+    );
+    false
+}
+
+pub fn try_ipc_full_content_with_mode(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    content: &str,
+    mode: FullContentIpcMode,
+    source_content: Option<&str>,
+) -> Result<bool> {
+    let _canonical = file.canonicalize()?;
+    let before_content = std::fs::read_to_string(file).ok();
+    // `#turnsaferecycle` Goal 3 — shared stale-supervisor short-circuit (same
+    // guard as `try_ipc`): a stale hosting supervisor makes this full-content IPC
+    // write doomed. Skip it, schedule the recycle, and defer uniformly.
+    if stale_supervisor_write_short_circuit(file, mode.source_label()).is_some() {
+        return Ok(false);
+    }
+    let effective_source_content = match (mode, source_content) {
+        (FullContentIpcMode::ResponseFallback, None) => Some(content),
+        _ => source_content,
+    };
+    let patch_id = uuid::Uuid::new_v4().to_string();
+
+    if mode == FullContentIpcMode::ResponseFallback
+        && let Some(ref cycle_id) = effects.cycle_already_committed(file)
+    {
+        eprintln!(
+            "[write] full-content IPC skipped: cycle {} already committed for {}",
+            cycle_id,
+            file.display()
+        );
+        effects.log_file_ipc_already_committed(file, cycle_id);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "late_fallback_patch_rejected file={} cycle_id={} patch_id=full_content reason=already_committed transport=full_content",
+                file.display(),
+                cycle_id
+            ),
+        );
+        effects.cleanup_fallback_patch_files(file);
+        return Ok(false);
+    }
+
+    let scope_rejection =
+        agent_doc_document_realtime::write_policy::full_content_scope_rejection_reason(&[
+            Some(content),
+            effective_source_content,
+            before_content.as_deref(),
+        ]);
+    let authority = if live_editor_delivery_has_operator_authority(file) {
+        WholeBufferAuthority::OperatorTextAuthority
+    } else {
+        WholeBufferAuthority::None
+    };
+    let source_buffer_matches = effective_source_content
+        .zip(before_content.as_deref())
+        .is_some_and(|(source, current)| source == current);
+    let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+        delivery: WholeBufferDelivery::FullContentEditorIpc,
+        authority,
+        source_buffer_matches,
+        scope_rejection,
+        enabled: false,
+    });
+    match decision.action {
+        WholeBufferDeliveryAction::Reject if scope_rejection.is_some() => {
+            full_content_ipc_scope_allows(
+                file,
+                mode,
+                &patch_id,
+                content,
+                effective_source_content,
+                before_content.as_deref(),
+            );
+            return Ok(false);
+        }
+        WholeBufferDeliveryAction::Reject => {
+            log_full_content_ipc_authority_rejected(FullContentIpcAuthorityRejectionLog {
+                file,
+                mode,
+                patch_id: &patch_id,
+                target_content: content,
+                source_content: effective_source_content,
+                current_content: before_content.as_deref(),
+                authority,
+                reason: decision.reason,
+            });
+            return Ok(false);
+        }
+        WholeBufferDeliveryAction::ObserveOnly => {
+            log_full_content_ipc_disabled(
+                file,
+                mode,
+                &patch_id,
+                content,
+                effective_source_content,
+                before_content.as_deref(),
+            );
+        }
+        WholeBufferDeliveryAction::Apply => {}
+    }
     Ok(false)
 }
 

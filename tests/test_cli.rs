@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 72,
+        ledger_rows.len() >= 73,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10190,25 +10190,31 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Write IPC normalization redelivery IO graph",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Split disabled full-content transport guard/cycle cleanup",
+            "Move snapshot-adoption guards",
         ),
         (
             "Write IPC sidecar repair-decision builder",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Move disabled full-content transport",
+            "Move snapshot-adoption guards",
         ),
         (
             "Write IPC visible-state repair IO graph",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Split disabled full-content transport",
+            "Split snapshot-adoption guards",
         ),
         (
             "Write IPC full-content redelivery proof IO graph",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Move disabled full-content transport",
+            "Move snapshot-adoption guards",
+        ),
+        (
+            "Write IPC disabled full-content transport IO graph",
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Move snapshot-adoption guards",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -21388,7 +21394,8 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             .unwrap();
     assert!(
         write_ipc_transport_source.contains("use agent_doc_ipc_protocol::{")
-            && write_ipc_transport_source.contains("use agent_doc_ipc_io::editor_target::{")
+            && write_ipc_transport_source
+                .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor")
             && write_ipc_transport_source.contains("FullContentIpcMode")
             && write_ipc_transport_source.contains("is_already_applied_ack_error_message")
             && write_ipc_transport_source.contains("is_socket_ack_timeout_error")
@@ -21406,6 +21413,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "fn live_editor_delivery_target(",
         "fn live_editor_delivery_has_operator_authority(",
         "fn target_payload_to_live_editor(",
+        "pub fn try_ipc_full_content(",
+        "pub(crate) fn try_ipc_full_content(",
+        "fn try_ipc_full_content_with_mode(",
+        "pub(crate) fn log_full_content_ipc_disabled(",
+        "pub(crate) fn full_content_ipc_scope_allows(",
     ] {
         assert!(
             !write_ipc_transport_source.contains(forbidden),
@@ -21418,8 +21430,9 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         write_converge_source.contains("use agent_doc_ipc_protocol::{")
             && write_converge_source.contains("is_socket_ack_timeout_error")
             && write_converge_source.contains("is_socket_status_error")
-            && write_converge_source
-                .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;"),
+            && write_converge_source.contains("use agent_doc_ipc_io::editor_target::{")
+            && write_converge_source.contains("live_editor_delivery_has_operator_authority")
+            && write_converge_source.contains("target_payload_to_live_editor"),
         "write convergence IO should import socket error classifiers and editor targeting from focused IPC crates"
     );
     for forbidden in [
@@ -24038,8 +24051,10 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "write/ipc.rs should import focused realtime snapshot/live-drift policy directly"
     );
     assert!(
-        write_ipc_transport.contains("agent_doc_document_realtime::write_policy::{")
-            && write_ipc_transport.contains("normalize_patch_content"),
+        write_ipc_transport
+            .contains("use agent_doc_document_realtime::write_policy::normalize_patch_content;")
+            || (write_ipc_transport.contains("agent_doc_document_realtime::write_policy::{")
+                && write_ipc_transport.contains("normalize_patch_content")),
         "write/ipc/transport.rs should import focused IPC patch normalization policy directly"
     );
     for forbidden_snippet in [
@@ -24429,16 +24444,27 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
             .unwrap();
     assert!(
-        write_ipc_transport_source.contains(
+        write_converge_io_source.contains(
             "agent_doc_document_realtime::write_policy::full_content_scope_rejection_reason"
-        ),
-        "full-content scope checks should call the focused realtime policy directly"
+        ) && write_converge_io_source.contains("pub fn try_ipc_full_content(")
+            && write_converge_io_source
+                .contains("pub fn try_ipc_full_content_response_fallback_from_source(")
+            && write_converge_io_source
+                .contains("pub fn try_ipc_full_content_operator_mutation_from_source(")
+            && write_converge_io_source.contains("pub fn full_content_ipc_scope_allows(")
+            && write_converge_io_source.contains("pub fn log_full_content_ipc_disabled("),
+        "agent-doc-write-converge-io should own disabled full-content IPC guards and scope logging"
     );
     for forbidden_snippet in [
         "pub(crate) fn frontmatter_mode_is_explicit_template",
         "pub(crate) fn content_declares_template_frontmatter",
         "pub(crate) fn content_has_agent_components",
         "pub(crate) fn full_content_ipc_scope_rejection_reason",
+        "pub fn try_ipc_full_content(",
+        "pub(crate) fn try_ipc_full_content(",
+        "fn try_ipc_full_content_with_mode(",
+        "pub(crate) fn log_full_content_ipc_disabled(",
+        "pub(crate) fn full_content_ipc_scope_allows(",
     ] {
         assert!(
             !write_ipc_transport_source.contains(forbidden_snippet),

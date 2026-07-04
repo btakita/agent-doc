@@ -3136,6 +3136,7 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
     let codex_hook_io_dependencies = codex_hook_io_manifest["dependencies"].as_table().unwrap();
     for required in [
         "agent-doc-hash",
+        "agent-doc-prompt-contract",
         "agent-doc-project-root-io",
         "anyhow",
         "serde",
@@ -3168,6 +3169,10 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
         "pub fn push_unique_root(",
         "pub struct SessionState",
         "pub struct ActiveSessionState",
+        "pub struct UserPromptSubmitInput",
+        "pub fn handle_user_prompt_submit(",
+        "pub fn apply_user_prompt_submit(",
+        "pub fn resolve_agent_doc_path(",
         "pub fn load_state_any(",
         "pub fn clear_state_across_roots(",
         "pub fn save_state_across_roots(",
@@ -3219,6 +3224,10 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
         "fn clear_state(",
         "fn state_path(",
         "fn current_session_id(",
+        "struct UserPromptSubmitInput",
+        "fn handle_user_prompt_submit(",
+        "fn apply_user_prompt_submit(",
+        "fn resolve_agent_doc_path(",
         "agent_doc_fs::find_project_root(",
         "resolve project root for blocked stop payload",
         "write blocked stop payload",
@@ -3236,6 +3245,13 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
             && codex_hook.contains("save_state_across_roots")
             && codex_hook.contains("agent_doc_codex_hook_io::save_blocked_stop_payload("),
         "codex_hook.rs should call focused Codex hook IO directly"
+    );
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        main_source.contains("agent_doc_codex_hook_io::handle_user_prompt_submit()")
+            && !main_source
+                .contains("agent_doc_orchestration::codex_hook::handle_user_prompt_submit()"),
+        "Codex UserPromptSubmit hook should route directly to focused Codex hook IO"
     );
 }
 
@@ -8040,7 +8056,7 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
             ],
         ),
         (
-            "agent-doc-orchestration/src/codex_hook.rs",
+            "agent-doc-codex-hook-io/src/lib.rs",
             vec!["agent_doc_prompt_contract::harness_prompt::agent_doc_invocation_file_from_text"],
             vec![
                 "fn parse_agent_doc_invocation_line(",
@@ -9699,7 +9715,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 80,
+        ledger_rows.len() >= 82,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10380,6 +10396,18 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/ipc/transport.rs",
             "agent-doc-write-ipc-io/src/lib.rs",
             "Split pure payload policy from file read/eprintln diagnostics",
+        ),
+        (
+            "Write convergence test-wrapper re-export facade deletion",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-write-converge-io",
+            "Move the remaining `write/converge.rs` fixture coverage",
+        ),
+        (
+            "Codex hook user-prompt-submit tracking IO graph",
+            "agent-doc-orchestration/src/codex_hook.rs",
+            "agent-doc-codex-hook-io/src/lib.rs",
+            "Move Stop-hook decision policy behind an explicit effect port",
         ),
     ] {
         let row_text = ledger_rows
@@ -26161,6 +26189,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     assert!(
         write_source.contains("#[cfg(test)]\nmod converge;")
             && !write_source.contains("pub use converge::*;")
+            && !write_source.contains("pub(crate) use converge::*;")
             && write_source.contains("pub static WRITE_CONVERGENCE_EFFECTS")
             && write_source.contains(
                 "impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceEffects",

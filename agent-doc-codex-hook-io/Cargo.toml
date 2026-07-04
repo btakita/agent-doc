@@ -11,10 +11,12 @@ name = "agent_doc_codex_hook_io"
 
 [dependencies]
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-prompt-contract = { path = "../agent-doc-prompt-contract", version = "0.34.67" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
 tempfile = "3"

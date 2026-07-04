@@ -2,11 +2,8 @@
 //!
 //! ## Spec
 //! - Implements the repo-local Codex hook bridge used by `agent-doc` installs.
-//! - `handle_user_prompt_submit()` reads the Codex `UserPromptSubmit` JSON payload
-//!   from stdin, finds the effective `agent-doc <FILE>`-style invocation even
-//!   when the prompt body includes injected instruction preambles, and records
-//!   the active document for the Codex session under
-//!   `.agent-doc/codex-hooks/`.
+//! - Codex `UserPromptSubmit` is handled by `agent-doc-codex-hook-io`; this
+//!   module consumes the resulting tracked session state during `Stop`.
 //! - `handle_stop()` reads the Codex `Stop` JSON payload from stdin, checks the
 //!   tracked document with `session_check::inspect()`, and only intervenes when
 //!   the cycle is still open.
@@ -31,7 +28,6 @@
 //! - Hook state is scoped by Codex `session_id`, not globally across documents.
 //!
 //! ## Evals
-//! - `user_prompt_submit_tracks_agent_doc_file`
 //! - `stop_auto_closes_open_cycle_from_last_assistant_message`
 //! - `stop_blocks_transcript_shaped_last_assistant_message`
 //! - `stop_passes_through_committed_cycle`
@@ -39,12 +35,12 @@
 //! - `stop_fails_closed_after_one_auto_continue`
 
 use agent_doc_codex_hook_io::{
-    SessionState, clear_state_across_roots, load_state_any, project_roots_for, save_state,
+    SessionState, clear_state_across_roots, load_state_any, project_roots_for,
     save_state_across_roots, tracking_roots,
 };
 #[cfg(test)]
 use agent_doc_codex_hook_io::{
-    load_latest_prompt_for_file, load_prompt_for_current_session, load_state, prompt_requests_clear,
+    UserPromptSubmitInput, apply_user_prompt_submit, load_state, save_state,
 };
 use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_model_tier::context_transcript_io::{
@@ -65,14 +61,6 @@ use std::path::{Path, PathBuf};
 
 #[cfg(test)]
 use agent_doc_codex_hook_io::project_root_for;
-
-#[derive(Debug, Deserialize)]
-struct UserPromptSubmitInput {
-    session_id: String,
-    turn_id: String,
-    cwd: String,
-    prompt: String,
-}
 
 #[derive(Debug, Deserialize)]
 struct StopInput {
@@ -111,24 +99,6 @@ enum StopCloseAttempt {
     NotPossible,
 }
 
-pub fn handle_user_prompt_submit() -> Result<()> {
-    let payload = match read_stdin_payload() {
-        Ok(payload) => payload,
-        Err(err) => {
-            eprintln!("[codex-hook] user-prompt-submit payload read failed: {err}");
-            return Ok(());
-        }
-    };
-    let input: UserPromptSubmitInput = match serde_json::from_str(&payload) {
-        Ok(input) => input,
-        Err(err) => {
-            eprintln!("[codex-hook] user-prompt-submit JSON parse failed: {err}");
-            return Ok(());
-        }
-    };
-    apply_user_prompt_submit(&input)
-}
-
 pub fn handle_stop() -> Result<()> {
     let response = match read_stdin_payload()
         .and_then(|payload| serde_json::from_str::<StopInput>(&payload).context("parse stop JSON"))
@@ -141,46 +111,6 @@ pub fn handle_stop() -> Result<()> {
         },
     };
     println!("{}", serde_json::to_string(&response)?);
-    Ok(())
-}
-
-fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
-    let cwd = PathBuf::from(&input.cwd);
-    let roots_for_cwd = project_roots_for(&cwd);
-    let previous_state = load_state_any(&roots_for_cwd, &input.session_id)?.map(|(_, state)| state);
-    let doc_path = resolve_agent_doc_path(&input.prompt, &cwd).or_else(|| {
-        previous_state
-            .as_ref()
-            .map(|state| PathBuf::from(&state.doc_path))
-    });
-    let Some(doc_path) = doc_path else {
-        return Ok(());
-    };
-    let roots = tracking_roots(&cwd, Some(&doc_path));
-    if roots.is_empty() {
-        return Ok(());
-    }
-
-    let now = now_secs();
-    let last_context_clear_at = if is_context_clear_prompt(&input.prompt) {
-        Some(now)
-    } else {
-        previous_state
-            .as_ref()
-            .and_then(|state| state.last_context_clear_at)
-    };
-    let state = SessionState {
-        session_id: input.session_id.clone(),
-        doc_path: doc_path.display().to_string(),
-        last_turn_id: input.turn_id.clone(),
-        last_prompt: input.prompt.clone(),
-        last_auto_queue_head: None,
-        last_context_clear_at,
-        updated_at: now,
-    };
-    for root in roots {
-        save_state(&root, &state)?;
-    }
     Ok(())
 }
 
@@ -1330,18 +1260,6 @@ fn read_stdin_payload() -> Result<String> {
     Ok(payload)
 }
 
-fn resolve_agent_doc_path(prompt: &str, cwd: &Path) -> Option<PathBuf> {
-    let file =
-        agent_doc_prompt_contract::harness_prompt::agent_doc_invocation_file_from_text(prompt)?;
-    let path = PathBuf::from(file);
-    let joined = if path.is_absolute() {
-        path
-    } else {
-        cwd.join(path)
-    };
-    Some(joined.canonicalize().unwrap_or(joined))
-}
-
 fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
     // Single source of truth: the shared queue-continuation detector
     // (#codex-auto-queue-stalled-final-gate). Keeps the Stop-hook continuation
@@ -1580,220 +1498,6 @@ Done.\n\
             prompt: format!("agent-doc {}", doc.display()),
         })
         .unwrap();
-    }
-
-    #[test]
-    fn user_prompt_submit_tracks_agent_doc_file() {
-        let dir = setup_project();
-        let doc = write_doc(&dir);
-
-        track_doc(&dir, &doc, "turn-1");
-
-        let root = project_root_for(dir.path()).unwrap();
-        let state = load_state(&root, "codex-session").unwrap().unwrap();
-        assert_eq!(PathBuf::from(state.doc_path), doc);
-        assert_eq!(state.last_turn_id, "turn-1");
-        assert_eq!(state.last_prompt, format!("agent-doc {}", doc.display()));
-    }
-
-    #[test]
-    fn user_prompt_submit_does_not_track_ambient_ancestor_root() {
-        let ambient = tempfile::tempdir().unwrap();
-        fs::create_dir_all(ambient.path().join(".agent-doc")).unwrap();
-        let project = ambient.path().join("project");
-        fs::create_dir_all(project.join(".agent-doc/snapshots")).unwrap();
-        let doc = project.join("task.md");
-        let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
-        fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-
-        apply_user_prompt_submit(&UserPromptSubmitInput {
-            session_id: "codex-session".to_string(),
-            turn_id: "turn-1".to_string(),
-            cwd: project.display().to_string(),
-            prompt: format!("agent-doc {}", doc.display()),
-        })
-        .unwrap();
-
-        let project_state = load_state(&project, "codex-session").unwrap();
-        let ambient_state = load_state(ambient.path(), "codex-session").unwrap();
-        assert!(
-            project_state.is_some(),
-            "nearest project root should receive Codex hook state"
-        );
-        assert!(
-            ambient_state.is_none(),
-            "ambient ancestor .agent-doc roots must not receive shared hook state"
-        );
-    }
-
-    #[test]
-    fn user_prompt_submit_tracks_same_line_agent_doc_body() {
-        let dir = setup_project();
-        let doc = write_doc(&dir);
-
-        apply_user_prompt_submit(&UserPromptSubmitInput {
-            session_id: "codex-session".to_string(),
-            turn_id: "turn-1".to_string(),
-            cwd: dir.path().display().to_string(),
-            prompt: format!("agent-doc {} #code-review", doc.display()),
-        })
-        .unwrap();
-
-        let root = project_root_for(dir.path()).unwrap();
-        let state = load_state(&root, "codex-session").unwrap().unwrap();
-        assert_eq!(PathBuf::from(&state.doc_path), doc);
-        assert_eq!(
-            state.last_prompt,
-            format!("agent-doc {} #code-review", doc.display())
-        );
-
-        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-            .lock()
-            .unwrap();
-        let prev = std::env::var("CODEX_THREAD_ID").ok();
-        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
-        let loaded = agent_doc_harness::prompt_source::prompt_body_for_file(
-            &doc,
-            load_prompt_for_current_session,
-        )
-        .unwrap();
-        if let Some(value) = prev {
-            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
-        } else {
-            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
-        }
-
-        assert_eq!(loaded, Some("#code-review".to_string()));
-    }
-
-    #[test]
-    fn resolve_agent_doc_path_prefers_real_invocation_after_instruction_preamble() {
-        let dir = setup_project();
-        let doc = write_doc(&dir);
-        let prompt = format!(
-            "# AGENTS.md instructions for {}\n\
-\n\
-```\n\
-agent-doc <FILE>\n\
-agent-doc compact <FILE>\n\
-```\n\
-\n\
-Use the harness-native entrypoint below.\n\
-\n\
-agent-doc {}\n",
-            dir.path().display(),
-            doc.display()
-        );
-
-        let resolved = resolve_agent_doc_path(&prompt, dir.path()).expect("doc path");
-
-        assert_eq!(resolved, doc);
-    }
-
-    #[test]
-    fn resolve_agent_doc_path_accepts_session_invocation_with_trailing_body() {
-        let dir = setup_project();
-        let doc = write_doc(&dir);
-        let prompt = format!("agent-doc {} #agent-doc-bug", doc.display());
-
-        let resolved = resolve_agent_doc_path(&prompt, dir.path()).expect("doc path");
-
-        assert_eq!(resolved, doc);
-    }
-
-    #[test]
-    fn load_prompt_for_current_session_uses_codex_thread_id() {
-        let dir = setup_project();
-        let doc = write_doc(&dir);
-        track_doc(&dir, &doc, "turn-1");
-
-        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-            .lock()
-            .unwrap();
-        let prev = std::env::var("CODEX_THREAD_ID").ok();
-        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
-        let loaded = load_prompt_for_current_session(&doc).unwrap();
-        if let Some(value) = prev {
-            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
-        } else {
-            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
-        }
-
-        assert_eq!(loaded, Some(format!("agent-doc {}", doc.display())));
-    }
-
-    #[test]
-    fn load_latest_prompt_for_file_picks_most_recent_matching_state() {
-        let dir = setup_project();
-        let doc = write_doc(&dir);
-        let root = project_root_for(dir.path()).unwrap();
-
-        save_state(
-            &root,
-            &SessionState {
-                session_id: "codex-session-old".to_string(),
-                doc_path: doc.display().to_string(),
-                last_turn_id: "turn-1".to_string(),
-                last_prompt: format!("agent-doc {}", doc.display()),
-                last_auto_queue_head: None,
-                last_context_clear_at: None,
-                updated_at: 10,
-            },
-        )
-        .unwrap();
-        save_state(
-            &root,
-            &SessionState {
-                session_id: "codex-session-new".to_string(),
-                doc_path: doc.display().to_string(),
-                last_turn_id: "turn-2".to_string(),
-                last_prompt: "/clear".to_string(),
-                last_auto_queue_head: None,
-                last_context_clear_at: Some(20),
-                updated_at: 20,
-            },
-        )
-        .unwrap();
-
-        let loaded = load_latest_prompt_for_file(&doc).unwrap();
-        assert_eq!(loaded.as_deref(), Some("/clear"));
-    }
-
-    #[test]
-    fn load_latest_prompt_for_file_skips_malformed_state_entries() {
-        let dir = setup_project();
-        let doc = write_doc(&dir);
-        let root = project_root_for(dir.path()).unwrap();
-        let state_dir = root.join(".agent-doc/codex-hooks/sessions");
-        fs::create_dir_all(&state_dir).unwrap();
-        fs::write(state_dir.join("bad.json"), "{").unwrap();
-
-        save_state(
-            &root,
-            &SessionState {
-                session_id: "codex-session-good".to_string(),
-                doc_path: doc.display().to_string(),
-                last_turn_id: "turn-1".to_string(),
-                last_prompt: "/clear".to_string(),
-                last_auto_queue_head: None,
-                last_context_clear_at: Some(20),
-                updated_at: 20,
-            },
-        )
-        .unwrap();
-
-        let loaded = load_latest_prompt_for_file(&doc).unwrap();
-        assert_eq!(loaded.as_deref(), Some("/clear"));
-    }
-
-    #[test]
-    fn prompt_requests_clear_matches_only_exact_builtin() {
-        assert!(prompt_requests_clear("/clear"));
-        assert!(prompt_requests_clear("  /clear  "));
-        assert!(prompt_requests_clear("/new"));
-        assert!(!prompt_requests_clear("agent-doc tasks/foo.md"));
-        assert!(!prompt_requests_clear("/clear please"));
     }
 
     #[test]

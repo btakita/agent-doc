@@ -3239,7 +3239,14 @@ mod core_tests {
             "two distinct ack timeouts must trip the degraded latch"
         );
 
-        let written = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        let written = agent_doc_write_converge_io::try_editor_converge(
+            &super::WRITE_CONVERGENCE_EFFECTS,
+            &doc,
+            &target,
+            &source,
+            "queue_consume",
+        )
+        .unwrap();
         assert!(written, "editorless degraded socket should converge");
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -3326,7 +3333,14 @@ mod core_tests {
             false
         });
 
-        let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        let converged = agent_doc_write_converge_io::try_editor_converge(
+            &super::WRITE_CONVERGENCE_EFFECTS,
+            &doc,
+            &target,
+            &source,
+            "queue_consume",
+        )
+        .unwrap();
         assert!(
             converged,
             "degraded convergence must succeed through file IPC when the plugin consumes it"

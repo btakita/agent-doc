@@ -2042,8 +2042,6 @@ const SHRINK_GUARD_MAX_RATIO: f64 = 0.10;
 
 #[cfg(test)]
 mod converge;
-#[cfg(test)]
-pub(crate) use converge::*;
 
 struct TemplatePatchApplicationBase<'a, 'b> {
     file: &'b Path,

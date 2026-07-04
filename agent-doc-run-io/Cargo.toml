@@ -59,4 +59,4 @@ agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.67" }
 anyhow = "1"
 fs2 = "0.4"
 libc = "0.2"
-tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+tmux-router = { path = "../../tmux-router", version = "0.3.13" }

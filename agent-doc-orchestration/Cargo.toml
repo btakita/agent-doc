@@ -94,6 +94,7 @@ agent-doc-session-registry = { path = "../agent-doc-session-registry", version =
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.67" }
+agent-doc-start-io = { path = "../agent-doc-start-io", version = "0.34.67" }
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
 agent-doc-state-observer-io = { path = "../agent-doc-state-observer-io", version = "0.34.67" }
 agent-doc-status-io = { path = "../agent-doc-status-io", version = "0.34.67" }
@@ -136,7 +137,7 @@ zip = "8"
 uuid = { version = "1", features = ["v4"] }
 notify = "8"
 instruction-files = "0.3"
-tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+tmux-router = { path = "../../tmux-router", version = "0.3.13" }
 base64 = "0.22"
 regex = "1"
 interprocess = { version = "2", default-features = false }

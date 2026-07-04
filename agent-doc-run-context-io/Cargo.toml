@@ -24,7 +24,7 @@ agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", ver
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
 anyhow = "1"
 lazily = "0.21"
-tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+tmux-router = { path = "../../tmux-router", version = "0.3.13" }
 
 [dev-dependencies]
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }

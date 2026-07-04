@@ -28,7 +28,7 @@ agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.67" }
 anyhow = "1"
 notify = "8"
-tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+tmux-router = { path = "../../tmux-router", version = "0.3.13" }
 
 [dev-dependencies]
 tempfile = "3"

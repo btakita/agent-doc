@@ -102,6 +102,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
+ "agent-doc-start-io",
  "agent-doc-state-backbone",
  "agent-doc-state-observer-io",
  "agent-doc-state-wire",
@@ -1105,6 +1106,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
+ "agent-doc-start-io",
  "agent-doc-state-backbone",
  "agent-doc-state-observer-io",
  "agent-doc-status-io",
@@ -1748,6 +1750,42 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-start-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-config",
+ "agent-doc-controller",
+ "agent-doc-controller-io",
+ "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
+ "agent-doc-harness",
+ "agent-doc-hooks-io",
+ "agent-doc-log-time",
+ "agent-doc-model-tier",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-config-io",
+ "agent-doc-project-root-io",
+ "agent-doc-queue",
+ "agent-doc-queue-io",
+ "agent-doc-run-context-io",
+ "agent-doc-run-io",
+ "agent-doc-session-actor-io",
+ "agent-doc-session-registry-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-sqlite",
+ "agent-doc-supervisor",
+ "agent-doc-supervisor-io",
+ "agent-doc-supervisor-process-io",
+ "agent-doc-sync-io",
+ "agent-doc-tmux-commands",
+ "agent-doc-tmux-io",
+ "anyhow",
+ "tempfile",
+ "tmux-router",
+ "uuid",
 ]
 
 [[package]]

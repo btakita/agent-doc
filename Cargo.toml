@@ -91,6 +91,7 @@ members = [
     "agent-doc-queue-io",
     "agent-doc-route-io",
     "agent-doc-sqlite",
+    "agent-doc-start-io",
     "agent-doc-sync",
     "agent-doc-sync-io",
     "agent-doc-document",
@@ -233,6 +234,7 @@ agent-doc-session-registry = { path = "agent-doc-session-registry", version = "0
 agent-doc-session-registry-io = { path = "agent-doc-session-registry-io", version = "0.34.67" }
 agent-doc-snapshot-io = { path = "agent-doc-snapshot-io", version = "0.34.67" }
 agent-doc-sqlite = { path = "agent-doc-sqlite", version = "0.34.67" }
+agent-doc-start-io = { path = "agent-doc-start-io", version = "0.34.67" }
 agent-doc-state-backbone = { path = "agent-doc-state-backbone", version = "0.34.67" }
 agent-doc-state-observer-io = { path = "agent-doc-state-observer-io", version = "0.34.67" }
 agent-doc-state-wire = { path = "agent-doc-state-wire", version = "0.34.67" }
@@ -270,7 +272,7 @@ uuid = { version = "1", features = ["v4"] }
 notify = "8"
 agent-kit = { version = "0.4.1", features = ["hooks"] }
 instruction-files = "0.3"
-tmux-router = { path = "../tmux-router", version = "0.3.11" }
+tmux-router = { path = "../tmux-router", version = "0.3.13" }
 indexmap = { version = "2", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

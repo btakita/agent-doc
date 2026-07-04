@@ -1,11 +1,10 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_controller::status::LaunchMode;
-use agent_doc_session_registry_io::registration as sessions;
+use agent_doc_start_io::{log_event, prepare_start_runtime, start_console_status};
 use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
-    lifecycle::{BootResumeAction, boot_resume_action, start_session_retryable_during_recycle},
+    lifecycle::{BootResumeAction, boot_resume_action},
     run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
 };
 use agent_doc_supervisor_process::{
@@ -14,7 +13,7 @@ use agent_doc_supervisor_process::{
     resize,
 };
 use agent_doc_supervisor_process_io::{
-    HarnessLaunchSpec, SupervisorLaunchLog, SupervisorStderrRedirect, build_harness_launch_spec,
+    HarnessLaunchSpec, SupervisorLaunchLog, build_harness_launch_spec,
 };
 #[cfg(test)]
 use agent_doc_supervisor_process_io::{
@@ -23,25 +22,6 @@ use agent_doc_supervisor_process_io::{
 
 pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
-}
-
-fn start_console_status(
-    session_log: &mut Option<std::fs::File>,
-    route_owned: bool,
-    message: impl AsRef<str>,
-) {
-    let message = message.as_ref();
-    let printed = !route_owned || agent_doc_tmux_commands::input_diag::verbose_enabled();
-    log_event(
-        session_log,
-        &format!(
-            "start_console_status route_owned={} printed={} message={:?}",
-            route_owned, printed, message
-        ),
-    );
-    if printed {
-        eprintln!("{message}");
-    }
 }
 
 struct StartRunLaunchLog<'a> {
@@ -97,513 +77,20 @@ pub fn run_with_reap_policy(
     route_owned: bool,
     route_owned_reap_policy: RouteOwnedReapPolicy,
 ) -> Result<()> {
-    if !file.exists() {
-        anyhow::bail!("file not found: {}", file.display());
-    }
-
-    // Malformed frontmatter must not silently prevent the supervisor from opening
-    // (operator bug 2026-07-03): basic-repair it on disk before any parse below.
-    let _ = agent_doc_run_io::repair_document_frontmatter_on_disk(file);
-    // Ensure session UUID exists in frontmatter
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    // Opt-in gate: a plain `.md` must not be auto-converted into a session.
-    agent_doc_frontmatter_io::session::require_agent_doc_document(&content, file)?;
-    let (updated_content, session_id) =
-        agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)?;
-    let generated_session_uuid = updated_content != content;
-    if updated_content != content {
-        std::fs::write(file, &updated_content)
-            .with_context(|| format!("failed to write {}", file.display()))?;
-    }
-
-    // `#qdurcrash`: supervisor-startup queue reconcile. An operator queue add can
-    // be lost across a supervisor/pane crash+restart (it lived only in the editor
-    // buffer / in-memory CRDT and the reloaded snapshot predates it). Replay any
-    // journaled operator queue prompt that is absent from the reloaded document,
-    // re-inserting it so the crash+restart does not drop the pending queue edit.
-    // Additive + conservative: only re-adds missing prompts, never removes, and a
-    // journal hiccup degrades to a no-op.
-    let updated_content = {
-        // `#qftloss` mode-6: before replaying the journal, capture any operator
-        // queue prompt that lives ONLY in the live editor buffer (reported by the
-        // plugin to `.agent-doc/live-buffer/<hash>` but never flushed to disk /
-        // observed by a cycle). Journaling it here folds the pre-first-observation
-        // edit into the existing `#qdurcrash` substrate so the very next
-        // `replay_missing` below re-inserts it instead of dropping it when the
-        // reloaded document predates the add.
-        if let Err(err) = agent_doc_queue_io::queue_journal::record_live_buffer(file) {
-            eprintln!(
-                "[agent-doc] queue_journal: live-buffer record failed for {} ({err:#}) — continuing",
-                file.display()
-            );
-        }
-        let durable_content = agent_doc_snapshot_io::load(file).ok().flatten();
-        let missing = agent_doc_queue_io::queue_journal::replay_missing(
-            file,
-            &updated_content,
-            durable_content.as_deref(),
-        );
-        match agent_doc_queue::queue_journal::merge_missing_into_content(&missing, &updated_content)
-        {
-            Ok(Some(merged)) => {
-                if let Err(err) = std::fs::write(file, &merged) {
-                    eprintln!(
-                        "[agent-doc] queue_journal: failed to write replayed queue items to {} ({err:#})",
-                        file.display()
-                    );
-                    updated_content
-                } else {
-                    eprintln!(
-                        "[agent-doc] queue_journal: replayed {} operator queue item(s) lost to a crash+restart for {}",
-                        missing.len(),
-                        file.display()
-                    );
-                    merged
-                }
-            }
-            Ok(None) => updated_content,
-            Err(err) => {
-                eprintln!(
-                    "[agent-doc] queue_journal: replay merge failed for {} ({err:#}) — continuing without replay",
-                    file.display()
-                );
-                updated_content
-            }
-        }
-    };
-
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
-    let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
-        &updated_content,
-        file,
-        &rc.ssh_context(),
-    )?;
-    let global_config = agent_doc_config::load().unwrap_or_default();
-    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
-        });
-    let mut session_log = open_session_log(&canonical, &session_id);
-    if generated_session_uuid {
-        start_console_status(
-            &mut session_log,
-            route_owned,
-            format!("Generated session UUID: {session_id}"),
-        );
-    }
-    match agent_doc_controller_io::project_controller::close_stale_starting_actors_for_caller(
-        &project_root,
-        std::time::Duration::from_secs(3600),
-        false,
-        "start",
-    ) {
-        Ok((closed, kept)) if closed > 0 => start_console_status(
-            &mut session_log,
-            route_owned,
-            format!("[start] actors: {closed} stale starting closed, {kept} still active"),
-        ),
-        Ok(_) => {}
-        Err(e) => start_console_status(
-            &mut session_log,
-            route_owned,
-            format!("[start] actor gc warning: {e}"),
-        ),
-    }
-    match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
-        &project_root,
-        false,
-        "start",
-        "stale_dead_pane_actor",
-    ) {
-        Ok((closed, kept)) if closed > 0 => start_console_status(
-            &mut session_log,
-            route_owned,
-            format!("[start] actors: {closed} stale dead-pane closed, {kept} still active"),
-        ),
-        Ok(_) => {}
-        Err(e) => start_console_status(
-            &mut session_log,
-            route_owned,
-            format!("[start] dead-pane actor gc warning: {e}"),
-        ),
-    }
-
-    // Resolve harness config from frontmatter agent > config default_agent > claude
-    let harness = agent_doc_harness::HarnessConfig::from_context(&fm, &global_config);
-    let _stderr_redirect = {
-        let mut launch_log = StartRunLaunchLog {
-            session_log: &mut session_log,
-            route_owned,
-        };
-        SupervisorStderrRedirect::maybe_start(&project_root, &harness, route_owned, &mut launch_log)
-    };
-    {
-        let (source, _resolved_name) = if fm.agent.is_some() {
-            ("frontmatter", fm.agent.as_deref().unwrap_or("?"))
-        } else if global_config.default_agent.is_some() {
-            (
-                "config",
-                global_config.default_agent.as_deref().unwrap_or("?"),
-            )
-        } else {
-            ("fallback", "claude")
-        };
-        let env_harness = agent_doc_model_tier::detect_harness();
-        start_console_status(
-            &mut session_log,
-            route_owned,
-            format!(
-                "[start] harness resolved: binary={} source={} env={}",
-                harness.binary, source, env_harness
-            ),
-        );
-        if env_harness != "default" && env_harness != harness.binary {
-            start_console_status(
-                &mut session_log,
-                route_owned,
-                format!(
-                    "[start] WARNING: harness mismatch - from_context resolved {} (via {}) but env detect_harness returned {}",
-                    harness.binary, source, env_harness
-                ),
-            );
-        }
-    }
-
-    // Must be inside tmux
-    if !agent_doc_tmux_io::in_tmux() {
-        // Distinguish "tmux not installed" from "not inside a tmux session"
-        let tmux_installed = std::process::Command::new("which")
-            .arg("tmux")
-            .output()
-            .is_ok_and(|o| o.status.success());
-        if !tmux_installed {
-            let hint = if cfg!(target_os = "macos") {
-                "brew install tmux"
-            } else if cfg!(target_os = "linux") {
-                "sudo apt install tmux  # or: sudo pacman -S tmux / sudo dnf install tmux"
-            } else {
-                "Install WSL first, then: sudo apt install tmux"
-            };
-            anyhow::bail!(
-                "tmux is not installed.\n\n  Install it:\n    {}\n\n  Then start a tmux session:\n    tmux new-session -s dev",
-                hint
-            );
-        }
-        anyhow::bail!(
-            "not running inside tmux — start a tmux session first:\n    tmux new-session -s dev"
-        );
-    }
-
-    let tmux = tmux_router::Tmux::default_server();
-    let pane_id = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
-        .context("failed to query current tmux pane")?;
-
-    // `#recursion-guard-wedge-escape` (part 1): hard-refuse a recursive
-    // self-owned-pane start. When `agent-doc start <FILE>` runs inside the Codex
-    // pane that already owns this document, spawning a replacement owner here
-    // would loop re-injecting `agent-doc <FILE>` into the owner pane. Mirror the
-    // `run` path's unconditional recursive guard (it fires regardless of
-    // `--force`, since the deadlock is inherent to the same-pane nesting) and
-    // point the operator at an out-of-pane recovery command instead.
-    if let Some(diagnostic) = agent_doc_run_io::recursive_codex_start_invocation_diagnostic(
-        file,
-        &session_id,
-        &harness.binary,
-    ) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "start_recursive_self_owned_pane_refused file={} pane={} session_id={}",
-                file.display(),
-                pane_id,
-                session_id
-            ),
-        );
-        anyhow::bail!("{}", diagnostic);
-    }
-
-    if let Some((miss, supersession)) =
-        agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(
-            agent_doc_supervisor_io::startup_miss::session_registry_lookup(),
-            file,
-        )?
-    {
-        let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
-        start_console_status(
-            &mut session_log,
-            route_owned,
-            format!(
-                "[start] clearing stale startup-miss on pane {} from {} for {} because newer registered owner {} already took over",
-                miss.pane_id,
-                miss_ts,
-                file.display(),
-                supersession.registered_pane
-            ),
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "start_startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} miss_timestamp={} latest_start_timestamp={}",
-                file.display(),
-                miss.pane_id,
-                supersession.registered_pane,
-                miss_ts,
-                supersession.latest_start_timestamp
-            ),
-        );
-    }
-    let unresolved_startup_miss = agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
-        .ok()
-        .flatten();
-
-    if !force {
-        if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
-            match action {
-                ExistingSessionPaneAction::Refuse(conflicting_pane) => {
-                    if let Some(miss) = unresolved_startup_miss.as_ref()
-                        && miss.pane_id == conflicting_pane
-                    {
-                        let miss_ts =
-                            agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
-                        anyhow::bail!(
-                            "startup-miss from {} still belongs to alive pane {} for {}.\n\n{}",
-                            miss_ts,
-                            conflicting_pane,
-                            file.display(),
-                            format_existing_pane_conflict_error(
-                                &tmux,
-                                file,
-                                &pane_id,
-                                &conflicting_pane
-                            )
-                        );
-                    }
-                    anyhow::bail!(
-                        "{}",
-                        format_existing_pane_conflict_error(
-                            &tmux,
-                            file,
-                            &pane_id,
-                            &conflicting_pane
-                        )
-                    );
-                }
-            }
-        }
-    } else {
-        start_console_status(
-            &mut session_log,
-            route_owned,
-            format!(
-                "[start] --force: bypassing existing session pane reuse for {}",
-                file.display()
-            ),
-        );
-    }
-
-    // Only relocate the current launcher pane when start is actually falling through to
-    // a fresh session in this pane. If a live owner already exists elsewhere, moving the
-    // launcher pane first can rip it out of its original tmux window/session before the
-    // reuse path returns.
-    if let Some(expected_session) = agent_doc_project_config_io::project_tmux_session()
-        && !relocate_if_wrong_session(&tmux, &pane_id, &expected_session)
-    {
-        rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &expected_session);
-    }
-
-    // Register session → pane (with relative file path)
-    let file_str = file.to_string_lossy();
-    let supervisor_instance_id = uuid::Uuid::new_v4().to_string();
-    let prior_entry = agent_doc_session_registry_io::lookup_entry(&session_id)?;
-    let pane_window = agent_doc_tmux_io::target_window_id(&tmux, &pane_id).unwrap_or_default();
-    sessions::register_supervisor(
-        &session_id,
-        &pane_id,
-        &file_str,
-        std::process::id(),
-        &supervisor_instance_id,
-    )?;
-    start_console_status(
-        &mut session_log,
-        route_owned,
-        format!(
-            "Registered session {} -> pane {}",
-            &session_id[..8],
-            pane_id
-        ),
-    );
-    // A `start` always mints a new ownership epoch, including when the launcher
-    // pane differs from the registry's stale pane (a pane move IS an ownership
-    // transition). The earlier no-bump `infer_latest_generation` branch for the
-    // pane-changed case was structurally incompatible with the controller's
-    // `start_session` CAS, which unconditionally expects `start_generation - 1`
-    // as the prior generation: `infer_latest_generation` returns
-    // `max(controller-actor gen, session-log gen)`, so once the controller actor
-    // catches up to the inferred latest (the healthy steady state) the no-bump
-    // value equals the live generation and the CAS fails closed
-    // (`expected N-1, found N`), surfacing as `controller failed to start
-    // session actor`. Always taking the `next_generation` (`infer + 1`) path
-    // keeps the value handed to the controller aligned with the CAS contract.
-    let start_generation = {
-        let generations = agent_doc_session_actor_io::next_generation(&canonical, &session_id)
-            .unwrap_or(agent_doc_supervisor::OwnershipGeneration {
-                prior_generation: 0,
-                new_generation: 1,
-            });
-        log_event(
-            &mut session_log,
-            &agent_doc_supervisor::format_transition_event(
-                agent_doc_supervisor::OwnershipTransitionEvent {
-                    caller: "start",
-                    reason: "session_start",
-                    prior_generation: generations.prior_generation,
-                    new_generation: generations.new_generation,
-                    old_pane: prior_entry.as_ref().map(|entry| entry.pane.as_str()),
-                    new_pane: &pane_id,
-                    old_window: prior_entry.as_ref().and_then(|entry| {
-                        (!entry.window.is_empty()).then_some(entry.window.as_str())
-                    }),
-                    new_window: Some(pane_window.as_str()),
-                },
-            ),
-        );
-        generations.new_generation
-    };
-    log_event(
-        &mut session_log,
-        &format!(
-            "session_start file={} pane={} session={} generation={}",
-            file.display(),
-            pane_id,
-            &session_id[..8],
-            start_generation
-        ),
-    );
-    agent_doc_controller_io::project_controller::ensure_controller_running(
-        &project_root,
-        LaunchMode::Lazy,
-    )?;
-    // `#jbdisprecycle` R2: a `start_session` that races a supervisor `execve`
-    // hot-reload (lib-install auto-recycle / operator restart) fails because the
-    // project controller is mid-teardown (the live repro's terminal
-    // `start_session failed for tasks/software/tsift.md`). That is a transient
-    // race, not a terminal error — wait for the recycle to settle and retry,
-    // instead of surfacing a terminal failure that strands the dispatch.
-    let actor_record = {
-        const MAX_START_SESSION_RECYCLE_RETRIES: usize = 2;
-        let start_request = agent_doc_controller_io::project_controller::StartSessionRequest {
-            file: canonical.clone(),
-            session_id: session_id.clone(),
-            pane_id: pane_id.clone(),
-            window_id: pane_window.clone(),
-            generation: start_generation,
-        };
-        let file_path_str = file.to_string_lossy().to_string();
-        let mut attempts_used = 0usize;
-        loop {
-            match agent_doc_controller_io::project_controller::start_session(
-                &project_root,
-                start_request.clone(),
-            ) {
-                Ok(record) => break record,
-                Err(err) => {
-                    let recycle_pending =
-                        agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(
-                            &file_path_str,
-                        );
-                    if !start_session_retryable_during_recycle(
-                        recycle_pending,
-                        attempts_used,
-                        MAX_START_SESSION_RECYCLE_RETRIES,
-                    ) {
-                        return Err(err);
-                    }
-                    attempts_used += 1;
-                    let reason = agent_doc_supervisor_io::recycle_inflight::read_recycle_inflight(
-                        &file_path_str,
-                    )
-                    .map(|m| m.reason)
-                    .unwrap_or_else(|| "unknown".to_string());
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "start_session_recycle_retry file={} pane={} attempt={} reason={} err={}",
-                            file.display(),
-                            pane_id,
-                            attempts_used,
-                            reason,
-                            err
-                        ),
-                    );
-                    log_event(
-                        &mut session_log,
-                        &format!(
-                            "start_session_recycle_retry attempt={attempts_used} reason={reason}"
-                        ),
-                    );
-                    // Bounded wait for the fresh supervisor to settle onto the new
-                    // binary (clears the recycle-inflight marker on watch-loop
-                    // start; TTL is the backstop). If it never settles, surface the
-                    // original error so the caller retries the whole dispatch rather
-                    // than spinning here.
-                    if !agent_doc_supervisor_io::recycle_inflight::wait_for_recycle_settle(
-                        &file_path_str,
-                        agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT,
-                        agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL,
-                    ) {
-                        return Err(err);
-                    }
-                    // Re-ensure the freshly-recycled controller is reachable before retry.
-                    agent_doc_controller_io::project_controller::ensure_controller_running(
-                        &project_root,
-                        LaunchMode::Lazy,
-                    )?;
-                }
-            }
-        }
-    };
-    log_event(
-        &mut session_log,
-        &format!(
-            "controller_session_start generation={} state={}",
-            actor_record.generation,
-            actor_record.state.as_str()
-        ),
-    );
-
-    // Fire document-level session_start hooks
-    let harness_name = agent_doc_model_tier::harness_key_for_agent_name(&harness.binary);
-    let resolved_model = fm.resolve_harness_model(&harness_name).map(|s| {
-        agent_doc_model_tier::canonical_model_name(s, &harness_name, &global_config.model)
-    });
-    agent_doc_hooks_io::fire_doc_hooks(
-        &fm.hooks,
-        "session_start",
-        file,
-        &session_id,
-        &fm.agent,
-        &resolved_model,
-    );
-
-    // 08b supervisor-host end state (`#pcpc5e1` / `#dav9`, cutover complete):
-    // `agent-doc start` always hosts the harness child through
-    // `supervisor::in_process::InProcessSupervisor`. `start.rs` keeps the
-    // PTY-output/prompt plumbing and the Unix-socket IPC boundary; the run loop
-    // drives the adapter's tick loop for exit reaping / heartbeat / crash-policy.
-    // The old out-of-process `session.wait()` host path and the
-    // `AGENT_DOC_SUPERVISOR` rollback flag were removed at the removal rung.
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "supervisor_host_gate file={} hosting=in-process",
-            file.display()
-        ),
-    );
-    log_event(&mut session_log, "supervisor_host_gate hosting=in-process");
+    let agent_doc_start_io::StartRuntime {
+        session_id,
+        fm,
+        global_config,
+        canonical,
+        project_root,
+        mut session_log,
+        stderr_redirect,
+        harness: _harness,
+        pane_id,
+        supervisor_instance_id,
+        actor_record,
+    } = prepare_start_runtime(file, force, route_owned)?;
+    let _stderr_redirect = stderr_redirect;
 
     // --- Snapshot integrity validation ---
     // If file was moved (JB plugin respawn after rename), the old path hash
@@ -1788,6 +1275,7 @@ pub fn run_with_reap_policy(
                 pane_id
             ),
         );
+        let tmux = tmux_router::Tmux::default_server();
         let _ = agent_doc_tmux_io::kill_pane(&tmux, &pane_id);
     }
     Ok(())
@@ -1801,7 +1289,12 @@ mod tests {
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use agent_doc_hooks_io::fire_doc_hooks;
     use agent_doc_project_config_io as project_config_io;
+    use agent_doc_start_io::{
+        existing_session_pane_action_from_entry, format_existing_pane_conflict_error,
+        rebind_project_tmux_session_if_expected_dead, relocate_if_wrong_session,
+    };
     use agent_doc_supervisor::ipc_protocol::IpcMethod;
+    use agent_doc_supervisor::session_owner::ExistingSessionPaneAction;
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;

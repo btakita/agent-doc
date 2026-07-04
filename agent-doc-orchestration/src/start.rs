@@ -121,7 +121,9 @@
 
 use anyhow::{Context, Result};
 use portable_pty::PtySize;
-use std::io::{self, Write};
+use std::io;
+#[cfg(test)]
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -137,6 +139,7 @@ use agent_doc_queue::queue::{
     idle_queue_context_reset_decision, idle_queue_drain_decision,
 };
 use agent_doc_queue_io::queue_consume;
+use agent_doc_start_io::log_event;
 use agent_doc_supervisor::auto_trigger::{
     AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction, AutoTriggerOutcome,
     AutoTriggerStopOutcome, CapabilityProofGate, auto_trigger_clear_cooldown_action,
@@ -155,10 +158,6 @@ use agent_doc_supervisor::crash_policy::{
 use agent_doc_supervisor::input::prompt_input_summary;
 use agent_doc_supervisor::ipc_protocol::submit_bytes;
 use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
-use agent_doc_supervisor::session_owner::{
-    ExistingPaneConflictFacts, ExistingSessionPaneAction,
-    format_existing_pane_conflict_error as format_existing_pane_conflict_error_from_facts,
-};
 use agent_doc_supervisor_io::cwd;
 use agent_doc_supervisor_io::detection::*;
 use agent_doc_supervisor_io::ipc::SupervisorIpc;
@@ -174,56 +173,11 @@ use agent_doc_supervisor_process::{
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;
 
-use agent_doc_project_config_io as project_config_io;
-
-/// Open (or create) the session log file at `.agent-doc/logs/<session-uuid>.log`.
-/// Returns a writable file handle in append mode, or None if the directory can't be created.
-fn open_session_log(file: &Path, session_id: &str) -> Option<std::fs::File> {
-    // Walk up from the document to find the project root containing .agent-doc/
-    let dir = file.parent()?;
-    let mut search = Some(dir);
-    let mut agent_doc_dir = None;
-    while let Some(d) = search {
-        let candidate = d.join(".agent-doc");
-        if candidate.is_dir() {
-            agent_doc_dir = Some(candidate);
-            break;
-        }
-        search = d.parent();
-    }
-    let logs_dir = agent_doc_dir?.join("logs");
-    std::fs::create_dir_all(&logs_dir).ok()?;
-    let log_path = logs_dir.join(format!("{}.log", session_id));
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .ok()
-}
-
-fn timestamp() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    // `#opslogts` — human-readable ISO-8601 UTC so operators reading the
-    // supervisor session log can correlate events to wall-clock time. The
-    // staleness/startup-miss parsers read this back via
-    // `agent_doc_log_time::parse_log_timestamp`, which still accepts bare epoch lines.
-    agent_doc_log_time::format_log_timestamp(now)
-}
-
 fn current_epoch_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
-    if let Some(f) = log {
-        let _ = writeln!(f, "[{}] {}", timestamp(), msg);
-    }
 }
 
 fn exit_provenance_fields(status: &portable_pty::ExitStatus) -> String {
@@ -1315,69 +1269,6 @@ fn surface_managed_capability_proof_status(
     }
 }
 
-fn existing_session_pane_action(
-    tmux: &tmux_router::Tmux,
-    session_id: &str,
-    file: &Path,
-    current_pane: &str,
-) -> Result<Option<ExistingSessionPaneAction>> {
-    let entry = agent_doc_session_registry_io::lookup_entry(session_id)?;
-    let live_owner = agent_doc_sync_io::sync::find_normal_path_owner_pane_excluding_quiet(
-        tmux,
-        file,
-        session_id,
-        Some(current_pane),
-    );
-    Ok(existing_session_pane_action_from_entry(
-        tmux,
-        current_pane,
-        entry.as_ref(),
-        live_owner.as_deref(),
-    ))
-}
-
-fn existing_session_pane_action_from_entry(
-    tmux: &tmux_router::Tmux,
-    current_pane: &str,
-    entry: Option<&tmux_router::RegistryEntry>,
-    live_owner: Option<&str>,
-) -> Option<ExistingSessionPaneAction> {
-    let registry_pane = entry.map(|entry| entry.pane.as_str());
-    let registry_pane_alive = registry_pane
-        .map(|pane| tmux.pane_alive(pane))
-        .unwrap_or(false);
-    agent_doc_supervisor::session_owner::existing_session_pane_action(
-        current_pane,
-        registry_pane,
-        registry_pane_alive,
-        live_owner,
-    )
-}
-
-fn format_existing_pane_conflict_error(
-    tmux: &tmux_router::Tmux,
-    file: &Path,
-    current_pane: &str,
-    conflicting_pane: &str,
-) -> String {
-    let conflict_session = tmux.pane_session(conflicting_pane).unwrap_or_default();
-    let conflict_window =
-        agent_doc_tmux_io::target_window_id(tmux, conflicting_pane).unwrap_or_default();
-    let current_session = tmux.pane_session(current_pane).unwrap_or_default();
-    let current_window =
-        agent_doc_tmux_io::target_window_id(tmux, current_pane).unwrap_or_default();
-    let document = file.display().to_string();
-    format_existing_pane_conflict_error_from_facts(&ExistingPaneConflictFacts {
-        document: &document,
-        current_pane,
-        conflicting_pane,
-        conflict_session: &conflict_session,
-        conflict_window: &conflict_window,
-        current_session: &current_session,
-        current_window: &current_window,
-    })
-}
-
 /// Put stdin into raw mode so the outer pty line discipline doesn't translate
 /// input bytes (ICRNL converts \r → \n, breaking Enter for Claude Code's TUI).
 /// Restores original termios on drop.
@@ -1797,79 +1688,6 @@ fn agent_launch_args_sources(
         config_codex_args: global_config.codex_args.clone(),
         config_opencode_args: global_config.opencode_args.clone(),
         env_claude_args: std::env::var("AGENT_DOC_CLAUDE_ARGS").ok(),
-    }
-}
-
-/// Auto-relocate `pane_id` to `expected_session` if it is currently in a different session.
-/// Returns `true` if relocation succeeded or was unnecessary; `false` if relocation failed.
-/// Falls back to warn-only on failure so the start isn't aborted.
-pub fn relocate_if_wrong_session(
-    tmux: &tmux_router::Tmux,
-    pane_id: &str,
-    expected_session: &str,
-) -> bool {
-    let actual_session = match tmux.pane_session(pane_id) {
-        Ok(s) => s,
-        Err(_) => return true, // can't determine — let registration proceed
-    };
-    if actual_session == expected_session {
-        return true;
-    }
-    eprintln!(
-        "[start] pane {} is in session '{}', expected '{}' — auto-relocating to project session",
-        pane_id, actual_session, expected_session
-    );
-    if let Some(anchor) = tmux.active_pane(expected_session) {
-        match tmux_router::PaneMoveOp::new(tmux, pane_id, &anchor)
-            .allow_cross_session("auto-relocate to project session on start")
-            .join("-dh")
-        {
-            Ok(()) => {
-                eprintln!(
-                    "[start] relocated pane {} → session '{}'",
-                    pane_id, expected_session
-                );
-                true
-            }
-            Err(e) => {
-                eprintln!(
-                    "[start] WARNING: relocation failed ({}); pane {} will register in session '{}'",
-                    e, pane_id, actual_session
-                );
-                false
-            }
-        }
-    } else {
-        eprintln!(
-            "[start] WARNING: no active pane found in session '{}'; \
-             pane {} will register in session '{}'",
-            expected_session, pane_id, actual_session
-        );
-        false
-    }
-}
-
-fn rebind_project_tmux_session_if_expected_dead(
-    tmux: &tmux_router::Tmux,
-    pane_id: &str,
-    expected_session: &str,
-) {
-    let actual_session = match tmux.pane_session(pane_id) {
-        Ok(session) => session,
-        Err(_) => return,
-    };
-    if actual_session == expected_session || tmux.session_alive(expected_session) {
-        return;
-    }
-    match project_config_io::update_project_tmux_session(&actual_session) {
-        Ok(()) => eprintln!(
-            "[start] configured project session '{}' is dead — rebound tmux_session to '{}'",
-            expected_session, actual_session
-        ),
-        Err(e) => eprintln!(
-            "[start] WARNING: configured project session '{}' is dead but failed to persist tmux_session '{}': {}",
-            expected_session, actual_session, e
-        ),
     }
 }
 

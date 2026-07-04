@@ -2633,7 +2633,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent_doc_hooks_io::fire_doc_event(file, \"post_commit\")",
         ),
         (
-            "agent-doc-orchestration/src/start/run.rs",
+            "agent-doc-start-io/src/lib.rs",
             "agent_doc_hooks_io::fire_doc_hooks(",
         ),
         (
@@ -3930,7 +3930,7 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "orchestration must not keep a queue_journal facade module"
     );
     let start_run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
         start_run_source.contains("agent_doc_queue::queue_journal::merge_missing_into_content")
             && !start_run_source.contains("crate::queue_journal::merge_missing_into_content"),
@@ -9806,7 +9806,7 @@ fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
         "src/patch.rs",
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/start/run.rs",
+        "agent-doc-start-io/src/lib.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -10752,6 +10752,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/start/run.rs",
             "agent-doc-supervisor-process-io/src/lib.rs",
             "Split launch-spec argument synthesis",
+        ),
+        (
+            "Start admission and session registration IO graph",
+            "agent-doc-orchestration/src/start/run.rs",
+            "agent-doc-start-io/src/lib.rs",
+            "Split `StartRuntime` into document prep, owner admission, registration, and controller lifecycle",
         ),
         (
             "Write IPC already-applied snapshot authority IO graph",
@@ -16997,6 +17003,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
     let orchestration_start_run =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+    let start_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/startup_miss.rs")
@@ -17072,17 +17080,24 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     for forbidden_snippet in [
         "pub enum ExistingSessionPaneAction",
         "struct ExistingPaneConflictFacts",
+        "fn existing_session_pane_action(",
+        "fn existing_session_pane_action_from_entry(",
+        "fn format_existing_pane_conflict_error(",
+        "pub fn relocate_if_wrong_session(",
+        "fn rebind_project_tmux_session_if_expected_dead(",
         "refusing to start {} in pane {} because pane {} is already bound to this document",
     ] {
         assert!(
             !orchestration_start.contains(forbidden_snippet),
-            "start.rs must not re-own existing-session owner policy: {forbidden_snippet}"
+            "start.rs must not re-own start admission/session-owner IO: {forbidden_snippet}"
         );
     }
     assert!(
-        orchestration_start.contains("agent_doc_supervisor::session_owner::{")
-            && orchestration_start.contains("format_existing_pane_conflict_error_from_facts("),
-        "start.rs should adapt tmux facts and call focused existing-session owner policy directly"
+        start_io_source.contains("agent_doc_supervisor::{")
+            && start_io_source.contains("format_existing_pane_conflict_error_from_facts(")
+            && start_io_source.contains("pub fn prepare_start_runtime(")
+            && orchestration_start_run.contains("prepare_start_runtime(file, force, route_owned)?"),
+        "agent-doc-start-io should own start admission/session-owner IO while start/run.rs calls it directly"
     );
     for required_snippet in [
         "pub enum AutoTriggerOutcome",
@@ -17371,7 +17386,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(",
         ),
         (
-            "agent-doc-orchestration/src/start/run.rs",
+            "agent-doc-start-io/src/lib.rs",
             "agent_doc_supervisor_io::startup_miss::take_superseded_startup_miss(",
         ),
         (
@@ -17902,12 +17917,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "orchestration must not expose a supervisor lifecycle facade: {forbidden_snippet}"
         );
     }
-    let start_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
     assert!(
-        start_run.contains("agent_doc_supervisor::")
-            && start_run.contains("start_session_retryable_during_recycle"),
-        "start/run should call focused supervisor start-session recycle retry policy directly"
+        start_io_source.contains("agent_doc_supervisor::{")
+            && start_io_source.contains("start_session_retryable_during_recycle"),
+        "agent-doc-start-io should call focused supervisor start-session recycle retry policy directly"
     );
     let route_direct_pane_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
@@ -20357,7 +20370,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let start_run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
         resync_source.contains("pane_process_kind_from_current_command_samples")
             && resync_source.contains("agent_doc_tmux_io::target_current_command(")
@@ -21463,11 +21476,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "graph should call focused project-root IO instead of owning run-context root discovery"
     );
     let start_run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
         !start_run_source.contains("agent_doc_fs::find_project_root(")
             && start_run_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "start/run should call focused project-root IO instead of owning supervisor-start root discovery"
+        "agent-doc-start-io should call focused project-root IO instead of owning supervisor-start root discovery"
     );
     let preflight_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))

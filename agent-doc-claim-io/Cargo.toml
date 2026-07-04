@@ -27,7 +27,7 @@ agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }
 agent-doc-watch-io = { path = "../agent-doc-watch-io", version = "0.34.67" }
 agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.34.67" }
 anyhow = "1"
-tmux-router = { path = "../../tmux-router", version = "0.3.11" }
+tmux-router = { path = "../../tmux-router", version = "0.3.13" }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

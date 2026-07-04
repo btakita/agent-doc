@@ -9,14 +9,17 @@ use agent_doc_document::write_normalization::{
     convergence_recovered_editor_wins_outside_response,
 };
 use agent_doc_document_realtime::write_policy::{
-    AckMismatchRecovery, classify_ack_mismatch_recovery,
-    exchange_change_is_safe_historical_reduction, live_prompt_drift_recovery_target,
-    normalize_visible_recovery_compare, should_refuse_disk_fallback,
-    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
+    AckMismatchRecovery, OperatorReconcileStep, WholeBufferAuthority, WholeBufferAuthorityFacts,
+    WholeBufferDelivery, WholeBufferDeliveryAction, classify_ack_mismatch_recovery,
+    decide_whole_buffer_delivery, exchange_change_is_safe_historical_reduction,
+    live_prompt_drift_recovery_target, normalize_visible_recovery_compare, operator_reconcile_step,
+    should_refuse_disk_fallback, snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
-use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};
+use agent_doc_ipc_protocol::{
+    IpcRepairDecision, is_socket_ack_timeout_error, is_socket_status_error,
+};
 use agent_doc_turn::response_replay::response_materialized_in_content;
 use anyhow::{Context, Result};
 use std::collections::HashSet;
@@ -54,6 +57,376 @@ pub trait EditorConvergenceEffects {
         invariant: &str,
         recovery: &str,
         detail: &str,
+    );
+}
+
+#[cfg(test)]
+const ACK_CONTENT_TYPING_SETTLE_MS: u64 = 75;
+#[cfg(not(test))]
+const ACK_CONTENT_TYPING_SETTLE_MS: u64 = 500;
+#[cfg(test)]
+const ACK_CONTENT_TYPING_TIMEOUT_MS: u64 = 1_000;
+#[cfg(not(test))]
+const ACK_CONTENT_TYPING_TIMEOUT_MS: u64 = 2_000;
+
+fn live_buffer_file_keys(file: &Path) -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Ok(canonical) = file.canonicalize() {
+        keys.push(canonical.to_string_lossy().to_string());
+    }
+    let raw = file.to_string_lossy().to_string();
+    if !keys.iter().any(|key| key == &raw) {
+        keys.push(raw);
+    }
+    keys
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AckContentDiskWriteProof {
+    pub authority: WholeBufferAuthority,
+    pub source_buffer_matches: bool,
+}
+
+impl AckContentDiskWriteProof {
+    fn unproven() -> Self {
+        Self {
+            authority: WholeBufferAuthority::AckContentSidecar,
+            source_buffer_matches: false,
+        }
+    }
+}
+
+pub fn ack_content_disk_write_proof(
+    file: &Path,
+    editor_id: Option<&str>,
+    content: &str,
+) -> AckContentDiskWriteProof {
+    let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return AckContentDiskWriteProof::unproven();
+    };
+    let content_len = content.len();
+    let content_hash = agent_doc_hash::content_hash(content);
+
+    if let Some(typing_key) = live_buffer_file_keys(file).into_iter().find(|file_key| {
+        agent_doc_debounce::is_typing_via_file(file_key, ACK_CONTENT_TYPING_SETTLE_MS)
+    }) {
+        let settled = agent_doc_debounce::await_idle_via_file(
+            &typing_key,
+            ACK_CONTENT_TYPING_SETTLE_MS,
+            ACK_CONTENT_TYPING_TIMEOUT_MS,
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ack_content_disk_write_proof_typing_settle file={} settled={} settle_ms={} timeout_ms={} key={}",
+                file.display(),
+                settled,
+                ACK_CONTENT_TYPING_SETTLE_MS,
+                ACK_CONTENT_TYPING_TIMEOUT_MS,
+                typing_key
+            ),
+        );
+        if !settled {
+            return AckContentDiskWriteProof::unproven();
+        }
+    }
+
+    let Some(snapshot) = live_buffer_file_keys(file)
+        .into_iter()
+        .flat_map(|file_key| agent_doc_debounce::live_buffer_snapshots(&file_key))
+        .filter(|snapshot| {
+            snapshot
+                .editor_id
+                .as_deref()
+                .is_some_and(|candidate| candidate == editor_id)
+        })
+        .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
+        .max_by_key(|snapshot| snapshot.timestamp_ms)
+    else {
+        return AckContentDiskWriteProof::unproven();
+    };
+
+    let source_buffer_matches =
+        snapshot.len == content_len && snapshot.hash.eq_ignore_ascii_case(&content_hash);
+    let authority =
+        if snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
+            WholeBufferAuthority::OperatorTextAuthority
+        } else {
+            WholeBufferAuthority::AckContentSidecar
+        };
+
+    AckContentDiskWriteProof {
+        authority,
+        source_buffer_matches,
+    }
+}
+
+/// Newest operator-authoritative live-buffer content for `editor_id`, or `None`
+/// when no live operator buffer is present.
+fn newest_operator_authoritative_buffer(file: &Path, editor_id: &str) -> Option<String> {
+    live_buffer_file_keys(file)
+        .into_iter()
+        .flat_map(|file_key| agent_doc_debounce::live_buffer_snapshots(&file_key))
+        .filter(|snapshot| {
+            snapshot
+                .editor_id
+                .as_deref()
+                .is_some_and(|candidate| candidate == editor_id)
+        })
+        .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
+        .filter(|snapshot| {
+            snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+        })
+        .max_by_key(|snapshot| snapshot.timestamp_ms)
+        .and_then(|snapshot| snapshot.content)
+}
+
+/// Settle the editor (wait out active typing) so the next live-buffer read is
+/// quiescent. Bounded by the ack-content settle/timeout budget; a no-op when the
+/// editor is not typing.
+fn settle_editor_typing(file: &Path) {
+    for key in live_buffer_file_keys(file) {
+        if agent_doc_debounce::is_typing_via_file(&key, ACK_CONTENT_TYPING_SETTLE_MS) {
+            agent_doc_debounce::await_idle_via_file(
+                &key,
+                ACK_CONTENT_TYPING_SETTLE_MS,
+                ACK_CONTENT_TYPING_TIMEOUT_MS,
+            );
+        }
+    }
+}
+
+/// Max rounds of the bounded reconcile-before-accept loop. Each round settles the
+/// editor and re-samples the operator buffer; the loop ends when the buffer is
+/// stable across two reads (a fixpoint) or this bound is hit.
+const ACK_RECONCILE_MAX_ROUNDS: usize = 4;
+
+/// `#adoc-live-prompt-drift-operator-edit` (Phase 2): the bounded
+/// reconcile-before-accept loop. When the operator kept editing past the ack
+/// capture (so the ack snapshot is stale relative to the live buffer), settle the
+/// editor and re-sample its buffer until it reaches a fixpoint (unchanged across
+/// two reads) or the round bound is hit, then adopt that settled
+/// operator-authoritative buffer as the snapshot, provided it still presents this
+/// cycle's response. This owns only the IO/settling; the decision each round is
+/// owned by the realtime model.
+pub fn reconcile_ack_snapshot_to_newer_operator_buffer(
+    file: &Path,
+    editor_id: Option<&str>,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return false;
+    };
+    let mut prev: Option<String> = None;
+    for round in 0..ACK_RECONCILE_MAX_ROUNDS {
+        settle_editor_typing(file);
+        let Some(curr) = newest_operator_authoritative_buffer(file, editor_id) else {
+            return false;
+        };
+        match operator_reconcile_step(&decision.snapshot_content, prev.as_deref(), &curr) {
+            OperatorReconcileStep::Accept(content) => {
+                if content == decision.snapshot_content {
+                    return false;
+                }
+                if agent_doc_element::element::structural_corruption_reason(&content).is_some() {
+                    return false;
+                }
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "ack_content_snapshot_reconciled_forward file={} editor_id={} reason=operator_buffer_ahead rounds={} stale_len={} stale_hash={} newer_len={} newer_hash={}",
+                        file.display(),
+                        editor_id,
+                        round + 1,
+                        decision.snapshot_content.len(),
+                        agent_doc_hash::content_hash(&decision.snapshot_content),
+                        content.len(),
+                        agent_doc_hash::content_hash(&content),
+                    ),
+                );
+                decision.snapshot_content = content;
+                return true;
+            }
+            OperatorReconcileStep::Continue => {
+                prev = Some(curr);
+            }
+            OperatorReconcileStep::FailClosed => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "ack_content_snapshot_reconcile_fail_closed file={} editor_id={} reason=settled_buffer_dropped_response rounds={}",
+                        file.display(),
+                        editor_id,
+                        round + 1,
+                    ),
+                );
+                return false;
+            }
+        }
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ack_content_snapshot_reconcile_timeout file={} editor_id={} reason=operator_still_editing rounds={}",
+            file.display(),
+            editor_id,
+            ACK_RECONCILE_MAX_ROUNDS,
+        ),
+    );
+    false
+}
+
+pub fn mark_ack_content_live_buffer_synced(
+    file: &Path,
+    patch_id: &str,
+    editor_id: Option<&str>,
+    content: &str,
+) {
+    let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ack_content_live_buffer_sync_skipped file={} patch_id={} reason=no_editor_id",
+                file.display(),
+                patch_id
+            ),
+        );
+        return;
+    };
+    let path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    match agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+        &path,
+        content,
+        editor_id,
+        "ipc",
+        "unknown",
+        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+    ) {
+        Ok(()) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ack_content_live_buffer_synced file={} patch_id={} editor_id={} len={} hash={}",
+                file.display(),
+                patch_id,
+                editor_id,
+                content.len(),
+                agent_doc_hash::content_hash(content)
+            ),
+        ),
+        Err(err) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ack_content_live_buffer_sync_failed file={} patch_id={} editor_id={} error={}",
+                file.display(),
+                patch_id,
+                editor_id,
+                err
+            ),
+        ),
+    }
+}
+
+pub fn write_ack_content_through_to_disk(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    patch_id: &str,
+    content: &str,
+    proof: AckContentDiskWriteProof,
+) -> Result<bool> {
+    let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+        delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+        authority: proof.authority,
+        source_buffer_matches: proof.source_buffer_matches,
+        scope_rejection: None,
+        enabled: true,
+    });
+    if decision.action != WholeBufferDeliveryAction::Apply {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ack_content_disk_write_through_blocked file={} patch_id={} authority={} source_buffer_matches={} action={} reason={} len={} hash={}",
+                file.display(),
+                patch_id,
+                proof.authority.as_str(),
+                proof.source_buffer_matches,
+                decision.action.as_str(),
+                decision.reason,
+                content.len(),
+                agent_doc_hash::content_hash(content)
+            ),
+        );
+        let stale_operator_source = proof.authority == WholeBufferAuthority::OperatorTextAuthority
+            && decision.reason == "stale_source_buffer";
+        return Ok(!stale_operator_source);
+    }
+
+    let before = std::fs::read_to_string(file).ok();
+    if before.as_deref() == Some(content) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ack_content_disk_write_through_skipped file={} patch_id={} authority={} reason=already_current len={} hash={}",
+                file.display(),
+                patch_id,
+                proof.authority.as_str(),
+                content.len(),
+                agent_doc_hash::content_hash(content)
+            ),
+        );
+        return Ok(true);
+    }
+
+    effects.atomic_write(file, content).with_context(|| {
+        format!(
+            "failed to write proven ack-content through to disk for {}",
+            file.display()
+        )
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ack_content_disk_write_through file={} patch_id={} authority={} before_len={} before_hash={} ack_len={} ack_hash={}",
+            file.display(),
+            patch_id,
+            proof.authority.as_str(),
+            before.as_deref().map(str::len).unwrap_or(0),
+            before
+                .as_deref()
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            content.len(),
+            agent_doc_hash::content_hash(content)
+        ),
+    );
+    Ok(true)
+}
+
+pub fn mark_ack_content_live_buffer_synced_after_write(
+    file: &Path,
+    patch_id: &str,
+    editor_id: Option<&str>,
+    content: &str,
+) {
+    let proof = ack_content_disk_write_proof(file, editor_id, content);
+    if proof.authority == WholeBufferAuthority::OperatorTextAuthority && proof.source_buffer_matches
+    {
+        mark_ack_content_live_buffer_synced(file, patch_id, editor_id, content);
+        return;
+    }
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ack_content_live_buffer_sync_skipped file={} patch_id={} reason=post_write_source_unproven authority={} source_buffer_matches={}",
+            file.display(),
+            patch_id,
+            proof.authority.as_str(),
+            proof.source_buffer_matches
+        ),
     );
 }
 

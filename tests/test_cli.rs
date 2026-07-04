@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 67,
+        ledger_rows.len() >= 68,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -21367,10 +21367,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let write_converge_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
-        write_converge_source.contains(
-            "use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};"
-        ) && write_converge_source
-            .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;"),
+        write_converge_source.contains("use agent_doc_ipc_protocol::{")
+            && write_converge_source.contains("is_socket_ack_timeout_error")
+            && write_converge_source.contains("is_socket_status_error")
+            && write_converge_source
+                .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;"),
         "write convergence IO should import socket error classifiers and editor targeting from focused IPC crates"
     );
     for forbidden in [

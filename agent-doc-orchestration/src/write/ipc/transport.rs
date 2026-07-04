@@ -533,6 +533,7 @@ pub fn try_ipc(
                             &repair_decision.snapshot_content,
                         );
                         let disk_synced = write_ack_content_through_to_disk(
+                            &crate::write::WRITE_CONVERGENCE_EFFECTS,
                             file,
                             &patch_id,
                             &repair_decision.snapshot_content,
@@ -1702,6 +1703,7 @@ pub(crate) fn write_ipc_and_poll(
                 &repair_decision.snapshot_content,
             );
             let disk_synced = write_ack_content_through_to_disk(
+                &crate::write::WRITE_CONVERGENCE_EFFECTS,
                 doc_file,
                 patch_id,
                 &repair_decision.snapshot_content,

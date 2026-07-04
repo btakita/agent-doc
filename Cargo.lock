@@ -1897,9 +1897,17 @@ dependencies = [
 name = "agent-doc-supervisor-process-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-config",
+ "agent-doc-frontmatter",
+ "agent-doc-git-io",
  "agent-doc-harness",
+ "agent-doc-model-tier",
+ "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
+ "agent-doc-turn-executor",
+ "anyhow",
+ "libc",
 ]
 
 [[package]]

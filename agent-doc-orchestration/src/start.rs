@@ -142,6 +142,7 @@ use agent_doc_supervisor::auto_trigger::{
     AutoTriggerStopOutcome, CapabilityProofGate, auto_trigger_clear_cooldown_action,
     auto_trigger_no_prompt_action,
 };
+#[cfg(test)]
 use agent_doc_supervisor::config::AgentLaunchArgsSources;
 use agent_doc_supervisor::crash_policy::{
     CrashPolicy, FAILED_RESUME_WINDOW, FailedResumeTracker, RestartAction,
@@ -1781,6 +1782,7 @@ mod supervisor_io;
 mod run;
 pub use run::*;
 
+#[cfg(test)]
 fn agent_launch_args_sources(
     fm: &frontmatter::Frontmatter,
     global_config: &agent_doc_config::Config,

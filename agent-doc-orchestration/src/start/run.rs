@@ -8,18 +8,18 @@ use agent_doc_supervisor::{
     lifecycle::{BootResumeAction, boot_resume_action, start_session_retryable_during_recycle},
     run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
 };
-use agent_doc_supervisor_io::env::EnvSpec;
 use agent_doc_supervisor_process::{
     REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState,
     io_threads::{spawn_reader_thread, spawn_writer_thread},
     resize,
 };
-use agent_doc_turn_executor::codex_launch::{
-    CODEX_SANDBOX_NETWORK_DISABLED_ENV, apply_codex_network_access_env_map,
-    codex_network_status_from_env_map, resolve_codex_network_access,
+use agent_doc_supervisor_process_io::{
+    HarnessLaunchSpec, SupervisorLaunchLog, SupervisorStderrRedirect, build_harness_launch_spec,
 };
-#[cfg(unix)]
-use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
+#[cfg(test)]
+use agent_doc_supervisor_process_io::{
+    supervisor_stderr_redirect_needed, supervisor_stderr_redirect_path,
+};
 
 pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
@@ -44,265 +44,19 @@ fn start_console_status(
     }
 }
 
-/// `#agentreloadrestart` Phase 1b — the harness launch spec assembled from the
-/// CURRENT frontmatter: the resolved harness, its `base_args` (model flag,
-/// workspace-access args, `--no-mcp`), and the resolved child env (including any
-/// codex network-access mutations). Built once before the supervisor loop, and
-/// re-built at the top of a restart iteration so a frontmatter `agent:` change
-/// (e.g. claude→opencode) can bring up the NEW harness fresh.
-///
-/// INERTNESS INVARIANT: for an unchanged `agent:`, re-invoking
-/// [`build_harness_launch_spec`] yields byte-identical `harness` / `base_args` /
-/// `resolved_env` / `capability_proof_required`, so the common same-harness
-/// restart path is unaffected — only a real harness change exercises the new
-/// fresh-spawn branch.
-struct HarnessLaunchSpec {
-    harness: agent_doc_harness::HarnessConfig,
-    base_args: Vec<String>,
-    resolved_env: std::collections::HashMap<String, String>,
-    capability_proof_required: bool,
-}
-
-#[cfg(unix)]
-struct SupervisorStderrRedirect {
-    saved_stderr: Option<OwnedFd>,
-}
-
-fn supervisor_stderr_redirect_needed(
-    harness: &agent_doc_harness::HarnessConfig,
+struct StartRunLaunchLog<'a> {
+    session_log: &'a mut Option<std::fs::File>,
     route_owned: bool,
-) -> bool {
-    route_owned && harness.is_tui_harness()
 }
 
-fn supervisor_stderr_redirect_path(project_root: &Path) -> std::path::PathBuf {
-    project_root
-        .join(".agent-doc")
-        .join("logs")
-        .join("supervisor-stderr.log")
-}
-
-#[cfg(unix)]
-impl SupervisorStderrRedirect {
-    fn inactive() -> Self {
-        Self { saved_stderr: None }
+impl SupervisorLaunchLog for StartRunLaunchLog<'_> {
+    fn log_event(&mut self, msg: &str) {
+        log_event(self.session_log, msg);
     }
 
-    fn maybe_start(
-        project_root: &Path,
-        harness: &agent_doc_harness::HarnessConfig,
-        route_owned: bool,
-        session_log: &mut Option<std::fs::File>,
-    ) -> Self {
-        if !supervisor_stderr_redirect_needed(harness, route_owned) {
-            return Self::inactive();
-        }
-        match Self::start(project_root, harness, session_log) {
-            Ok(guard) => guard,
-            Err(err) => {
-                log_event(
-                    session_log,
-                    &format!(
-                        "supervisor_stderr_redirect_failed harness={} error={:?}",
-                        harness.binary,
-                        err.to_string()
-                    ),
-                );
-                eprintln!(
-                    "[start] warning: could not redirect supervisor stderr for {} TUI: {err:#}",
-                    harness.binary
-                );
-                Self::inactive()
-            }
-        }
+    fn start_console_status(&mut self, message: &str) {
+        start_console_status(self.session_log, self.route_owned, message);
     }
-
-    fn start(
-        project_root: &Path,
-        harness: &agent_doc_harness::HarnessConfig,
-        session_log: &mut Option<std::fs::File>,
-    ) -> Result<Self> {
-        let stderr_path = supervisor_stderr_redirect_path(project_root);
-        let logs_dir = stderr_path
-            .parent()
-            .context("supervisor stderr path must include logs directory")?;
-        std::fs::create_dir_all(logs_dir)
-            .with_context(|| format!("failed to create {}", logs_dir.display()))?;
-        let log_file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&stderr_path)
-            .with_context(|| format!("failed to open {}", stderr_path.display()))?;
-        let saved_fd = unsafe { libc::dup(libc::STDERR_FILENO) };
-        if saved_fd < 0 {
-            anyhow::bail!("dup(stderr) failed: {}", std::io::Error::last_os_error());
-        }
-        let saved_stderr = unsafe { OwnedFd::from_raw_fd(saved_fd) };
-        let redirected = unsafe { libc::dup2(log_file.as_raw_fd(), libc::STDERR_FILENO) };
-        if redirected < 0 {
-            anyhow::bail!("dup2(stderr) failed: {}", std::io::Error::last_os_error());
-        }
-        log_event(
-            session_log,
-            &format!(
-                "supervisor_stderr_redirect harness={} target={}",
-                harness.binary,
-                stderr_path.display()
-            ),
-        );
-        eprintln!(
-            "[start] stderr redirected to {} for {} route-owned TUI",
-            stderr_path.display(),
-            harness.binary
-        );
-        Ok(Self {
-            saved_stderr: Some(saved_stderr),
-        })
-    }
-}
-
-#[cfg(unix)]
-impl Drop for SupervisorStderrRedirect {
-    fn drop(&mut self) {
-        let Some(saved_stderr) = self.saved_stderr.take() else {
-            return;
-        };
-        let restored = unsafe { libc::dup2(saved_stderr.as_raw_fd(), libc::STDERR_FILENO) };
-        if restored < 0 {
-            let msg = b"[start] warning: failed to restore stderr after supervisor redirect\n";
-            unsafe {
-                libc::write(
-                    saved_stderr.as_raw_fd(),
-                    msg.as_ptr().cast::<libc::c_void>(),
-                    msg.len(),
-                );
-            }
-        }
-    }
-}
-
-#[cfg(not(unix))]
-struct SupervisorStderrRedirect;
-
-#[cfg(not(unix))]
-impl SupervisorStderrRedirect {
-    fn inactive() -> Self {
-        Self
-    }
-
-    fn maybe_start(
-        _project_root: &Path,
-        _harness: &agent_doc_harness::HarnessConfig,
-        _route_owned: bool,
-        _session_log: &mut Option<std::fs::File>,
-    ) -> Self {
-        Self
-    }
-}
-
-/// Assemble the harness launch spec from current frontmatter + global config.
-///
-/// Pure refactor of the inline pre-loop assembly: resolves the harness, the
-/// per-harness `agent_args`, the model flag, workspace-access args, `--no-mcp`,
-/// the child env (with codex network access), and whether a managed capability
-/// proof is required. Keeps ALL existing side effects intact (codex network
-/// status console line, `*_capability_proof status=not_required` log event,
-/// fail-closed `bail!` on a codex network mismatch) so calling it once before the
-/// loop is behaviorally identical to the original inline code.
-fn build_harness_launch_spec(
-    fm: &frontmatter::Frontmatter,
-    global_config: &agent_doc_config::Config,
-    canonical: &Path,
-    session_log: &mut Option<std::fs::File>,
-    route_owned: bool,
-) -> Result<HarnessLaunchSpec> {
-    // Resolve harness config from frontmatter agent > config default_agent > claude
-    let harness = agent_doc_harness::HarnessConfig::from_context(fm, global_config);
-    let resolved_agent_args = agent_doc_supervisor::config::resolve_agent_launch_args(
-        &harness.binary,
-        agent_launch_args_sources(fm, global_config),
-    );
-
-    // Resolve env — reused across all restarts for determinism within a spec.
-    let env_spec = EnvSpec::from_frontmatter(fm);
-    let mut resolved_env = env_spec.resolve()?;
-    if harness.supports_enable_tool_search && fm.enable_tool_search.unwrap_or(false) {
-        resolved_env.insert("ENABLE_TOOL_SEARCH".into(), "true".into());
-    }
-
-    // Build base args (resolved once per spec).
-    let mut base_args: Vec<String> = Vec::new();
-    if let Some(ref args) = resolved_agent_args {
-        base_args.extend(args.split_whitespace().map(String::from));
-    }
-    // Inject --model from harness-specific model frontmatter when not already in args.
-    if !base_args.iter().any(|a| a == "--model") {
-        let harness_key = agent_doc_model_tier::harness_key_for_agent_name(&harness.binary);
-        if let Some(model) = fm.resolve_harness_model(&harness_key) {
-            base_args.push("--model".into());
-            base_args.push(agent_doc_model_tier::canonical_model_name(
-                model,
-                &harness_key,
-                &global_config.model,
-            ));
-        }
-    }
-    agent_doc_git_io::dirs::append_workspace_access_args(
-        &harness.binary,
-        &mut base_args,
-        canonical,
-    );
-    if harness.supports_no_mcp && fm.no_mcp.unwrap_or(false) {
-        base_args.push("--no-mcp".into());
-    }
-    if harness.binary == "codex" {
-        let codex_network_access = resolve_codex_network_access(
-            fm.codex_network_access,
-            global_config.codex_network_access,
-        );
-        apply_codex_network_access_env_map(&mut resolved_env, codex_network_access);
-        let status = codex_network_status_from_env_map(
-            &base_args,
-            codex_network_access,
-            parent_codex_network_disabled(),
-            &resolved_env,
-        );
-        start_console_status(
-            session_log,
-            route_owned,
-            format!("[start] codex network access: {}", status.summary()),
-        );
-        if let Some(err) = status.mismatch_error() {
-            anyhow::bail!(err);
-        }
-    }
-    let capability_proof_required =
-        agent_doc_harness::managed_capability::managed_capability_contract_required(
-            &base_args,
-            fm,
-            global_config,
-            &harness.binary,
-        );
-    if !capability_proof_required {
-        log_event(
-            session_log,
-            &format!("{}_capability_proof status=not_required", harness.binary),
-        );
-    }
-
-    Ok(HarnessLaunchSpec {
-        harness,
-        base_args,
-        resolved_env,
-        capability_proof_required,
-    })
-}
-
-fn parent_codex_network_disabled() -> bool {
-    std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV)
-        .ok()
-        .as_deref()
-        == Some("1")
 }
 
 fn configure_managed_capability_proof_for_spec(
@@ -480,12 +234,13 @@ pub fn run_with_reap_policy(
 
     // Resolve harness config from frontmatter agent > config default_agent > claude
     let harness = agent_doc_harness::HarnessConfig::from_context(&fm, &global_config);
-    let _stderr_redirect = SupervisorStderrRedirect::maybe_start(
-        &project_root,
-        &harness,
-        route_owned,
-        &mut session_log,
-    );
+    let _stderr_redirect = {
+        let mut launch_log = StartRunLaunchLog {
+            session_log: &mut session_log,
+            route_owned,
+        };
+        SupervisorStderrRedirect::maybe_start(&project_root, &harness, route_owned, &mut launch_log)
+    };
     {
         let (source, _resolved_name) = if fm.agent.is_some() {
             ("frontmatter", fm.agent.as_deref().unwrap_or("?"))
@@ -902,13 +657,13 @@ pub fn run_with_reap_policy(
     // `harness` was already resolved above for the early recursive-guard / shared
     // state; the spec re-resolves it (identical inputs ⇒ identical harness) and
     // also carries `base_args`/`resolved_env`/`capability_proof_required`.
-    let initial_launch_spec = build_harness_launch_spec(
-        &fm,
-        &global_config,
-        &canonical,
-        &mut session_log,
-        route_owned,
-    )?;
+    let initial_launch_spec = {
+        let mut launch_log = StartRunLaunchLog {
+            session_log: &mut session_log,
+            route_owned,
+        };
+        build_harness_launch_spec(&fm, &global_config, &canonical, &mut launch_log)?
+    };
     let mut harness = initial_launch_spec.harness.clone();
     let mut base_args = initial_launch_spec.base_args.clone();
     let mut resolved_env = initial_launch_spec.resolved_env.clone();
@@ -1170,12 +925,15 @@ pub fn run_with_reap_policy(
                 .and_then(|content| frontmatter::parse(&content).ok().map(|(fm, _)| fm));
             match restart_fm {
                 Some(restart_fm) => {
+                    let mut launch_log = StartRunLaunchLog {
+                        session_log: &mut session_log,
+                        route_owned,
+                    };
                     match build_harness_launch_spec(
                         &restart_fm,
                         &global_config,
                         &canonical,
-                        &mut session_log,
-                        route_owned,
+                        &mut launch_log,
                     ) {
                         Ok(restart_spec)
                             if harness_change_forces_fresh_spawn(

@@ -6273,8 +6273,8 @@ fn test_agent_doc_turn_owns_no_change_cycle_policy() {
 
     let run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
-    let run_io_source = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs"))
-        .unwrap();
+    let run_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     for forbidden in [
         "enum NoChangeVerdict",
         "fn classify_no_change_cycle_state(",
@@ -10617,6 +10617,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/start/supervisor_io.rs",
             "agent-doc-supervisor-process-io/src/lib.rs",
             "Split the `SupervisorProcessIoState` adapter",
+        ),
+        (
+            "Supervisor start launch spec and stderr redirect IO graph",
+            "agent-doc-orchestration/src/start/run.rs",
+            "agent-doc-supervisor-process-io/src/lib.rs",
+            "Split launch-spec argument synthesis",
         ),
         (
             "Write IPC already-applied snapshot authority IO graph",
@@ -16845,6 +16851,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .unwrap();
     let supervisor_pty =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/pty.rs")).unwrap();
+    let supervisor_process_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process-io/src/lib.rs"))
+            .unwrap();
     let supervisor_io_threads =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/io_threads.rs"))
             .unwrap();
@@ -17461,10 +17470,13 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "start.rs must not re-own pure supervisor launch-args precedence: {forbidden_snippet}"
     );
     assert!(
-        start_source.contains("fn agent_launch_args_sources(")
-            && start_run_source
+        start_source.contains("#[cfg(test)]\nfn agent_launch_args_sources(")
+            && !start_run_source
+                .contains("agent_doc_supervisor::config::resolve_agent_launch_args(")
+            && supervisor_process_io.contains("fn agent_launch_args_sources(")
+            && supervisor_process_io
                 .contains("agent_doc_supervisor::config::resolve_agent_launch_args("),
-        "start paths should project launch-args facts and call focused supervisor config policy directly"
+        "agent-doc-supervisor-process-io should project launch-args facts and call focused supervisor config policy directly"
     );
     for required_snippet in ["pub struct ChildLaunchPlan", "pub fn child_launch_plan("] {
         assert!(
@@ -18270,13 +18282,21 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
     let supervisor_process_io_dependencies =
         supervisor_process_io["dependencies"].as_table().unwrap();
     for required in [
+        "agent-doc-config",
+        "agent-doc-frontmatter",
+        "agent-doc-git-io",
         "agent-doc-harness",
+        "agent-doc-model-tier",
+        "agent-doc-supervisor",
         "agent-doc-supervisor-io",
         "agent-doc-supervisor-process",
+        "agent-doc-turn-executor",
+        "anyhow",
+        "libc",
     ] {
         assert!(
             supervisor_process_io_dependencies.contains_key(required),
-            "agent-doc-supervisor-process-io observer adapter must own its dependency: {required}"
+            "agent-doc-supervisor-process-io launch/process adapter must own its dependency: {required}"
         );
     }
 
@@ -18298,9 +18318,11 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
     let start_run =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
     assert!(
-        start_run.contains("use agent_doc_supervisor_io::env::EnvSpec;")
-            && start_run.contains("EnvSpec::from_frontmatter(fm)"),
-        "start/run.rs should import EnvSpec from agent-doc-supervisor-io directly"
+        start_run.contains("build_harness_launch_spec(")
+            && start_run.contains("StartRunLaunchLog")
+            && !start_run.contains("EnvSpec::from_frontmatter(fm)")
+            && !start_run.contains("CODEX_SANDBOX_NETWORK_DISABLED_ENV"),
+        "start/run.rs should delegate supervisor launch-spec assembly to agent-doc-supervisor-process-io"
     );
     let supervisor_process_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/lib.rs")).unwrap();
@@ -18344,6 +18366,13 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
     assert!(
         process_io_source.contains("pub struct SupervisorProcessIoObserver")
             && process_io_source.contains("pub trait SupervisorProcessIoState")
+            && process_io_source.contains("pub trait SupervisorLaunchLog")
+            && process_io_source.contains("pub struct HarnessLaunchSpec")
+            && process_io_source.contains("pub struct SupervisorStderrRedirect")
+            && process_io_source.contains("pub fn build_harness_launch_spec(")
+            && process_io_source.contains("pub fn supervisor_stderr_redirect_needed(")
+            && process_io_source
+                .contains("agent_doc_supervisor_io::env::EnvSpec::from_frontmatter")
             && process_io_source
                 .contains("impl<S> PtyReaderObserver for SupervisorProcessIoObserver<S>")
             && process_io_source
@@ -18356,7 +18385,15 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
                 .contains("impl agent_doc_supervisor_process::io_threads::StdinForwardObserver")
             && !start_supervisor_io.contains("pub(crate) fn spawn_reader_thread")
             && !start_supervisor_io.contains("pub(crate) fn spawn_writer_thread"),
-        "agent-doc-supervisor-process-io should own supervisor-process observer adapters"
+        "agent-doc-supervisor-process-io should own supervisor-process observer and launch adapters"
+    );
+    assert!(
+        !start_run.contains("struct HarnessLaunchSpec")
+            && !start_run.contains("struct SupervisorStderrRedirect")
+            && !start_run.contains("fn build_harness_launch_spec(")
+            && !start_run.contains("fn supervisor_stderr_redirect_needed(")
+            && !start_run.contains("fn parent_codex_network_disabled("),
+        "start/run.rs must not re-own supervisor launch-spec or stderr redirect helpers after extraction"
     );
     for forbidden in [
         "crate::supervisor::env",

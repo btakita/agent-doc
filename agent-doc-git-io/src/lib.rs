@@ -9,6 +9,7 @@ pub mod dirs;
 pub mod guard_marker_cleanup;
 pub mod index;
 pub mod partial_staging;
+pub mod post_commit_cleanup;
 pub mod pre_stage_repair;
 pub mod revision;
 pub mod sibling;

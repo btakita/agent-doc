@@ -78,8 +78,8 @@
 
 use agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts;
 use agent_doc_document::transient_markers::{
-    normalize_for_replay_hash, normalize_post_commit_re_heading_drift,
-    normalize_transient_agent_doc_markers, strip_head_markers,
+    normalize_post_commit_re_heading_drift, normalize_transient_agent_doc_markers,
+    strip_head_markers,
 };
 use anyhow::Result;
 use std::collections::HashSet;
@@ -92,7 +92,6 @@ use agent_doc_document_realtime::write_policy::{
     classify_committed_historical_agent_doc_mutation, classify_safe_out_of_band_agent_doc_mutation,
     detect_reintroduced_reaped_pending_ids, is_empty_template_scaffold_snapshot,
 };
-use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
 use agent_doc_git::{
     PostCommitLocalDriftKind, agent_doc_commit_message_for_file, classify_post_commit_local_drift,
     commit_retry_backoff, has_blocking_non_exchange_component_drift,
@@ -183,6 +182,11 @@ struct OrchestrationTransientCleanupEffects;
 
 static TRANSIENT_CLEANUP_EFFECTS: OrchestrationTransientCleanupEffects =
     OrchestrationTransientCleanupEffects;
+
+struct OrchestrationPostCommitCleanupEffects;
+
+static POST_COMMIT_CLEANUP_EFFECTS: OrchestrationPostCommitCleanupEffects =
+    OrchestrationPostCommitCleanupEffects;
 
 impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
     for OrchestrationBoundaryRepositionEffects
@@ -289,6 +293,18 @@ impl agent_doc_git_io::transient_cleanup::TransientCleanupEffects
 
     fn write_vcs_refresh_signal(&self, signal_file: &Path) -> Result<()> {
         Ok(std::fs::write(signal_file, "")?)
+    }
+}
+
+impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
+    for OrchestrationPostCommitCleanupEffects
+{
+    fn read_to_string(&self, file: &Path) -> Result<String> {
+        Ok(std::fs::read_to_string(file)?)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
     }
 }
 
@@ -1176,7 +1192,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         // this commit changed non-exchange surfaces. A reposition-only editor
         // save can otherwise flush a stale live buffer and drop freshly
         // committed queue/backlog/icebox state.
-        if should_send_post_commit_ipc_reposition(file) {
+        if agent_doc_git_io::post_commit_cleanup::should_send_post_commit_ipc_reposition(file) {
             agent_doc_write_ipc_io::try_ipc_reposition_boundary(file);
         } else {
             eprintln!(
@@ -1235,7 +1251,10 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         // Emit the live worktree==HEAD proof line after post-commit cleanup +
         // transient-drift repair have run, so it reflects the residual visible
         // state. `match=false` is the #postcommit-ipc-worktree-corruption signal.
-        emit_postcommit_worktree_check(file);
+        agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
+            &POST_COMMIT_CLEANUP_EFFECTS,
+            file,
+        );
 
         // Submodule pointer update: if we just committed inside a submodule,
         // stage the new submodule HEAD in the parent and partial-commit it.
@@ -1253,69 +1272,6 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         did_commit,
         vcs_refresh_signaled,
     })
-}
-
-/// `#postcommit-ipc-worktree-corruption` / `#realtimecutover` — emit a live
-/// worktree-vs-HEAD proof line after each committed closeout, **observe-only**.
-///
-/// The legacy turn-based revert tower that used to live here
-/// (`reconcile_postcommit_worktree_to_head`, the `content_ours` snapshot revert,
-/// the `#pcwc`/`#pcwcwarn`/`#pzjy` queue/exchange reconcile-to-HEAD writes, and the
-/// editor refresh/flush) was RIPPED OUT. It re-derived the working tree from HEAD
-/// after a commit, which silently REVERTED operator edits that landed after the
-/// snapshot (the recurring "agent:queue reverted to an old snapshot / lost free
-/// text" class). The realtime CRDT replica owns disk reconciliation now — it always
-/// watches the file and reconciles continuously — so the post-commit path must
-/// never write back to the working tree. This check only RECORDS drift for
-/// observability; it changes nothing on disk or in the editor.
-///
-/// The comparison is taken modulo the legitimate transient churn the working tree
-/// intentionally keeps relative to the clean committed blob (boundary markers,
-/// `(HEAD)` annotations, guard markers, the managed pipeline block, and independent
-/// `agent:queue` maintenance) via [`normalize_for_replay_hash`]. Best-effort and
-/// non-fatal: a missing HEAD blob or unreadable working tree skips the check.
-fn emit_postcommit_worktree_check(file: &Path) {
-    let head_doc = match agent_doc_git_io::revision::show_head(file) {
-        Ok(Some(head)) => head,
-        Ok(None) => return,
-        Err(e) => {
-            eprintln!("[commit] postcommit worktree check: HEAD read failed (non-fatal): {e}");
-            return;
-        }
-    };
-    let working = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!(
-                "[commit] postcommit worktree check: working-tree read failed (non-fatal): {e}"
-            );
-            return;
-        }
-    };
-    let head_norm = normalize_for_replay_hash(&head_doc);
-    let tree_norm = normalize_for_replay_hash(&working);
-    let head_sha = agent_doc_hash::content_hash(&head_norm);
-    let tree_sha = agent_doc_hash::content_hash(&tree_norm);
-    let matches = head_norm == tree_norm;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "postcommit_worktree_check file={} head={} tree={} match={} action=observe_only_realtime_replica_owns_disk",
-            file.display(),
-            &head_sha[..head_sha.len().min(12)],
-            &tree_sha[..tree_sha.len().min(12)],
-            matches
-        ),
-    );
-    if !matches {
-        // `#realtimecutover`: NO revert. The realtime replica reconciles disk; the
-        // legacy turn-based revert that clobbered operator edits is gone. We only
-        // surface the drift so it stays auditable from `ops.log`.
-        eprintln!(
-            "[commit] postcommit_worktree_check match=false for {} — working tree differs from HEAD; realtime replica owns reconciliation, no revert (#realtimecutover)",
-            file.display()
-        );
-    }
 }
 
 fn ensure_active_capture_materialized_for_head_current_noop(
@@ -1596,16 +1552,6 @@ fn cycle_is_terminal(file: &Path) -> bool {
         .ok()
         .flatten()
         .is_some_and(|state| !state.is_open())
-}
-
-fn should_send_post_commit_ipc_reposition(file: &Path) -> bool {
-    let Ok(Some(parent_doc)) = agent_doc_git_io::revision::show_rev(file, "HEAD^") else {
-        return false;
-    };
-    let Ok(Some(head_doc)) = agent_doc_git_io::revision::show_rev(file, "HEAD") else {
-        return false;
-    };
-    post_commit_ipc_reposition_only_exchange_safe(&parent_doc, &head_doc)
 }
 
 fn chrono_timestamp() -> String {
@@ -4563,7 +4509,10 @@ Duplicate replay should stay live.
             <!-- /agent:exchange -->\n";
         fs::write(&doc, working).unwrap();
 
-        emit_postcommit_worktree_check(&doc);
+        agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
+            &POST_COMMIT_CLEANUP_EFFECTS,
+            &doc,
+        );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
@@ -4600,7 +4549,10 @@ Duplicate replay should stay live.
         let superset = format!("{head_doc}\na new uncommitted user note line\n");
         fs::write(&doc, &superset).unwrap();
 
-        emit_postcommit_worktree_check(&doc);
+        agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
+            &POST_COMMIT_CLEANUP_EFFECTS,
+            &doc,
+        );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
@@ -4640,7 +4592,10 @@ Duplicate replay should stay live.
         let doc = root.join("session.md");
         // Working tree already equals HEAD (no edit).
 
-        emit_postcommit_worktree_check(&doc);
+        agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
+            &POST_COMMIT_CLEANUP_EFFECTS,
+            &doc,
+        );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
@@ -4683,7 +4638,10 @@ Duplicate replay should stay live.
             follow up on #newtask\n";
         fs::write(&doc, drifted).unwrap();
 
-        emit_postcommit_worktree_check(&doc);
+        agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
+            &POST_COMMIT_CLEANUP_EFFECTS,
+            &doc,
+        );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
@@ -4731,7 +4689,10 @@ Duplicate replay should stay live.
             <!-- agent:boundary:abc123 -->\n";
         fs::write(&doc, corrupted).unwrap();
 
-        emit_postcommit_worktree_check(&doc);
+        agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
+            &POST_COMMIT_CLEANUP_EFFECTS,
+            &doc,
+        );
 
         // Observe-only: drift is logged, but NOTHING is reverted.
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
@@ -4795,7 +4756,10 @@ Duplicate replay should stay live.
             <!-- agent:boundary:abc123 -->\n";
         fs::write(&doc, drifted).unwrap();
 
-        emit_postcommit_worktree_check(&doc);
+        agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
+            &POST_COMMIT_CLEANUP_EFFECTS,
+            &doc,
+        );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(

@@ -10975,6 +10975,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split `TransientCleanupEffects` into document-write, snapshot-store, sidecar-refresh, VCS-refresh, and log ports",
         ),
         (
+            "Git postcommit worktree proof and IPC reposition safety IO graph",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-git-io/src/post_commit_cleanup.rs",
+            "Split `PostCommitCleanupEffects` into read and log ports",
+        ),
+        (
             "Codex hook user-prompt-submit tracking IO graph",
             "agent-doc-orchestration/src/codex_hook.rs",
             "agent-doc-codex-hook-io/src/lib.rs",
@@ -24150,6 +24156,9 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
     let repair_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
+    let git_post_commit_cleanup =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/post_commit_cleanup.rs"))
+            .unwrap();
     let graph_source =
         fs::read_to_string(manifest_dir.join("agent-doc-run-context-io/src/lib.rs")).unwrap();
     assert!(
@@ -24160,7 +24169,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     assert!(
         git_adapter_source
             .contains("agent_doc_git_io::submodule::is_submodule_pointer_stale(file)")
-            && git_adapter_source.contains("agent_doc_git_io::revision::show_rev(file, \"HEAD^\")")
+            && git_post_commit_cleanup.contains("crate::revision::show_rev(file, \"HEAD^\")")
             && git_adapter_source.contains("agent_doc_git_io::revision::show_head(file)?")
             && write_source.contains("agent_doc_git_io::revision::show_head(file)")
             && write_source.contains("agent_doc_git_io::status::is_in_git_repo(file)")
@@ -24572,15 +24581,22 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     );
     let git_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let git_post_commit_cleanup =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/post_commit_cleanup.rs"))
+            .unwrap();
     assert!(
-        git_source.contains(
+        git_post_commit_cleanup.contains(
+            "use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;"
+        ) && !git_source.contains(
             "use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;"
         ),
-        "git post-commit IPC path should import exchange-only reposition policy from the focused crate"
+        "git post-commit cleanup should import exchange-only reposition policy from the focused crate"
     );
     assert!(
         !git_source.contains("fn redact_exchange_component_content(")
-            && !git_source.contains("fn post_commit_ipc_reposition_only_exchange_safe("),
+            && !git_source.contains("fn post_commit_ipc_reposition_only_exchange_safe(")
+            && !git_post_commit_cleanup
+                .contains("fn post_commit_ipc_reposition_only_exchange_safe("),
         "git.rs must not re-own exchange-only post-commit IPC policy"
     );
     let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();

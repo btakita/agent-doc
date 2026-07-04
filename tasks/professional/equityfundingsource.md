@@ -160,15 +160,27 @@ I changed the implementation to match that distinction.
 `a9f77417 fix(agent-doc): repair committed-capture snapshot drift` fixes the real wedge this exposed: when a committed capture proves the rendered response is already in `HEAD`, historical snapshot drift now refreshes recovery metadata even if that response commit also included queue/backlog mutations. That stale sidecar no longer becomes a direct-patchback blocker. I also kept the force-disk already-present response repair path preserving the editor-attached state so it does not silently skip the right closeout boundary.
 
 Verification: `make check` passed in `src/agent-doc`: clippy, 7115 nextest tests, doctests, medium SimWorld corpus, version checks, and Lean. Latest GitHub Actions CI was still `in_progress` (`28698197379`) when checked. I installed the updated `agent-doc` locally with `make install`; it also broadcast the cdylib reload and marked supervisors for idle recycle.
-<!-- agent:boundary:73ddd6b5 -->
+
+### Re: agent-doc model authority, sidecars, and reentrant stages — gpt-5
+
+Agreed. The failure should be handled inside agent-doc before the agent sees it: if the editor is authoritative but the CRDT relay has no registered replica, preflight should auto-start or reconcile the document model, then continue or fail with that bounded startup/reconciliation error.
+
+I captured the architecture fix in `tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md` and committed it as `f064008ce`. The plan makes sidecars derived audit/recovery projections and moves hot-path authority to the lazily-backed state backbone.
+
+I also added your reentrancy requirement as a hard invariant: every pipeline stage must be safe to resume after a crash. On re-entry, agent-doc should complete the transition, prove it already completed, or reconcile any drift into a named backbone state before continuing. Raw snapshot/sidecar drift should not leak as the recovery contract when agent-doc can deterministically reconcile it.
+
+I queued the implementation as `#sidecarstate` in `tasks/agent-doc/agent-doc-bugs2.md` against that plan. No EFS application code changed.
+<!-- agent:boundary:73859e6a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- [#sy71]
+- [#7jj2]
 <!-- /agent:queue -->
 
 ## Notes
 
-<!-- notes -->
+<!-- agent:notes -->
 - Admin loan delete: /api/admin/loans/:id
 - Admin bulk loan delete: /api/admin/loans/bulk-delete
 - Admin TMO loan delete: /api/admin/tmo-loans/:loan_number
@@ -182,12 +194,11 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 After 20:30
 - login to TMO. Make sure we are using the correct credentials.
 - TMO Syncs
-<!-- /notes -->
+<!-- /agent:notes -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#sy71] https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard for btak.dev+lender10@gmail.com should not show the "Complete Your Lender Sign Up" modal because the lender already took action and submitted the form. "Annual requirements — action needed" > "Complete Requirements" should also not show up because the lender has already done the action. The lender's options are to wait for the admin to approve. The lender can contact the admin.
 <!-- /agent:backlog -->
 
 ## Review

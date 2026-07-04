@@ -115,6 +115,11 @@ struct OrchestrationCommitPreStageRepairEffects;
 static COMMIT_PRE_STAGE_REPAIR_EFFECTS: OrchestrationCommitPreStageRepairEffects =
     OrchestrationCommitPreStageRepairEffects;
 
+struct OrchestrationCaptureMaterializationGuardEffects;
+
+static CAPTURE_MATERIALIZATION_GUARD_EFFECTS: OrchestrationCaptureMaterializationGuardEffects =
+    OrchestrationCaptureMaterializationGuardEffects;
+
 struct OrchestrationGuardMarkerCleanupEffects;
 
 static GUARD_MARKER_CLEANUP_EFFECTS: OrchestrationGuardMarkerCleanupEffects =
@@ -133,6 +138,42 @@ impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
 
     fn log_op(&self, file: &Path, message: &str) {
         agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+impl agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuardEffects
+    for OrchestrationCaptureMaterializationGuardEffects
+{
+    fn load_active_capture(
+        &self,
+        file: &Path,
+    ) -> Result<Option<agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization>>
+    {
+        Ok(agent_doc_capture_io::load_active(file)?.map(|capture| {
+            agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization {
+                capture_id: capture.capture_id,
+                response_sha256: capture.response_sha256,
+                response_body: capture.response_body,
+                terminal: matches!(
+                    capture.state,
+                    agent_doc_workflow::capture::CaptureState::Committed
+                        | agent_doc_workflow::capture::CaptureState::Discarded
+                ),
+            }
+        }))
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+
+    fn log_missing_capture_guard(&self, file: &Path) {
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
+            file,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::FailedClosed,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
+        );
     }
 }
 
@@ -879,7 +920,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     }
 
     if snapshot_matches_head {
-        ensure_active_capture_materialized_for_head_current_noop(
+        agent_doc_git_io::capture_materialization_guard::ensure_active_capture_materialized_for_head_current_noop(
+            &CAPTURE_MATERIALIZATION_GUARD_EFFECTS,
             file,
             snapshot_content.as_deref(),
             head_doc.as_deref(),
@@ -1059,7 +1101,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         "pre_stage",
         snapshot_content.as_deref(),
     )?;
-    ensure_active_capture_materialized_for_commit(
+    agent_doc_git_io::capture_materialization_guard::ensure_active_capture_materialized_for_commit(
+        &CAPTURE_MATERIALIZATION_GUARD_EFFECTS,
         file,
         snapshot_content.as_deref().or(Some(file_content.as_str())),
         "staged",
@@ -1281,66 +1324,6 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         did_commit,
         vcs_refresh_signaled,
     })
-}
-
-fn ensure_active_capture_materialized_for_head_current_noop(
-    file: &Path,
-    snapshot_content: Option<&str>,
-    head_doc: Option<&str>,
-) -> Result<()> {
-    ensure_active_capture_materialized_for_commit(
-        file,
-        snapshot_content.or(head_doc),
-        "head_current",
-    )
-}
-
-fn ensure_active_capture_materialized_for_commit(
-    file: &Path,
-    staged_content: Option<&str>,
-    basis: &str,
-) -> Result<()> {
-    let Some(capture) = agent_doc_capture_io::load_active(file)? else {
-        return Ok(());
-    };
-    if matches!(
-        capture.state,
-        agent_doc_workflow::capture::CaptureState::Committed
-            | agent_doc_workflow::capture::CaptureState::Discarded
-    ) {
-        return Ok(());
-    }
-    let Some(materialized) = staged_content else {
-        return Ok(());
-    };
-    if agent_doc_turn::response_replay::response_materialized_in_content(
-        &capture.response_body,
-        materialized,
-    ) {
-        return Ok(());
-    }
-
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "commit_blocked_missing_captured_response file={} capture_id={} response_sha256={} basis={}",
-            file.display(),
-            capture.capture_id,
-            capture.response_sha256,
-            basis
-        ),
-    );
-    agent_doc_flow_io::closeout::log_closeout_guard_event(
-        file,
-        agent_doc_flow::types::FlowStage::TerminalGuard,
-        agent_doc_flow::types::FlowOutcome::FailedClosed,
-        agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
-    );
-    anyhow::bail!(
-        "captured response body is not present in the staged snapshot for {} even though the snapshot already matches HEAD; refusing already-committed closeout. Replay the captured response with `agent-doc write --commit {}` before marking the cycle committed.",
-        file.display(),
-        file.display()
-    );
 }
 
 fn response_bearing_exchange_drift_after_committed_head(head_doc: &str, current_doc: &str) -> bool {

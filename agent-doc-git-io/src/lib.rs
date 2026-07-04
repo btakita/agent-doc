@@ -3,6 +3,7 @@
 pub mod boundary_invariant;
 pub mod boundary_reposition;
 pub mod branch;
+pub mod capture_materialization_guard;
 pub mod checkpoint;
 pub mod commit;
 pub mod dirs;

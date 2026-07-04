@@ -10993,6 +10993,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split `PostCommitCleanupEffects` into lifecycle-log, flow-event, cycle-state, capture-state, queue-journal, queue-continuation, session, hooks, read, and log ports",
         ),
         (
+            "Git active capture materialization guard IO graph",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-git-io/src/capture_materialization_guard.rs",
+            "Split `CaptureMaterializationGuardEffects` into capture-read, log, and closeout-guard ports",
+        ),
+        (
             "Codex hook user-prompt-submit tracking IO graph",
             "agent-doc-orchestration/src/codex_hook.rs",
             "agent-doc-codex-hook-io/src/lib.rs",

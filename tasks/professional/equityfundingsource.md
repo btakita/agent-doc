@@ -25,7 +25,6 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -134,7 +133,7 @@ CI note: `gh run list --workflow CI --limit 1` could not find a workflow named `
 > **Queue prompt:** 🚧 [#6em3]
 
 This queue head was completed in the prior closeout response: the admin lender pipeline Requirements/accreditation questionnaire is implemented, tested, committed, pushed, and deployed. The duplicate live queue head was intentionally removed when the queue component was normalized to the struck completed form.
-### Re: go-mode backlog (lender requirements form, deploy) — opus-4-8 (HEAD)
+### Re: go-mode backlog (lender requirements form, deploy) — opus-4-8
 
 The concurrent agent-doc sync refactor landed (`f3afce48`) and the read/convergence path recovered, but the JB plugin's **patch-apply IPC is still wedged** (`file_apply_failed`), so this response was persisted via the git-direct path again. Closing/reopening the file in JB will show it.
 
@@ -161,7 +160,7 @@ I changed the implementation to match that distinction.
 `a9f77417 fix(agent-doc): repair committed-capture snapshot drift` fixes the real wedge this exposed: when a committed capture proves the rendered response is already in `HEAD`, historical snapshot drift now refreshes recovery metadata even if that response commit also included queue/backlog mutations. That stale sidecar no longer becomes a direct-patchback blocker. I also kept the force-disk already-present response repair path preserving the editor-attached state so it does not silently skip the right closeout boundary.
 
 Verification: `make check` passed in `src/agent-doc`: clippy, 7115 nextest tests, doctests, medium SimWorld corpus, version checks, and Lean. Latest GitHub Actions CI was still `in_progress` (`28698197379`) when checked. I installed the updated `agent-doc` locally with `make install`; it also broadcast the cdylib reload and marked supervisors for idle recycle.
-<!-- agent:boundary:a9b35254 -->
+<!-- agent:boundary:73ddd6b5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -188,6 +187,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#sy71] https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard for btak.dev+lender10@gmail.com should not show the "Complete Your Lender Sign Up" modal because the lender already took action and submitted the form. "Annual requirements — action needed" > "Complete Requirements" should also not show up because the lender has already done the action. The lender's options are to wait for the admin to approve. The lender can contact the admin.
 <!-- /agent:backlog -->
 
 ## Review

@@ -4026,6 +4026,8 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     }
     let git_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "fn queue_entry_commit_signature(",
         "fn queue_entry_count_map(",
@@ -4037,10 +4039,10 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         );
     }
     assert!(
-        git_source.contains(
+        commit_io_source.contains(
             "agent_doc_queue::queue_replay::preserved_queue_additions_neutralized_by_replay"
         ),
-        "git.rs should call focused queue replay-normalization policy directly"
+        "commit coordinator should call focused queue replay-normalization policy directly"
     );
 
     let queue_manifest =
@@ -11015,6 +11017,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/git.rs",
             "agent-doc-git-io/src/commit_result_reporting.rs",
             "Split stdout summary emission from ops-log writes",
+        ),
+        (
+            "Git commit lifecycle coordinator IO graph",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-commit-io/src/lib.rs",
+            "Split `CommitCoordinatorPorts` into commit admission, snapshot/head drift guard, pre-stage normalization, transaction, and post-commit cleanup ports",
         ),
         (
             "Codex hook user-prompt-submit tracking IO graph",
@@ -23813,6 +23821,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let git_policy_source =
         fs::read_to_string(manifest_dir.join("agent-doc-git/src/lib.rs")).unwrap();
+    let commit_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for required in [
         "pub fn relative_to_root(",
         "pub fn is_index_lock_contention_text(",
@@ -23848,19 +23858,23 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         );
     }
     assert!(
-        git_source.contains("normalize_committed_exchange_artifacts")
+        commit_io_source.contains("normalize_committed_exchange_artifacts")
             && fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/boundary_reposition.rs"))
                 .unwrap()
                 .contains("canonicalize_answered_prompt_prefixes"),
-        "git.rs and git-io boundary reposition should import focused commit normalization directly"
+        "commit coordinator and git-io boundary reposition should import focused commit normalization directly"
     );
     assert!(
-        git_source.contains("use agent_doc_git::{"),
-        "git.rs should import focused git command/path policy directly"
+        commit_io_source.contains("use agent_doc_git::{"),
+        "commit coordinator should import focused git command/path policy directly"
     );
     assert!(
-        git_source.contains("has_blocking_non_exchange_component_drift("),
-        "git.rs should call focused non-exchange component drift policy directly"
+        commit_io_source.contains("has_blocking_non_exchange_component_drift("),
+        "commit coordinator should call focused non-exchange component drift policy directly"
+    );
+    assert!(
+        git_source.contains("agent_doc_commit_io::commit_with_outcome("),
+        "git.rs should delegate commit lifecycle policy to agent-doc-commit-io"
     );
 
     let partial_staging =
@@ -24169,9 +24183,13 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     let git_adapter_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     assert!(
-        git_adapter_source.contains("dirs::{narrow_to_submodule, resolve_to_git_root}")
-            && git_adapter_source.contains("transaction::{"),
-        "orchestration git adapter should import focused git IO helpers directly"
+        commit_io_source.contains("dirs::{narrow_to_submodule, resolve_to_git_root}")
+            && commit_io_source.contains("transaction::{"),
+        "commit coordinator should import focused git IO helpers directly"
+    );
+    assert!(
+        git_adapter_source.contains("agent_doc_commit_io::CommitCoordinatorPorts"),
+        "orchestration git adapter should delegate to focused commit coordinator"
     );
     let doctor_source =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/doctor.rs")).unwrap();
@@ -24203,10 +24221,9 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "orchestration graph should cache snapshot/HEAD inputs but call focused snapshot IO for comparison"
     );
     assert!(
-        git_adapter_source
-            .contains("agent_doc_git_io::submodule::is_submodule_pointer_stale(file)")
+        commit_io_source.contains("agent_doc_git_io::submodule::is_submodule_pointer_stale(file)")
             && git_post_commit_cleanup.contains("crate::revision::show_rev(file, \"HEAD^\")")
-            && git_adapter_source.contains("agent_doc_git_io::revision::show_head(file)?")
+            && commit_io_source.contains("agent_doc_git_io::revision::show_head(file)?")
             && write_source.contains("agent_doc_git_io::revision::show_head(file)")
             && write_source.contains("agent_doc_git_io::status::is_in_git_repo(file)")
             && repair_source.contains("agent_doc_git_io::status::is_in_git_repo(file)")
@@ -25181,6 +25198,8 @@ fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
 
     let git_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "mod safe_mutation",
         "pub use safe_mutation",
@@ -25197,10 +25216,14 @@ fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
         );
     }
     assert!(
-        git_source.contains("agent_doc_document_realtime::write_policy::{")
-            && git_source.contains("classify_safe_out_of_band_agent_doc_mutation")
-            && git_source.contains("classify_committed_historical_agent_doc_mutation"),
-        "git.rs should call the focused realtime safe mutation policy directly"
+        commit_io_source.contains("agent_doc_document_realtime::write_policy::{")
+            && commit_io_source.contains("classify_safe_out_of_band_agent_doc_mutation")
+            && commit_io_source.contains("classify_committed_historical_agent_doc_mutation"),
+        "commit coordinator should call the focused realtime safe mutation policy directly"
+    );
+    assert!(
+        git_source.contains("agent_doc_commit_io::commit_with_outcome("),
+        "git.rs should delegate commit lifecycle policy instead of duplicating safe mutation checks"
     );
 }
 
@@ -26409,6 +26432,37 @@ fn test_agent_doc_template_owns_stale_baseline_policy() {
         git.contains("agent_doc_template::stale_baseline::is_stale_baseline"),
         "git write-path tests should call focused stale-baseline policy directly"
     );
+}
+
+#[test]
+fn test_commit_lifecycle_policy_has_single_owner() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let git = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
+
+    assert!(
+        git.contains("agent_doc_commit_io::commit_with_outcome(")
+            && git.contains("agent_doc_commit_io::CommitCoordinatorPorts"),
+        "git.rs should be the concrete adapter into the focused commit coordinator"
+    );
+
+    for required in [
+        "try_auto_recover_live_prompt_drift(",
+        "commit_blocked_reintroduced_reaped_pending file=",
+        "snapshot_resync_blocked file=",
+        "commit_frontmatter_self_heal file=",
+        "stage_and_commit_once(",
+    ] {
+        assert!(
+            commit_io.contains(required),
+            "agent-doc-commit-io must own commit lifecycle policy marker: {required}"
+        );
+        assert!(
+            !git.contains(required),
+            "git.rs must not duplicate focused commit lifecycle policy marker: {required}"
+        );
+    }
 }
 
 #[test]

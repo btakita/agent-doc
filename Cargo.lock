@@ -283,6 +283,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-commit-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-cycle-state-io",
+ "agent-doc-diff",
+ "agent-doc-document",
+ "agent-doc-document-realtime",
+ "agent-doc-flow",
+ "agent-doc-flow-io",
+ "agent-doc-git",
+ "agent-doc-git-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-queue",
+ "agent-doc-queue-io",
+ "agent-doc-repair-io",
+ "agent-doc-session-check-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-template",
+ "agent-doc-turn",
+ "agent-doc-turn-scope-io",
+ "agent-doc-write-converge-io",
+ "agent-doc-write-ipc-io",
+ "anyhow",
+]
+
+[[package]]
 name = "agent-doc-compact-io"
 version = "0.34.67"
 dependencies = [
@@ -1043,6 +1069,7 @@ dependencies = [
  "agent-doc-callback-io",
  "agent-doc-capture-io",
  "agent-doc-codex-hook-io",
+ "agent-doc-commit-io",
  "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-controller-io",

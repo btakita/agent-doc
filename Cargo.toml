@@ -9,6 +9,7 @@ members = [
     "agent-doc-capture-io",
     "agent-doc-claim-io",
     "agent-doc-codex-hook-io",
+    "agent-doc-commit-io",
     "agent-doc-compact-io",
     "agent-doc-config",
     "agent-doc-controller-io",

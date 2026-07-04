@@ -2226,8 +2226,10 @@ fn verify_pane_ownership(file: &Path) -> Result<()> {
 mod run_entry;
 pub use run_entry::*;
 
+#[cfg(test)]
 mod ipc;
-pub use ipc::*;
+#[cfg(test)]
+pub(crate) use ipc::*;
 // ---------------------------------------------------------------------------
 // Internal helpers (same patterns as submit.rs)
 // ---------------------------------------------------------------------------

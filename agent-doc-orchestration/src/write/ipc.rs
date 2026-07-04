@@ -131,8 +131,10 @@ pub(crate) fn normalized_content_ours_fallback(
     .unwrap_or(normalized)
 }
 
+#[cfg(test)]
 mod transport;
-pub use transport::*;
+#[cfg(test)]
+pub(crate) use transport::try_ipc;
 
 #[cfg(test)]
 mod ack_content_snapshot_tests {

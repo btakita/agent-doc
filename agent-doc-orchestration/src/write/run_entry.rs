@@ -819,7 +819,8 @@ pub fn run_stream(
             } else {
                 Some(normalize_prefix_lines.as_slice())
             };
-            let ipc_result = try_ipc(
+            let ipc_result = agent_doc_write_ipc_io::try_ipc_with_effects(
+                &WRITE_CONVERGENCE_EFFECTS,
                 file,
                 &patches,
                 &unmatched,

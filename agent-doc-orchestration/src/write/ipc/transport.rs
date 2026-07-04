@@ -10,8 +10,9 @@ use agent_doc_write_converge_io::{
 };
 
 /// Attempt to write via IPC (socket-first, file-based fallback).
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
-pub fn try_ipc(
+pub(crate) fn try_ipc(
     file: &Path,
     patches: &[agent_doc_template::PatchBlock],
     unmatched: &str,

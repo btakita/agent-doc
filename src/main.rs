@@ -779,8 +779,16 @@ impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
         patches: &[agent_doc_template::PatchBlock],
         unmatched: &str,
     ) -> anyhow::Result<bool> {
-        agent_doc_orchestration::write::try_ipc(
-            file, patches, unmatched, None, None, None, None, None,
+        agent_doc_write_ipc_io::try_ipc_with_effects(
+            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
+            file,
+            patches,
+            unmatched,
+            None,
+            None,
+            None,
+            None,
+            None,
         )
         .map(|result| result.success)
     }

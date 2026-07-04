@@ -10502,6 +10502,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move remaining write IPC transport tests and the orchestration wrapper",
         ),
         (
+            "Write IPC production transport facade demotion",
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "agent-doc-write-ipc-io/src/transport.rs",
+            "Move remaining write IPC transport tests into `agent-doc-write-ipc-io`",
+        ),
+        (
             "Direct-run prompt and auto-queue IO graph",
             "agent-doc-orchestration/src/run.rs",
             "agent-doc-run-io/src/lib.rs",
@@ -21761,6 +21767,8 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     );
     let write_ipc_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let write_converge_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
@@ -21919,9 +21927,29 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "write IPC transport should import remaining IPC protocol vocabulary from the focused protocol crate"
     );
     assert!(
-        orchestration_write_ipc_transport_source
-            .contains("agent_doc_write_ipc_io::try_ipc_with_effects("),
-        "orchestration write IPC transport should only adapt try_ipc through the focused transport crate"
+        write_source.contains("#[cfg(test)]\nmod ipc;")
+            && write_source.contains("#[cfg(test)]\npub(crate) use ipc::*;")
+            && !write_source.contains("pub use ipc::*;")
+            && write_ipc_source.contains("#[cfg(test)]\nmod transport;")
+            && write_ipc_source.contains("#[cfg(test)]\npub(crate) use transport::try_ipc;")
+            && !write_ipc_source.contains("pub use transport::*;")
+            && orchestration_write_ipc_transport_source.contains("#[cfg(test)]")
+            && orchestration_write_ipc_transport_source.contains("pub(crate) fn try_ipc(")
+            && orchestration_write_ipc_transport_source
+                .contains("agent_doc_write_ipc_io::try_ipc_with_effects("),
+        "orchestration write IPC transport should be a test-only wrapper over the focused transport crate"
+    );
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let write_run_entry_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+    assert!(
+        main_source.contains("agent_doc_write_ipc_io::try_ipc_with_effects(")
+            && main_source.contains("&agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS")
+            && !main_source.contains("agent_doc_orchestration::write::try_ipc(")
+            && write_run_entry_source.contains("agent_doc_write_ipc_io::try_ipc_with_effects(")
+            && write_run_entry_source.contains("&WRITE_CONVERGENCE_EFFECTS"),
+        "production write IPC callers should call the focused transport crate directly"
     );
     assert!(
         write_ipc_io_source.contains("use agent_doc_ipc_protocol::{")

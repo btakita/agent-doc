@@ -554,9 +554,11 @@ pub fn run_with_reap_policy(
     // `run` path's unconditional recursive guard (it fires regardless of
     // `--force`, since the deadlock is inherent to the same-pane nesting) and
     // point the operator at an out-of-pane recovery command instead.
-    if let Some(diagnostic) =
-        crate::run::recursive_codex_start_invocation_diagnostic(file, &session_id, &harness.binary)
-    {
+    if let Some(diagnostic) = agent_doc_run_io::recursive_codex_start_invocation_diagnostic(
+        file,
+        &session_id,
+        &harness.binary,
+    ) {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

@@ -1515,7 +1515,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             Ok((owner_fm, _)) => match owner_fm.session.as_deref() {
                 Some(session_id) => {
                     let agent_name = owner_fm.agent.as_deref().unwrap_or("claude");
-                    crate::run::detect_owned_pane_self_invocation_with_options(
+                    agent_doc_run_io::detect_owned_pane_self_invocation_with_options(
                         file,
                         session_id,
                         agent_name,

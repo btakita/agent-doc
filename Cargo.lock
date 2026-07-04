@@ -1527,16 +1527,21 @@ dependencies = [
 name = "agent-doc-run-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-agent-io",
  "agent-doc-controller-io",
+ "agent-doc-cycle-state-io",
  "agent-doc-diff",
  "agent-doc-diff-io",
  "agent-doc-document",
+ "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
  "agent-doc-markdown-ast",
+ "agent-doc-model-tier",
  "agent-doc-ops-log-io",
+ "agent-doc-owner-pane-io",
  "agent-doc-project-root-io",
  "agent-doc-prompt-cache",
  "agent-doc-prompt-context",
@@ -1546,9 +1551,19 @@ dependencies = [
  "agent-doc-run-context-io",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
+ "agent-doc-session-actor-io",
+ "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
+ "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-tmux-commands",
+ "agent-doc-tmux-io",
+ "agent-doc-turn",
+ "agent-doc-turn-scope-io",
+ "agent-doc-workflow",
  "anyhow",
+ "libc",
+ "tmux-router",
 ]
 
 [[package]]

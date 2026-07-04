@@ -2928,7 +2928,7 @@ fn test_turn_scope_io_extraction_stays_first_class_and_facade_free() {
         "orchestration must not export a turn_scope_store facade"
     );
     for relative_path in [
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-run-io/src/lib.rs",
         "agent-doc-orchestration/src/git.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
@@ -6548,6 +6548,8 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
 
     let run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let run_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     let owner_pane_io =
         fs::read_to_string(manifest_dir.join("agent-doc-owner-pane-io/src/lib.rs")).unwrap();
     assert!(
@@ -6590,12 +6592,20 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
         "prompt_miss_message",
         "queue_handoff_message",
         "queue_wedge_halt_message",
-        "recursive_direct_invocation_message",
-        "recursive_start_invocation_message",
     ] {
         assert!(
             run_source.contains(required),
             "orchestration run should call focused owner-pane recursion diagnostics directly: {required}"
+        );
+    }
+    for required in [
+        "use agent_doc_turn::owner_pane_recursion::{",
+        "recursive_direct_invocation_message",
+        "recursive_start_invocation_message",
+    ] {
+        assert!(
+            run_io_source.contains(required),
+            "run IO should call focused recursive owner-pane diagnostics directly: {required}"
         );
     }
     for required in ["OwnerPaneWedgeRecord", "record_owner_pane_wedge_fire"] {
@@ -9758,6 +9768,17 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         "pub fn should_continue_auto_queue",
         "pub fn build_prompt",
         "pub fn prompt_cache_routing_affinity",
+        "pub struct RunStderrRedirect",
+        "pub struct RunHeartbeat",
+        "pub fn start_run_cycle",
+        "pub fn mark_run_write_applied",
+        "pub fn record_run_progress",
+        "pub fn record_run_preflight_timeout",
+        "pub fn abandon_run_recursive_cycle",
+        "pub fn owned_pane_self_invocation_detail",
+        "pub fn detect_owned_pane_self_invocation_with_options",
+        "pub fn recursive_codex_start_invocation_diagnostic",
+        "pub fn run_dispatch_timeout_diagnostic",
         "PromptCacheBlocks::new",
         "agent_doc_controller_io::project_controller::load_state_event_ledger",
     ] {
@@ -9785,6 +9806,17 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         "fn should_continue_auto_queue(",
         "fn build_prompt(",
         "fn prompt_cache_routing_affinity(",
+        "struct RunStderrRedirect",
+        "struct RunHeartbeat",
+        "fn start_run_cycle(",
+        "fn mark_run_write_applied(",
+        "fn record_run_progress(",
+        "fn record_run_preflight_timeout(",
+        "fn abandon_run_recursive_cycle(",
+        "fn owned_pane_self_invocation_detail(",
+        "fn detect_owned_pane_self_invocation_with_options(",
+        "fn recursive_codex_start_invocation_diagnostic(",
+        "fn run_dispatch_timeout_diagnostic(",
     ] {
         assert!(
             !orchestration_source.contains(forbidden),
@@ -10359,6 +10391,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/run.rs",
             "agent-doc-run-io/src/lib.rs",
             "Move remaining direct-run prompt and queue tests into `agent-doc-run-io`",
+        ),
+        (
+            "Direct-run runtime and owner-pane IO graph",
+            "agent-doc-orchestration/src/run.rs",
+            "agent-doc-run-io/src/lib.rs",
+            "Split stderr redirection, cycle markers/heartbeat, owner-pane recursion, queue-edit deferral, and dispatch timeout helpers",
         ),
         (
             "Codex Stop continuation context IO graph",
@@ -12053,9 +12091,15 @@ fn test_agent_doc_diff_owns_semantic_diff_summary_policy() {
     );
     let orchestration_run =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let run_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     assert!(
-        orchestration_run.contains("agent_doc_diff::semantic::semantic_diff_summary("),
-        "orchestration run should call the focused semantic diff builder directly"
+        !orchestration_run.contains("agent_doc_diff::semantic::semantic_diff_summary("),
+        "orchestration run must not retain the owner-pane semantic diff policy call"
+    );
+    assert!(
+        run_io_source.contains("agent_doc_diff::semantic::semantic_diff_summary("),
+        "agent-doc-run-io should call the focused semantic diff builder directly"
     );
 }
 
@@ -21254,12 +21298,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && preflight_source.contains("agent_doc_project_root_io::project_root_containing("),
         "preflight should call focused project-root IO instead of owning drift/archive/claims root discovery"
     );
-    let run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let run_source = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     assert!(
         !run_source.contains("agent_doc_fs::find_project_root(")
             && run_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "run should call focused project-root IO instead of owning stderr/queue/actor root discovery"
+        "run IO should call focused project-root IO instead of owning stderr/queue/actor root discovery"
     );
     let repair_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();

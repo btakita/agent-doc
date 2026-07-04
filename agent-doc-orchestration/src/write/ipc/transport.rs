@@ -530,13 +530,11 @@ pub fn try_ipc(
                         file,
                         &repair_decision,
                         Some(&patch_id),
-                        |file, repaired_content, expected_bad_state, kind, source_patch_id| {
-                            redeliver_full_content_repair_to_editor(
+                        |file, repaired_content, expected_bad_state| {
+                            try_ipc_full_content_response_fallback_from_source(
                                 file,
                                 repaired_content,
                                 expected_bad_state,
-                                kind,
-                                source_patch_id,
                             )
                         },
                     )?;
@@ -1713,13 +1711,11 @@ pub(crate) fn write_ipc_and_poll(
             doc_file,
             &repair_decision,
             Some(patch_id),
-            |file, repaired_content, expected_bad_state, kind, source_patch_id| {
-                redeliver_full_content_repair_to_editor(
+            |file, repaired_content, expected_bad_state| {
+                try_ipc_full_content_response_fallback_from_source(
                     file,
                     repaired_content,
                     expected_bad_state,
-                    kind,
-                    source_patch_id,
                 )
             },
         )?;
@@ -4022,12 +4018,12 @@ Can you preserve the second paragraph too?
 mod late_fallback_patch_guard_tests {
     use super::{
         WriteFlags, cleanup_fallback_patch_files, cycle_already_committed,
-        recover_dedupe_only_drift, recover_empty_response_for_strict_closeout,
-        redeliver_ipc_dedupe_to_editor, try_ipc, try_ipc_full_content,
-        try_ipc_full_content_operator_mutation_from_source,
+        recover_dedupe_only_drift, recover_empty_response_for_strict_closeout, try_ipc,
+        try_ipc_full_content, try_ipc_full_content_operator_mutation_from_source,
     };
     use agent_doc_ipc_protocol::{
-        EditorBadStateFingerprint, IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource,
+        EditorBadStateFingerprint, FullContentRepairRedelivery, IpcDiskRepairReason,
+        IpcRepairDecision, IpcSnapshotSource,
     };
     use std::fs;
     use std::path::Path;
@@ -4649,7 +4645,20 @@ mod late_fallback_patch_guard_tests {
             "fake socket listener did not start"
         );
 
-        let delivered = redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
+        let delivered = agent_doc_write_converge_io::redeliver_full_content_repair_to_editor(
+            &doc,
+            repaired,
+            bad_state,
+            FullContentRepairRedelivery::IpcDedupe,
+            None,
+            &mut |file, repaired_content, expected_bad_state| {
+                super::try_ipc_full_content_response_fallback_from_source(
+                    file,
+                    repaired_content,
+                    expected_bad_state,
+                )
+            },
+        );
 
         assert!(!delivered, "full-content redelivery is disabled");
         assert_eq!(
@@ -4687,7 +4696,20 @@ mod late_fallback_patch_guard_tests {
         let repaired = "before\n### Re: issue — gpt-5\nDone.\n";
         fs::write(&doc, live_state).unwrap();
 
-        let delivered = redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
+        let delivered = agent_doc_write_converge_io::redeliver_full_content_repair_to_editor(
+            &doc,
+            repaired,
+            bad_state,
+            FullContentRepairRedelivery::IpcDedupe,
+            None,
+            &mut |file, repaired_content, expected_bad_state| {
+                super::try_ipc_full_content_response_fallback_from_source(
+                    file,
+                    repaired_content,
+                    expected_bad_state,
+                )
+            },
+        );
 
         assert!(
             !delivered,
@@ -4758,13 +4780,11 @@ mod late_fallback_patch_guard_tests {
             &doc,
             &decision,
             Some("source-patch"),
-            |file, repaired_content, expected_bad_state, kind, source_patch_id| {
-                super::redeliver_full_content_repair_to_editor(
+            |file, repaired_content, expected_bad_state| {
+                super::try_ipc_full_content_response_fallback_from_source(
                     file,
                     repaired_content,
                     expected_bad_state,
-                    kind,
-                    source_patch_id,
                 )
             },
         )
@@ -4842,10 +4862,19 @@ mod late_fallback_patch_guard_tests {
             "fake socket listener did not start"
         );
 
-        let delivered = redeliver_ipc_dedupe_to_editor(
+        let delivered = agent_doc_write_converge_io::redeliver_full_content_repair_to_editor(
             &doc,
             fixture.repaired_snapshot,
             fixture.bad_state_before_live_typing,
+            FullContentRepairRedelivery::IpcDedupe,
+            None,
+            &mut |file, repaired_content, expected_bad_state| {
+                super::try_ipc_full_content_response_fallback_from_source(
+                    file,
+                    repaired_content,
+                    expected_bad_state,
+                )
+            },
         );
 
         assert!(
@@ -5389,13 +5418,11 @@ Implemented.
             &doc,
             &decision,
             Some("live-drift-1"),
-            |file, repaired_content, expected_bad_state, kind, source_patch_id| {
-                super::redeliver_full_content_repair_to_editor(
+            |file, repaired_content, expected_bad_state| {
+                super::try_ipc_full_content_response_fallback_from_source(
                     file,
                     repaired_content,
                     expected_bad_state,
-                    kind,
-                    source_patch_id,
                 )
             },
         )
@@ -5460,13 +5487,11 @@ Implemented.
             &doc,
             &decision,
             Some("live-drift-2"),
-            |file, repaired_content, expected_bad_state, kind, source_patch_id| {
-                super::redeliver_full_content_repair_to_editor(
+            |file, repaired_content, expected_bad_state| {
+                super::try_ipc_full_content_response_fallback_from_source(
                     file,
                     repaired_content,
                     expected_bad_state,
-                    kind,
-                    source_patch_id,
                 )
             },
         )

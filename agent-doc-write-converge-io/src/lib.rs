@@ -1594,6 +1594,182 @@ pub fn redeliver_normalization_fallback_to_editor(
     full_content_fallback(file, repaired_content, expected_bad_state, source_patch_id)
 }
 
+pub fn redeliver_full_content_repair_to_editor(
+    file: &Path,
+    repaired_content: &str,
+    expected_bad_state: &str,
+    kind: FullContentRepairRedelivery,
+    source_patch_id: Option<&str>,
+    try_full_content_response_fallback: &mut dyn FnMut(&Path, &str, &str) -> Result<bool>,
+) -> bool {
+    let current_content = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!(
+                "[write] WARNING: {} editor repair skipped because {} could not be read: {}",
+                kind.label(),
+                file.display(),
+                e
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{}_editor_redelivery_skipped file={} patch_id={} skip=read_failed error={}",
+                    kind.label(),
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    e
+                ),
+            );
+            return false;
+        }
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{}_editor_redelivery_proof file={} patch_id={} proof_source=bad_editor_state expected_len={} expected_hash={} current_len={} current_hash={} redeliver={}",
+            kind.label(),
+            file.display(),
+            source_patch_id.unwrap_or("-"),
+            expected_bad_state.len(),
+            agent_doc_hash::content_hash(expected_bad_state),
+            current_content.len(),
+            agent_doc_hash::content_hash(&current_content),
+            current_content == expected_bad_state
+        ),
+    );
+    let source_buffer_matches = current_content == expected_bad_state;
+    let authority = if source_buffer_matches
+        && redelivery_missing_operator_text_authority(
+            file,
+            expected_bad_state,
+            kind.label(),
+            source_patch_id,
+        ) {
+        WholeBufferAuthority::None
+    } else {
+        WholeBufferAuthority::OperatorTextAuthority
+    };
+    let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+        delivery: WholeBufferDelivery::EditorRepairRedelivery,
+        authority,
+        source_buffer_matches,
+        scope_rejection: None,
+        enabled: true,
+    });
+    if decision.action != WholeBufferDeliveryAction::Apply {
+        if !source_buffer_matches {
+            eprintln!(
+                "[write] {} editor repair skipped: visible buffer no longer matches the bad state",
+                kind.label()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{}_editor_redelivery_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={} table_reason={}",
+                    kind.label(),
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    expected_bad_state.len(),
+                    agent_doc_hash::content_hash(expected_bad_state),
+                    current_content.len(),
+                    agent_doc_hash::content_hash(&current_content),
+                    decision.reason
+                ),
+            );
+        } else if decision.reason != "missing_operator_text_authority" {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{}_editor_redelivery_skipped file={} patch_id={} skip=authority_table action={} reason={} authority={}",
+                    kind.label(),
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    decision.action.as_str(),
+                    decision.reason,
+                    authority.as_str()
+                ),
+            );
+        }
+        return false;
+    }
+
+    let indicator_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    if let Some(live) =
+        agent_doc_debounce::live_buffer_diverges_from_content(&indicator_path, expected_bad_state)
+    {
+        eprintln!(
+            "[write] {} editor repair skipped: live editor buffer has unsaved edits ahead of the bad state",
+            kind.label()
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{}_editor_redelivery_skipped file={} patch_id={} skip=live_buffer_diverges expected_len={} expected_hash={} live_len={} live_hash={}",
+                kind.label(),
+                file.display(),
+                source_patch_id.unwrap_or("-"),
+                expected_bad_state.len(),
+                agent_doc_hash::content_hash(expected_bad_state),
+                live.len,
+                live.hash
+            ),
+        );
+        return false;
+    }
+
+    match try_full_content_response_fallback(file, repaired_content, expected_bad_state) {
+        Ok(true) => {
+            eprintln!("{}", kind.success_message());
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{}_redelivered_editor file={} patch_id={} bytes={} expected_bad_len={} expected_bad_hash={}",
+                    kind.label(),
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    repaired_content.len(),
+                    expected_bad_state.len(),
+                    agent_doc_hash::content_hash(expected_bad_state)
+                ),
+            );
+            true
+        }
+        Ok(false) => {
+            eprintln!("{}", kind.not_consumed_message());
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{}_editor_repair_not_consumed file={} patch_id={} bytes={}",
+                    kind.label(),
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    repaired_content.len()
+                ),
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("{}", kind.failed_message(&e));
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{}_editor_repair_failed file={} patch_id={} error={}",
+                    kind.label(),
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    e
+                ),
+            );
+            false
+        }
+    }
+}
+
 fn log_ipc_proof_failure_with_recycle(
     file: &Path,
     source: &str,
@@ -1635,13 +1811,7 @@ pub fn repair_ipc_decision_visible_state(
     file: &Path,
     decision: &IpcRepairDecision,
     patch_id: Option<&str>,
-    mut redeliver_full_content: impl FnMut(
-        &Path,
-        &str,
-        &str,
-        FullContentRepairRedelivery,
-        Option<&str>,
-    ) -> bool,
+    mut try_full_content_response_fallback: impl FnMut(&Path, &str, &str) -> Result<bool>,
 ) -> Result<()> {
     let Some(reason) = decision.disk_repair_reason else {
         return Ok(());
@@ -1696,23 +1866,25 @@ pub fn repair_ipc_decision_visible_state(
                 &decision.normalize_prefix_lines,
                 patch_id,
                 |file, repaired_content, expected_bad_state, source_patch_id| {
-                    redeliver_full_content(
+                    redeliver_full_content_repair_to_editor(
                         file,
                         repaired_content,
                         expected_bad_state,
                         FullContentRepairRedelivery::NormalizationFallback,
                         source_patch_id,
+                        &mut try_full_content_response_fallback,
                     )
                 },
             ),
             IpcDiskRepairReason::IpcDedupe
             | IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe
-            | IpcDiskRepairReason::LivePromptDrift => redeliver_full_content(
+            | IpcDiskRepairReason::LivePromptDrift => redeliver_full_content_repair_to_editor(
                 file,
                 &decision.snapshot_content,
                 expected_bad_state.content(),
                 reason.redelivery_kind(),
                 patch_id,
+                &mut try_full_content_response_fallback,
             ),
         }
     {

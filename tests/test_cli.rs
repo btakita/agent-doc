@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 71,
+        ledger_rows.len() >= 72,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10190,19 +10190,25 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Write IPC normalization redelivery IO graph",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Split the remaining full-content visible repair redelivery",
+            "Split disabled full-content transport guard/cycle cleanup",
         ),
         (
             "Write IPC sidecar repair-decision builder",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Move full-content visible redelivery",
+            "Move disabled full-content transport",
         ),
         (
             "Write IPC visible-state repair IO graph",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Split full-content visible repair redelivery",
+            "Split disabled full-content transport",
+        ),
+        (
+            "Write IPC full-content redelivery proof IO graph",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Move disabled full-content transport",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -25964,6 +25970,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn try_ipc_normalization_repair_patch(",
         "pub fn redeliver_normalization_fallback_to_editor(",
         "pub fn repair_ipc_decision_visible_state(",
+        "pub fn redeliver_full_content_repair_to_editor(",
     ] {
         assert!(
             write_converge_io.contains(required_snippet),
@@ -26031,6 +26038,8 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub(crate) fn try_ipc_normalization_repair_patch(",
         "pub(crate) fn redeliver_normalization_fallback_to_editor(",
         "pub(crate) fn repair_ipc_decision_visible_state(",
+        "pub(crate) fn redeliver_full_content_repair_to_editor(",
+        "pub(crate) fn redeliver_ipc_dedupe_to_editor(",
     ] {
         assert!(
             !converge.contains(forbidden_snippet) && !write_ipc.contains(forbidden_snippet),

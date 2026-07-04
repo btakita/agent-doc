@@ -3,11 +3,9 @@
 use super::*;
 use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;
 use agent_doc_document_realtime::write_policy::{
-    WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
-    WholeBufferDeliveryAction, ack_content_contains_latest_response, decide_whole_buffer_delivery,
-    dropped_prompt_lines_after_content_ours, first_response_heading,
-    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, new_agent_response_headings,
-    response_already_in_current, response_converged_in_visible_target,
+    ack_content_contains_latest_response, dropped_prompt_lines_after_content_ours,
+    first_response_heading, ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
+    new_agent_response_headings, response_already_in_current, response_converged_in_visible_target,
     response_target_disjoint_from_user_edit,
 };
 #[cfg(test)]
@@ -18,8 +16,8 @@ use agent_doc_element_exchange::{
     normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
 };
 use agent_doc_ipc_protocol::{
-    AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentRepairRedelivery,
-    IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource,
+    AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, IpcDiskRepairReason,
+    IpcRepairDecision, IpcSnapshotSource,
 };
 use agent_doc_template::response_materialization::{
     extract_response_headings_from_patches, response_materialization_probe_from_response,
@@ -1228,13 +1226,11 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         file,
         &repair_decision,
         Some(patch_id),
-        |file, repaired_content, expected_bad_state, kind, source_patch_id| {
-            redeliver_full_content_repair_to_editor(
+        |file, repaired_content, expected_bad_state| {
+            try_ipc_full_content_response_fallback_from_source(
                 file,
                 repaired_content,
                 expected_bad_state,
-                kind,
-                source_patch_id,
             )
         },
     )?;
@@ -1281,209 +1277,6 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         ),
     );
     Ok(AlreadyAppliedSnapshotOutcome::Persisted)
-}
-
-pub(crate) fn redeliver_full_content_repair_to_editor(
-    file: &Path,
-    repaired_content: &str,
-    expected_bad_state: &str,
-    kind: FullContentRepairRedelivery,
-    source_patch_id: Option<&str>,
-) -> bool {
-    let current_content = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!(
-                "[write] WARNING: {} editor repair skipped because {} could not be read: {}",
-                kind.label(),
-                file.display(),
-                e
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{}_editor_redelivery_skipped file={} patch_id={} skip=read_failed error={}",
-                    kind.label(),
-                    file.display(),
-                    source_patch_id.unwrap_or("-"),
-                    e
-                ),
-            );
-            return false;
-        }
-    };
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "{}_editor_redelivery_proof file={} patch_id={} proof_source=bad_editor_state expected_len={} expected_hash={} current_len={} current_hash={} redeliver={}",
-            kind.label(),
-            file.display(),
-            source_patch_id.unwrap_or("-"),
-            expected_bad_state.len(),
-            agent_doc_hash::content_hash(expected_bad_state),
-            current_content.len(),
-            agent_doc_hash::content_hash(&current_content),
-            current_content == expected_bad_state
-        ),
-    );
-    let source_buffer_matches = current_content == expected_bad_state;
-    let authority = if source_buffer_matches
-        && agent_doc_write_converge_io::redelivery_missing_operator_text_authority(
-            file,
-            expected_bad_state,
-            kind.label(),
-            source_patch_id,
-        ) {
-        WholeBufferAuthority::None
-    } else {
-        WholeBufferAuthority::OperatorTextAuthority
-    };
-    let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
-        delivery: WholeBufferDelivery::EditorRepairRedelivery,
-        authority,
-        source_buffer_matches,
-        scope_rejection: None,
-        enabled: true,
-    });
-    if decision.action != WholeBufferDeliveryAction::Apply {
-        if !source_buffer_matches {
-            eprintln!(
-                "[write] {} editor repair skipped: visible buffer no longer matches the bad state",
-                kind.label()
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{}_editor_redelivery_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={} table_reason={}",
-                    kind.label(),
-                    file.display(),
-                    source_patch_id.unwrap_or("-"),
-                    expected_bad_state.len(),
-                    agent_doc_hash::content_hash(expected_bad_state),
-                    current_content.len(),
-                    agent_doc_hash::content_hash(&current_content),
-                    decision.reason
-                ),
-            );
-        } else if decision.reason != "missing_operator_text_authority" {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{}_editor_redelivery_skipped file={} patch_id={} skip=authority_table action={} reason={} authority={}",
-                    kind.label(),
-                    file.display(),
-                    source_patch_id.unwrap_or("-"),
-                    decision.action.as_str(),
-                    decision.reason,
-                    authority.as_str()
-                ),
-            );
-        }
-        return false;
-    }
-
-    // #clearexchstale / #dvre: the disk check above proves DISK still matches the
-    // bad state, but the live editor buffer can diverge from disk while disk lags
-    // (the plugin applies edits to the in-memory Document first). When the operator
-    // has freshly edited the buffer — e.g. cleared the exchange or deleted a typed
-    // prompt — redelivering the stale snapshot over it REVIVES the deleted content.
-    // Fail closed on a proven live-buffer divergence from the bad state: the
-    // operator's unsaved edits win over a stale repair. `live_buffer_diverges_from_content`
-    // is provenance-aware (it ignores a buffer digest that merely lags a newer disk
-    // write), so this only suppresses genuine unsaved editor edits ahead of disk.
-    let indicator_path = file
-        .canonicalize()
-        .unwrap_or_else(|_| file.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    if let Some(live) =
-        agent_doc_debounce::live_buffer_diverges_from_content(&indicator_path, expected_bad_state)
-    {
-        eprintln!(
-            "[write] {} editor repair skipped: live editor buffer has unsaved edits ahead of the bad state",
-            kind.label()
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "{}_editor_redelivery_skipped file={} patch_id={} skip=live_buffer_diverges expected_len={} expected_hash={} live_len={} live_hash={}",
-                kind.label(),
-                file.display(),
-                source_patch_id.unwrap_or("-"),
-                expected_bad_state.len(),
-                agent_doc_hash::content_hash(expected_bad_state),
-                live.len,
-                live.hash
-            ),
-        );
-        return false;
-    }
-
-    match try_ipc_full_content_response_fallback_from_source(
-        file,
-        repaired_content,
-        expected_bad_state,
-    ) {
-        Ok(true) => {
-            eprintln!("{}", kind.success_message());
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{}_redelivered_editor file={} patch_id={} bytes={} expected_bad_len={} expected_bad_hash={}",
-                    kind.label(),
-                    file.display(),
-                    source_patch_id.unwrap_or("-"),
-                    repaired_content.len(),
-                    expected_bad_state.len(),
-                    agent_doc_hash::content_hash(expected_bad_state)
-                ),
-            );
-            true
-        }
-        Ok(false) => {
-            eprintln!("{}", kind.not_consumed_message());
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{}_editor_repair_not_consumed file={} patch_id={} bytes={}",
-                    kind.label(),
-                    file.display(),
-                    source_patch_id.unwrap_or("-"),
-                    repaired_content.len()
-                ),
-            );
-            false
-        }
-        Err(e) => {
-            eprintln!("{}", kind.failed_message(&e));
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{}_editor_repair_failed file={} patch_id={} error={}",
-                    kind.label(),
-                    file.display(),
-                    source_patch_id.unwrap_or("-"),
-                    e
-                ),
-            );
-            false
-        }
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn redeliver_ipc_dedupe_to_editor(
-    file: &Path,
-    content: &str,
-    expected_bad_state: &str,
-) -> bool {
-    redeliver_full_content_repair_to_editor(
-        file,
-        content,
-        expected_bad_state,
-        FullContentRepairRedelivery::IpcDedupe,
-        None,
-    )
 }
 
 pub fn dedupe_ipc_snapshot_content(
@@ -1674,12 +1467,19 @@ mod ack_content_snapshot_tests {
             normalize_prefix_lines,
             source_patch_id,
             |file, repaired_content, expected_bad_state, source_patch_id| {
-                redeliver_full_content_repair_to_editor(
+                agent_doc_write_converge_io::redeliver_full_content_repair_to_editor(
                     file,
                     repaired_content,
                     expected_bad_state,
-                    FullContentRepairRedelivery::NormalizationFallback,
+                    agent_doc_ipc_protocol::FullContentRepairRedelivery::NormalizationFallback,
                     source_patch_id,
+                    &mut |file, repaired_content, expected_bad_state| {
+                        try_ipc_full_content_response_fallback_from_source(
+                            file,
+                            repaired_content,
+                            expected_bad_state,
+                        )
+                    },
                 )
             },
         )
@@ -1754,7 +1554,10 @@ mod ack_content_snapshot_tests {
         let proof = ack_content_disk_write_proof(&doc, Some(editor_id), ack_content);
         updater.join().unwrap();
 
-        assert_eq!(proof.authority, WholeBufferAuthority::OperatorTextAuthority);
+        assert_eq!(
+            proof.authority,
+            agent_doc_document_realtime::write_policy::WholeBufferAuthority::OperatorTextAuthority
+        );
         assert!(
             !proof.source_buffer_matches,
             "ACK-content must not remain authoritative after active typing publishes a newer editor buffer"
@@ -3468,7 +3271,20 @@ Stale response that the operator cleared.
         .unwrap();
 
         let repaired = bad_state; // the stale snapshot the repair would re-apply
-        let delivered = redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
+        let delivered = agent_doc_write_converge_io::redeliver_full_content_repair_to_editor(
+            &doc,
+            repaired,
+            bad_state,
+            agent_doc_ipc_protocol::FullContentRepairRedelivery::IpcDedupe,
+            None,
+            &mut |file, repaired_content, expected_bad_state| {
+                try_ipc_full_content_response_fallback_from_source(
+                    file,
+                    repaired_content,
+                    expected_bad_state,
+                )
+            },
+        );
 
         assert!(
             !delivered,

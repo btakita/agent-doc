@@ -162,8 +162,8 @@ use std::time::Instant;
 use agent_doc_controller::dispatch::dispatch_only_starting_pane_ready_timeout_for_binary;
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
-    ActorDispatchState, CloseoutBlockDispatchDecision, DispatchOnlyReopenDelivery,
-    StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
+    ActorDispatchState, CloseoutBlockDispatchDecision, StartingTimeoutActorFacts,
+    actor_blocked_by_starting_timeout,
 };
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
@@ -178,10 +178,6 @@ use agent_doc_controller::dispatch::{
     busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
 };
 #[cfg(test)]
-use agent_doc_controller::dispatch::{
-    DegradedAuthoritativeActorDirectSubmit, degraded_authoritative_actor_direct_submit_log_message,
-};
-#[cfg(test)]
 use agent_doc_controller_io::starting_actor_timeout::{
     StartingActorTimeoutLogDecision, clear_starting_actor_timeout_record,
     record_starting_actor_timeout, starting_actor_timeout_record_identity_matches,
@@ -190,20 +186,15 @@ use agent_doc_controller_io::starting_actor_timeout::{
 use agent_doc_harness::HarnessConfig;
 #[cfg(test)]
 use agent_doc_route_io::authoritative_actor::{
-    AuthoritativeActorDispatchTarget, RouteDispatchAuthorization, actor_dispatch_state,
-    authorize_controller_dispatch, load_authoritative_actor_binding, route_dispatch_deduped_pane,
+    AuthoritativeActorDispatchTarget, actor_dispatch_state,
 };
 #[cfg(test)]
 use agent_doc_route_io::authoritative_actor::{
     ManagedCapabilityProofStatus, authoritative_actor_dispatch_can_queue_optimistically,
-    authoritative_actor_start_wait_terminal_state,
-    dispatch_only_can_use_degraded_authoritative_actor, load_authoritative_actor_dispatch_target,
-    load_authoritative_actor_for_registered_pane, managed_capability_proof_status,
+    authoritative_actor_start_wait_terminal_state, managed_capability_proof_status,
     route_starting_actor_not_ready_log_line, tracked_harness_clear_requires_fresh_restart,
 };
 use agent_doc_route_io::authoritative_dispatch::RouteAuthoritativeActorEffects;
-#[cfg(test)]
-use agent_doc_route_io::authoritative_dispatch::route_via_authoritative_actor;
 use agent_doc_route_io::closeout_drain::RouteCloseoutDrainEffects;
 #[cfg(test)]
 use agent_doc_route_io::closeout_drain::{
@@ -214,8 +205,6 @@ pub use agent_doc_route_io::command::RouteMode;
 use agent_doc_route_io::cycle_ack::RouteCycleAckEffects;
 #[cfg(test)]
 use agent_doc_route_io::cycle_ack::pending_prompt_bearing_context_for_route;
-#[cfg(test)]
-pub(crate) use agent_doc_route_io::cycle_ack::require_routed_cycle_ack;
 use agent_doc_route_io::diagnostics::{
     RouteDispatchBugReportEffects, emit_busy_route_diagnostic, emit_busy_route_queued_diagnostic,
     emit_busy_route_queued_diagnostic_from_facts, emit_startup_miss_diagnostic,
@@ -224,12 +213,8 @@ use agent_doc_route_io::diagnostics::{
 #[cfg(test)]
 use agent_doc_route_io::direct_pane_dispatch::editor_route_attempt_id;
 #[cfg(test)]
-use agent_doc_route_io::dispatch::dispatch_existing_managed_reopen;
-#[cfg(test)]
 use agent_doc_route_io::dispatch::send_command_checked;
 use agent_doc_route_io::dispatch::{RouteDispatchBugReportFacts, RouteDispatchEffects};
-#[cfg(test)]
-use agent_doc_route_io::dispatch_only::dispatch_only_reopen_existing_pane;
 pub(crate) use agent_doc_route_io::dispatch_only::{
     DispatchOnlyQueuedPromptOutcome, DispatchOnlyRouteEffects,
 };
@@ -241,20 +226,13 @@ use agent_doc_route_io::document_prep::RouteDocumentPrepEffects;
 #[cfg(test)]
 use agent_doc_route_io::document_prep::scrub_duplicate_prompt_comments_for_route;
 #[cfg(test)]
-use agent_doc_route_io::launch_contract::reapply_codex_launch_contract_before_reuse;
-#[cfg(test)]
-use agent_doc_route_io::pane_provenance::pane_route_provenance;
-#[cfg(test)]
 use agent_doc_route_io::pane_resolution::cleanup_failed_route_panes;
 #[cfg(test)]
 use agent_doc_route_io::pane_resolution::should_preserve_failed_route_pane;
+#[cfg(test)]
+use agent_doc_route_io::pane_resolution::startup_miss_route_facts;
 use agent_doc_route_io::pane_resolution::{
     ManagedPaneResolutionEffects, RouteBusyPaneRetryEffects,
-};
-#[cfg(test)]
-use agent_doc_route_io::pane_resolution::{
-    fail_if_recent_session_loss_window, is_agent_process, startup_miss_route_facts,
-    startup_miss_route_provenance,
 };
 use agent_doc_route_io::queue_dispatch::{RouteQueueEffects, enqueue_route_dispatch_prompt};
 #[cfg(test)]
@@ -264,21 +242,15 @@ use agent_doc_route_io::queue_dispatch::{
 };
 use agent_doc_route_io::startup::RouteStartupEffects;
 #[cfg(test)]
-use agent_doc_route_io::supervisor_runtime::{query_supervisor_health, restart_via_supervisor};
-#[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::pane_registration_matches_file;
 #[cfg(test)]
 use agent_doc_supervisor::route_runtime::SupervisorHealth;
 #[cfg(test)]
-use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason;
-#[cfg(test)]
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
 #[cfg(test)]
 use agent_doc_supervisor::route_runtime::{RouteActorState, SupervisorRuntime};
-#[cfg(test)]
-use agent_doc_tmux::is_first_column;
 use agent_doc_turn::closeout_recovery::{CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput};
 use tmux_router::Tmux;
 

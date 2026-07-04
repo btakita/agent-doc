@@ -9715,7 +9715,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 83,
+        ledger_rows.len() >= 84,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10408,6 +10408,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/converge.rs",
             "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
             "Split the test-only convergence effects adapter by durable sidecar family",
+        ),
+        (
+            "Route pane-resolution test adapter delegation",
+            "agent-doc-orchestration/src/route/pane_resolution.rs",
+            "agent-doc-route-io/src/pane_resolution.rs::resolve_or_create_pane*",
+            "Move the retained pane-resolution tests into `agent-doc-route-io`",
         ),
         (
             "Codex hook user-prompt-submit tracking IO graph",
@@ -14869,7 +14875,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .exists()
             && !route_source.contains("mod busy_pane;")
             && !route_source.contains("pub(crate) use agent_doc_route_io::busy_pane::{")
-            && route_pane_resolution_source.contains("agent_doc_route_io::busy_pane::{")
+            && route_pane_resolution_io_source.contains("use crate::busy_pane::{")
             && route_busy_pane_source.contains("pub fn ensure_existing_pane_ready_for_dispatch("),
         "orchestration must not keep or re-export a busy-pane route module after the graph moves to agent-doc-route-io"
     );
@@ -14893,6 +14899,15 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && !route_pane_resolution_source.contains("fn rescue_from_stash(")
             && !route_pane_resolution_source.contains("fn optimistic_busy_pane_dispatch(")
             && !route_pane_resolution_source.contains("fn retry_route_after_busy_pane_auto_fix(")
+            && route_pane_resolution_source.contains(
+                "agent_doc_route_io::pane_resolution::resolve_or_create_pane_dispatch_only("
+            )
+            && route_pane_resolution_source.contains(
+                "agent_doc_route_io::pane_resolution::resolve_or_create_pane("
+            )
+            && route_pane_resolution_source.contains(
+                "agent_doc_route_io::pane_resolution::resolve_or_create_pane_with_auto_fix_retry("
+            )
             && route_pane_resolution_source.contains(
                 "#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub(crate) fn resolve_or_create_pane_dispatch_only("
             )
@@ -15191,14 +15206,21 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "busy-pane user-facing error formatting should live in controller dispatch and route callers should use it directly"
     );
     assert!(
-        route_pane_resolution_source.contains("startup_miss_route_facts(")
-            && route_pane_resolution_io_source.contains("StartupMissRouteFacts")
-            && route_pane_resolution_source.contains("startup_miss_requires_fresh_start(")
-            && route_pane_resolution_source
+        !route_pane_resolution_source.contains("startup_miss_route_facts(")
+            && !route_pane_resolution_source.contains("startup_miss_requires_fresh_start(")
+            && !route_pane_resolution_source
                 .contains("startup_miss_superseded_by_later_open_start(")
-            && route_pane_resolution_source.contains("startup_miss_should_restart_live_owner(")
-            && route_pane_resolution_source.contains("startup_miss_should_fail_closed("),
-        "route pane resolution should adapt startup-miss sidecars into focused controller policy"
+            && !route_pane_resolution_source.contains("startup_miss_should_restart_live_owner(")
+            && !route_pane_resolution_source.contains("startup_miss_should_fail_closed(")
+            && route_pane_resolution_source
+                .contains("agent_doc_route_io::pane_resolution::resolve_or_create_pane(")
+            && route_pane_resolution_io_source.contains("StartupMissRouteFacts")
+            && route_pane_resolution_io_source.contains("startup_miss_requires_fresh_start(")
+            && route_pane_resolution_io_source
+                .contains("startup_miss_superseded_by_later_open_start(")
+            && route_pane_resolution_io_source.contains("startup_miss_should_restart_live_owner(")
+            && route_pane_resolution_io_source.contains("startup_miss_should_fail_closed("),
+        "route pane resolution should adapt startup-miss sidecars in route IO while orchestration only forwards retained tests"
     );
     assert!(
         route_startup_source.contains("DuplicatePanePolicyErrorFacts")
@@ -16968,7 +16990,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "agent_doc_supervisor_io::startup_miss::superseded_by_newer_registered_start(",
         ),
         (
-            "agent-doc-orchestration/src/route/pane_resolution.rs",
+            "agent-doc-route-io/src/pane_resolution.rs",
             "agent_doc_supervisor_io::startup_miss::superseded_by_newer_registered_start(",
         ),
     ] {
@@ -16984,7 +17006,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-sync-io/src/sync.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-session-check-io/src/command.rs",
-        "agent-doc-orchestration/src/route/pane_resolution.rs",
+        "agent-doc-route-io/src/pane_resolution.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -19324,6 +19346,8 @@ fn test_agent_doc_tmux_owns_editor_column_split_policy() {
 
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_pane_resolution_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
     let sync_source =
         fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     let pane_repair_source =
@@ -19347,8 +19371,8 @@ fn test_agent_doc_tmux_owns_editor_column_split_policy() {
         );
     }
     assert!(
-        route_source.contains("use agent_doc_tmux::is_first_column;"),
-        "route.rs should import editor column split policy from agent-doc-tmux directly"
+        route_pane_resolution_source.contains("use agent_doc_tmux::is_first_column;"),
+        "route pane-resolution IO should import editor column split policy from agent-doc-tmux directly"
     );
     assert!(
         sync_source.contains("auto_start_candidate_files")

@@ -612,7 +612,7 @@ pub fn resolve_or_create_pane(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn resolve_or_create_pane_with_auto_fix_retry(
+pub fn resolve_or_create_pane_with_auto_fix_retry(
     tmux: &Tmux,
     file: &Path,
     pane: Option<&str>,

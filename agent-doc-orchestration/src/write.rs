@@ -1906,19 +1906,6 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
     }
 }
 
-pub fn repair_commit_prompt_artifacts_against_snapshot(
-    file: &Path,
-    snapshot: &str,
-    current: &str,
-) -> Option<String> {
-    agent_doc_element_exchange_io::repair_commit_prompt_artifacts_against_snapshot_with_log(
-        file,
-        snapshot,
-        current,
-        agent_doc_ops_log_io::log_op,
-    )
-}
-
 fn log_duplicate_prompt_residue_guard(file: &Path) {
     log_template_structure_guard_event(
         file,

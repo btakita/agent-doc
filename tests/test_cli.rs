@@ -23548,10 +23548,12 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         !git_source.contains("mod normalize;") && !git_source.contains("pub use normalize"),
         "git.rs must call document commit normalization directly, not keep a facade module"
     );
+    let git_pre_stage_repair =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/pre_stage_repair.rs")).unwrap();
     assert!(
-        git_source.contains("exchange_prompt_prefix_equivalent")
+        git_pre_stage_repair.contains("exchange_prompt_prefix_equivalent")
             && git_source.contains("repair_stale_agent_response_collapse_doc"),
-        "git.rs should keep only commit/worktree adapters over focused transient-marker repair policy"
+        "git-io pre-stage repair and git.rs worktree adapters should call focused transient-marker repair policy"
     );
     let realtime_write_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))

@@ -810,8 +810,10 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-document",
+ "agent-doc-element-exchange-io",
  "agent-doc-git",
  "agent-doc-hash",
+ "agent-doc-turn",
  "anyhow",
  "fs2",
  "tempfile",

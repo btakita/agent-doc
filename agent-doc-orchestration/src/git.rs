@@ -80,11 +80,11 @@ use agent_doc_document::commit_normalization::{
     canonicalize_answered_prompt_prefixes, normalize_committed_exchange_artifacts,
 };
 use agent_doc_document::transient_markers::{
-    exchange_prompt_prefix_equivalent, normalize_for_replay_hash,
-    normalize_post_commit_re_heading_drift, normalize_transient_agent_doc_markers,
-    repair_stale_agent_response_collapse_doc, strip_guard_markers, strip_head_markers,
+    normalize_for_replay_hash, normalize_post_commit_re_heading_drift,
+    normalize_transient_agent_doc_markers, repair_stale_agent_response_collapse_doc,
+    strip_guard_markers, strip_head_markers,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashSet;
 #[cfg(test)]
 use std::fs;
@@ -112,6 +112,27 @@ use agent_doc_queue_io::queue_consume;
 pub struct CommitOutcome {
     pub did_commit: bool,
     pub vcs_refresh_signaled: Option<bool>,
+}
+
+struct OrchestrationCommitPreStageRepairEffects;
+
+static COMMIT_PRE_STAGE_REPAIR_EFFECTS: OrchestrationCommitPreStageRepairEffects =
+    OrchestrationCommitPreStageRepairEffects;
+
+impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
+    for OrchestrationCommitPreStageRepairEffects
+{
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        crate::write::atomic_write_pub(file, content)
+    }
+
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
 }
 
 /// Commit a file with an auto-generated message. Skips hooks.
@@ -396,7 +417,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         }
     }
 
-    dedupe_snapshot_and_worktree_before_commit(file, &mut snapshot_content, &mut file_content)?;
+    agent_doc_git_io::pre_stage_repair::dedupe_snapshot_and_worktree_before_commit(
+        &COMMIT_PRE_STAGE_REPAIR_EFFECTS,
+        file,
+        &mut snapshot_content,
+        &mut file_content,
+    )?;
 
     let mut snapshot_matches_head = snapshot_content
         .as_deref()
@@ -758,7 +784,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         snapshot_content = Some(reloaded);
     }
     file_content = std::fs::read_to_string(file).unwrap_or_default();
-    dedupe_snapshot_and_worktree_before_commit(file, &mut snapshot_content, &mut file_content)?;
+    agent_doc_git_io::pre_stage_repair::dedupe_snapshot_and_worktree_before_commit(
+        &COMMIT_PRE_STAGE_REPAIR_EFFECTS,
+        file,
+        &mut snapshot_content,
+        &mut file_content,
+    )?;
     ensure_no_live_editor_buffer_ahead_of_disk(
         file,
         &file_content,
@@ -1051,85 +1082,6 @@ fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
     let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
     signal_file.parent().filter(|p| p.exists())?;
     Some(signal_file)
-}
-
-fn dedupe_snapshot_and_worktree_before_commit(
-    file: &Path,
-    snapshot_content: &mut Option<String>,
-    file_content: &mut String,
-) -> Result<()> {
-    let Some(snapshot) = snapshot_content.as_deref() else {
-        return Ok(());
-    };
-    let deduped_snapshot = agent_doc_turn::response_replay::dedupe_responses(snapshot);
-    if deduped_snapshot != snapshot {
-        eprintln!(
-            "[commit] deduped consecutive duplicate response block(s) before staging {}",
-            file.display()
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "commit_pre_stage_dedupe file={} before_commit=true",
-                file.display()
-            ),
-        );
-        agent_doc_snapshot_io::save(file, &deduped_snapshot, agent_doc_ops_log_io::log_op)?;
-        *snapshot_content = Some(deduped_snapshot);
-    }
-
-    let deduped_file = agent_doc_turn::response_replay::dedupe_responses(file_content);
-    if deduped_file != *file_content {
-        crate::write::atomic_write_pub(file, &deduped_file).with_context(|| {
-            format!(
-                "failed to repair duplicate response blocks in {}",
-                file.display()
-            )
-        })?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "commit_pre_stage_dedupe_repaired_worktree file={} before_commit=true",
-                file.display()
-            ),
-        );
-        *file_content = deduped_file;
-    }
-
-    if let Some(snapshot) = snapshot_content.as_deref()
-        && let Some(repaired_file) = crate::write::repair_commit_prompt_artifacts_against_snapshot(
-            file,
-            snapshot,
-            file_content,
-        )
-    {
-        let mut snapshot_updated = false;
-        if exchange_prompt_prefix_equivalent(snapshot, &repaired_file) {
-            let clean_snapshot = strip_head_markers(&repaired_file);
-            agent_doc_snapshot_io::save(file, &clean_snapshot, agent_doc_ops_log_io::log_op)?;
-            *snapshot_content = Some(clean_snapshot);
-            snapshot_updated = true;
-        }
-        if repaired_file != *file_content {
-            crate::write::atomic_write_pub(file, &repaired_file).with_context(|| {
-                format!(
-                    "failed to repair duplicate prompt artifacts in {}",
-                    file.display()
-                )
-            })?;
-            *file_content = repaired_file;
-        }
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "commit_pre_stage_prompt_duplicate_repaired file={} snapshot_updated={} before_commit=true",
-                file.display(),
-                snapshot_updated
-            ),
-        );
-    }
-
-    Ok(())
 }
 
 /// Strip ephemeral guard markers from the snapshot and working-tree file on disk.

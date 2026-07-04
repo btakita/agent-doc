@@ -3375,6 +3375,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "agent-doc-hash",
         "agent-doc-ops-log-io",
         "agent-doc-project-root-io",
+        "agent-doc-session-check-io",
         "agent-doc-snapshot-io",
         "agent-doc-template-io",
         "agent-doc-turn",
@@ -3403,6 +3404,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "pub fn repair_committed_historical_snapshot_drift(",
         "pub fn recover_missing_commit_boundary(",
         "pub fn repair_completed_backlog_items(",
+        "pub fn repair_stale_preflight_started_cycle(",
         "pub fn cancel_preflight_cycle(",
         "pub fn historical_committed_capture_replay(",
         "pub fn visible_response_patch_from_document(",
@@ -3415,6 +3417,8 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "agent_doc_git_io::revision::show_head(",
         "agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(",
         "agent_doc_element_backlog::backlog::reap_with_items(",
+        "agent_doc_session_check_io::detect_bypassed_response_write(",
+        "agent_doc_session_check_io::first_unstarted_prompt_bearing_change(",
         "agent_doc_flow_io::closeout::log_closeout_guard_event(",
         "agent_doc_frontmatter::frontmatter::parse(",
     ] {
@@ -3462,6 +3466,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "pub fn save_pending(",
         "pub fn clear_pending(",
         "pub fn recover_missing_commit_boundary(",
+        "pub fn repair_stale_preflight_started_cycle(",
         "pub fn cancel_preflight_cycle(",
         "fn historical_committed_capture_replay(",
         "fn visible_response_patch_from_document(",
@@ -3485,7 +3490,8 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     );
     assert!(
         repair.contains("agent_doc_repair_io::recover_missing_commit_boundary(")
-            && repair.contains("agent_doc_repair_io::repair_completed_backlog_items("),
+            && repair.contains("agent_doc_repair_io::repair_completed_backlog_items(")
+            && repair.contains("agent_doc_repair_io::repair_stale_preflight_started_cycle("),
         "repair.rs should route recovery repair graphs through focused repair IO"
     );
     assert!(
@@ -10507,6 +10513,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
             "Split commit-boundary, preflight-cancel, replay detection, and backlog reap effects",
+        ),
+        (
+            "Repair stale preflight recovery IO graph",
+            "agent-doc-orchestration/src/repair.rs",
+            "agent-doc-repair-io/src/lib.rs",
+            "Split empty-cycle abandonment, bypassed-response detection, committed patchback recovery, and terminal frontmatter effects",
         ),
         (
             "Commit-seam free-text queue strike IO graph",
@@ -22923,7 +22935,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         );
     }
     for relative in [
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-io/src/lib.rs",
         "agent-doc-cycle-state-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();

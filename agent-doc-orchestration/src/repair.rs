@@ -66,13 +66,9 @@ use agent_doc_queue_io::queue_consume;
 use agent_doc_turn::{
     closeout_recovery::{
         CloseoutRecoveryMutationReason, content_matches_ignoring_trailing_newlines,
-        prompt_change_is_orchestration_handoff_marker, repair_leaves_unanswered_prompt_diff,
-        stale_preflight_cycle_age_secs, visible_response_recovery_is_adoptable,
+        repair_leaves_unanswered_prompt_diff, visible_response_recovery_is_adoptable,
     },
-    repair::{
-        AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR, EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR,
-        RESPONSE_PATCHBACK_UNCOMMITTED_ERROR, RepairOutcome, STALE_EMPTY_PREFLIGHT_TTL_SECS,
-    },
+    repair::RepairOutcome,
     response_replay,
 };
 use anyhow::{Context, Result};
@@ -86,230 +82,6 @@ use agent_doc_workflow::capture::{
 };
 
 use crate::write;
-
-pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
-        return Ok(RepairOutcome::Noop);
-    };
-    if state.phase != agent_doc_turn::CyclePhase::PreflightStarted {
-        return Ok(RepairOutcome::Noop);
-    }
-
-    let file_content = std::fs::read_to_string(file).with_context(|| {
-        format!(
-            "failed to read {} for stale preflight repair",
-            file.display()
-        )
-    })?;
-    let snapshot_content = agent_doc_snapshot_io::load(file)?;
-    let current_file_hash = agent_doc_hash::content_hash(&file_content);
-    let current_snapshot_hash = snapshot_content
-        .as_deref()
-        .map(agent_doc_hash::content_hash);
-    let current_normalized_file_hash =
-        agent_doc_document::transient_markers::replay_content_hash(&file_content);
-    let current_normalized_snapshot_hash = snapshot_content
-        .as_deref()
-        .map(agent_doc_document::transient_markers::replay_content_hash);
-
-    let raw_hashes_match = state.file_hash.as_deref() == Some(current_file_hash.as_str())
-        && state.snapshot_hash == current_snapshot_hash;
-    let normalized_hashes_match = state.normalized_file_hash.as_deref()
-        == Some(current_normalized_file_hash.as_str())
-        && state.normalized_snapshot_hash == current_normalized_snapshot_hash;
-
-    if raw_hashes_match || normalized_hashes_match {
-        if !agent_doc_repair_io::head_already_matches_current_doc(file, &file_content)?
-            && let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)?
-        {
-            agent_doc_flow_io::closeout::log_closeout_guard_event(
-                file,
-                agent_doc_flow::types::FlowStage::TerminalGuard,
-                agent_doc_flow::types::FlowOutcome::FailedClosed,
-                agent_doc_turn::closeout_guard::CloseoutGuardReason::ResponsePatchbackUncommitted,
-            );
-            anyhow::bail!(
-                "{} for {}: stale preflight_started cycle `{}` has visible response patchback drift ({marker}) that is not committed in HEAD. Run `agent-doc write --commit {}` or `agent-doc finalize {}` through the normal closeout path; recovery will not report an already-committed cycle while this response is still only in the working tree.",
-                RESPONSE_PATCHBACK_UNCOMMITTED_ERROR,
-                file.display(),
-                state.cycle_id,
-                file.display(),
-                file.display(),
-            );
-        }
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            "repair_preflight_stale_lock",
-            snapshot_content.as_deref(),
-            Some(&file_content),
-        )?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "repair_preflight_stale_lock file={} cycle_id={}",
-                file.display(),
-                state.cycle_id
-            ),
-        );
-        agent_doc_flow_io::closeout::log_closeout_guard_event(
-            file,
-            agent_doc_flow::types::FlowStage::TerminalGuard,
-            agent_doc_flow::types::FlowOutcome::Completed,
-            agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightLockRepaired,
-        );
-        eprintln!(
-            "[repair] repaired stale preflight_started cycle {} for {}",
-            state.cycle_id,
-            file.display()
-        );
-        return Ok(RepairOutcome::StalePreflightLockRepaired);
-    }
-
-    if let Some(reason) = agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)? {
-        let repaired_snapshot = agent_doc_snapshot_io::load(file)?;
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            "repair_preflight_committed_historical",
-            repaired_snapshot.as_deref(),
-            Some(&file_content),
-        )?;
-        agent_doc_capture_io::mark_committed(file)?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "repair_preflight_committed_historical file={} cycle_id={} reason={}",
-                file.display(),
-                state.cycle_id,
-                reason
-            ),
-        );
-        agent_doc_flow_io::closeout::log_closeout_guard_event(
-            file,
-            agent_doc_flow::types::FlowStage::TerminalGuard,
-            agent_doc_flow::types::FlowOutcome::Completed,
-            agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightLockRepaired,
-        );
-        eprintln!(
-            "[repair] closed stale preflight_started cycle {} for {} after repairing committed historical {} drift",
-            state.cycle_id,
-            file.display(),
-            reason
-        );
-        return Ok(RepairOutcome::StalePreflightLockRepaired);
-    }
-
-    if let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)? {
-        agent_doc_flow_io::closeout::log_closeout_guard_event(
-            file,
-            agent_doc_flow::types::FlowStage::TerminalGuard,
-            agent_doc_flow::types::FlowOutcome::FailedClosed,
-            agent_doc_turn::closeout_guard::CloseoutGuardReason::OpenCycle,
-        );
-        anyhow::bail!(
-            "{} for {}: found visible response patchback ({marker}) but no pending/capture artifact exists and HEAD cannot prove the patchback was already committed",
-            AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR,
-            file.display(),
-        );
-    }
-
-    let cycle_capture_exists = agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some();
-    let age_secs = stale_preflight_cycle_age_secs(state.started_at, state.updated_at, now_secs());
-    if !cycle_capture_exists
-        && let Some(change) =
-            agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?
-        && !prompt_change_is_orchestration_handoff_marker(&change.text)
-    {
-        let preview = change
-            .text
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or(change.text.as_str())
-            .trim();
-        if age_secs >= STALE_EMPTY_PREFLIGHT_TTL_SECS {
-            agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-                &crate::PIPELINE_FRONTMATTER_EFFECTS,
-                file,
-                "repair_preflight_stale_prompt_cycle_abandoned",
-                snapshot_content.as_deref(),
-                Some(&file_content),
-            )?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "repair_preflight_stale_prompt_cycle_abandoned file={} cycle_id={} age_secs={} prompt_preview={}",
-                    file.display(),
-                    state.cycle_id,
-                    age_secs,
-                    preview
-                ),
-            );
-            agent_doc_flow_io::closeout::log_closeout_guard_event(
-                file,
-                agent_doc_flow::types::FlowStage::TerminalGuard,
-                agent_doc_flow::types::FlowOutcome::FailedClosed,
-                agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightCycleAbandoned,
-            );
-            eprintln!(
-                "[repair] abandoned stale empty preflight_started cycle {} for {} after {}s; unresolved prompt remains visible for the next preflight",
-                state.cycle_id,
-                file.display(),
-                age_secs
-            );
-            return Ok(RepairOutcome::StalePreflightCycleAbandoned);
-        }
-        agent_doc_flow_io::closeout::log_closeout_guard_event(
-            file,
-            agent_doc_flow::types::FlowStage::TerminalGuard,
-            agent_doc_flow::types::FlowOutcome::Blocked,
-            agent_doc_turn::closeout_guard::CloseoutGuardReason::OpenCycle,
-        );
-        anyhow::bail!(
-            "{} for {}: previous cycle `{}` is still `preflight_started`, the live document has unresolved prompt_target: {preview}, and no response exists to replay. The cycle is only {}s old; wait until it is stale or restart the harness pane and rerun `agent-doc {}` (or use `agent-doc start {}` from a fresh pane) so the prompt is handled by a new response cycle.",
-            EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR,
-            file.display(),
-            state.cycle_id,
-            age_secs,
-            file.display(),
-            file.display(),
-        );
-    }
-
-    if age_secs >= STALE_EMPTY_PREFLIGHT_TTL_SECS && !cycle_capture_exists {
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            "repair_preflight_stale_empty_cycle",
-            snapshot_content.as_deref(),
-            Some(&file_content),
-        )?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "repair_preflight_stale_empty_cycle file={} cycle_id={} age_secs={}",
-                file.display(),
-                state.cycle_id,
-                age_secs
-            ),
-        );
-        agent_doc_flow_io::closeout::log_closeout_guard_event(
-            file,
-            agent_doc_flow::types::FlowStage::TerminalGuard,
-            agent_doc_flow::types::FlowOutcome::Completed,
-            agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightLockRepaired,
-        );
-        eprintln!(
-            "[repair] closed stale empty preflight_started cycle {} for {} after {}s without a capture",
-            state.cycle_id,
-            file.display(),
-            age_secs
-        );
-        return Ok(RepairOutcome::StalePreflightLockRepaired);
-    }
-
-    Ok(RepairOutcome::Noop)
-}
 
 fn repair_template_doc_if_needed(
     file: &Path,
@@ -590,13 +362,6 @@ fn repair_answered_stale_boundary_if_safe(
     Ok(Some(repaired))
 }
 
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
 fn fail_closed_on_blocked_template_replay(file: &Path, response: &str, reason: &str) -> Result<()> {
     match agent_doc_repair_io::save_blocked_repair_payload(file, response, reason) {
         Ok(path) => {
@@ -815,7 +580,10 @@ pub(crate) fn run_with_queue_completion_ids(
         && historical_capture.is_none()
         && visible_response_recovery.is_none()
     {
-        let outcome = repair_stale_preflight_started_cycle(file)?;
+        let outcome = agent_doc_repair_io::repair_stale_preflight_started_cycle(
+            &crate::REPAIR_IO_EFFECTS,
+            file,
+        )?;
         if outcome != RepairOutcome::Noop {
             let refreshed_content = std::fs::read_to_string(file).with_context(|| {
                 format!(
@@ -1256,7 +1024,10 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_turn::repair::CancelOutcome;
+    use agent_doc_turn::repair::{
+        AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR, CancelOutcome,
+        EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR, STALE_EMPTY_PREFLIGHT_TTL_SECS,
+    };
     use std::path::Path;
     use std::process::Command as ProcessCommand;
     use std::time::Duration;

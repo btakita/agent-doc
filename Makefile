@@ -4,6 +4,7 @@ CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null 
 TEST_THREADS ?= 2
 TMUX_TEST_THREADS ?= 1
 CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
+NEXTEST_QUIET_FLAGS ?= --cargo-quiet --status-level fail --final-status-level fail --failure-output immediate-final --success-output never
 LOCAL_INSTALL_PROFILE ?= release-local
 LOCAL_INSTALL_TARGET_DIR ?= target/local-install
 LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mold; elif command -v ld.lld >/dev/null 2>&1 || command -v lld >/dev/null 2>&1; then printf '%s' lld; fi)
@@ -60,16 +61,34 @@ release: check
 test:
 	@set -e; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		$(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets; \
-		$(CARGO_CLEAN_ENV) cargo test --workspace --doc; \
+		$(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets $(NEXTEST_QUIET_FLAGS); \
+		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-doctest.XXXXXX.log"); \
+		if ! $(CARGO_CLEAN_ENV) cargo test --workspace --doc --quiet >"$$log" 2>&1; then \
+			cat "$$log"; \
+			rm -f "$$log"; \
+			exit 1; \
+		fi; \
+		rm -f "$$log"; \
 	else \
-		$(CARGO_CLEAN_ENV) cargo test --workspace --all-targets -- --test-threads="$(TEST_THREADS)"; \
+		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-test.XXXXXX.log"); \
+		if ! $(CARGO_CLEAN_ENV) cargo test --workspace --all-targets --quiet -- --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
+			cat "$$log"; \
+			rm -f "$$log"; \
+			exit 1; \
+		fi; \
+		rm -f "$$log"; \
 	fi
 
 # Wider deterministic simulator budget. Kept outside normal cargo test via
 # #[ignore], but make check runs it explicitly so CI exercises more schedules.
 sim-medium:
-	$(CARGO_CLEAN_ENV) cargo test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget -- --ignored --test-threads="$(TEST_THREADS)"
+	@log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-sim-medium.XXXXXX.log"); \
+	if ! $(CARGO_CLEAN_ENV) cargo test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget --quiet -- --ignored --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
+		cat "$$log"; \
+		rm -f "$$log"; \
+		exit 1; \
+	fi; \
+	rm -f "$$log"
 
 # Live tmux integration sweep. These tests are intentionally ignored in the
 # default development suite and run on CI where tmux is installed.
@@ -78,7 +97,7 @@ tmux-ci:
 
 # Lint
 clippy:
-	cargo clippy -- -D warnings
+	@cargo clippy --quiet -- -D warnings
 
 # Verify Cargo.toml, pyproject.toml, and internal publish-unit versions match
 version-sync:

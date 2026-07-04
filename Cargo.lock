@@ -1424,6 +1424,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-ops-log-io",
  "agent-doc-project-root-io",
+ "agent-doc-session-check-io",
  "agent-doc-snapshot-io",
  "agent-doc-template-io",
  "agent-doc-turn",

@@ -207,7 +207,10 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_turn::repair::RepairOutcome> {
-        agent_doc_orchestration::repair::repair_stale_preflight_started_cycle(file)
+        agent_doc_repair_io::repair_stale_preflight_started_cycle(
+            &agent_doc_orchestration::REPAIR_IO_EFFECTS,
+            file,
+        )
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {

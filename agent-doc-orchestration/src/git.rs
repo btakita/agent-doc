@@ -411,8 +411,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // is not snapshot adoption: queue/backlog/frontmatter and other
     // operator-visible state stay as they are in `file_content`.
     if let Some(snapshot) = snapshot_content.as_deref()
-        && let Some(recovered) =
-            crate::write::try_auto_recover_live_prompt_drift(file, snapshot, &file_content)?
+        && let Some(recovered) = agent_doc_write_converge_io::try_auto_recover_live_prompt_drift(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            file,
+            snapshot,
+            &file_content,
+        )?
     {
         file_content = recovered;
         snapshot_content = agent_doc_snapshot_io::load(file)?;
@@ -586,6 +590,32 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     } else {
         None
     };
+    if snapshot_matches_head
+        && let Some(drift_kind) = post_commit_local_drift
+        && let Some(head) = head_doc.as_deref()
+        && response_bearing_exchange_drift_after_committed_head(head, &file_content)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_blocked_response_patchback_uncommitted file={} basis=head drift_kind={}",
+                file.display(),
+                drift_kind.as_str()
+            ),
+        );
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
+            file,
+            agent_doc_flow::types::FlowStage::Commit,
+            agent_doc_flow::types::FlowOutcome::FailedClosed,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::ResponsePatchbackUncommitted,
+        );
+        anyhow::bail!(
+            "refusing to close {} as already committed: the staged snapshot matches HEAD, but the working tree has response-bearing exchange edits that are not committed. Run `agent-doc write --commit {}` after verifying the visible response body, then run `agent-doc session-check {}`.",
+            file.display(),
+            file.display(),
+            file.display()
+        );
+    }
     if snapshot_matches_head
         && (ipc_snapshot_adoption_blocked
             || has_dropped_queue_prompt_evidence
@@ -1276,7 +1306,8 @@ fn strip_guard_markers_from_disk(file: &Path) {
         // should drop them too. With no listener this falls back to the same
         // byte-for-byte disk write as before.
         if cleaned != content
-            && let Err(e) = crate::write::converge_or_disk_write(
+            && let Err(e) = agent_doc_write_converge_io::converge_or_disk_write(
+                &crate::write::WRITE_CONVERGENCE_EFFECTS,
                 file,
                 &content,
                 &cleaned,
@@ -1769,6 +1800,37 @@ fn ensure_active_capture_materialized_for_commit(
         file.display(),
         file.display()
     );
+}
+
+fn response_bearing_exchange_drift_after_committed_head(head_doc: &str, current_doc: &str) -> bool {
+    let normalized_head = normalize_committed_exchange_artifacts(head_doc);
+    let normalized_current = normalize_committed_exchange_artifacts(current_doc);
+    if normalized_head == normalized_current {
+        return false;
+    }
+    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+        &normalized_head,
+        &normalized_current,
+    )
+    .is_some()
+    {
+        return true;
+    }
+    agent_doc_turn::document_drift::exchange_has_new_appended_content(
+        &normalized_head,
+        &normalized_current,
+    ) && !exchange_append_is_prompt_target_only(&normalized_head, &normalized_current)
+}
+
+fn exchange_append_is_prompt_target_only(snapshot_doc: &str, current_doc: &str) -> bool {
+    let Some(diff) = agent_doc_diff::unified_diff_from_contents(snapshot_doc, current_doc) else {
+        return false;
+    };
+    let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff);
+    !changes.is_empty()
+        && changes
+            .iter()
+            .all(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
 }
 
 fn ensure_no_live_editor_buffer_ahead_of_disk(
@@ -3867,6 +3929,73 @@ Duplicate replay should stay live.
             log.contains("post_commit_local_drift file=")
                 && log.contains("kind=working_tree_edits"),
             "out-of-component local edits should be classified as working-tree drift:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_blocks_head_current_noop_with_uncommitted_response_body_append() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: pending closeout\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        commit_file(root, "session.md", committed, "add doc");
+        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+
+        let live = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: pending closeout\n",
+            "implemented the response body after the snapshot was already HEAD-current\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, live).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(live)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(committed),
+            Some(live),
+            "sha256",
+            None,
+        )
+        .unwrap();
+
+        let err = commit(&doc).expect_err("uncommitted response body drift must fail closed");
+        let message = err.to_string();
+        assert!(
+            message.contains("response-bearing exchange edits that are not committed"),
+            "error should explain the uncommitted response patchback:\n{message}"
+        );
+
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
+        assert_eq!(state.last_event, "response_captured");
+
+        let head_doc = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !head_doc.contains("implemented the response body"),
+            "HEAD must not appear to contain the uncommitted response body:\n{head_doc}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_blocked_response_patchback_uncommitted file="),
+            "ops log should record the failed-closed response patchback guard:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_already_current file="),
+            "guard must fire before the already-current no-op marks the cycle committed:\n{log}"
         );
     }
 

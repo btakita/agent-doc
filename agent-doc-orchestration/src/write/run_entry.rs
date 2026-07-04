@@ -52,13 +52,6 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     let response = agent_doc_turn::response_text::strip_assistant_heading(&response);
     let pending_flags = super::pending_write_flags(&flags);
     agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
-    agent_doc_session_check_io::auto_apply_pending_done_if_enabled(
-        file,
-        &response,
-        &pending_flags,
-        &mut current_content,
-        &crate::BACKLOG_COMMAND_EFFECTS,
-    )?;
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
@@ -300,13 +293,6 @@ pub fn run_template(
     }
     let pending_flags = super::pending_write_flags(&flags);
     agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
-    agent_doc_session_check_io::auto_apply_pending_done_if_enabled(
-        file,
-        &response,
-        &pending_flags,
-        &mut current_content,
-        &crate::BACKLOG_COMMAND_EFFECTS,
-    )?;
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
@@ -488,7 +474,13 @@ pub fn run_template(
     // `#fcc0`: template (non-CRDT) mode must converge through the editor path;
     // if editor convergence is unavailable or unproven, fail closed instead of
     // writing the merged document straight to disk.
-    try_editor_converge(file, &final_content, &content_current, "write_template")?;
+    agent_doc_write_converge_io::try_editor_converge(
+        &super::WRITE_CONVERGENCE_EFFECTS,
+        file,
+        &final_content,
+        &content_current,
+        "write_template",
+    )?;
 
     agent_doc_ops_log_io::log_cycle(
         file,
@@ -651,13 +643,6 @@ pub fn run_stream(
     }
     let pending_flags = super::pending_write_flags(&flags);
     agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
-    agent_doc_session_check_io::auto_apply_pending_done_if_enabled(
-        file,
-        &response,
-        &pending_flags,
-        &mut current_content,
-        &crate::BACKLOG_COMMAND_EFFECTS,
-    )?;
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     agent_doc_template::response_materialization::reject_marker_response_with_zero_patches(
@@ -1374,13 +1359,6 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     }
     let pending_flags = super::pending_write_flags(&flags);
     agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
-    agent_doc_session_check_io::auto_apply_pending_done_if_enabled(
-        file,
-        &response,
-        &pending_flags,
-        &mut current_content,
-        &crate::BACKLOG_COMMAND_EFFECTS,
-    )?;
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
@@ -1823,7 +1801,13 @@ pub fn apply_template_from_string_with_options(
         // `#fcc0`: repair recovery applies template (component) patches through
         // the editor path; if editor convergence is unavailable or unproven,
         // fail closed instead of writing the repaired document straight to disk.
-        try_editor_converge(file, &final_content, &content_current, "apply_template")?;
+        agent_doc_write_converge_io::try_editor_converge(
+            &super::WRITE_CONVERGENCE_EFFECTS,
+            file,
+            &final_content,
+            &content_current,
+            "apply_template",
+        )?;
     }
     // Save snapshot as the repaired/merged final content.
     save_recovery_snapshot(file, &final_content, use_crdt)?;

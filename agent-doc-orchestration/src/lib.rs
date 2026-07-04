@@ -59,7 +59,13 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for BacklogCommandEffec
         target_content: &str,
         reason: &str,
     ) -> anyhow::Result<()> {
-        crate::write::converge_or_disk_write(file, current_content, target_content, reason)
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            file,
+            current_content,
+            target_content,
+            reason,
+        )
     }
 
     fn record_document_write_provenance(&self, file: &std::path::Path, content: &str) {
@@ -82,7 +88,13 @@ impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
         target_content: &str,
         reason: &str,
     ) -> anyhow::Result<()> {
-        crate::write::converge_or_disk_write(file, current_content, target_content, reason)
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            file,
+            current_content,
+            target_content,
+            reason,
+        )
     }
 
     fn log_op(&self, file: &std::path::Path, message: &str) {

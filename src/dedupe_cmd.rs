@@ -11,7 +11,13 @@ struct CliDedupeEffects;
 
 impl agent_doc_response_replay_io::DedupeEffects for CliDedupeEffects {
     fn write_deduped_document(&self, file: &Path, previous: &str, deduped: &str) -> Result<()> {
-        agent_doc_orchestration::write::converge_or_disk_write(file, previous, deduped, "dedupe")
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
+            file,
+            previous,
+            deduped,
+            "dedupe",
+        )
     }
 
     fn save_snapshot(&self, file: &Path, deduped: &str) -> Result<()> {

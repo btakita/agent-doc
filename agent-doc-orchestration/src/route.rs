@@ -358,7 +358,13 @@ fn route_write_document(
         );
         Ok(())
     } else {
-        crate::write::converge_document_or_disk(file, next_content, previous_content, reason)
+        agent_doc_write_converge_io::converge_document_or_disk(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            file,
+            next_content,
+            previous_content,
+            reason,
+        )
     }
 }
 

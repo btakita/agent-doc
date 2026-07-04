@@ -80,7 +80,8 @@ pub fn run(
         // converge seam so a live JB editor buffer stays in sync with the change
         // instead of diverging from a bare disk write and raising a File Cache
         // Conflict. Without `--force-disk`, no-listener reset fails closed.
-        agent_doc_orchestration::write::converge_or_disk_write(
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
             file,
             &content,
             &updated,

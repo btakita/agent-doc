@@ -179,7 +179,8 @@ impl CompactRuntimeEffects for TestCompactRuntimeEffects {
         source_content: &str,
         reason: &str,
     ) -> Result<bool> {
-        agent_doc_orchestration::write::try_editor_converge(
+        agent_doc_write_converge_io::try_editor_converge(
+            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
             file,
             target_content,
             source_content,
@@ -1192,7 +1193,7 @@ mod tests {
     );
 
     fn assert_stale_compact_source_refusal(err: &anyhow::Error, ops_log: &str) {
-        let err = err.to_string();
+        let err = format!("{err:#}");
         assert!(
             err.contains("document changed after the response merge was computed"),
             "compact must fail closed when the visible file changed after compaction input: {err}"

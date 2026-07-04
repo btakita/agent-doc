@@ -279,7 +279,8 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
         source_content: &str,
         reason: &str,
     ) -> anyhow::Result<bool> {
-        agent_doc_orchestration::write::try_editor_converge(
+        agent_doc_write_converge_io::try_editor_converge(
+            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
             file,
             target_content,
             source_content,
@@ -703,7 +704,8 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for CliBacklogCommandEf
         target_content: &str,
         reason: &str,
     ) -> anyhow::Result<()> {
-        agent_doc_orchestration::write::converge_or_disk_write(
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
             file,
             current_content,
             target_content,
@@ -737,7 +739,8 @@ impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for CliQueueCon
         source_content: &str,
         reason: &str,
     ) -> anyhow::Result<()> {
-        agent_doc_orchestration::write::converge_document_or_disk(
+        agent_doc_write_converge_io::converge_document_or_disk(
+            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
             file,
             target_content,
             source_content,

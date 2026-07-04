@@ -1861,11 +1861,13 @@ fn redelivery_missing_operator_text_authority(
     label: &str,
     source_patch_id: Option<&str>,
 ) -> bool {
-    let Some(live) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
-        file,
-        expected_bad_state,
-        label,
-    ) else {
+    let Some(live) =
+        agent_doc_write_converge_io::live_buffer_delivery_missing_operator_text_authority_after_refresh(
+            file,
+            expected_bad_state,
+            label,
+        )
+    else {
         return false;
     };
     let editor_id = live.editor_id.as_deref().unwrap_or("unknown");
@@ -2519,11 +2521,13 @@ pub(crate) fn repair_ipc_decision_visible_state(
             .unwrap_or(false);
         if listener_active
             && let Ok(file_content) = std::fs::read_to_string(file)
-            && let Ok(Some(_recovered)) = crate::write::try_auto_recover_live_prompt_drift(
-                file,
-                &decision.snapshot_content,
-                &file_content,
-            )
+            && let Ok(Some(_recovered)) =
+                agent_doc_write_converge_io::try_auto_recover_live_prompt_drift(
+                    &super::WRITE_CONVERGENCE_EFFECTS,
+                    file,
+                    &decision.snapshot_content,
+                    &file_content,
+                )
         {
             agent_doc_ops_log_io::log_op(
                 file,

@@ -5699,7 +5699,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let cli_dedupe_source = fs::read_to_string(manifest_dir.join("src/dedupe_cmd.rs")).unwrap();
     assert!(
         cli_dedupe_source.contains("agent_doc_response_replay_io::run(&EFFECTS, file)")
-            && cli_dedupe_source.contains("agent_doc_orchestration::write::converge_or_disk_write")
+            && cli_dedupe_source.contains("agent_doc_write_converge_io::converge_or_disk_write")
+            && cli_dedupe_source
+                .contains("agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS")
             && cli_dedupe_source.contains("agent_doc_snapshot_io::save("),
         "CLI dedupe adapter should only inject writer and snapshot effects"
     );
@@ -9694,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 63,
+        ledger_rows.len() >= 64,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10153,6 +10155,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/{ipc.rs,ipc/transport.rs,converge.rs}",
             "agent-doc-write-converge-io/src/lib.rs",
             "Split editor convergence payload construction",
+        ),
+        (
+            "Write editor convergence IO graph",
+            "agent-doc-orchestration/src/write/converge.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Move the file-IPC poller and its ACK/NACK/content validation",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -12349,7 +12357,7 @@ fn test_agent_doc_frontmatter_owns_raw_frontmatter_yaml_policy() {
 
     for relative in [
         "agent-doc-document-realtime-io/src/lib.rs",
-        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-write-converge-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -17652,8 +17660,7 @@ fn test_agent_doc_markdown_ast_uses_current_node_key_mutation_api_names() {
         );
     }
     let converge =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     let write_normalization =
         fs::read_to_string(manifest_dir.join("agent-doc-document/src/write_normalization.rs"))
             .unwrap();
@@ -17664,12 +17671,12 @@ fn test_agent_doc_markdown_ast_uses_current_node_key_mutation_api_names() {
     ] {
         assert!(
             !converge.contains(forbidden),
-            "write/converge.rs must not re-own node-key mutation payload policy: {forbidden}"
+            "write convergence IO must not re-own node-key mutation payload policy: {forbidden}"
         );
     }
     assert!(
         converge.contains("convergence_recovered_editor_wins_for_payload"),
-        "write/converge.rs should delegate convergence payload policy to agent-doc-document"
+        "write convergence IO should delegate convergence payload policy to agent-doc-document"
     );
     for required in [
         "agent_doc_markdown_ast::mutations::parse_node_patches_payload",
@@ -21358,14 +21365,13 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         );
     }
     let write_converge_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
         write_converge_source.contains(
             "use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};"
         ) && write_converge_source
             .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;"),
-        "write convergence should import socket error classifiers and editor targeting from focused IPC crates"
+        "write convergence IO should import socket error classifiers and editor targeting from focused IPC crates"
     );
     for forbidden in [
         "fn is_socket_ack_timeout_error(",
@@ -21709,7 +21715,8 @@ fn test_agent_doc_document_owns_status_projection_policy() {
     }
     assert!(
         status_adapter.contains("agent_doc_status_io::set_with_options(&STATUS_EFFECTS")
-            && status_adapter.contains("converge_or_disk_write(file, previous, updated, phase)")
+            && status_adapter.contains("agent_doc_write_converge_io::converge_or_disk_write(")
+            && status_adapter.contains("&WRITE_CONVERGENCE_EFFECTS")
             && status_adapter.contains("record_document_write_provenance(file, updated)")
             && status_adapter.contains("agent_doc_ops_log_io::log_op(file, message)"),
         "write status adapter should only inject orchestration effects into focused status IO"
@@ -22110,7 +22117,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/git.rs",
-        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-write-converge-io/src/lib.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
     ] {
@@ -23804,7 +23811,9 @@ fn test_agent_doc_document_realtime_owns_ack_mismatch_policy() {
         );
     }
 
-    let converge_source =
+    let write_converge_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
+    let orchestration_converge_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
             .unwrap();
     for forbidden in [
@@ -23815,14 +23824,15 @@ fn test_agent_doc_document_realtime_owns_ack_mismatch_policy() {
         "fn blank_components_named",
     ] {
         assert!(
-            !converge_source.contains(forbidden),
-            "write::converge must not re-own ACK-mismatch recovery policy: {forbidden}"
+            !write_converge_source.contains(forbidden)
+                && !orchestration_converge_source.contains(forbidden),
+            "write convergence layers must not re-own ACK-mismatch recovery policy: {forbidden}"
         );
     }
     assert!(
-        converge_source.contains("agent_doc_document_realtime::write_policy::{")
-            && converge_source.contains("classify_ack_mismatch_recovery("),
-        "write::converge should call the focused realtime ACK-mismatch policy directly"
+        write_converge_source.contains("agent_doc_document_realtime::write_policy::{")
+            && write_converge_source.contains("classify_ack_mismatch_recovery("),
+        "agent-doc-write-converge-io should call the focused realtime ACK-mismatch policy directly"
     );
 }
 
@@ -25889,10 +25899,20 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn editor_ipc_write_wedged",
         "pub fn stale_supervisor_write_short_circuit",
         "pub fn schedule_stale_supervisor_pcp_recycle",
+        "pub trait EditorConvergenceEffects",
+        "pub fn try_auto_recover_live_prompt_drift",
+        "pub fn try_editor_converge(",
+        "pub fn converge_document_or_disk(",
+        "pub fn converge_or_disk_write(",
+        "pub fn editor_convergence_payload(",
+        "pub fn live_buffer_delivery_missing_operator_text_authority_after_refresh(",
+        "fn try_editor_converge_file_ipc(",
+        "fn try_detached_disk_write(",
+        "write_file_ipc_and_poll_convergence",
     ] {
         assert!(
             write_converge_io.contains(required_snippet),
-            "agent-doc-write-converge-io must own stale-snapshot convergence IO: {required_snippet}"
+            "agent-doc-write-converge-io must own write convergence IO: {required_snippet}"
         );
     }
     assert!(
@@ -25927,13 +25947,21 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         );
     }
     assert!(
-        !converge.contains("pub use agent_doc_write_converge_io")
-            && converge.contains("use agent_doc_write_converge_io::{")
-            && converge.contains("agent_doc_document_realtime::write_policy::{")
-            && converge.contains("live_prompt_drift_recovery_target(")
+        write_source.contains("#[cfg(test)]\nmod converge;")
+            && !write_source.contains("pub use converge::*;")
+            && write_source.contains("pub static WRITE_CONVERGENCE_EFFECTS")
+            && write_source.contains(
+                "impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceEffects",
+            )
+            && write_source.contains("write_file_ipc_and_poll_convergence")
+            && converge.contains("Test-only write convergence coverage")
+            && !converge.contains("fn try_detached_disk_write(")
+            && !converge.contains("fn try_editor_converge_file_ipc(")
+            && !converge.contains("fn refresh_editor_after_ack_mismatch(")
+            && !converge.contains("fn live_editor_sidecar_present(")
             && !converge.contains("stale_snapshot_reset_drift(snapshot_doc, current_doc)")
             && !converge.contains("fn classify_stale_snapshot_visible_rebase"),
-        "write/converge.rs should delegate stale-snapshot convergence IO while adapting live-prompt recovery policy"
+        "production write convergence should live in agent-doc-write-converge-io with orchestration retaining only test wrappers and explicit effects"
     );
     for forbidden_snippet in [
         "pub(crate) fn editor_ipc_write_wedged",

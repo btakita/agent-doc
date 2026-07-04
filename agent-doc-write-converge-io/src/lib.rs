@@ -4,13 +4,1221 @@
 //! pure realtime/write policy and durable sidecars. It keeps those decision
 //! graphs out of the orchestration command crate.
 
+use agent_doc_document::write_normalization::{
+    AGENT_RESPONSE_COMPONENT, convergence_recovered_editor_wins_for_payload,
+    convergence_recovered_editor_wins_outside_response,
+};
 use agent_doc_document_realtime::write_policy::{
-    exchange_change_is_safe_historical_reduction, stale_snapshot_reset_drift,
+    AckMismatchRecovery, classify_ack_mismatch_recovery,
+    exchange_change_is_safe_historical_reduction, live_prompt_drift_recovery_target,
+    normalize_visible_recovery_compare, should_refuse_disk_fallback,
+    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use agent_doc_element::element::is_backlog_component;
+use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
+use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};
 use agent_doc_turn::response_replay::response_materialized_in_content;
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+fn log_flow_event(file: &Path, event: agent_doc_flow::types::FlowEvent) {
+    let message =
+        agent_doc_flow::types::flow_event_log_message(&file.display().to_string(), &event);
+    agent_doc_ops_log_io::log_op(file, &message);
+}
+
+/// Effects still owned by the orchestration command crate while the write
+/// authority queue and file-IPC poller are being extracted.
+pub trait EditorConvergenceEffects {
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+
+    fn atomic_write_if_current(
+        &self,
+        file: &Path,
+        content: &str,
+        expected_current: &str,
+        source: &str,
+    ) -> Result<()>;
+
+    fn write_file_ipc_and_poll_convergence(
+        &self,
+        patch_file: &Path,
+        payload: &serde_json::Value,
+        doc_file: &Path,
+        patch_count: usize,
+        project_root: &Path,
+        target: &str,
+    ) -> Result<bool>;
+}
+
+/// `#exch-intermix`: auto-recover the `live_prompt_drift_after_preflight`
+/// closeout wedge by rebasing the missing agent response onto the realtime
+/// document. Returns the recovered file content on success (the caller must
+/// refresh its `file_content` and snapshot), or `None` when no recovery applies.
+pub fn try_auto_recover_live_prompt_drift(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    snapshot: &str,
+    file_content: &str,
+) -> Result<Option<String>> {
+    let Some(cycle) = agent_doc_cycle_state_io::load(file)? else {
+        return Ok(None);
+    };
+    if !cycle.ipc_snapshot_adoption_blocked {
+        return Ok(None);
+    }
+    schedule_stale_supervisor_pcp_recycle(file, "live_prompt_drift_after_preflight");
+
+    let dropped_missing_from_snapshot = cycle
+        .dropped_exchange_prompts
+        .iter()
+        .chain(cycle.dropped_queue_prompts.iter())
+        .any(|prompt| !snapshot_contains_dropped_prompt(snapshot, prompt));
+    if dropped_missing_from_snapshot {
+        return Ok(None);
+    }
+    let Some(recovery_target) = live_prompt_drift_recovery_target(
+        snapshot,
+        file_content,
+        normalize_visible_recovery_compare,
+    ) else {
+        return Ok(None);
+    };
+
+    let ipc_project_root = file
+        .canonicalize()
+        .ok()
+        .map(|c| agent_doc_project_root_io::resolve_ipc_project_root(&c));
+    let ipc_listener_active = ipc_project_root
+        .as_deref()
+        .map(agent_doc_ipc_io::is_listener_active)
+        .unwrap_or(false);
+
+    if let Some(project_root) = ipc_project_root.as_deref()
+        && ipc_listener_active
+    {
+        match try_editor_converge_live_prompt_drift(
+            file,
+            project_root,
+            &recovery_target,
+            file_content,
+        ) {
+            Ok(Some(recovered)) => {
+                log_live_prompt_drift_auto_recovered(
+                    file,
+                    &recovery_target,
+                    file_content,
+                    true,
+                    "editor_ipc",
+                );
+                log_flow_event(
+                    file,
+                    agent_doc_flow::types::FlowEvent::new(
+                        agent_doc_flow::types::FlowName::DocumentMutation,
+                        agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+                        agent_doc_flow::types::FlowOutcome::Completed,
+                    )
+                    .with_reason("live_prompt_drift_auto_recovered"),
+                );
+                eprintln!(
+                    "[commit] auto-recovered live_prompt_drift wedge for {} via editor IPC convergence ({} bytes)",
+                    file.display(),
+                    recovery_target.len()
+                );
+                return Ok(Some(recovered));
+            }
+            Ok(None) => {}
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_error file={} error={}",
+                        file.display(),
+                        err
+                    ),
+                );
+            }
+        }
+    }
+
+    if ipc_listener_active {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "[jbstalecache] auto_recovery_disk_write_blocked file={} target_len={} reason=editor_ipc_unconfirmed",
+                file.display(),
+                recovery_target.len()
+            ),
+        );
+        return Ok(None);
+    }
+
+    effects
+        .atomic_write(file, &recovery_target)
+        .with_context(|| {
+            format!(
+                "live_prompt_drift auto-recover write for {}",
+                file.display()
+            )
+        })?;
+    agent_doc_snapshot_io::save(file, &recovery_target, agent_doc_ops_log_io::log_op)?;
+    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&recovery_target);
+    agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), &recovery_target)?;
+    log_live_prompt_drift_auto_recovered(
+        file,
+        &recovery_target,
+        file_content,
+        ipc_listener_active,
+        "disk_fallback",
+    );
+    log_flow_event(
+        file,
+        agent_doc_flow::types::FlowEvent::new(
+            agent_doc_flow::types::FlowName::DocumentMutation,
+            agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+            agent_doc_flow::types::FlowOutcome::Completed,
+        )
+        .with_reason("live_prompt_drift_auto_recovered"),
+    );
+    eprintln!(
+        "[commit] auto-recovered live_prompt_drift wedge for {} — merged the missing response into the realtime document ({} bytes) so operator-visible edits stay authoritative",
+        file.display(),
+        recovery_target.len()
+    );
+    Ok(Some(recovery_target))
+}
+
+pub fn log_live_prompt_drift_auto_recovered(
+    file: &Path,
+    target: &str,
+    file_content: &str,
+    ipc_listener_active: bool,
+    transport: &str,
+) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "live_prompt_drift_auto_recovered file={} target_len={} file_len={} target_hash={} ipc_listener_active={} transport={}",
+            file.display(),
+            target.len(),
+            file_content.len(),
+            agent_doc_hash::content_hash(target),
+            ipc_listener_active,
+            transport
+        ),
+    );
+}
+
+pub fn try_editor_converge_live_prompt_drift(
+    file: &Path,
+    project_root: &Path,
+    target: &str,
+    file_content: &str,
+) -> Result<Option<String>> {
+    let patches = live_prompt_drift_response_patches(file_content, target)?;
+    let frontmatter = None;
+    if patches.is_empty() && frontmatter.is_none() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "[jbstalecache] editor_convergence_skipped file={} skip=no_component_or_frontmatter_delta",
+                file.display()
+            ),
+        );
+        return Ok(None);
+    }
+
+    let canonical = file.canonicalize()?;
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let mut payload = serde_json::json!({
+        "type": "patch",
+        "file": canonical.to_string_lossy(),
+        "patches": patches,
+        "node_patches": [],
+        "unmatched": "",
+        "baseline": file_content,
+        "reposition_boundary": false,
+        "patch_id": patch_id,
+    });
+    if let Some(frontmatter) = frontmatter {
+        payload["frontmatter"] = serde_json::Value::String(frontmatter);
+    }
+    if let Ok(Some(ref cycle)) = agent_doc_cycle_state_io::load(file) {
+        payload["cycle_id"] = serde_json::Value::String(cycle.cycle_id.clone());
+    }
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "[jbstalecache] editor_convergence_attempt file={} patch_id={} patches={} frontmatter={} target_hash={}",
+            file.display(),
+            payload
+                .get("patch_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("-"),
+            payload
+                .get("patches")
+                .and_then(|value| value.as_array())
+                .map(Vec::len)
+                .unwrap_or(0),
+            payload.get("frontmatter").is_some(),
+            agent_doc_hash::content_hash(target)
+        ),
+    );
+
+    match agent_doc_ipc_io::send_message(project_root, &payload) {
+        Ok(Some(_ack)) => {
+            let patch_id = payload
+                .get("patch_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("-");
+            let sidecar = poll_ack_content_sidecar(
+                project_root,
+                patch_id,
+                std::time::Duration::from_millis(500),
+                std::time::Duration::from_millis(25),
+            )?;
+            let Some(recovered) = sidecar else {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_no_ack_content file={} patch_id={} action=block_external_disk_write",
+                        file.display(),
+                        patch_id
+                    ),
+                );
+                return Ok(None);
+            };
+            if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                &recovered,
+            ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                target,
+            ) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_succeeded file={} patch_id={} recovered_len={} transport=editor_ipc",
+                        file.display(),
+                        patch_id,
+                        recovered.len()
+                    ),
+                );
+                Ok(Some(recovered))
+            } else if convergence_recovered_editor_wins_outside_response(&recovered, target) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_succeeded file={} patch_id={} recovered_len={} target_len={} transport=editor_ipc resolution=editor_wins_outside_response #qpcwcmerge",
+                        file.display(),
+                        patch_id,
+                        recovered.len(),
+                        target.len()
+                    ),
+                );
+                Ok(Some(recovered))
+            } else {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "[jbstalecache] editor_convergence_ack_mismatch file={} patch_id={} recovered_len={} target_len={} action=block_external_disk_write",
+                        file.display(),
+                        patch_id,
+                        recovered.len(),
+                        target.len()
+                    ),
+                );
+                Ok(None)
+            }
+        }
+        Ok(None) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "[jbstalecache] editor_convergence_no_ack file={} action=block_external_disk_write",
+                    file.display()
+                ),
+            );
+            Ok(None)
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "[jbstalecache] editor_convergence_send_failed file={} error={} action=block_external_disk_write",
+                    file.display(),
+                    err
+                ),
+            );
+            Ok(None)
+        }
+    }
+}
+
+pub fn live_prompt_drift_response_patches(
+    file_content: &str,
+    snapshot: &str,
+) -> Result<Vec<serde_json::Value>> {
+    let mut patches =
+        agent_doc_document::component_patches::component_replace_patches(file_content, snapshot)?;
+    patches.retain(|patch| {
+        patch.get("component").and_then(|value| value.as_str()) == Some(AGENT_RESPONSE_COMPONENT)
+    });
+    Ok(patches)
+}
+
+fn refuse_unproven_editor_delivery(
+    file: &Path,
+    source: &str,
+    reason: &str,
+    patch_id: Option<&str>,
+) -> Result<bool> {
+    let sidecar_live = live_editor_sidecar_present(file);
+    let owner_holds =
+        !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy());
+    let editor_endpoint =
+        if should_refuse_disk_fallback(sidecar_live, owner_holds, editor_ipc_listener_active(file))
+        {
+            "live"
+        } else {
+            "absent"
+        };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_writeback file={} transport=blocked reason={reason} editor_endpoint={} action=editor_convergence_required",
+            file.display(),
+            editor_endpoint
+        ),
+    );
+    let detail = format!("editor_endpoint={editor_endpoint}");
+    if let Err(err) = agent_doc_cycle_state_io::record_editor_convergence_required(
+        file,
+        source,
+        reason,
+        patch_id,
+        Some(&detail),
+    ) {
+        eprintln!(
+            "[write] WARNING: failed to record editor-convergence blocked closeout for {}: {err}",
+            file.display()
+        );
+    }
+    anyhow::bail!(
+        "{source}: refused direct disk write for {} while editor convergence is unproven (reason={reason}, editor_endpoint={editor_endpoint})",
+        file.display()
+    );
+}
+
+fn live_editor_sidecar_present(file: &Path) -> bool {
+    let indicator_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    agent_doc_debounce::live_buffer_snapshots(&indicator_path)
+        .iter()
+        .any(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
+}
+
+fn editor_ipc_listener_active(file: &Path) -> bool {
+    file.canonicalize()
+        .ok()
+        .map(|c| agent_doc_project_root_io::resolve_ipc_project_root(&c))
+        .map(|root| agent_doc_ipc_io::is_listener_active(&root))
+        .unwrap_or(false)
+}
+
+fn try_detached_disk_write(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    current: &str,
+    target: &str,
+    source: &str,
+    reason: &str,
+) -> Result<bool> {
+    let sidecar_live = live_editor_sidecar_present(file);
+    let owner_holds =
+        !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy());
+    if should_refuse_disk_fallback(sidecar_live, owner_holds, editor_ipc_listener_active(file)) {
+        return Ok(false);
+    }
+
+    effects
+        .atomic_write_if_current(file, target, current, source)
+        .with_context(|| {
+            format!(
+                "{source}: failed detached disk write for {}",
+                file.display()
+            )
+        })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_writeback file={} transport=disk_detached reason={} len={} hash={}",
+            file.display(),
+            reason,
+            target.len(),
+            agent_doc_hash::content_hash(target)
+        ),
+    );
+    Ok(true)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AckMismatchRefreshOutcome {
+    NoRecovery,
+    RevertedToCurrent,
+    ReplayedTarget,
+}
+
+fn refresh_editor_after_ack_mismatch(
+    file: &Path,
+    project_root: &Path,
+    canonical: &Path,
+    target: &str,
+    recovered: &str,
+    current_content: &str,
+    source: &str,
+) -> AckMismatchRefreshOutcome {
+    let stale_hash = agent_doc_hash::content_hash(recovered);
+    let Some(recovery) = classify_ack_mismatch_recovery(
+        target,
+        recovered,
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers,
+    ) else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason=untrusted_ack_content_contains_user_drift action=leave_editor_owned_ack_content stale_len={} stale_hash={}",
+                file.display(),
+                recovered.len(),
+                &stale_hash[..stale_hash.len().min(12)]
+            ),
+        );
+        return AckMismatchRefreshOutcome::NoRecovery;
+    };
+    let (refresh_content, action, success_outcome) = match recovery {
+        AckMismatchRecovery::RevertUntrustedAckToCurrent => (
+            current_content,
+            "revert_untrusted_ack_content",
+            AckMismatchRefreshOutcome::RevertedToCurrent,
+        ),
+        AckMismatchRecovery::ReplayMissingAgentResponseToTarget => (
+            target,
+            "replay_missing_agent_response",
+            AckMismatchRefreshOutcome::ReplayedTarget,
+        ),
+    };
+    let target_hash = agent_doc_hash::content_hash(refresh_content);
+    let failure_action = match recovery {
+        AckMismatchRecovery::RevertUntrustedAckToCurrent => {
+            "left_untrusted_ack_content_editor_owned"
+        }
+        AckMismatchRecovery::ReplayMissingAgentResponseToTarget => {
+            "left_missing_agent_response_editor_owned"
+        }
+    };
+    let failure_reason = match recovery {
+        AckMismatchRecovery::RevertUntrustedAckToCurrent => "safe_stale_prompt_refresh_failed",
+        AckMismatchRecovery::ReplayMissingAgentResponseToTarget => {
+            "safe_missing_agent_response_refresh_failed"
+        }
+    };
+    match agent_doc_ipc_io::send_refresh_content(
+        project_root,
+        &canonical.to_string_lossy(),
+        refresh_content,
+        &stale_hash,
+        recovered.len(),
+    ) {
+        Ok(true) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_ack_mismatch_editor_refresh file={} transport=editor_ipc action={} stale_len={} stale_hash={} target_len={} target_hash={}",
+                    file.display(),
+                    action,
+                    recovered.len(),
+                    &stale_hash[..stale_hash.len().min(12)],
+                    refresh_content.len(),
+                    &target_hash[..target_hash.len().min(12)]
+                ),
+            );
+            success_outcome
+        }
+        Ok(false) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason={} no_ack=true action={} stale_len={} stale_hash={}",
+                    file.display(),
+                    failure_reason,
+                    failure_action,
+                    recovered.len(),
+                    &stale_hash[..stale_hash.len().min(12)]
+                ),
+            );
+            AckMismatchRefreshOutcome::NoRecovery
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason={} send_failed=true error={} action={} stale_len={} stale_hash={}",
+                    file.display(),
+                    failure_reason,
+                    err,
+                    failure_action,
+                    recovered.len(),
+                    &stale_hash[..stale_hash.len().min(12)]
+                ),
+            );
+            AckMismatchRefreshOutcome::NoRecovery
+        }
+    }
+}
+
+pub fn live_buffer_delivery_missing_operator_text_authority_after_refresh(
+    file: &Path,
+    content: &str,
+    source: &str,
+) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
+    let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let indicator_path = canonical_file.to_string_lossy().to_string();
+    let missing = agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
+        &indicator_path,
+        content,
+    )?;
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical_file);
+    if !agent_doc_ipc_io::is_listener_active(&project_root) {
+        return match agent_doc_ipc_io::send_publish_live_buffer_file_signal(
+            &project_root,
+            &indicator_path,
+        ) {
+            Ok(true) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_editor_authority_refresh file={} transport=file_signal action=publish_live_buffer",
+                        file.display()
+                    ),
+                );
+                wait_for_operator_text_authority_refresh(&indicator_path, content, missing)
+            }
+            Ok(false) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_editor_authority_refresh file={} transport=blocked outcome=publish_live_buffer_file_signal_unavailable action=editor_reload_required",
+                        file.display()
+                    ),
+                );
+                Some(missing)
+            }
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_editor_authority_refresh file={} transport=blocked outcome=publish_live_buffer_file_signal_failed error={} action=editor_reload_required",
+                        file.display(),
+                        err
+                    ),
+                );
+                Some(missing)
+            }
+        };
+    }
+
+    match agent_doc_ipc_io::send_publish_live_buffer(&project_root, &indicator_path) {
+        Ok(true) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_editor_authority_refresh file={} transport=editor_ipc action=publish_live_buffer",
+                    file.display()
+                ),
+            );
+            wait_for_operator_text_authority_refresh(&indicator_path, content, missing)
+        }
+        Ok(false) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_editor_authority_refresh file={} transport=blocked reason=publish_live_buffer_failed action=editor_reload_required",
+                    file.display()
+                ),
+            );
+            Some(missing)
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_editor_authority_refresh file={} transport=blocked reason=publish_live_buffer_failed error={} action=editor_reload_required",
+                    file.display(),
+                    err
+                ),
+            );
+            Some(missing)
+        }
+    }
+}
+
+fn wait_for_operator_text_authority_refresh(
+    indicator_path: &str,
+    content: &str,
+    mut latest_missing: agent_doc_debounce::LiveBufferSnapshot,
+) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
+    for _ in 0..20 {
+        match agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
+            indicator_path,
+            content,
+        ) {
+            Some(still_missing) => {
+                latest_missing = still_missing;
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            None => return None,
+        }
+    }
+    Some(latest_missing)
+}
+
+pub fn try_editor_converge(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    target: &str,
+    current_content: &str,
+    source: &str,
+) -> Result<bool> {
+    let canonical_file = file
+        .canonicalize()
+        .with_context(|| format!("{source}: failed to resolve {}", file.display()))?;
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical_file);
+    cleanup_legacy_ipc_degraded(&project_root);
+    if current_content == target {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=already_current",
+                file.display()
+            ),
+        );
+        return Ok(true);
+    }
+    if let Some(snapshot) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
+        &canonical_file,
+        current_content,
+        source,
+    ) {
+        let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=blocked reason=editor_capability_missing capability={} editor_id={} live_len={} live_hash={} action=editor_reload_required",
+                file.display(),
+                agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                editor_id,
+                snapshot.len,
+                snapshot.hash
+            ),
+        );
+        anyhow::bail!(
+            "{source}: refused editor convergence for {} because live editor buffer {} lacks required capability {}",
+            file.display(),
+            editor_id,
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+        );
+    }
+    match ipc_direct_disk_degraded(&project_root, file) {
+        Ok(true) => {
+            log_ipc_dewedge_prefer_file_ipc(file, source);
+            let canonical = file.canonicalize()?;
+            let patch_id = uuid::Uuid::new_v4().to_string();
+            let Some(mut payload) =
+                editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
+            else {
+                if try_detached_disk_write(
+                    effects,
+                    file,
+                    current_content,
+                    target,
+                    source,
+                    "listener_degraded_no_component_delta",
+                )? {
+                    return Ok(true);
+                }
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_writeback file={} transport=blocked degraded_cause=no_component_delta action=refuse_external_disk_write",
+                        file.display()
+                    ),
+                );
+                anyhow::bail!(
+                    "{source}: refused direct disk write for {} while editor IPC listener is degraded (cause=no_component_delta)",
+                    file.display()
+                );
+            };
+            target_payload_to_live_editor(file, &mut payload, "file_ipc_convergence");
+            if try_editor_converge_file_ipc(
+                effects,
+                FileIpcConvergenceRequest {
+                    file,
+                    project_root: &project_root,
+                    payload: &payload,
+                    patch_id: &patch_id,
+                    target,
+                    source,
+                    reason: "listener_degraded",
+                },
+            )? {
+                return Ok(true);
+            }
+            if try_detached_disk_write(
+                effects,
+                file,
+                current_content,
+                target,
+                source,
+                "listener_degraded_editor_detached",
+            )? {
+                return Ok(true);
+            }
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_writeback file={} transport=blocked degraded_cause=listener_degraded action=refuse_external_disk_write",
+                    file.display()
+                ),
+            );
+            anyhow::bail!(
+                "{source}: refused direct disk write for {} while editor IPC listener is degraded",
+                file.display()
+            );
+        }
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!(
+                "[write] WARNING: {source} converge degradation check failed (non-fatal): {e}"
+            );
+        }
+    }
+    if !agent_doc_ipc_io::is_listener_active(&project_root) {
+        if try_detached_disk_write(
+            effects,
+            file,
+            current_content,
+            target,
+            source,
+            "no_listener",
+        )? {
+            return Ok(true);
+        }
+        return refuse_unproven_editor_delivery(file, source, "no_listener", None);
+    }
+
+    let canonical = canonical_file;
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let Some(mut payload) =
+        editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
+    else {
+        if try_detached_disk_write(
+            effects,
+            file,
+            current_content,
+            target,
+            source,
+            "no_component_delta",
+        )? {
+            return Ok(true);
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=blocked reason=no_component_delta action=refuse_external_disk_write",
+                file.display()
+            ),
+        );
+        anyhow::bail!(
+            "{source}: refused direct disk write for {} while editor IPC listener is active (reason=no_component_delta)",
+            file.display()
+        );
+    };
+    target_payload_to_live_editor(file, &mut payload, "editor_convergence");
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_editor_convergence_attempt file={} patch_id={} patches={} node_patches={} frontmatter={}",
+            file.display(),
+            patch_id,
+            payload
+                .get("patches")
+                .and_then(|value| value.as_array())
+                .map(Vec::len)
+                .unwrap_or(0),
+            payload
+                .get("node_patches")
+                .and_then(|value| value.as_array())
+                .map(Vec::len)
+                .unwrap_or(0),
+            payload.get("frontmatter").is_some(),
+        ),
+    );
+
+    match agent_doc_ipc_io::send_message(&project_root, &payload) {
+        Ok(Some(_ack)) => {
+            let sidecar = poll_ack_content_sidecar(
+                &project_root,
+                &patch_id,
+                std::time::Duration::from_millis(500),
+                std::time::Duration::from_millis(25),
+            )?;
+            let Some(recovered) = sidecar else {
+                return refuse_unproven_editor_delivery(
+                    file,
+                    source,
+                    "no_ack_content",
+                    Some(&patch_id),
+                );
+            };
+            if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                &recovered,
+            ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                target,
+            ) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_writeback file={} patch_id={} recovered_len={} transport=editor_ipc",
+                        file.display(),
+                        patch_id,
+                        recovered.len()
+                    ),
+                );
+                if let Err(e) = clear_ipc_socket_ack_timeouts(&project_root, file, source) {
+                    eprintln!(
+                        "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
+                    );
+                }
+                Ok(true)
+            } else if convergence_recovered_editor_wins_for_payload(&recovered, target, &payload) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_writeback file={} patch_id={} recovered_len={} target_len={} transport=editor_ipc resolution=editor_wins_outside_touched_components",
+                        file.display(),
+                        patch_id,
+                        recovered.len(),
+                        target.len()
+                    ),
+                );
+                if let Err(e) = clear_ipc_socket_ack_timeouts(&project_root, file, source) {
+                    eprintln!(
+                        "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
+                    );
+                }
+                Ok(true)
+            } else {
+                let recovery = refresh_editor_after_ack_mismatch(
+                    file,
+                    &project_root,
+                    &canonical,
+                    target,
+                    &recovered,
+                    current_content,
+                    source,
+                );
+                if recovery == AckMismatchRefreshOutcome::ReplayedTarget {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "{source}_writeback file={} patch_id={} recovered_len={} target_len={} transport=editor_ipc recovery=ack_mismatch_replayed_target",
+                            file.display(),
+                            patch_id,
+                            recovered.len(),
+                            target.len()
+                        ),
+                    );
+                    if let Err(e) = clear_ipc_socket_ack_timeouts(&project_root, file, source) {
+                        eprintln!(
+                            "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
+                        );
+                    }
+                    return Ok(true);
+                }
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_writeback file={} patch_id={} transport=blocked reason=ack_mismatch recovered_len={} target_len={} action=editor_convergence_required",
+                        file.display(),
+                        patch_id,
+                        recovered.len(),
+                        target.len()
+                    ),
+                );
+                refuse_unproven_editor_delivery(file, source, "ack_mismatch", Some(&patch_id))
+            }
+        }
+        Ok(None) => {
+            if try_detached_disk_write(effects, file, current_content, target, source, "no_ack")? {
+                return Ok(true);
+            }
+            refuse_unproven_editor_delivery(file, source, "no_ack", Some(&patch_id))
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_writeback file={} reason=send_failed error={} note=converge_send_error",
+                    file.display(),
+                    err
+                ),
+            );
+            if is_socket_status_error(err.to_string())
+                && try_editor_converge_file_ipc(
+                    effects,
+                    FileIpcConvergenceRequest {
+                        file,
+                        project_root: &project_root,
+                        payload: &payload,
+                        patch_id: &patch_id,
+                        target,
+                        source,
+                        reason: "socket_status_error",
+                    },
+                )?
+            {
+                return Ok(true);
+            }
+            if is_socket_ack_timeout_error(err.to_string()) {
+                match record_ipc_socket_ack_timeout(&project_root, file, Some(&patch_id), source) {
+                    Ok(true) => {
+                        eprintln!(
+                            "[write] IPC listener degraded for {} after repeated {source} ack timeouts",
+                            file.display()
+                        );
+                        log_write_wedge_requests_supervisor_recycle(file, source);
+                    }
+                    Ok(false) => {}
+                    Err(e) => eprintln!(
+                        "[write] WARNING: {source} converge ack-timeout record failed (non-fatal): {e}"
+                    ),
+                }
+            }
+            if try_detached_disk_write(
+                effects,
+                file,
+                current_content,
+                target,
+                source,
+                "send_failed",
+            )? {
+                return Ok(true);
+            }
+            refuse_unproven_editor_delivery(file, source, "send_failed", Some(&patch_id))
+        }
+    }
+}
+
+struct FileIpcConvergenceRequest<'a> {
+    file: &'a Path,
+    project_root: &'a Path,
+    payload: &'a serde_json::Value,
+    patch_id: &'a str,
+    target: &'a str,
+    source: &'a str,
+    reason: &'a str,
+}
+
+fn try_editor_converge_file_ipc(
+    effects: &dyn EditorConvergenceEffects,
+    request: FileIpcConvergenceRequest<'_>,
+) -> Result<bool> {
+    let FileIpcConvergenceRequest {
+        file,
+        project_root,
+        payload,
+        patch_id,
+        target,
+        source,
+        reason,
+    } = request;
+    let patches_dir = project_root.join(".agent-doc/patches");
+    if !patches_dir.exists() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=blocked degraded_cause={reason}_no_file_ipc action=refuse_external_disk_write",
+                file.display()
+            ),
+        );
+        return Ok(false);
+    }
+    let patch_file = patches_dir.join(format!("{patch_id}.json"));
+    let patch_count = payload
+        .get("patches")
+        .and_then(|value| value.as_array())
+        .map(Vec::len)
+        .unwrap_or(0)
+        + payload
+            .get("node_patches")
+            .and_then(|value| value.as_array())
+            .map(Vec::len)
+            .unwrap_or(0)
+        + usize::from(payload.get("frontmatter").is_some());
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_file_ipc_convergence_attempt file={} patch_id={} degraded_cause={} patches={}",
+            file.display(),
+            patch_id,
+            reason,
+            patch_count
+        ),
+    );
+    if effects.write_file_ipc_and_poll_convergence(
+        &patch_file,
+        payload,
+        file,
+        patch_count,
+        project_root,
+        target,
+    )? {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} patch_id={} transport=file_ipc degraded_cause={}",
+                file.display(),
+                patch_id,
+                reason
+            ),
+        );
+        return Ok(true);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_writeback file={} patch_id={} transport=blocked degraded_cause={reason}_file_ipc_unproven action=refuse_external_disk_write",
+            file.display(),
+            patch_id
+        ),
+    );
+    Ok(false)
+}
+
+pub fn editor_convergence_payload(
+    canonical_file: &Path,
+    target: &str,
+    current_content: &str,
+    source: &str,
+    patch_id: &str,
+) -> Result<Option<serde_json::Value>> {
+    let mut patches =
+        agent_doc_document::component_patches::component_replace_patches(current_content, target)?;
+    let frontmatter = live_prompt_drift_convergence_frontmatter(current_content, target);
+    let node_patches = queue_consume_node_patches(current_content, target, source);
+
+    if !node_patches.is_empty() {
+        let node_patched_components = node_patches
+            .iter()
+            .filter_map(|patch| patch.get("component").and_then(|value| value.as_str()))
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+        patches.retain(|patch| {
+            patch
+                .get("component")
+                .and_then(|value| value.as_str())
+                .is_none_or(|component| !node_patched_components.contains(component))
+        });
+    }
+
+    if patches.is_empty() && node_patches.is_empty() && frontmatter.is_none() {
+        return Ok(None);
+    }
+
+    let normalized_baseline =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            current_content,
+        );
+    let mut payload = serde_json::json!({
+        "type": "patch",
+        "file": canonical_file.to_string_lossy(),
+        "patches": patches,
+        "node_patches": node_patches,
+        "unmatched": "",
+        "baseline": current_content,
+        "baseline_hash": agent_doc_hash::content_hash(current_content),
+        "baseline_normalized_hash": agent_doc_hash::content_hash(&normalized_baseline),
+        "reposition_boundary": false,
+        "patch_id": patch_id,
+    });
+    if let Some(frontmatter) = frontmatter {
+        payload["frontmatter"] = serde_json::Value::String(frontmatter);
+    }
+    Ok(Some(payload))
+}
+
+fn queue_consume_node_patches(
+    current_content: &str,
+    target: &str,
+    source: &str,
+) -> Vec<serde_json::Value> {
+    if source != "queue_consume" {
+        return Vec::new();
+    }
+    agent_doc_ipc_protocol::build_ipc_node_patches_json(Some(current_content), Some(target))
+        .into_iter()
+        .filter(|patch| patch.get("component").and_then(|value| value.as_str()) == Some("queue"))
+        .collect()
+}
+
+pub fn converge_document_or_disk(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    target: &str,
+    current: &str,
+    source: &str,
+) -> Result<()> {
+    if try_editor_converge(effects, file, target, current, source)? {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{source}: refused direct disk write for {} because editor convergence did not complete",
+        file.display()
+    )
+}
+
+pub fn converge_or_disk_write(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    current: &str,
+    target: &str,
+    source: &str,
+) -> Result<()> {
+    if try_editor_converge(effects, file, target, current, source)? {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{source}: refused direct disk write for {} because editor convergence did not complete",
+        file.display()
+    )
+}
+
+pub fn live_prompt_drift_convergence_frontmatter(
+    file_content: &str,
+    snapshot: &str,
+) -> Option<String> {
+    let file_frontmatter = agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(file_content);
+    let snapshot_frontmatter = agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(snapshot)?;
+    if file_frontmatter == Some(snapshot_frontmatter) {
+        None
+    } else {
+        Some(snapshot_frontmatter.to_string())
+    }
+}
 
 /// Read the ack-content sidecar file written by the plugin after apply.
 /// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).

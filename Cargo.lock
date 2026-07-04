@@ -2134,6 +2134,7 @@ dependencies = [
  "agent-doc-capture-io",
  "agent-doc-controller-io",
  "agent-doc-cycle-state-io",
+ "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
@@ -2141,11 +2142,14 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
+ "agent-doc-hash",
  "agent-doc-ipc-io",
+ "agent-doc-ipc-protocol",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
  "agent-doc-merge-io",
  "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
  "agent-doc-project-root-io",
  "agent-doc-session-accretion-io",
  "agent-doc-snapshot-io",
@@ -2159,6 +2163,7 @@ dependencies = [
  "anyhow",
  "serde_json",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]

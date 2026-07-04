@@ -1833,7 +1833,13 @@ impl PreflightMaintenanceWriteEffects for OrchestrationPreflightMaintenanceWrite
         target_content: &str,
         source: &str,
     ) -> Result<()> {
-        crate::write::converge_or_disk_write(file, current_content, target_content, source)
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            file,
+            current_content,
+            target_content,
+            source,
+        )
     }
 }
 

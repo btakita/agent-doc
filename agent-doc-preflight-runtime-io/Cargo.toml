@@ -1,0 +1,16 @@
+[package]
+name = "agent-doc-preflight-runtime-io"
+version = "0.34.67"
+edition = "2024"
+description = "Runtime preflight maintenance write adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_preflight_runtime_io"
+
+[dependencies]
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
+agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.67" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.67" }
+anyhow = "1"

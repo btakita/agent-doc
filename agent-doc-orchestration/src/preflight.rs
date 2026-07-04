@@ -108,10 +108,10 @@ use agent_doc_frontmatter::frontmatter;
 #[cfg(test)]
 use agent_doc_preflight_io::layout::detect_duplicate_claims;
 use agent_doc_preflight_io::{
-    GateVerifyResult, PreflightCycleCompletionEffects, PreflightMaintenanceWriteEffects,
-    PreflightWarning,
+    GateVerifyResult, PreflightCycleCompletionEffects, PreflightWarning,
     layout::{check_layout, maybe_auto_repair_base_index, maybe_auto_resync_on_drift},
 };
+use agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS;
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
@@ -1117,42 +1117,6 @@ fn log_and_skip_foreign_owned_sweep_if_needed(
 
 mod run;
 pub use run::*;
-
-pub(crate) struct OrchestrationPreflightMaintenanceWriteEffects;
-
-pub(crate) static PREFLIGHT_MAINTENANCE_WRITE_EFFECTS:
-    OrchestrationPreflightMaintenanceWriteEffects = OrchestrationPreflightMaintenanceWriteEffects;
-
-impl PreflightMaintenanceWriteEffects for OrchestrationPreflightMaintenanceWriteEffects {
-    fn record_document_write_provenance(&self, file: &Path, content: &str) {
-        crate::write::record_document_write_provenance(file, content);
-    }
-
-    fn guard_visible_write_idle_and_current(
-        &self,
-        file: &Path,
-        source: &str,
-        expected_current: &str,
-    ) -> Result<()> {
-        crate::write::guard_visible_write_idle_and_current(file, source, expected_current)
-    }
-
-    fn converge_or_disk_write(
-        &self,
-        file: &Path,
-        current_content: &str,
-        target_content: &str,
-        source: &str,
-    ) -> Result<()> {
-        agent_doc_write_converge_io::converge_or_disk_write(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
-            file,
-            current_content,
-            target_content,
-            source,
-        )
-    }
-}
 
 fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {
     // Canonicalize to find project root reliably.

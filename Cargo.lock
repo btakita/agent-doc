@@ -1136,6 +1136,7 @@ dependencies = [
  "agent-doc-owner-pane-io",
  "agent-doc-plugin-owner",
  "agent-doc-preflight-io",
+ "agent-doc-preflight-runtime-io",
  "agent-doc-process-owner-io",
  "agent-doc-project-config-io",
  "agent-doc-project-root-io",
@@ -1306,6 +1307,16 @@ dependencies = [
  "tempfile",
  "tmux-router",
  "tracing",
+]
+
+[[package]]
+name = "agent-doc-preflight-runtime-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-document-realtime-io",
+ "agent-doc-preflight-io",
+ "agent-doc-write-converge-io",
+ "anyhow",
 ]
 
 [[package]]

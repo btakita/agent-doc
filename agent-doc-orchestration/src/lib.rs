@@ -384,12 +384,12 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffec
         if force_disk {
             agent_doc_preflight_io::run_pending_maintenance_force_disk(
                 file,
-                &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
             )
         } else {
             agent_doc_preflight_io::run_pending_maintenance(
                 file,
-                &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
             )
         }
     }

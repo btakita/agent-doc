@@ -11083,6 +11083,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the integration test suite from `agent-doc-orchestration/tests/git.rs` into focused `agent-doc-commit-io`/`agent-doc-git-io` fixtures",
         ),
         (
+            "Preflight maintenance runtime write-effect adapter graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-runtime-io/src/lib.rs",
+            "Split the runtime adapter once write command extraction lands",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

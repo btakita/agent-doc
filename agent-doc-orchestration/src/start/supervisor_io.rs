@@ -50,6 +50,53 @@ impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorS
     }
 }
 
+impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorShared {
+    fn transition_actor_busy(&self, caller: &str, reason: &str) {
+        self.transition_actor_state(
+            agent_doc_sqlite::state_store::ActorState::Busy,
+            caller,
+            reason,
+        );
+    }
+
+    fn transition_actor_waiting_input(&self, caller: &str, reason: &str) {
+        self.transition_actor_state(
+            agent_doc_sqlite::state_store::ActorState::WaitingInput,
+            caller,
+            reason,
+        );
+    }
+
+    fn set_restart_mode(&self, mode: String) {
+        *self.restart_mode.lock().unwrap() = mode;
+    }
+
+    fn set_restart_requested(&self, requested: bool) {
+        self.restart_requested.store(requested, Ordering::Relaxed);
+    }
+
+    fn binary_stale(&self) -> bool {
+        self.binary_stale.load(Ordering::Relaxed)
+    }
+
+    fn set_restart_reexec(&self, reexec: bool) {
+        self.restart_reexec.store(reexec, Ordering::Relaxed);
+    }
+
+    fn set_stop_requested(&self, requested: bool) {
+        self.stop_requested.store(requested, Ordering::Relaxed);
+    }
+
+    fn set_stop_agent_requested(&self, requested: bool) {
+        self.stop_agent_requested
+            .store(requested, Ordering::Relaxed);
+    }
+
+    fn kill_child_for_ipc(&self) {
+        self.kill_child();
+    }
+}
+
 impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShared {
     fn supervisor_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
@@ -115,60 +162,6 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShar
 impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShared {
     fn capability_dispatch_blocker(&self) -> Option<String> {
         SupervisorShared::capability_dispatch_blocker(self)
-    }
-
-    fn deliver_ipc_inject(&self, bytes: &str, diag_op: &str) -> Result<(), String> {
-        agent_doc_supervisor_io::ipc::deliver_supervisor_inject(self, bytes, diag_op)
-    }
-
-    fn mark_inject_dispatched(&self) {
-        self.transition_actor_state(
-            agent_doc_sqlite::state_store::ActorState::Busy,
-            "dispatch",
-            "ipc_inject",
-        );
-    }
-
-    fn mark_clear_dispatched(&self) {
-        self.transition_actor_state(
-            agent_doc_sqlite::state_store::ActorState::Busy,
-            "operator",
-            "ipc_clear",
-        );
-    }
-
-    fn request_restart(&self, mode: String) {
-        self.transition_actor_state(
-            agent_doc_sqlite::state_store::ActorState::Busy,
-            "supervisor",
-            "ipc_restart_requested",
-        );
-        *self.restart_mode.lock().unwrap() = mode;
-        self.restart_requested.store(true, Ordering::Relaxed);
-        // `#supkill-bg` — blue/green drain-and-supersede. When the supervisor's own
-        // binary is stale (the `restart-supervisor ... generation closed` / `#fcc0`
-        // case), route the restart through the idle-watch in-place `execve` reexec.
-        let reexec = self.binary_stale.load(Ordering::Relaxed);
-        self.restart_reexec.store(reexec, Ordering::Relaxed);
-        if !reexec {
-            self.kill_child();
-        }
-    }
-
-    fn request_stop(&self) {
-        self.stop_requested.store(true, Ordering::Relaxed);
-        self.kill_child();
-    }
-
-    fn request_stop_agent(&self) {
-        // "Stop Agent": kill the harness child but keep the supervisor alive.
-        self.transition_actor_state(
-            agent_doc_sqlite::state_store::ActorState::WaitingInput,
-            "supervisor",
-            "ipc_stop_agent_requested",
-        );
-        self.stop_agent_requested.store(true, Ordering::Relaxed);
-        self.kill_child();
     }
 
     fn handle_replica_register(&self, file: &str, identity: &str) -> IpcResponse {

@@ -9697,7 +9697,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 60,
+        ledger_rows.len() >= 61,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10240,6 +10240,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/start/supervisor_io.rs",
             "agent-doc-supervisor-io/src/ipc.rs",
             "Split the `SupervisorIpcSnapshotState` adapter",
+        ),
+        (
+            "Supervisor IPC lifecycle adapter graph",
+            "agent-doc-orchestration/src/start/supervisor_io.rs",
+            "agent-doc-supervisor-io/src/ipc.rs",
+            "Split the `SupervisorIpcLifecycleState` adapter",
         ),
         (
             "Supervisor IPC inject delivery adapter graph",
@@ -16681,6 +16687,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub struct SupervisorIpcStateSnapshot",
         "pub trait SupervisorIpcSnapshotState",
         "pub fn supervisor_ipc_state_snapshot",
+        "pub trait SupervisorIpcLifecycleState",
+        "pub fn request_supervisor_restart",
+        "pub fn request_supervisor_stop_agent",
         "pub trait SupervisorIpcHandlerState",
         "pub trait SupervisorInjectDeliveryState",
         "pub fn deliver_supervisor_inject",
@@ -16705,6 +16714,14 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShared"
         ) && !orchestration_supervisor_io.contains("agent_doc_debounce::editor_sync_statuses"),
         "orchestration supervisor IPC adapter should expose snapshot fields without assembling editor-sync JSON"
+    );
+    assert!(
+        orchestration_supervisor_io.contains(
+            "impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorShared"
+        ) && !orchestration_supervisor_io.contains("ipc_restart_requested")
+            && !orchestration_supervisor_io.contains("ipc_stop_agent_requested")
+            && !orchestration_supervisor_io.contains("fn request_restart("),
+        "orchestration supervisor IPC adapter should expose lifecycle fields without owning restart/stop semantics"
     );
     for relative in [
         "agent-doc-controller-io/src/project_controller/rpc.rs",

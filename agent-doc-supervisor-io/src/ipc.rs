@@ -192,12 +192,6 @@ where
 /// Effect boundary for handling supervisor IPC methods.
 pub trait SupervisorIpcHandlerState: SupervisorIpcSnapshotState {
     fn capability_dispatch_blocker(&self) -> Option<String>;
-    fn deliver_ipc_inject(&self, bytes: &str, diag_op: &str) -> Result<(), String>;
-    fn mark_inject_dispatched(&self);
-    fn mark_clear_dispatched(&self);
-    fn request_restart(&self, mode: String);
-    fn request_stop(&self);
-    fn request_stop_agent(&self);
     fn handle_replica_register(&self, file: &str, identity: &str) -> IpcResponse;
     fn handle_replica_deregister(&self, file: &str, identity: &str) -> IpcResponse;
     fn handle_replica_update(&self, file: &str, identity: &str, update_b64: &str) -> IpcResponse;
@@ -221,6 +215,63 @@ pub trait SupervisorInjectDeliveryState {
     fn inject_pane_id(&self) -> Option<String>;
     fn harness_binary(&self) -> &str;
     fn write_child_pty(&self, bytes: &[u8]) -> Result<(), String>;
+}
+
+pub trait SupervisorIpcLifecycleState {
+    fn transition_actor_busy(&self, caller: &str, reason: &str);
+    fn transition_actor_waiting_input(&self, caller: &str, reason: &str);
+    fn set_restart_mode(&self, mode: String);
+    fn set_restart_requested(&self, requested: bool);
+    fn binary_stale(&self) -> bool;
+    fn set_restart_reexec(&self, reexec: bool);
+    fn set_stop_requested(&self, requested: bool);
+    fn set_stop_agent_requested(&self, requested: bool);
+    fn kill_child_for_ipc(&self);
+}
+
+pub fn mark_supervisor_inject_dispatched<S>(state: &S)
+where
+    S: SupervisorIpcLifecycleState + ?Sized,
+{
+    state.transition_actor_busy("dispatch", "ipc_inject");
+}
+
+pub fn mark_supervisor_clear_dispatched<S>(state: &S)
+where
+    S: SupervisorIpcLifecycleState + ?Sized,
+{
+    state.transition_actor_busy("operator", "ipc_clear");
+}
+
+pub fn request_supervisor_restart<S>(state: &S, mode: String)
+where
+    S: SupervisorIpcLifecycleState + ?Sized,
+{
+    state.transition_actor_busy("supervisor", "ipc_restart_requested");
+    state.set_restart_mode(mode);
+    state.set_restart_requested(true);
+    let reexec = state.binary_stale();
+    state.set_restart_reexec(reexec);
+    if !reexec {
+        state.kill_child_for_ipc();
+    }
+}
+
+pub fn request_supervisor_stop<S>(state: &S)
+where
+    S: SupervisorIpcLifecycleState + ?Sized,
+{
+    state.set_stop_requested(true);
+    state.kill_child_for_ipc();
+}
+
+pub fn request_supervisor_stop_agent<S>(state: &S)
+where
+    S: SupervisorIpcLifecycleState + ?Sized,
+{
+    state.transition_actor_waiting_input("supervisor", "ipc_stop_agent_requested");
+    state.set_stop_agent_requested(true);
+    state.kill_child_for_ipc();
 }
 
 pub fn deliver_supervisor_inject<S>(state: &S, bytes: &str, diag_op: &str) -> Result<(), String>
@@ -271,7 +322,10 @@ fn noop_input_diag_log(_file: &Path, _message: &str) {}
 /// runtime state adapter.
 pub fn handle_supervisor_ipc<S>(method: IpcMethod, state: &S) -> IpcResponse
 where
-    S: SupervisorIpcHandlerState + ?Sized,
+    S: SupervisorIpcHandlerState
+        + SupervisorIpcLifecycleState
+        + SupervisorInjectDeliveryState
+        + ?Sized,
 {
     if agent_doc_supervisor::ipc_protocol::ipc_method_requires_capability_gate(&method)
         && let Some(reason) = state.capability_dispatch_blocker()
@@ -307,30 +361,31 @@ where
                 IpcResponse::ok(serde_json::json!({ "pid": null }))
             }
         }
-        IpcMethod::Inject { bytes } => match state.deliver_ipc_inject(&bytes, "ipc_inject") {
+        IpcMethod::Inject { bytes } => match deliver_supervisor_inject(state, &bytes, "ipc_inject")
+        {
             Ok(()) => {
-                state.mark_inject_dispatched();
+                mark_supervisor_inject_dispatched(state);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             Err(err) => IpcResponse::err(err),
         },
-        IpcMethod::Clear { bytes } => match state.deliver_ipc_inject(&bytes, "ipc_clear") {
+        IpcMethod::Clear { bytes } => match deliver_supervisor_inject(state, &bytes, "ipc_clear") {
             Ok(()) => {
-                state.mark_clear_dispatched();
+                mark_supervisor_clear_dispatched(state);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             Err(err) => IpcResponse::err(err),
         },
         IpcMethod::Restart { mode } => {
-            state.request_restart(mode);
+            request_supervisor_restart(state, mode);
             IpcResponse::ok_empty()
         }
         IpcMethod::Stop { graceful: _ } => {
-            state.request_stop();
+            request_supervisor_stop(state);
             IpcResponse::ok_empty()
         }
         IpcMethod::StopAgent { reason: _ } => {
-            state.request_stop_agent();
+            request_supervisor_stop_agent(state);
             IpcResponse::ok_empty()
         }
         IpcMethod::ReplicaRegister { file, identity } => {

@@ -25,7 +25,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -111,7 +110,7 @@ Both new items are real features in `src/equityfundingsource-dev`; I'll explore 
 ### Re: wedge root-caused + fixed — opus-4-8
 
 Root cause: after repeated git-direct commits (my own wedge workaround), the JB plugin's native yrs CRDT node model diverged from disk, so `native node-patch apply` rejected every patch. Re-synced the plugin's native CRDT; this note verifies the editor apply path works again.
-<!-- agent:boundary:61edb843 -->
+<!-- agent:boundary:612c82ef -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -140,8 +139,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#6em3] In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=96176122-b287-4c47-823e-88a71a831f7c&dialog=lender, allow the admin to fill out the requirements form for the lender.
-- [ ] [#7jj2] deploy
 <!-- /agent:backlog -->
 
 ## Review

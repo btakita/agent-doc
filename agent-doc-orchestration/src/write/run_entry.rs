@@ -44,7 +44,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         anyhow::bail!("empty response — nothing to write");
     }
 
-    let mut current_content = std::fs::read_to_string(file)
+    let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
@@ -226,7 +226,7 @@ pub fn run_template(
         anyhow::bail!("empty response — nothing to write");
     }
 
-    let mut current_content = std::fs::read_to_string(file)
+    let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
@@ -564,7 +564,7 @@ pub fn run_stream(
         anyhow::bail!("empty response — nothing to write");
     }
 
-    let mut current_content = std::fs::read_to_string(file)
+    let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let mut snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     if agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
@@ -1295,8 +1295,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     // attached returns disk unchanged.
     let disk = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let mut current_content =
-        agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content;
+    let current_content = agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
         file,

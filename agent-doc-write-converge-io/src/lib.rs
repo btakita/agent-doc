@@ -4324,6 +4324,27 @@ pub fn stale_supervisor_write_short_circuit(
     if !agent_doc_turn_status_io::supervisor_stale(&base) {
         return None;
     }
+    if !stale_supervisor_marker_should_defer(
+        true,
+        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
+            .is_some(),
+    ) {
+        if let Err(err) = agent_doc_turn_status_io::set_supervisor_stale_marker(&base, false) {
+            eprintln!(
+                "[write] warning: failed to clear stale-supervisor marker for {}: {err:#}",
+                file.display()
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "stale_supervisor_marker_ignored file={} source={} reason=live_supervisor_not_stale",
+                file.display(),
+                source,
+            ),
+        );
+        return None;
+    }
     schedule_stale_supervisor_pcp_recycle(file, source);
     if let Err(err) = agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
         file,
@@ -4351,6 +4372,10 @@ pub fn stale_supervisor_write_short_circuit(
         file.display()
     );
     Some(ui)
+}
+
+fn stale_supervisor_marker_should_defer(marker_present: bool, live_supervisor_stale: bool) -> bool {
+    marker_present && live_supervisor_stale
 }
 
 pub fn guard_no_stale_snapshot_reset_drift(
@@ -4656,7 +4681,15 @@ mod tests {
     }
 
     #[test]
-    fn stale_supervisor_write_short_circuit_defers_when_marker_present() {
+    fn stale_supervisor_marker_policy_requires_live_stale_proof() {
+        assert!(!stale_supervisor_marker_should_defer(false, false));
+        assert!(!stale_supervisor_marker_should_defer(true, false));
+        assert!(!stale_supervisor_marker_should_defer(false, true));
+        assert!(stale_supervisor_marker_should_defer(true, true));
+    }
+
+    #[test]
+    fn stale_supervisor_write_short_circuit_ignores_uncorroborated_marker() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
@@ -4665,11 +4698,13 @@ mod tests {
         let base = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
         agent_doc_turn_status_io::set_supervisor_stale_marker(&base, true).unwrap();
 
-        let outcome = stale_supervisor_write_short_circuit(&file, "unit_test")
-            .expect("stale marker must short-circuit the write");
-        assert_eq!(
-            outcome.outcome,
-            agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForRecycle
+        assert!(
+            stale_supervisor_write_short_circuit(&file, "unit_test").is_none(),
+            "a stale marker without live stale-supervisor proof is display/recovery residue, not a hot-path write blocker"
+        );
+        assert!(
+            !agent_doc_turn_status_io::supervisor_stale(&base),
+            "uncorroborated stale marker should be cleared"
         );
 
         agent_doc_turn_status_io::set_supervisor_stale_marker(&base, false).unwrap();

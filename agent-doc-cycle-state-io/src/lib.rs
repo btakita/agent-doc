@@ -284,6 +284,23 @@ impl CycleState {
         self.is_open() && inflight == 0 && now_secs.saturating_sub(self.updated_at) > deadline_secs
     }
 
+    /// `#suprecyclespin`: whether a stalled open cycle may be force-abandoned at
+    /// a supervisor recycle boundary. Only pre-response cycles are disposable.
+    /// Once a response has been captured or written, the open cycle is durable
+    /// recovery evidence and must survive recycle so the fresh process can retry
+    /// or reconcile it instead of silently losing the response.
+    pub fn stalled_pre_response_cycle(
+        &self,
+        inflight: u64,
+        now_secs: u64,
+        deadline_secs: u64,
+    ) -> bool {
+        self.open_stalled(inflight, now_secs, deadline_secs)
+            && matches!(self.phase, CyclePhase::PreflightStarted)
+            && self.capture_id.is_none()
+            && self.response_sha256.is_none()
+    }
+
     /// Derive the live finalize-pipeline view (`#fm-run-id-step` / `#fmrunid-wire`)
     /// from the authoritative cycle-state fields: `run_id` = cycle id, `step` =
     /// lowercase phase, plus the recorded `turn_id` / `queue_task_id`.
@@ -1351,23 +1368,37 @@ mod tests {
     fn open_stalled_resolves_only_abandoned_older_turns() {
         // `#suprecyclespin`: the recycle-defer gate must distinguish a live cycle
         // (keep deferring) from a stalled/superseded older turn (force-close).
-        let mut state = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::ResponseCaptured);
+        let mut state = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::PreflightStarted);
         let deadline = STALLED_CYCLE_RESOLVE_SECS;
         // updated_at far in the past, no IPC inflight → stalled (resolvable).
         state.updated_at = 1_000;
         assert!(state.open_stalled(0, 1_000 + deadline + 1, deadline));
+        assert!(state.stalled_pre_response_cycle(0, 1_000 + deadline + 1, deadline));
         // Exactly at the deadline is NOT yet stalled (strict `>`).
         assert!(!state.open_stalled(0, 1_000 + deadline, deadline));
+        assert!(!state.stalled_pre_response_cycle(0, 1_000 + deadline, deadline));
         // Fresh `updated_at` → a live cycle, never force-closed.
         state.updated_at = 1_000 + deadline + 1;
         assert!(!state.open_stalled(0, 1_000 + deadline + 5, deadline));
+        assert!(!state.stalled_pre_response_cycle(0, 1_000 + deadline + 5, deadline));
         // IPC ack connection in flight → finalize is live, never force-closed even
         // if the cycle has been open a long time.
         state.updated_at = 1_000;
         assert!(!state.open_stalled(1, 1_000 + deadline + 100, deadline));
+        assert!(!state.stalled_pre_response_cycle(1, 1_000 + deadline + 100, deadline));
+        // Once a response is captured, the stalled open cycle is durable recovery
+        // evidence. It may keep the recycle gate open until escalation, but must
+        // not be abandoned as disposable pre-response state.
+        let mut captured = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::ResponseCaptured);
+        captured.updated_at = 1_000;
+        captured.capture_id = Some("cycle-1".to_string());
+        captured.response_sha256 = Some("abc".to_string());
+        assert!(captured.open_stalled(0, 1_000 + deadline + 1, deadline));
+        assert!(!captured.stalled_pre_response_cycle(0, 1_000 + deadline + 1, deadline));
         // A committed cycle is not open, so it is never "stalled".
         let committed = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::Committed);
         assert!(!committed.open_stalled(0, u64::MAX, deadline));
+        assert!(!committed.stalled_pre_response_cycle(0, u64::MAX, deadline));
     }
 
     #[test]

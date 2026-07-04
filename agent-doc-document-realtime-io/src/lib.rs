@@ -228,8 +228,7 @@ pub fn guard_visible_write_reconcile_with_target(
         // finalize" gate with an actor-aware check (the live-buffer actor is not
         // diverging when it already equals disk).
         let disk_hash = agent_doc_hash::content_hash(&actual_current);
-        let editor_matches_disk =
-            live.len == actual_current.len() && live.hash.eq_ignore_ascii_case(&disk_hash);
+        let editor_matches_disk = live_buffer_snapshot_matches_content(&live, &actual_current);
         if editor_matches_disk {
             let expected_hash = agent_doc_hash::content_hash(expected_current);
             agent_doc_ops_log_io::log_op(
@@ -240,6 +239,30 @@ pub fn guard_visible_write_reconcile_with_target(
                     source,
                     expected_current.len(),
                     expected_hash,
+                    actual_current.len(),
+                    disk_hash,
+                    live.len,
+                    live.hash,
+                    live.timestamp_ms
+                ),
+            );
+        } else if live
+            .content
+            .as_deref()
+            .is_some_and(|content| content_matches_recent_committed_blob(file, content, 15))
+        {
+            // A buffer that byte-matches a recent committed blob is stale recovery
+            // evidence, not new unsaved operator text. Let the caller reconcile
+            // from disk/current instead of failing closed on an editor sidecar
+            // that is merely behind the committed document.
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "visible_write_live_buffer_committed_blob_reconcile file={} source={} expected_len={} expected_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
+                    file.display(),
+                    source,
+                    expected_current.len(),
+                    agent_doc_hash::content_hash(expected_current),
                     actual_current.len(),
                     disk_hash,
                     live.len,
@@ -348,10 +371,17 @@ fn live_buffer_snapshot_matches_content(
     snapshot: &agent_doc_debounce::LiveBufferSnapshot,
     content: &str,
 ) -> bool {
-    snapshot.len == content.len()
+    if snapshot.len == content.len()
         && snapshot
             .hash
             .eq_ignore_ascii_case(&agent_doc_hash::content_hash(content))
+    {
+        return true;
+    }
+    snapshot.content.as_ref().is_some_and(|editor_text| {
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(editor_text)
+            == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content)
+    })
 }
 
 /// Source the durable editor-buffer feed for `file`, gated by the existing
@@ -1059,6 +1089,57 @@ scratch
     }
 
     #[test]
+    fn visible_write_reconcile_normalizes_transient_live_buffer_markers() {
+        // The editor sidecar can lag only in transient agent-doc markers (for
+        // example a regenerated boundary id). That is not operator text and must
+        // not fail closed as a live-buffer edit.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:boundary:old -->
+<!-- agent:exchange patch=append -->
+### Re: x
+<!-- /agent:exchange -->
+";
+        let live = expected.replace("agent:boundary:old", "agent:boundary:new");
+        std::fs::write(&doc, expected).unwrap();
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+            &doc_str,
+            &live,
+            "jetbrains-boundary-test",
+            "jetbrains",
+            "0.2.205",
+            &["operator_text_authority_v1"],
+            false,
+        )
+        .unwrap();
+
+        let outcome = guard_visible_write_reconcile_with_target(
+            &doc,
+            "test_transient_marker",
+            expected,
+            None,
+        )
+        .expect("transient marker churn must not fail closed");
+        assert!(
+            matches!(outcome, VisibleWriteReconcile::Clean),
+            "disk still matches expected"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_live_buffer_matches_disk"),
+            "normalized transient match should be logged as disk-safe: {log}"
+        );
+        assert!(
+            !log.contains("visible_write_deferred_live_buffer_changed"),
+            "transient marker churn must not trip the fail-closed block: {log}"
+        );
+    }
+
+    #[test]
     fn visible_write_reconcile_reports_clean_when_disk_matches() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -1207,6 +1288,54 @@ scratch
         assert!(
             !log.contains("visible_write_deferred_live_buffer_changed"),
             "replica churn must not trip the fail-closed live-buffer block: {log}"
+        );
+    }
+
+    #[test]
+    fn visible_write_reconcile_committed_blob_buffer_does_not_fail_closed() {
+        // A live editor buffer that equals a recent committed blob is stale
+        // recovery/editor state, not new unsaved operator text. The write guard
+        // should reconcile from disk/current instead of halting the hot path.
+        let old = concat!(
+            "# Doc\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: old\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let new = concat!(
+            "# Doc\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: new\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc, canonical) = temp_git_doc(&[old, new]);
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+            &canonical,
+            old,
+            "jetbrains-stale-commit-test",
+            "jetbrains",
+            "0.2.205",
+            &["operator_text_authority_v1"],
+            false,
+        )
+        .unwrap();
+
+        let outcome =
+            guard_visible_write_reconcile_with_target(&doc, "test_committed_blob", new, None)
+                .expect("committed-blob live buffer must not fail closed");
+        assert!(
+            matches!(outcome, VisibleWriteReconcile::Clean),
+            "disk still matches the expected current document"
+        );
+        let log =
+            std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_live_buffer_committed_blob_reconcile"),
+            "committed-blob reconcile marker should be logged: {log}"
+        );
+        assert!(
+            !log.contains("visible_write_deferred_live_buffer_changed"),
+            "committed stale buffer must not trip the fail-closed block: {log}"
         );
     }
 

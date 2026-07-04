@@ -1446,12 +1446,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let inflight = agent_doc_ipc_io::inflight_connection_handlers();
                 let cycle_open = match agent_doc_cycle_state_io::load(&path).ok().flatten() {
                     Some(state) if state.is_open() => {
-                        if turn_boundary
-                            && state.open_stalled(
-                            inflight,
-                            current_epoch_secs(),
-                            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
-                        ) {
+                        let pre_response_cycle_stalled = turn_boundary
+                            && state.stalled_pre_response_cycle(
+                                inflight,
+                                current_epoch_secs(),
+                                agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
+                            );
+                        if pre_response_cycle_stalled {
                             let stalled_secs =
                                 current_epoch_secs().saturating_sub(state.updated_at);
                             if let Err(err) = agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(&crate::PIPELINE_FRONTMATTER_EFFECTS,

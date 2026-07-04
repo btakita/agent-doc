@@ -9650,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 49,
+        ledger_rows.len() >= 50,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10145,6 +10145,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/project_controller.rs",
             "agent-doc-controller-io/src/project_controller.rs",
             "Split RPC client/server wire protocol from SQLite actor-store projection",
+        ),
+        (
+            "Route queue facade deletion batch",
+            "agent-doc-orchestration/src/route.rs",
+            "agent-doc-route-io/src/queue_dispatch.rs",
+            "Move the remaining `RouteQueueEffects` write callback",
         ),
     ] {
         let row_text = ledger_rows
@@ -25380,6 +25386,12 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     for forbidden_snippet in [
         "fn route_queue_lock_path(",
         "fn acquire_route_queue_lock(",
+        "fn enqueue_route_dispatch_prompt(",
+        "fn enqueue_exchange_slash_command_for_idle_drain(",
+        "fn activate_existing_route_queue_head(",
+        "enqueue_route_dispatch_prompt_with_effects",
+        "enqueue_exchange_slash_command_for_idle_drain_with_effects",
+        "activate_existing_route_queue_head_with_effects",
         "agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update",
         "agent_doc_queue::route_dispatch::inactive_route_queue_head",
         "agent_doc_queue::route_dispatch::activate_existing_route_queue_content",

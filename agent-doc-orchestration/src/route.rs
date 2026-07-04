@@ -259,10 +259,8 @@ use agent_doc_route_io::pane_resolution::{
     startup_miss_route_provenance,
 };
 use agent_doc_route_io::queue_dispatch::{
-    RouteQueueEffects, RouteQueueEnqueueOutcome,
-    activate_existing_route_queue_head as activate_existing_route_queue_head_with_effects,
-    enqueue_exchange_slash_command_for_idle_drain as enqueue_exchange_slash_command_for_idle_drain_with_effects,
-    enqueue_route_dispatch_prompt as enqueue_route_dispatch_prompt_with_effects,
+    RouteQueueEffects, activate_existing_route_queue_head,
+    enqueue_exchange_slash_command_for_idle_drain, enqueue_route_dispatch_prompt,
     inactive_route_queue_head,
 };
 use agent_doc_route_io::session_resolution::resolve_target_session;
@@ -450,7 +448,8 @@ fn enqueue_route_dispatch_prompt_for_dispatch_only(
     source: &str,
     priority: bool,
 ) -> Result<DispatchOnlyQueuedPromptOutcome> {
-    let outcome = enqueue_route_dispatch_prompt(file, prompt_text, source, priority)?;
+    let outcome =
+        enqueue_route_dispatch_prompt(file, prompt_text, source, priority, route_queue_effects())?;
     Ok(DispatchOnlyQueuedPromptOutcome {
         prompt_text: outcome.prompt_text,
         appended: outcome.appended,
@@ -903,41 +902,6 @@ fn classify_route_closeout_block(
     (recovery_decision, dispatch_decision)
 }
 
-fn enqueue_route_dispatch_prompt(
-    file: &Path,
-    prompt_text: &str,
-    source: &str,
-    priority: bool,
-) -> Result<RouteQueueEnqueueOutcome> {
-    enqueue_route_dispatch_prompt_with_effects(
-        file,
-        prompt_text,
-        source,
-        priority,
-        route_queue_effects(),
-    )
-}
-
-fn enqueue_exchange_slash_command_for_idle_drain(
-    file: &Path,
-    context: &PromptBearingRouteContext,
-    source: &str,
-) -> Result<Option<RouteQueueEnqueueOutcome>> {
-    enqueue_exchange_slash_command_for_idle_drain_with_effects(
-        file,
-        context,
-        source,
-        route_queue_effects(),
-    )
-}
-
-fn activate_existing_route_queue_head(
-    file: &Path,
-    source: &str,
-) -> Result<Option<RouteQueueEnqueueOutcome>> {
-    activate_existing_route_queue_head_with_effects(file, source, route_queue_effects())
-}
-
 fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {
     wait_for_ready_override().unwrap_or_else(|| {
         dispatch_only_starting_pane_ready_timeout_for_binary(
@@ -994,6 +958,7 @@ fn route_via_authoritative_actor(
                         file,
                         context,
                         "open_closeout_blocked",
+                        route_queue_effects(),
                     )? {
                         Some(queued) => queued,
                         None => enqueue_route_dispatch_prompt(
@@ -1001,6 +966,7 @@ fn route_via_authoritative_actor(
                             &context.prompt_text,
                             "open_closeout_blocked",
                             true,
+                            route_queue_effects(),
                         )?,
                     };
                     eprintln!(
@@ -1051,8 +1017,12 @@ fn route_via_authoritative_actor(
         }
     }
     if let Some(context) = prompt_context
-        && let Some(queued) =
-            enqueue_exchange_slash_command_for_idle_drain(file, context, "exchange_slash_command")?
+        && let Some(queued) = enqueue_exchange_slash_command_for_idle_drain(
+            file,
+            context,
+            "exchange_slash_command",
+            route_queue_effects(),
+        )?
     {
         eprintln!(
             "[route] unresolved exchange slash command for {} was queued as {:?} in active agent:queue (appended={}, already_present={}, superseded={}) for managed after-turn submission",
@@ -1514,7 +1484,9 @@ fn route_via_authoritative_actor(
             if dispatch_only_focus_only_should_fail_closed(reopen_mode, actor_dispatch_state) {
                 let reason = actor_dispatch_blocker_reason(actor_dispatch_state)
                     .unwrap_or("actor not ready");
-                if let Some(queued) = activate_existing_route_queue_head(file, reason)? {
+                if let Some(queued) =
+                    activate_existing_route_queue_head(file, reason, route_queue_effects())?
+                {
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
@@ -1632,9 +1604,11 @@ fn route_via_authoritative_actor(
                 actor_state.as_str(),
                 dispatch_pane
             );
-            if let Some(queued) =
-                activate_existing_route_queue_head(file, "focus_only_inactive_queue")?
-            {
+            if let Some(queued) = activate_existing_route_queue_head(
+                file,
+                "focus_only_inactive_queue",
+                route_queue_effects(),
+            )? {
                 eprintln!(
                     "[route] activated existing inactive agent:queue head {:?} for {} (already_present={}, activated={}) during focus-only reopen",
                     queued.prompt_text,
@@ -1669,8 +1643,13 @@ fn route_via_authoritative_actor(
             );
             if let Some(context) = prompt_context {
                 // #jb-run-preempt-autoloop-priority: busy-actor Run Agent Doc preempts.
-                let queued =
-                    enqueue_route_dispatch_prompt(file, &context.prompt_text, reason, true)?;
+                let queued = enqueue_route_dispatch_prompt(
+                    file,
+                    &context.prompt_text,
+                    reason,
+                    true,
+                    route_queue_effects(),
+                )?;
                 eprintln!(
                     "[route] authoritative actor generation {} for {} is busy on pane {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger {}",
                     actor.record.generation,
@@ -1870,7 +1849,11 @@ fn route_via_authoritative_actor(
             let queue_prompt = if prompt_context.is_some() {
                 prompt_context.map(|context| context.prompt_text.clone())
             } else {
-                activate_existing_route_queue_head(file, "dispatch_only_inactive_queue")?
+                activate_existing_route_queue_head(
+                    file,
+                    "dispatch_only_inactive_queue",
+                    route_queue_effects(),
+                )?
                     .map(|queued| {
                         eprintln!(
                             "[route] activated existing inactive agent:queue head {:?} for {} (already_present={}, activated={}) before dispatch-only reopen",
@@ -2659,10 +2642,14 @@ mod tests {
         assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
 
         let _force_disk_guard = ForceDiskRouteWritesGuard::set(true);
-        let outcome =
-            enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_exchange_slash")
-                .unwrap()
-                .expect("slash command should queue for idle drain");
+        let outcome = enqueue_exchange_slash_command_for_idle_drain(
+            &doc,
+            &ctx,
+            "test_exchange_slash",
+            route_queue_effects(),
+        )
+        .unwrap()
+        .expect("slash command should queue for idle drain");
         assert!(outcome.appended);
         assert_eq!(outcome.prompt_text, "/clear");
 
@@ -2716,9 +2703,14 @@ mod tests {
         assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
 
         let _force_disk_guard = ForceDiskRouteWritesGuard::set(true);
-        let outcome = enqueue_exchange_slash_command_for_idle_drain(&doc, &ctx, "test_bare_slash")
-            .unwrap()
-            .expect("slash command should queue for idle drain");
+        let outcome = enqueue_exchange_slash_command_for_idle_drain(
+            &doc,
+            &ctx,
+            "test_bare_slash",
+            route_queue_effects(),
+        )
+        .unwrap()
+        .expect("slash command should queue for idle drain");
         assert!(outcome.appended);
         assert_eq!(outcome.prompt_text, "/clear");
 
@@ -3114,6 +3106,7 @@ mod tests {
             "❯ do [#qipc]. #spec-test-build-install-commit-push",
             "test_busy_actor",
             false,
+            route_queue_effects(),
         )
         .expect("route should persist a queued dispatch prompt");
 
@@ -3185,9 +3178,14 @@ mod tests {
             crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), expected.into());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
 
-        let outcome =
-            enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
-                .expect("route enqueue should converge through editor IPC");
+        let outcome = enqueue_route_dispatch_prompt(
+            &doc,
+            "manual preempt prompt",
+            "test_busy_actor",
+            true,
+            route_queue_effects(),
+        )
+        .expect("route enqueue should converge through editor IPC");
 
         assert!(outcome.appended);
         assert!(outcome.activated);
@@ -3245,9 +3243,14 @@ mod tests {
         );
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
-        let outcome =
-            enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor", false)
-                .expect("route must not crash on a polluted agent:queue");
+        let outcome = enqueue_route_dispatch_prompt(
+            &doc,
+            "do [#newitem]",
+            "test_busy_actor",
+            false,
+            route_queue_effects(),
+        )
+        .expect("route must not crash on a polluted agent:queue");
         assert!(outcome.appended);
 
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -3258,9 +3261,14 @@ mod tests {
         assert!(updated.contains("- do [#newitem]"));
 
         // Re-dispatching the same prompt into the still-polluted queue is idempotent.
-        let outcome2 =
-            enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor", false)
-                .expect("route must stay resilient on repeat dispatch");
+        let outcome2 = enqueue_route_dispatch_prompt(
+            &doc,
+            "do [#newitem]",
+            "test_busy_actor",
+            false,
+            route_queue_effects(),
+        )
+        .expect("route must stay resilient on repeat dispatch");
         assert!(outcome2.already_present);
         let updated2 = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
@@ -3297,6 +3305,7 @@ mod tests {
             "do [#qipc]. #spec-test-build-install-commit-push",
             "test_busy_actor",
             false,
+            route_queue_effects(),
         )
         .expect("route should activate an existing queued dispatch prompt");
 
@@ -3345,7 +3354,7 @@ mod tests {
         );
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
-        let outcome = activate_existing_route_queue_head(&doc, "busy actor")
+        let outcome = activate_existing_route_queue_head(&doc, "busy actor", route_queue_effects())
             .unwrap()
             .expect("legacy inactive auto go queue head should activate");
 
@@ -3399,7 +3408,7 @@ mod tests {
 
         assert_eq!(inactive_route_queue_head(&doc).unwrap(), None);
         assert_eq!(
-            activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
+            activate_existing_route_queue_head(&doc, "busy actor", route_queue_effects()).unwrap(),
             None,
             "plain inactive queues should stay inert without auto/start activation"
         );
@@ -3471,7 +3480,12 @@ mod tests {
         // snapshot are untouched, so the operator's edit survives for the next
         // committed cycle.
         assert_eq!(
-            activate_existing_route_queue_head(&doc, "dispatch_only_inactive_queue").unwrap(),
+            activate_existing_route_queue_head(
+                &doc,
+                "dispatch_only_inactive_queue",
+                route_queue_effects(),
+            )
+            .unwrap(),
             None,
             "route must not activate/consume an uncommitted queue head"
         );
@@ -3508,9 +3522,13 @@ mod tests {
             "a committed-backed head is dispatchable"
         );
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
-        let outcome = activate_existing_route_queue_head(&doc, "dispatch_only_inactive_queue")
-            .unwrap()
-            .expect("committed-backed head should activate");
+        let outcome = activate_existing_route_queue_head(
+            &doc,
+            "dispatch_only_inactive_queue",
+            route_queue_effects(),
+        )
+        .unwrap()
+        .expect("committed-backed head should activate");
         assert_eq!(outcome.prompt_text, "do [#committed]");
     }
     #[test]
@@ -3582,7 +3600,7 @@ mod tests {
             "an already-active go queue exposes no inactive head to activate"
         );
         assert_eq!(
-            activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
+            activate_existing_route_queue_head(&doc, "busy actor", route_queue_effects()).unwrap(),
             None,
             "activate path returns None when the queue is already go-looping"
         );
@@ -3626,7 +3644,7 @@ mod tests {
         );
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
-        let outcome = activate_existing_route_queue_head(&doc, "busy actor")
+        let outcome = activate_existing_route_queue_head(&doc, "busy actor", route_queue_effects())
             .unwrap()
             .expect("startable inactive `go` queue head should activate");
 
@@ -3675,7 +3693,7 @@ mod tests {
             "marker-side `stop` must keep the queue inert"
         );
         assert_eq!(
-            activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
+            activate_existing_route_queue_head(&doc, "busy actor", route_queue_effects()).unwrap(),
             None,
             "marker-side `stop` must not be activated by the route path"
         );
@@ -3715,6 +3733,7 @@ mod tests {
             "do [#adoc-orch-shim-cleanup]",
             "test_busy_actor",
             true,
+            route_queue_effects(),
         )
         .expect("route should treat the live head as already queued");
 
@@ -3756,6 +3775,7 @@ mod tests {
             "Run Agent Doc queued the edited prompt.",
             "test_busy_actor",
             false,
+            route_queue_effects(),
         )
         .expect("route should update a stale single auto-queue prompt");
 
@@ -3804,9 +3824,14 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
-        let outcome =
-            enqueue_route_dispatch_prompt(&doc, "third queued prompt", "test_busy_actor", false)
-                .expect("route should append to legacy multi-prompt queues");
+        let outcome = enqueue_route_dispatch_prompt(
+            &doc,
+            "third queued prompt",
+            "test_busy_actor",
+            false,
+            route_queue_effects(),
+        )
+        .expect("route should append to legacy multi-prompt queues");
 
         assert!(outcome.appended);
         assert!(!outcome.already_present);
@@ -3846,9 +3871,14 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
-        let outcome =
-            enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
-                .expect("priority route dispatch should preempt the pending queue");
+        let outcome = enqueue_route_dispatch_prompt(
+            &doc,
+            "manual preempt prompt",
+            "test_busy_actor",
+            true,
+            route_queue_effects(),
+        )
+        .expect("priority route dispatch should preempt the pending queue");
 
         assert!(outcome.appended);
         assert!(!outcome.already_present);
@@ -3890,9 +3920,14 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
-        let outcome =
-            enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
-                .expect("priority route dispatch should insert ahead, not supersede");
+        let outcome = enqueue_route_dispatch_prompt(
+            &doc,
+            "manual preempt prompt",
+            "test_busy_actor",
+            true,
+            route_queue_effects(),
+        )
+        .expect("priority route dispatch should insert ahead, not supersede");
 
         assert!(outcome.appended);
         assert!(!outcome.superseded, "priority dispatch must not supersede");
@@ -3929,8 +3964,14 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
-        enqueue_route_dispatch_prompt(&doc, "manual preempt prompt", "test_busy_actor", true)
-            .expect("priority route dispatch should insert after leading directives");
+        enqueue_route_dispatch_prompt(
+            &doc,
+            "manual preempt prompt",
+            "test_busy_actor",
+            true,
+            route_queue_effects(),
+        )
+        .expect("priority route dispatch should insert after leading directives");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("<!-- agent:queue go -->"));

@@ -3,6 +3,7 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use serde_json::Value;
 use std::fs;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
@@ -271,11 +272,10 @@ fn write_commit_requires_git_repo_before_mutating_session_document() {
 }
 
 #[test]
-fn finalize_stale_snapshot_blocks_pending_flags_before_mutating_backlog() {
-    // #ipcproofcloseout / #crdtreset1: stale snapshot/CRDT state must be detected
-    // before granular --pending-* mutations are applied. Otherwise a failed
-    // finalize can leave backlog changes without the exchange response that
-    // explains them.
+fn finalize_stale_snapshot_warns_but_does_not_block_response_or_pending_flags() {
+    // Snapshots are durable recovery evidence, not hot-path authority. A stale
+    // sidecar can warn, but it must not prevent the response and its same-cycle
+    // pending mutation from landing atomically.
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);
     let current = fs::read_to_string(&doc).unwrap();
@@ -303,24 +303,23 @@ fn finalize_stale_snapshot_blocks_pending_flags_before_mutating_backlog() {
             "--baseline-file",
             baseline.to_str().unwrap(),
             "--backlog-add-back",
-            "id=partial Pending item that must not land without the response",
+            "id=partial Pending item that must land with the response",
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: stale snapshot — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .failure()
-        .stderr(predicates::str::contains("refusing pre-pending write"))
-        .stderr(predicates::str::contains("agent-doc reset --from-current"));
+        .success()
+        .stderr(predicates::str::contains("snapshot recovery warning"));
 
     let after = fs::read_to_string(&doc).unwrap();
     assert!(
-        !after.contains("#partial"),
-        "pending add must not land when stale snapshot blocks finalize:\n{after}"
+        after.contains("#partial"),
+        "pending add must land with the response despite stale recovery snapshot:\n{after}"
     );
     assert!(
-        !after.contains("### Re: stale snapshot — gpt-5"),
-        "exchange response must also remain absent on failed finalize:\n{after}"
+        after.contains("### Re: stale snapshot — gpt-5"),
+        "exchange response must land despite stale recovery snapshot:\n{after}"
     );
 }
 
@@ -438,6 +437,157 @@ fn stream_ipc_timeout_retains_patch_and_refuses_direct_write() {
     assert!(
         !patch_jsons.is_empty(),
         "IPC timeout should leave the patch queued for an editor retry"
+    );
+}
+
+#[test]
+fn finalize_ipc_timeout_does_not_apply_done_before_response_materializes() {
+    let (tmp, doc) = setup_session_stream_doc();
+    insert_pending_item(&doc, "- [ ] [#done1] Close the loop\n");
+    fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let initial_head = head_blob(tmp.path());
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--done", "done1"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "recovery=retry_without_disk_write",
+        ))
+        .stderr(predicates::str::contains(
+            "refusing direct document write",
+        ));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("### Re: #done1 close the loop — gpt-5"),
+        "IPC timeout must not leave a response in the working tree"
+    );
+    assert!(
+        content.contains("- [ ] [#done1] Close the loop"),
+        "failed response placement must not apply --done before the response materializes:\n{content}"
+    );
+    assert!(
+        !content.contains("- [x] [#done1] Close the loop"),
+        "failed response placement must not mark the item done:\n{content}"
+    );
+    assert_eq!(
+        initial_head,
+        head_blob(tmp.path()),
+        "IPC timeout must not commit tracked-work mutations without the response"
+    );
+}
+
+#[test]
+fn write_commit_force_disk_replays_pending_crdt_response_with_editor_owner() {
+    let (tmp, doc) = setup_session_stream_doc();
+    fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/crdt")).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    agent_doc_plugin_owner::try_acquire_plugin_owner(
+        doc.to_str().unwrap(),
+        "jetbrains-test-owner",
+        std::process::id(),
+    );
+    agent_doc_repair_io::pending::save_pending(
+        &doc,
+        "<!-- patch:exchange -->\n### Re: retained response — gpt-5\nRecovered through force disk.\n<!-- /patch:exchange -->\n",
+    )
+    .unwrap();
+    let crdt_lock_path = crdt_path(tmp.path(), &doc).with_extension("yrs.lock");
+    let crdt_lock = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&crdt_lock_path)
+        .unwrap();
+    let lock_result = unsafe { libc::flock(crdt_lock.as_raw_fd(), libc::LOCK_EX) };
+    assert_eq!(
+        lock_result,
+        0,
+        "failed to lock {}",
+        crdt_lock_path.display()
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", "--force-disk", doc.to_str().unwrap()])
+        .write_stdin("")
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("### Re: retained response — gpt-5"),
+        "force-disk retained-response replay should materialize the response:\n{content}"
+    );
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("### Re: retained response — gpt-5"),
+        "force-disk retained-response replay should commit the response"
+    );
+}
+
+#[test]
+fn finalize_force_disk_crdt_merge_drift_skips_editor_checkpoint_lock() {
+    let (tmp, doc) = setup_session_stream_doc();
+    fs::create_dir_all(tmp.path().join(".agent-doc/crdt")).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    agent_doc_plugin_owner::try_acquire_plugin_owner(
+        doc.to_str().unwrap(),
+        "jetbrains-test-owner-merge",
+        std::process::id(),
+    );
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+    let current = baseline_content.replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "❯ live editor drift\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, current).unwrap();
+    let crdt_lock_path = crdt_path(tmp.path(), &doc).with_extension("yrs.lock");
+    let crdt_lock = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&crdt_lock_path)
+        .unwrap();
+    let lock_result = unsafe { libc::flock(crdt_lock.as_raw_fd(), libc::LOCK_EX) };
+    assert_eq!(
+        lock_result,
+        0,
+        "failed to lock {}",
+        crdt_lock_path.display()
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--force-disk",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: live drift — gpt-5\nRecovered without checkpoint lock.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("### Re: live drift — gpt-5"),
+        "force-disk closeout should materialize the response:\n{content}"
+    );
+    assert!(
+        content.contains("❯ live editor drift"),
+        "force-disk merge should preserve live editor drift:\n{content}"
     );
 }
 

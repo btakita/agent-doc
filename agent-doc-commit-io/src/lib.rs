@@ -236,6 +236,36 @@ where
     let has_dropped_queue_prompt_evidence = cycle_state_for_commit
         .as_ref()
         .is_some_and(|state| !state.dropped_queue_prompts.is_empty());
+    let active_response_target = agent_doc_capture_io::load_active(file)
+        .ok()
+        .flatten()
+        .and_then(|capture| {
+            agent_doc_turn::response_text::response_prompt_target_from_re_heading(
+                &capture.response_body,
+            )
+        });
+    if ipc_snapshot_adoption_blocked
+        && let Some(snapshot) = snapshot_content.as_deref()
+        && live_prompt_drift_missing_response_with_unanswered_prompt_for_commit(
+            snapshot,
+            &file_content,
+            active_response_target.as_deref(),
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_blocked_live_prompt_drift_user_prompt file={} old_snap_len={} new_snap_len={}",
+                file.display(),
+                snap_len,
+                file_len
+            ),
+        );
+        anyhow::bail!(
+            "refusing to close {}: the recovery checkpoint contains a response that is missing from the visible file, and the visible exchange also contains a new unanswered prompt. Re-run preflight after preserving the visible prompt.",
+            file.display()
+        );
+    }
     let reintroduced_reaped_ids = cycle_state_for_commit
         .map(|state| state.reaped_pending_ids.into_iter().collect::<HashSet<_>>())
         .map(|ids| detect_reintroduced_reaped_pending_ids(&file_content, &ids))
@@ -297,7 +327,28 @@ where
                 .eq(head_doc.as_deref().unwrap_or_default()))
         && let Some(reason) = classify_safe_out_of_band_agent_doc_mutation(snapshot, &file_content)
     {
-        if ipc_snapshot_adoption_blocked {
+        if reason.contains("exchange")
+            && exchange_has_unanswered_disk_only_prompt_target_for_commit(
+                snapshot,
+                &file_content,
+                active_response_target.as_deref(),
+            )
+        {
+            eprintln!(
+                "[commit] leaving out-of-band exchange prompt drift unabsorbed for {}",
+                file.display()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "snapshot_absorb_skipped_prompt_target file={} reason={} old_snap_len={} new_snap_len={}",
+                    file.display(),
+                    reason,
+                    snap_len,
+                    file_len
+                ),
+            );
+        } else if ipc_snapshot_adoption_blocked {
             eprintln!(
                 "[commit] refusing to absorb out-of-band {} mutation after IPC snapshot adoption was blocked for {}",
                 reason,
@@ -811,6 +862,124 @@ where
         did_commit,
         vcs_refresh_signaled,
     })
+}
+
+fn exchange_has_unanswered_disk_only_prompt_target_for_commit(
+    snapshot_doc: &str,
+    current_doc: &str,
+    active_response_target: Option<&str>,
+) -> bool {
+    let (Ok(snapshot_components), Ok(current_components)) = (
+        agent_doc_element::element::parse(snapshot_doc),
+        agent_doc_element::element::parse(current_doc),
+    ) else {
+        return true;
+    };
+    let (Some(snapshot_exchange), Some(current_exchange)) = (
+        snapshot_components
+            .iter()
+            .find(|component| component.name == "exchange"),
+        current_components
+            .iter()
+            .find(|component| component.name == "exchange"),
+    ) else {
+        return true;
+    };
+
+    let snapshot_counts =
+        exchange_prompt_target_counts_for_commit(snapshot_exchange.content(snapshot_doc));
+    let mut seen = std::collections::HashMap::<String, usize>::new();
+    for prompt in exchange_prompt_target_lines_for_commit(current_exchange.content(current_doc)) {
+        let count = seen.entry(prompt.clone()).or_insert(0);
+        *count += 1;
+        if *count > snapshot_counts.get(&prompt).copied().unwrap_or(0) {
+            let answered_by_active_response = active_response_target.is_some_and(|target| {
+                prompt_target_matches_active_response_for_commit(&prompt, target)
+            });
+            if !answered_by_active_response {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn live_prompt_drift_missing_response_with_unanswered_prompt_for_commit(
+    snapshot_doc: &str,
+    current_doc: &str,
+    active_response_target: Option<&str>,
+) -> bool {
+    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+        current_doc,
+        snapshot_doc,
+    )
+    .is_none()
+    {
+        return false;
+    }
+    exchange_has_unanswered_disk_only_prompt_target_for_commit(
+        snapshot_doc,
+        current_doc,
+        active_response_target,
+    )
+}
+
+fn exchange_prompt_target_counts_for_commit(
+    exchange_body: &str,
+) -> std::collections::HashMap<String, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for prompt in exchange_prompt_target_lines_for_commit(exchange_body) {
+        *counts.entry(prompt).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn exchange_prompt_target_lines_for_commit(exchange_body: &str) -> Vec<String> {
+    exchange_body
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with('❯')
+                || agent_doc_prompt_lines::text_line_looks_like_prompt_target(trimmed)
+            {
+                Some(
+                    trimmed
+                        .strip_prefix('❯')
+                        .unwrap_or(trimmed)
+                        .trim()
+                        .to_string(),
+                )
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn prompt_target_matches_active_response_for_commit(
+    prompt: &str,
+    active_response_target: &str,
+) -> bool {
+    let prompt = prompt_match_key_for_commit(prompt);
+    let target = prompt_match_key_for_commit(active_response_target);
+    if prompt.is_empty() || target.is_empty() {
+        return false;
+    }
+    if prompt == target || prompt.contains(&target) || target.contains(&prompt) {
+        return true;
+    }
+    let target_tokens = target.split_whitespace().collect::<Vec<_>>();
+    target_tokens.len() >= 2 && target_tokens.iter().all(|token| prompt.contains(token))
+}
+
+fn prompt_match_key_for_commit(text: &str) -> String {
+    text.trim()
+        .trim_start_matches('❯')
+        .trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn response_bearing_exchange_drift_after_committed_head(head_doc: &str, current_doc: &str) -> bool {

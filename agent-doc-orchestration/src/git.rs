@@ -335,6 +335,11 @@ impl agent_doc_git_io::transient_cleanup::TransientCleanupEffects
         agent_doc_merge_io::save_document_crdt(file, legacy_state, markdown)
     }
 
+    fn editor_attached(&self, file: &Path) -> bool {
+        agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
+            .editor_attached()
+    }
+
     fn log_op(&self, file: &Path, message: &str) {
         agent_doc_ops_log_io::log_op(file, message);
     }

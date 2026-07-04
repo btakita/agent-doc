@@ -10,6 +10,7 @@ pub trait TransientCleanupEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()>;
     fn save_document_crdt(&self, file: &Path, legacy_state: &[u8], markdown: &str) -> Result<()>;
+    fn editor_attached(&self, file: &Path) -> bool;
     fn log_op(&self, file: &Path, message: &str);
     fn project_root_containing(&self, file: &Path) -> Option<PathBuf>;
     fn ipc_listener_active(&self, project_root: &Path) -> bool;
@@ -51,8 +52,19 @@ pub fn refresh_live_closeout_sidecars(
     signal_editor_refresh: bool,
 ) -> Result<Option<bool>> {
     if agent_doc_frontmatter::frontmatter::content_uses_crdt_write(committed_doc) {
-        let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(committed_doc).encode_state();
-        effects.save_document_crdt(file, &crdt, committed_doc)?;
+        if effects.editor_attached(file) {
+            effects.log_op(
+                file,
+                &format!(
+                    "crdt_checkpoint_skip file={} source=commit reason=editor_authority_owns_sidecar_lock len={}",
+                    file.display(),
+                    committed_doc.len()
+                ),
+            );
+        } else {
+            let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(committed_doc).encode_state();
+            effects.save_document_crdt(file, &crdt, committed_doc)?;
+        }
     }
 
     if !signal_editor_refresh {

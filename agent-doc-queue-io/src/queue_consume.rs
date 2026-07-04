@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
+use std::fmt::Display;
 use std::fs::OpenOptions;
 use std::path::Path;
 
@@ -17,16 +18,15 @@ use agent_doc_queue::{
         IpcNodeOp, QueueConsumptionPlan, annotate_newly_struck_free_text_heads,
         answered_free_text_head_node_keys, consume_queue_nodes_by_key, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
-        mark_entries_completed_by_done_ids, mark_first_matching_prompts_completed_by_texts,
-        normalized_done_id_bag, queue_consume_count_for_done_ids, queue_consume_node_ops,
-        queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
-        queue_prompt_node_keys_for_texts, should_consume_queue_prompt_for_diff_content,
+        mark_entries_completed_by_done_ids, normalized_done_id_bag,
+        queue_consume_count_for_done_ids, queue_consume_node_ops, queue_prompt_node_keys_for_count,
+        queue_prompt_node_keys_for_done_ids, should_consume_queue_prompt_for_diff_content,
         strike_all_noise_queue_heads,
     },
     queue_heads::active_queue_head_text,
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
-        queue_prompt_text_is_free_text, response_explicitly_targets_queue_head,
+        response_explicitly_targets_queue_head,
     },
 };
 
@@ -58,13 +58,42 @@ fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
     Ok(file)
 }
 
+fn log_snapshot_recovery_warning(file: &Path, context: &str, detail: impl Display) {
+    eprintln!("[queue] snapshot recovery warning during {context}: {detail}");
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "snapshot_recovery_warning file={} context={} detail={}",
+            file.display(),
+            context,
+            detail
+        ),
+    );
+}
+
+fn load_snapshot_recovery_only(file: &Path, context: &str) -> Option<String> {
+    match agent_doc_snapshot_io::load(file) {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            log_snapshot_recovery_warning(file, context, err);
+            None
+        }
+    }
+}
+
+fn save_snapshot_recovery_only(file: &Path, content: &str, context: &str) {
+    if let Err(err) = agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op) {
+        log_snapshot_recovery_warning(file, context, err);
+    }
+}
+
 #[cfg(test)]
 use agent_doc_queue::{
     queue_consume::{
         cycle_answered_foreign_exchange_prompt, queue_consumption_allowed_for_response,
         should_consume_queue_prompt_for_write,
     },
-    queue_response::queue_head_is_bare_do_directive,
+    queue_response::{queue_head_is_bare_do_directive, queue_prompt_text_is_free_text},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,7 +179,7 @@ pub fn consume_queue_prompts_with_outcome(
             .context("queue consume: failed to write document")?;
     }
     if plan.save_snapshot {
-        agent_doc_snapshot_io::save(file, &plan.new_snapshot, agent_doc_ops_log_io::log_op)?;
+        save_snapshot_recovery_only(file, &plan.new_snapshot, "queue consume writeback");
     }
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
 
@@ -315,17 +344,26 @@ pub fn strike_answered_free_text_queue_heads(
     // strike them by the snapshot's own node keys (keys are position/hash derived
     // and need not equal the document's). Required closeouts must prove both sides
     // converge on the struck state.
-    let new_snapshot = match agent_doc_snapshot_io::load(file)? {
-        Some(snap) => {
+    let new_snapshot = match load_snapshot_recovery_only(file, "free-text strike snapshot sync") {
+        Some(snap) => match (|| -> Result<Option<String>> {
             let snap_keys =
                 answered_free_text_head_node_keys(&snap, response_body, baseline.as_deref())?;
             if snap_keys.is_empty() {
-                None
+                Ok(None)
             } else {
                 let snap_struck = consume_queue_nodes_by_key(&snap, &snap_keys)?;
-                Some(annotate_newly_struck_free_text_heads(&snap, &snap_struck)?)
+                Ok(Some(annotate_newly_struck_free_text_heads(
+                    &snap,
+                    &snap_struck,
+                )?))
             }
-        }
+        })() {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
+                None
+            }
+        },
         None => None,
     };
 
@@ -339,7 +377,7 @@ pub fn strike_answered_free_text_queue_heads(
             .context("free-text strike: failed to write document")?;
     }
     if let Some(snap) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
+        save_snapshot_recovery_only(file, &snap, "free-text strike snapshot sync");
     }
 
     eprintln!(
@@ -463,15 +501,21 @@ pub fn prune_noise_queue_heads(
 
     // Snapshot sync: clear the same noise heads in the snapshot (its own node keys /
     // spans, derived independently) so required closeouts prove both sides converge.
-    let new_snapshot = match agent_doc_snapshot_io::load(file)? {
-        Some(snap) => {
+    let new_snapshot = match load_snapshot_recovery_only(file, "noise prune snapshot sync") {
+        Some(snap) => match (|| -> Result<Option<String>> {
             let (new_snap, _) = strike_all_noise_queue_heads(&snap)?;
             if new_snap == snap {
-                None
+                Ok(None)
             } else {
-                Some(new_snap)
+                Ok(Some(new_snap))
             }
-        }
+        })() {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                log_snapshot_recovery_warning(file, "noise prune snapshot sync", err);
+                None
+            }
+        },
         None => None,
     };
 
@@ -479,7 +523,7 @@ pub fn prune_noise_queue_heads(
         .converge_document_or_disk(file, &new_document, &content, "noise_prune")
         .context("noise prune: failed to write document")?;
     if let Some(snap) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
+        save_snapshot_recovery_only(file, &snap, "noise prune snapshot sync");
     }
 
     let base_hash = agent_doc_hash::content_hash(&content);
@@ -548,15 +592,21 @@ pub fn strike_orphan_id_backed_queue_head(
     }
     // Snapshot sync: strike the same id-backed head in the snapshot by its own node
     // keys so required closeouts prove both sides converge on the struck state.
-    let new_snapshot = match agent_doc_snapshot_io::load(file)? {
-        Some(snap) => {
+    let new_snapshot = match load_snapshot_recovery_only(file, "orphan id head snapshot sync") {
+        Some(snap) => match (|| -> Result<Option<String>> {
             let snap_keys = id_backed_head_node_keys(&snap, &target_id)?;
             if snap_keys.is_empty() {
-                None
+                Ok(None)
             } else {
-                Some(consume_queue_nodes_by_key(&snap, &snap_keys)?)
+                Ok(Some(consume_queue_nodes_by_key(&snap, &snap_keys)?))
             }
-        }
+        })() {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                log_snapshot_recovery_warning(file, "orphan id head snapshot sync", err);
+                None
+            }
+        },
         None => None,
     };
     let base_hash = agent_doc_hash::content_hash(&content);
@@ -564,7 +614,7 @@ pub fn strike_orphan_id_backed_queue_head(
         .converge_document_or_disk(file, &new_document, &content, "orphan_id_head_strike")
         .context("orphan strike: failed to write document")?;
     if let Some(snap) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
+        save_snapshot_recovery_only(file, &snap, "orphan id head snapshot sync");
     }
     eprintln!(
         "[queue] struck orphaned id-backed head [#{target_id}] ({} node(s); #orphanqhead)",
@@ -628,15 +678,21 @@ pub fn acknowledge_open_id_backed_queue_head(
     if new_document == content {
         return Ok(false);
     }
-    let new_snapshot = match agent_doc_snapshot_io::load(file)? {
-        Some(snap) => {
+    let new_snapshot = match load_snapshot_recovery_only(file, "open id ack snapshot sync") {
+        Some(snap) => match (|| -> Result<Option<String>> {
             let snap_keys = id_backed_head_node_keys(&snap, &target_id)?;
             if snap_keys.is_empty() {
-                None
+                Ok(None)
             } else {
-                Some(consume_queue_nodes_by_key(&snap, &snap_keys)?)
+                Ok(Some(consume_queue_nodes_by_key(&snap, &snap_keys)?))
             }
-        }
+        })() {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                log_snapshot_recovery_warning(file, "open id ack snapshot sync", err);
+                None
+            }
+        },
         None => None,
     };
     let base_hash = agent_doc_hash::content_hash(&content);
@@ -644,7 +700,7 @@ pub fn acknowledge_open_id_backed_queue_head(
         .converge_document_or_disk(file, &new_document, &content, "open_id_head_ack")
         .context("open-id ack: failed to write document")?;
     if let Some(snap) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &snap, agent_doc_ops_log_io::log_op)?;
+        save_snapshot_recovery_only(file, &snap, "open id ack snapshot sync");
     }
     eprintln!(
         "[queue] acknowledged id-backed correction head [#{target_id}] ({} node(s); backlog left open; #freshqueueauth)",
@@ -694,30 +750,46 @@ pub fn mark_completed_queue_prompts_for_done_ids(
     let new_body = agent_doc_queue::document_queue::render(&marked_entries);
     let new_document = queue_component.replace_content(&content, &new_body);
 
-    let new_snapshot = if let Some(snapshot_content) = agent_doc_snapshot_io::load(file)? {
-        let snapshot_components = element::parse(&snapshot_content)?;
-        let snapshot_queue = snapshot_components
-            .iter()
-            .find(|component| component.name == "queue")
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "queue done-id mark: document queue changed but snapshot has no agent:queue component"
-                )
-            })?;
-        let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
-        let snapshot_entries = agent_doc_queue::document_queue::parse(snapshot_body)
-            .context("queue done-id mark: failed to parse snapshot queue")?;
-        let (snapshot_marked_entries, snapshot_marked_texts) =
-            mark_entries_completed_by_done_ids(&snapshot_entries, done_ids);
-        if snapshot_marked_texts.len() != marked_texts.len() {
-            anyhow::bail!(
-                "queue done-id mark: snapshot matched {} queue item(s) but document matched {}",
-                snapshot_marked_texts.len(),
-                marked_texts.len()
-            );
+    let new_snapshot = if let Some(snapshot_content) =
+        load_snapshot_recovery_only(file, "queue done-id mark")
+    {
+        match (|| -> Result<Option<String>> {
+            let snapshot_components = element::parse(&snapshot_content)?;
+            let Some(snapshot_queue) = snapshot_components
+                .iter()
+                .find(|component| component.name == "queue")
+            else {
+                return Ok(None);
+            };
+            let snapshot_body =
+                &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
+            let snapshot_entries = agent_doc_queue::document_queue::parse(snapshot_body)
+                .context("queue done-id mark: failed to parse snapshot queue")?;
+            let (snapshot_marked_entries, snapshot_marked_texts) =
+                mark_entries_completed_by_done_ids(&snapshot_entries, done_ids);
+            if snapshot_marked_texts.len() != marked_texts.len() {
+                log_snapshot_recovery_warning(
+                    file,
+                    "queue done-id mark",
+                    format!(
+                        "snapshot matched {} queue item(s) but document matched {}",
+                        snapshot_marked_texts.len(),
+                        marked_texts.len()
+                    ),
+                );
+                return Ok(None);
+            }
+            let snapshot_body = agent_doc_queue::document_queue::render(&snapshot_marked_entries);
+            Ok(Some(
+                snapshot_queue.replace_content(&snapshot_content, &snapshot_body),
+            ))
+        })() {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                log_snapshot_recovery_warning(file, "queue done-id mark", err);
+                None
+            }
         }
-        let snapshot_body = agent_doc_queue::document_queue::render(&snapshot_marked_entries);
-        Some(snapshot_queue.replace_content(&snapshot_content, &snapshot_body))
     } else {
         None
     };
@@ -736,7 +808,7 @@ pub fn mark_completed_queue_prompts_for_done_ids(
             .context("queue done-id mark: failed to write document")?;
     }
     if let Some(new_snapshot) = new_snapshot {
-        agent_doc_snapshot_io::save(file, &new_snapshot, agent_doc_ops_log_io::log_op)?;
+        save_snapshot_recovery_only(file, &new_snapshot, "queue done-id mark");
     }
 
     eprintln!(
@@ -752,7 +824,7 @@ pub fn plan_queue_prompt_consumption(
     content: &str,
     done_ids: &[String],
 ) -> Result<Option<QueueConsumptionPlan>> {
-    let snapshot_content = agent_doc_snapshot_io::load(file)?;
+    let snapshot_content = load_snapshot_recovery_only(file, "queue consume planning");
     plan_queue_prompt_consumption_with_snapshot(
         file,
         content,
@@ -833,83 +905,6 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
                 current = frontmatter::merge_queue_state(&current, false)?;
             }
 
-            let snap = snapshot_content.ok_or_else(|| {
-                anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
-            })?;
-            let snap_comps = element::parse(snap)?;
-            let snap_queue = snap_comps
-                .iter()
-                .find(|c| c.name == "queue")
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "queue consume: queue_active is true but snapshot has no agent:queue component"
-                    )
-                })?;
-            let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
-            let snap_entries = agent_doc_queue::document_queue::parse(snap_body)
-                .context("queue consume: failed to parse snapshot queue")?;
-            let snap_has_auto = agent_doc_queue::document_queue::has_auto_attr(&snap_queue.attrs);
-            let (snap_completed_entries, snapshot_consumed_texts) =
-                mark_entries_completed_by_done_ids(&snap_entries, done_ids);
-            if normalized_done_id_bag(&snapshot_consumed_texts)
-                != normalized_done_id_bag(&consumed_texts)
-            {
-                anyhow::bail!(
-                    "queue consume: snapshot done-id prompts {:?} do not match document done-id prompts {:?}",
-                    snapshot_consumed_texts,
-                    consumed_texts
-                );
-            }
-            let snapshot_node_keys =
-                queue_prompt_node_keys_for_done_ids(snap, done_ids, &snapshot_consumed_texts);
-            let snap_remaining =
-                agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
-            let snap_new_entries = if snap_remaining == 0 {
-                Vec::new()
-            } else {
-                snap_completed_entries
-            };
-            if snap_new_entries != new_entries {
-                let snap_remaining_prompts =
-                    agent_doc_queue::document_queue::prompts(&snap_new_entries).len();
-                let doc_remaining_prompts =
-                    agent_doc_queue::document_queue::prompts(&new_entries).len();
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "queue_done_id_consume_divergence_reconciled file={} cause=done_id_authoritative consumed={} snap_remaining={} doc_remaining={}",
-                        file.display(),
-                        consumed_texts.len(),
-                        snap_remaining_prompts,
-                        doc_remaining_prompts
-                    ),
-                );
-            }
-
-            let mut new_snap =
-                if drained || snap_new_entries != new_entries || !snapshot_node_keys.ast_backed {
-                    snap_queue.replace_content(snap, &new_body)
-                } else {
-                    consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
-                };
-            if drained {
-                if snap_has_auto
-                    && let Ok(sc2) = element::parse(&new_snap)
-                    && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
-                {
-                    let raw = &new_snap[sq2.open_start..sq2.open_end];
-                    let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
-                    if new_tag != raw {
-                        let mut rebuilt = String::with_capacity(new_snap.len());
-                        rebuilt.push_str(&new_snap[..sq2.open_start]);
-                        rebuilt.push_str(&new_tag);
-                        rebuilt.push_str(&new_snap[sq2.open_end..]);
-                        new_snap = rebuilt;
-                    }
-                }
-                new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
-            }
-
             let response_first_line = agent_doc_capture_io::load_active(file)
                 .ok()
                 .flatten()
@@ -919,12 +914,116 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
                 &consumed_texts,
                 response_first_line.as_deref(),
             );
-            new_snap = embed_consumed_prompt_in_response(
-                &new_snap,
-                &consumed_texts,
-                response_first_line.as_deref(),
-            );
-            let save_snapshot = new_snap != snap;
+            let mut new_snap = snapshot_content.unwrap_or(content).to_string();
+            let mut save_snapshot = false;
+            if let Some(snap) = snapshot_content {
+                match (|| -> Result<Option<String>> {
+                    let snap_comps = element::parse(snap)?;
+                    let Some(snap_queue) = snap_comps.iter().find(|c| c.name == "queue") else {
+                        return Ok(None);
+                    };
+                    let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
+                    let snap_entries = agent_doc_queue::document_queue::parse(snap_body)
+                        .context("queue consume: failed to parse snapshot queue")?;
+                    let snap_has_auto =
+                        agent_doc_queue::document_queue::has_auto_attr(&snap_queue.attrs);
+                    let (snap_completed_entries, snapshot_consumed_texts) =
+                        mark_entries_completed_by_done_ids(&snap_entries, done_ids);
+                    if normalized_done_id_bag(&snapshot_consumed_texts)
+                        != normalized_done_id_bag(&consumed_texts)
+                    {
+                        log_snapshot_recovery_warning(
+                            file,
+                            "queue consume done-id snapshot sync",
+                            format!(
+                                "snapshot done-id prompts {:?} do not match document done-id prompts {:?}",
+                                snapshot_consumed_texts, consumed_texts
+                            ),
+                        );
+                        return Ok(None);
+                    }
+                    let snapshot_node_keys = queue_prompt_node_keys_for_done_ids(
+                        snap,
+                        done_ids,
+                        &snapshot_consumed_texts,
+                    );
+                    let snap_remaining =
+                        agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
+                    let snap_new_entries = if snap_remaining == 0 {
+                        Vec::new()
+                    } else {
+                        snap_completed_entries
+                    };
+                    if snap_new_entries != new_entries {
+                        let snap_remaining_prompts =
+                            agent_doc_queue::document_queue::prompts(&snap_new_entries).len();
+                        let doc_remaining_prompts =
+                            agent_doc_queue::document_queue::prompts(&new_entries).len();
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "queue_done_id_consume_divergence_reconciled file={} cause=done_id_authoritative consumed={} snap_remaining={} doc_remaining={}",
+                                file.display(),
+                                consumed_texts.len(),
+                                snap_remaining_prompts,
+                                doc_remaining_prompts
+                            ),
+                        );
+                    }
+
+                    let mut new_snap = if drained
+                        || snap_new_entries != new_entries
+                        || !snapshot_node_keys.ast_backed
+                    {
+                        snap_queue.replace_content(snap, &new_body)
+                    } else {
+                        consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
+                    };
+                    if drained {
+                        if snap_has_auto
+                            && let Ok(sc2) = element::parse(&new_snap)
+                            && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
+                        {
+                            let raw = &new_snap[sq2.open_start..sq2.open_end];
+                            let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
+                            if new_tag != raw {
+                                let mut rebuilt = String::with_capacity(new_snap.len());
+                                rebuilt.push_str(&new_snap[..sq2.open_start]);
+                                rebuilt.push_str(&new_tag);
+                                rebuilt.push_str(&new_snap[sq2.open_end..]);
+                                new_snap = rebuilt;
+                            }
+                        }
+                        new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
+                    }
+                    Ok(Some(embed_consumed_prompt_in_response(
+                        &new_snap,
+                        &consumed_texts,
+                        response_first_line.as_deref(),
+                    )))
+                })() {
+                    Ok(Some(snapshot)) => {
+                        save_snapshot = snapshot != snap;
+                        new_snap = snapshot;
+                    }
+                    Ok(None) => log_snapshot_recovery_warning(
+                        file,
+                        "queue consume done-id snapshot sync",
+                        "snapshot cannot be synchronized to the document queue",
+                    ),
+                    Err(err) => log_snapshot_recovery_warning(
+                        file,
+                        "queue consume done-id snapshot sync",
+                        err,
+                    ),
+                }
+            } else {
+                log_snapshot_recovery_warning(
+                    file,
+                    "queue consume done-id snapshot sync",
+                    "snapshot is missing",
+                );
+            }
 
             return Ok(Some(QueueConsumptionPlan {
                 consumed_text,
@@ -941,167 +1040,27 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
     }
 
     let consume_count = leading_done_consume_count.max(1);
-    let mut consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
-    let mut consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
+    let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
+    let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
         anyhow::anyhow!(
             "queue consume: queue_active is true but document queue has no prompt to consume"
         )
     })?;
 
-    // Update snapshot in sync. Required closeouts must be able to prove the
-    // same active turn prompt was removed from both the file and the snapshot.
-    // Load the snapshot before mutating the document so live queue insertions can
-    // be preserved while the pre-turn active head remains the closeout target.
-    let snap = snapshot_content.ok_or_else(|| {
-        anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
-    })?;
-    let snap_comps = element::parse(snap)?;
-    let snap_queue = snap_comps
-        .iter()
-        .find(|c| c.name == "queue")
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "queue consume: queue_active is true but snapshot has no agent:queue component"
-            )
-        })?;
-    let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
-    let snap_entries = agent_doc_queue::document_queue::parse(snap_body)
-        .context("queue consume: failed to parse snapshot queue")?;
-    let snap_has_auto = agent_doc_queue::document_queue::has_auto_attr(&snap_queue.attrs);
-    let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
-    let snapshot_node_keys = queue_prompt_node_keys_for_count(snap, consume_count)?;
-    if snapshot_consumed_texts.len() != consumed_texts.len() {
-        anyhow::bail!(
-            "queue consume: snapshot has {} prompt(s) available but document consumed {}",
-            snapshot_consumed_texts.len(),
-            consumed_texts.len()
-        );
-    }
-    // Compare head identity ignoring cosmetic pin annotations
-    // (`#queue-consume-pushpin-normalization`): the snapshot can carry the
-    // unpinned spelling of a head while the live document carries the `:pushpin:`
-    // spelling of the same logical item. The pin is priority metadata, not
-    // identity, so a raw text comparison spuriously fails the cycle. Normalize
-    // both sides through `strip_priority_markers` before the equality check.
-    let norm = |texts: &[String]| {
-        texts
-            .iter()
-            .map(|text| strip_priority_markers(text))
-            .collect::<Vec<_>>()
-    };
-    let mut consume_snapshot_head_for_live_addition = false;
-    if norm(&snapshot_consumed_texts) != norm(&consumed_texts) {
-        // A dropped-queue record proves a live editor-buffer addition exists and
-        // must be preserved. It does NOT retarget the active turn. When the
-        // document head is that recorded addition, consume the snapshot active
-        // head wherever it now sits in the current queue and leave the insertion
-        // live for a later turn.
-        let dropped_evidence = agent_doc_cycle_state_io::load(file)
-            .ok()
-            .flatten()
-            .map(|s| s.dropped_queue_prompts)
-            .unwrap_or_default();
-        let doc_head_is_recorded_addition = !dropped_evidence.is_empty()
-            && consumed_texts.iter().all(|doc_head| {
-                let doc_norm = strip_priority_markers(doc_head);
-                dropped_evidence
-                    .iter()
-                    .any(|d| strip_priority_markers(d) == doc_norm)
-            });
-        if doc_head_is_recorded_addition {
-            consume_snapshot_head_for_live_addition = true;
-        } else {
-            anyhow::bail!(
-                "queue consume: snapshot head prompts {:?} do not match document head prompts {:?}",
-                snapshot_consumed_texts,
-                consumed_texts
-            );
-        }
-    }
-    let (consumed_node_keys, completed_entries) = if consume_snapshot_head_for_live_addition {
-        if snapshot_consumed_texts
-            .iter()
-            .any(|text| !queue_prompt_text_is_free_text(content, text))
-        {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_consume_refused_id_backed_snapshot_head_without_explicit_signal file={} head={:?} doc_head={:?}",
-                    file.display(),
-                    snapshot_consumed_texts,
-                    consumed_texts
-                ),
-            );
-            return Ok(None);
-        }
-        let Some(node_keys) = queue_prompt_node_keys_for_texts(
-            content,
-            &snapshot_consumed_texts,
-            &snapshot_node_keys.keys,
-        )?
-        else {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_consume_head_divergence_preserved_live_addition file={} reason=snapshot_active_head_missing snap_head={:?} doc_head={:?}",
-                    file.display(),
-                    snapshot_consumed_texts,
-                    consumed_texts
-                ),
-            );
-            return Ok(None);
-        };
-        let Some(completed_entries) =
-            mark_first_matching_prompts_completed_by_texts(&entries, &snapshot_consumed_texts)
-        else {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_consume_head_divergence_preserved_live_addition file={} reason=snapshot_active_head_unrenderable snap_head={:?} doc_head={:?}",
-                    file.display(),
-                    snapshot_consumed_texts,
-                    consumed_texts
-                ),
-            );
-            return Ok(None);
-        };
+    if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "queue_consume_head_divergence_reconciled file={} reason=snapshot_active_head_authoritative_preserved_live_addition consumed={} snap_head={:?} doc_head={:?}",
+                "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
                 file.display(),
-                consume_count,
-                snapshot_consumed_texts,
-                consumed_texts
+                consumed_text
             ),
         );
-        consumed_texts = snapshot_consumed_texts.clone();
-        consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
-            anyhow::anyhow!(
-                "queue consume: snapshot-selected consume path had no prompt to consume"
-            )
-        })?;
-        (node_keys, completed_entries)
-    } else {
-        if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
-                    file.display(),
-                    consumed_text
-                ),
-            );
-            return Ok(None);
-        }
-        (
-            queue_prompt_node_keys_for_count(content, consume_count)?,
-            agent_doc_queue::document_queue::mark_first_n_prompts_completed(
-                &entries,
-                consume_count,
-            ),
-        )
-    };
+        return Ok(None);
+    }
+    let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
+    let completed_entries =
+        agent_doc_queue::document_queue::mark_first_n_prompts_completed(&entries, consume_count);
     let node_ops = queue_consume_node_ops(&consumed_node_keys.keys);
 
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
@@ -1136,69 +1095,6 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
         }
         current = frontmatter::merge_queue_state(&current, false)?;
     }
-    let snap_completed_entries = agent_doc_queue::document_queue::mark_first_n_prompts_completed(
-        &snap_entries,
-        consume_count,
-    );
-    let snap_remaining = agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
-    let snap_new_entries = if snap_remaining == 0 {
-        Vec::new()
-    } else {
-        snap_completed_entries
-    };
-    if snap_new_entries != new_entries {
-        // #finalize-divergence-orphans-committed-head / IPC-CRDT resilience: the
-        // document `content` here is the post-CRDT-merge result — the merge has
-        // already reconciled the agent (snapshot) side against concurrent
-        // user/editor edits on the disk side. The same-head proof above
-        // (`snapshot_consumed_texts == consumed_texts`) already confirmed we
-        // consumed the right head; this remaining-queue difference is exactly the
-        // concurrent edit the CRDT merge resolved. Hard-bailing here re-rejected
-        // the merge the pipeline just succeeded at, leaving an orphaned unstruck
-        // head that re-serves (the divergence error hit repeatedly under live
-        // editor races). Reconcile instead: the merged document queue is
-        // authoritative, and the snapshot below adopts the document's `new_body`,
-        // so both sides converge on the head-struck merged state. Record the
-        // reconciliation for forensics rather than failing the cycle.
-        let snap_remaining_prompts =
-            agent_doc_queue::document_queue::prompts(&snap_new_entries).len();
-        let doc_remaining_prompts = agent_doc_queue::document_queue::prompts(&new_entries).len();
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_consume_divergence_reconciled file={} reason=crdt_merge_authoritative consumed={} snap_remaining={} doc_remaining={}",
-                file.display(),
-                consume_count,
-                snap_remaining_prompts,
-                doc_remaining_prompts
-            ),
-        );
-    }
-
-    let mut new_snap =
-        if drained || snap_new_entries != new_entries || !snapshot_node_keys.ast_backed {
-            snap_queue.replace_content(snap, &new_body)
-        } else {
-            consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
-        };
-    if drained {
-        if snap_has_auto
-            && let Ok(sc2) = element::parse(&new_snap)
-            && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
-        {
-            let raw = &new_snap[sq2.open_start..sq2.open_end];
-            let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
-            if new_tag != raw {
-                let mut rebuilt = String::with_capacity(new_snap.len());
-                rebuilt.push_str(&new_snap[..sq2.open_start]);
-                rebuilt.push_str(&new_tag);
-                rebuilt.push_str(&new_snap[sq2.open_end..]);
-                new_snap = rebuilt;
-            }
-        }
-        new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
-    }
-
     // #queue-prompt-echo-in-response: an auto/synthetic queue head is never typed
     // into `agent:exchange`, so a consumed queue turn would otherwise record only
     // the `### Re:` answer with no trace of the originating prompt. Embed the
@@ -1215,24 +1111,120 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
         &consumed_texts,
         response_first_line.as_deref(),
     );
-    new_snap = embed_consumed_prompt_in_response(
-        &new_snap,
-        &consumed_texts,
-        response_first_line.as_deref(),
-    );
+    let mut new_snap = snapshot_content.unwrap_or(content).to_string();
+    let mut save_snapshot = false;
+    if let Some(snap) = snapshot_content {
+        match (|| -> Result<Option<String>> {
+            let snap_comps = element::parse(snap)?;
+            let Some(snap_queue) = snap_comps.iter().find(|c| c.name == "queue") else {
+                return Ok(None);
+            };
+            let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
+            let snap_entries = agent_doc_queue::document_queue::parse(snap_body)
+                .context("queue consume: failed to parse snapshot queue")?;
+            let snap_has_auto = agent_doc_queue::document_queue::has_auto_attr(&snap_queue.attrs);
+            let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
+            let snapshot_node_keys = queue_prompt_node_keys_for_count(snap, consume_count)?;
+            if snapshot_consumed_texts.len() != consumed_texts.len() {
+                log_snapshot_recovery_warning(
+                    file,
+                    "queue consume snapshot sync",
+                    format!(
+                        "snapshot has {} prompt(s) available but document consumed {}",
+                        snapshot_consumed_texts.len(),
+                        consumed_texts.len()
+                    ),
+                );
+                return Ok(None);
+            }
+            let norm = |texts: &[String]| {
+                texts
+                    .iter()
+                    .map(|text| strip_priority_markers(text))
+                    .collect::<Vec<_>>()
+            };
+            if norm(&snapshot_consumed_texts) != norm(&consumed_texts) {
+                log_snapshot_recovery_warning(
+                    file,
+                    "queue consume snapshot sync",
+                    format!(
+                        "snapshot head prompts {:?} do not match document head prompts {:?}",
+                        snapshot_consumed_texts, consumed_texts
+                    ),
+                );
+                return Ok(None);
+            }
+            let snap_completed_entries =
+                agent_doc_queue::document_queue::mark_first_n_prompts_completed(
+                    &snap_entries,
+                    consume_count,
+                );
+            let snap_remaining =
+                agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
+            let snap_new_entries = if snap_remaining == 0 {
+                Vec::new()
+            } else {
+                snap_completed_entries
+            };
+            if snap_new_entries != new_entries {
+                let snap_remaining_prompts =
+                    agent_doc_queue::document_queue::prompts(&snap_new_entries).len();
+                let doc_remaining_prompts =
+                    agent_doc_queue::document_queue::prompts(&new_entries).len();
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_consume_divergence_reconciled file={} reason=document_authoritative consumed={} snap_remaining={} doc_remaining={}",
+                        file.display(),
+                        consume_count,
+                        snap_remaining_prompts,
+                        doc_remaining_prompts
+                    ),
+                );
+            }
 
-    if new_snap != snap {
-        return Ok(Some(QueueConsumptionPlan {
-            consumed_text,
-            consumed_texts,
-            node_ops,
-            remaining,
-            drained,
-            auto: has_auto,
-            new_document: current,
-            new_snapshot: new_snap,
-            save_snapshot: true,
-        }));
+            let mut new_snap =
+                if drained || snap_new_entries != new_entries || !snapshot_node_keys.ast_backed {
+                    snap_queue.replace_content(snap, &new_body)
+                } else {
+                    consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
+                };
+            if drained {
+                if snap_has_auto
+                    && let Ok(sc2) = element::parse(&new_snap)
+                    && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
+                {
+                    let raw = &new_snap[sq2.open_start..sq2.open_end];
+                    let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
+                    if new_tag != raw {
+                        let mut rebuilt = String::with_capacity(new_snap.len());
+                        rebuilt.push_str(&new_snap[..sq2.open_start]);
+                        rebuilt.push_str(&new_tag);
+                        rebuilt.push_str(&new_snap[sq2.open_end..]);
+                        new_snap = rebuilt;
+                    }
+                }
+                new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
+            }
+            Ok(Some(embed_consumed_prompt_in_response(
+                &new_snap,
+                &consumed_texts,
+                response_first_line.as_deref(),
+            )))
+        })() {
+            Ok(Some(snapshot)) => {
+                save_snapshot = snapshot != snap;
+                new_snap = snapshot;
+            }
+            Ok(None) => log_snapshot_recovery_warning(
+                file,
+                "queue consume snapshot sync",
+                "snapshot cannot be synchronized to the document queue",
+            ),
+            Err(err) => log_snapshot_recovery_warning(file, "queue consume snapshot sync", err),
+        }
+    } else {
+        log_snapshot_recovery_warning(file, "queue consume snapshot sync", "snapshot is missing");
     }
 
     Ok(Some(QueueConsumptionPlan {
@@ -1244,7 +1236,7 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
         auto: has_auto,
         new_document: current,
         new_snapshot: new_snap,
-        save_snapshot: false,
+        save_snapshot,
     }))
 }
 
@@ -2100,13 +2092,10 @@ mod core_tests {
         );
     }
     #[test]
-    fn queue_consume_head_divergence_preserves_dropped_queue_evidence() {
-        // #editorbufwin / realtime-turn split: the snapshot head is the OLD turn
-        // target; the document head is the user's live editor-buffer addition.
-        // Dropped-queue evidence proves the live edit must be preserved, not that
-        // it should replace the turn target. If the old target no longer exists in
-        // the document queue, closeout must no-op rather than consuming/deleting
-        // the operator's new queue item.
+    fn queue_consume_head_divergence_consumes_document_head_despite_dropped_queue_evidence() {
+        // Snapshot sidecars are recovery-only. If the document head diverges from
+        // the snapshot head, the visible document remains authoritative even when
+        // older dropped-queue evidence exists.
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -2141,36 +2130,32 @@ mod core_tests {
         .unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
-            .expect("dropped-queue evidence must avoid a hard bail");
-        assert!(
-            outcome.is_none(),
-            "missing snapshot head should not consume the live queue edit"
-        );
+            .expect("snapshot divergence must not hard-bail")
+            .expect("document head should be consumed");
+        assert_eq!(outcome.consumed_text, "handle the new live-buffer request");
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- handle the new live-buffer request"),
-            "the live queue item must stay queued:\n{result}"
+            !result.contains("- handle the new live-buffer request"),
+            "the document queue head must be consumed:\n{result}"
         );
         let snap_result = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
             snap_result.contains("- handle the old request"),
-            "no-consume path leaves the snapshot unchanged for later reconciliation:\n{snap_result}"
+            "diverged recovery snapshot is left unchanged for later reconciliation:\n{snap_result}"
         );
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            ops_log.contains("queue_consume_head_divergence_preserved_live_addition")
-                && ops_log.contains("snapshot_active_head_missing"),
-            "the preserved-live-edit no-op must be logged for forensics:\n{ops_log}"
+            ops_log.contains("snapshot_recovery_warning")
+                && ops_log.contains("snapshot head prompts"),
+            "the skipped snapshot sync must be logged for forensics:\n{ops_log}"
         );
     }
 
     #[test]
-    fn queue_consume_preserves_inserted_live_head_and_consumes_snapshot_head() {
-        // A live queue edit is realtime state, not a turn retarget. If the
-        // operator inserts a new free-text head while a turn is closing out, the
-        // inserted head must stay queued and the pre-turn snapshot head must be
-        // the item consumed for this turn.
+    fn queue_consume_uses_document_head_when_snapshot_diverges() {
+        // The visible document head is the turn target. A stale snapshot may warn
+        // and skip sidecar sync, but it must not retarget consumption.
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -2201,36 +2186,31 @@ mod core_tests {
             .unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
-            .expect("consume must preserve the live edit and close the snapshot head")
-            .expect("snapshot head should be consumed");
-        assert_eq!(outcome.consumed_text, "handle the old request");
+            .expect("consume must not hard-bail on snapshot divergence")
+            .expect("document head should be consumed");
+        assert_eq!(outcome.consumed_text, "test");
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- test\n"),
-            "newly typed queue item must stay live:\n{result}"
+            result.contains("- ~~test~~"),
+            "document head must be consumed in place:\n{result}"
         );
         assert!(
-            !result.contains("- ~~test~~"),
-            "newly typed queue item must not be consumed by the old turn:\n{result}"
-        );
-        assert!(
-            result.contains("- ~~handle the old request~~"),
-            "snapshot head must be consumed in place:\n{result}"
+            result.contains("- handle the old request"),
+            "following document queue item must stay live:\n{result}"
         );
         let snap_result = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
-            snap_result.contains("- test\n")
-                && snap_result.contains("- ~~handle the old request~~"),
-            "snapshot must adopt the preserved live edit and consumed old head:\n{snap_result}"
+            snap_result.contains("- handle the old request") && !snap_result.contains("- test"),
+            "diverged recovery snapshot must not retarget the hot path:\n{snap_result}"
         );
     }
 
     #[test]
-    fn queue_consume_head_divergence_without_evidence_still_bails() {
-        // #editorbufwin (Fix A) corruption guard: a head divergence with NO
-        // recorded dropped-queue evidence is unexplained (genuine corruption) and
-        // must keep the hard-bail.
+    fn queue_consume_head_divergence_without_evidence_warns_and_consumes_document_head() {
+        // Snapshot sidecars are not a hot-path source of truth. Even without
+        // dropped-queue evidence, a stale snapshot mismatch warns and the document
+        // head is consumed.
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -2256,12 +2236,16 @@ mod core_tests {
         agent_doc_snapshot_io::save(&doc, snap, agent_doc_ops_log_io::log_op).unwrap();
         // No cycle_state dropped-queue evidence recorded.
 
-        let err = consume_queue_prompt_force_disk(&doc)
-            .expect_err("an unexplained head divergence must still hard-bail");
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("snapshot divergence must not hard-bail")
+            .expect("document head should be consumed");
+        assert_eq!(outcome.consumed_text, "handle the new live-buffer request");
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            err.to_string()
-                .contains("do not match document head prompts"),
-            "the corruption guard must keep the original bail: {err}"
+            ops_log.contains("snapshot_recovery_warning")
+                && ops_log.contains("snapshot head prompts"),
+            "snapshot mismatch must be logged for recovery diagnostics:\n{ops_log}"
         );
     }
 

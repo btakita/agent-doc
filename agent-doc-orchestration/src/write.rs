@@ -402,7 +402,7 @@ pub enum CommitMode {
 
 pub(crate) const EMPTY_RESPONSE_ERROR: &str = "empty response — nothing to write";
 
-pub(crate) type EmptyResponseRecovery = fn(&Path, bool, bool) -> Result<bool>;
+pub(crate) type EmptyResponseRecovery = fn(&Path, bool, bool, bool) -> Result<bool>;
 
 pub fn run_command_with_response(
     options: CommandOptions,
@@ -5440,7 +5440,8 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
 
         assert!(
-            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false).unwrap(),
+            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false, false)
+                .unwrap(),
             "strict empty response recovery should continue past stale preflight repair"
         );
 

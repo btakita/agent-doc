@@ -253,6 +253,30 @@ fn template_doc() -> String {
     "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
+fn template_doc_with_session(session_id: &str) -> String {
+    template_doc().replacen(
+        "---\n",
+        &format!("---\nagent_doc_session: {session_id}\n"),
+        1,
+    )
+}
+
+fn run_heartbeat_persisted(root: &Path, doc: &Path, session_id: &str) -> bool {
+    if let Ok(Some(state)) = cycle_state::load(doc)
+        && state
+            .last_event
+            .contains("run_heartbeat phase=child_agent_wait")
+    {
+        return true;
+    }
+    let log_path = root
+        .join(".agent-doc/logs")
+        .join(format!("{session_id}.log"));
+    fs::read_to_string(log_path).is_ok_and(|log| {
+        log.contains("document_cycle") && log.contains("run_heartbeat phase=child_agent_wait")
+    })
+}
+
 fn append_doc() -> String {
     "---\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n# Session\n\n## User\n\nPlease reply\n".to_string()
 }
@@ -749,7 +773,8 @@ fn run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff() {
 fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    fs::write(&doc, template_doc()).unwrap();
+    let session_id = "test-heartbeat-visible";
+    fs::write(&doc, template_doc_with_session(session_id)).unwrap();
     init_git_repo(tmp.path(), &doc);
 
     let script = write_delayed_mock_agent(
@@ -789,7 +814,8 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
 fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    fs::write(&doc, template_doc()).unwrap();
+    let session_id = "test-heartbeat-redirect";
+    fs::write(&doc, template_doc_with_session(session_id)).unwrap();
     init_git_repo(tmp.path(), &doc);
 
     let script = write_delayed_mock_agent(

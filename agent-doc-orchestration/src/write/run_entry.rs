@@ -28,7 +28,12 @@ use agent_doc_write_ipc_io::build_ipc_patches_json;
 
 fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Result<bool> {
     if let Some(recover) = flags.empty_response_recovery {
-        recover(file, flags.strict_closeout, flags.has_pending_mutation)
+        recover(
+            file,
+            flags.strict_closeout,
+            flags.has_pending_mutation,
+            flags.force_disk,
+        )
     } else {
         Ok(false)
     }
@@ -238,12 +243,12 @@ pub fn run_template(
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-    agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
+    guard_stale_snapshot_recovery_only(
         file,
         snapshot_doc.as_deref(),
         &current_content,
         "template write",
-    )?;
+    );
     sanitize_template_patchback_response(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
@@ -576,12 +581,12 @@ pub fn run_stream(
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let mut snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-    if agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
+    if guard_stale_snapshot_recovery_only(
         file,
         snapshot_doc.as_deref(),
         &current_content,
         "stream write",
-    )? {
+    ) {
         snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     }
     sanitize_template_patchback_response(&mut response)?;
@@ -926,6 +931,7 @@ pub fn run_stream(
         }
     }
     let t_disk = std::time::Instant::now();
+    let force_disk_editor_attached = force_disk && editor_crdt_authority_attached(file);
 
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
@@ -942,19 +948,47 @@ pub fn run_stream(
     })?;
     let base = base_cow.as_ref();
 
-    // Apply patches using the mode resolution chain:
-    // inline attr (patch=append on tag) > config.toml ([components] section) > built-in default.
-    // The skill sends delta content for append-mode components.
+    let build_patched_content = |patch_base: &str,
+                                 normalize_base: &str,
+                                 normalize_user_prompts: bool,
+                                 normalize_structure: bool|
+     -> Result<String> {
+        // Apply patches using the mode resolution chain:
+        // inline attr (patch=append on tag) > config.toml ([components] section) > built-in default.
+        // The skill sends delta content for append-mode components.
+        let mut content = template_io::apply_patches_with_overrides_with_project_config(
+            patch_base,
+            &patches,
+            &unmatched,
+            file,
+            &mode_overrides,
+            Some(rc.project_config()),
+        )
+        .context("failed to apply template patches")?;
+
+        // Apply frontmatter patch if present (fixes #16 — disk write path was missing this)
+        if let Some(fm_patch) = patches.iter().find(|p| p.name == "frontmatter") {
+            content = agent_doc_frontmatter::frontmatter::merge_fields(&content, &fm_patch.content)
+                .context("failed to merge frontmatter patch")?;
+        }
+
+        // Normalize user input in exchange: add ❯  prefix to user-added lines.
+        // Load snapshot to identify which lines are new (user-typed this cycle).
+        if normalize_user_prompts && let Some(ref snap) = snapshot_doc {
+            content = normalize_user_prompts_in_exchange_safe(&content, normalize_base, snap, file);
+        }
+
+        if normalize_structure {
+            // Lift pending out of exchange if nested (structural repair)
+            content = lift_pending_from_exchange_safe(&content, file);
+            normalize_template_structure_or_fail_preserving(&content, file, Some(normalize_base))
+        } else {
+            Ok(content)
+        }
+    };
+
     let t_apply2 = std::time::Instant::now();
-    let mut content_ours = template_io::apply_patches_with_overrides_with_project_config(
-        base,
-        &patches,
-        &unmatched,
-        file,
-        &mode_overrides,
-        Some(rc.project_config()),
-    )
-    .context("failed to apply template patches")?;
+    let content_ours = build_patched_content(base, base, true, true)?;
     let elapsed_apply2 = t_apply2.elapsed().as_millis();
     if elapsed_apply2 > 0 {
         eprintln!(
@@ -962,24 +996,6 @@ pub fn run_stream(
             elapsed_apply2
         );
     }
-
-    // Apply frontmatter patch if present (fixes #16 — disk write path was missing this)
-    if let Some(fm_patch) = patches.iter().find(|p| p.name == "frontmatter") {
-        content_ours =
-            agent_doc_frontmatter::frontmatter::merge_fields(&content_ours, &fm_patch.content)
-                .context("failed to merge frontmatter patch")?;
-    }
-
-    // Normalize user input in exchange: add ❯  prefix to user-added lines.
-    // Load snapshot to identify which lines are new (user-typed this cycle).
-    if let Some(ref snap) = snapshot_doc {
-        content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, snap, file);
-    }
-
-    // Lift pending out of exchange if nested (structural repair)
-    content_ours = lift_pending_from_exchange_safe(&content_ours, file);
-    content_ours =
-        normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
     // Shrink guard: refuse if new exchange content is dramatically shorter
     agent_doc_element_exchange_io::check_exchange_shrink_guard_with_log(
@@ -1000,7 +1016,7 @@ pub fn run_stream(
     // re-merge against a fresh disk state when a foreign agent-doc writer
     // appends mid-generation (#ipc-drift-visbuf-reconcile).
     let recompute_final = |content_current: &str| -> Result<(String, Vec<u8>, bool)> {
-        let (final_content, mut crdt_state) = if let Some(repaired_current) =
+        let (final_content, mut crdt_state, skip_final_normalize) = if let Some(repaired_current) =
             adopt_current_response_without_duplication(
                 file,
                 base,
@@ -1013,11 +1029,43 @@ pub fn run_stream(
                 "[write] response already present in current file; adopting normalized current content"
             );
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repaired_current);
-            (repaired_current, doc.encode_state())
+            (repaired_current, doc.encode_state(), false)
         } else if content_current == base {
             // No edits — build CRDT state from result
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours);
-            (content_ours.clone(), doc.encode_state())
+            (content_ours.clone(), doc.encode_state(), false)
+        } else if force_disk_editor_attached {
+            eprintln!(
+                "[write] File was modified during force-disk response generation. Applying patches to current document..."
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_patch_current file={} source=run_stream current_len={} base_len={}",
+                    file.display(),
+                    content_current.len(),
+                    base.len()
+                ),
+            );
+            let patched_current = match apply_simple_exchange_patch_to_current(
+                file,
+                content_current,
+                &patches,
+                &unmatched,
+            ) {
+                Some(result) => result?,
+                None => build_patched_content(content_current, content_current, false, false)?,
+            };
+            agent_doc_element_exchange_io::check_exchange_shrink_guard_with_log(
+                content_current,
+                &patched_current,
+                file,
+                SHRINK_GUARD_MIN_BYTES,
+                SHRINK_GUARD_MAX_RATIO,
+                agent_doc_ops_log_io::log_op,
+            )?;
+            let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&patched_current);
+            (patched_current, doc.encode_state(), true)
         } else {
             eprintln!("[write] File was modified during response generation. CRDT merging...");
             // Use baseline as CRDT base instead of stored state from previous cycle.
@@ -1025,48 +1073,58 @@ pub fn run_stream(
             // from, giving clean diffs. Using a stale stored state causes character-level
             // interleaving when the agent replaces component content while the user
             // appends within the same region (lazily-rs.md corruption bug).
-            let base_state = agent_doc_snapshot_io::crdt_merge_base_state_with(
+            let base_state = crdt_merge_base_state_for_write(
                 file,
                 base,
+                force_disk,
+                "run_stream",
                 agent_doc_op_capture_io::has_pending_editor_ops,
                 agent_doc_ops_log_io::log_op,
-            )?
-            .state;
+            )?;
             // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
             // Prefer the editor's real captured ops over the diff-guess when aligned
             // (#qnodemerge4wire); inert (byte-identical) until the editor reporters land.
-            match agent_doc_merge_io::merge_contents_crdt_with_ops(
-                file,
-                Some(&base_state),
-                &content_ours,
-                content_current,
-                agent_doc_ops_log_io::log_op,
-            ) {
-                Ok(merged) => merged,
-                Err(e) => {
-                    eprintln!(
-                        "[write] WARNING: CRDT merge failed in stream write, falling back to splice: {}",
-                        e
-                    );
-                    let spliced = splice_pending_component(&content_ours, content_current);
-                    if let Some(warning) = spliced.warning.as_ref() {
-                        log_splice_pending_component_warning(warning);
+            let (merged_content, merged_state) =
+                match agent_doc_merge_io::merge_contents_crdt_with_ops(
+                    file,
+                    Some(&base_state),
+                    &content_ours,
+                    content_current,
+                    agent_doc_ops_log_io::log_op,
+                ) {
+                    Ok(merged) => merged,
+                    Err(e) => {
+                        eprintln!(
+                            "[write] WARNING: CRDT merge failed in stream write, falling back to splice: {}",
+                            e
+                        );
+                        let spliced = splice_pending_component(&content_ours, content_current);
+                        if let Some(warning) = spliced.warning.as_ref() {
+                            log_splice_pending_component_warning(warning);
+                        }
+                        let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&spliced.content);
+                        (spliced.content, doc.encode_state())
                     }
-                    let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&spliced.content);
-                    (spliced.content, doc.encode_state())
-                }
-            }
+                };
+            (merged_content, merged_state, false)
         };
-        let mut final_content = normalize_final_template_content(
-            file,
-            base,
-            snapshot_doc.as_deref(),
-            Some(content_current),
-            &final_content,
-            Some(&response),
-        )?;
-        let cleaned_resolved_backlog_prompts =
-            cleanup_resolved_backlog_prompts_after_response(base, content_current, &final_content)?;
+        let mut final_content = if skip_final_normalize {
+            final_content
+        } else {
+            normalize_final_template_content(
+                file,
+                base,
+                snapshot_doc.as_deref(),
+                Some(content_current),
+                &final_content,
+                Some(&response),
+            )?
+        };
+        let cleaned_resolved_backlog_prompts = if skip_final_normalize {
+            None
+        } else {
+            cleanup_resolved_backlog_prompts_after_response(base, content_current, &final_content)?
+        };
         let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
         if let Some(cleaned) = cleaned_resolved_backlog_prompts {
             log_resolved_backlog_prompt_cleanup(file, cleaned.removed);
@@ -1193,7 +1251,18 @@ pub fn run_stream(
     );
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
     agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
-    agent_doc_merge_io::save_document_crdt(file, &snapshot_crdt_state, &snapshot_content)?;
+    if force_disk_editor_attached {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_checkpoint_skip file={} source=run_stream reason=force_disk_skip_sidecar_lock len={}",
+                file.display(),
+                snapshot_content.len()
+            ),
+        );
+    } else {
+        agent_doc_merge_io::save_document_crdt(file, &snapshot_crdt_state, &snapshot_content)?;
+    }
 
     atomic_write(file, &final_content)?;
     if let Some(plan) = integrated_queue_plan.as_ref() {
@@ -1310,12 +1379,12 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         .with_context(|| format!("failed to read {}", file.display()))?;
     let current_content = agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-    agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
+    guard_stale_snapshot_recovery_only(
         file,
         snapshot_doc.as_deref(),
         &current_content,
         "IPC write",
-    )?;
+    );
     sanitize_template_patchback_response(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
@@ -1600,12 +1669,48 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     );
 }
 
+fn crdt_merge_base_state_for_write(
+    file: &Path,
+    fallback_markdown: &str,
+    force_disk: bool,
+    source: &str,
+    has_pending_editor_ops: impl FnOnce(&Path) -> bool,
+    mut logger: impl FnMut(&Path, &str),
+) -> Result<Vec<u8>> {
+    if force_disk && editor_crdt_authority_attached(file) {
+        logger(
+            file,
+            &format!(
+                "crdt_merge_base_force_disk_fallback file={} source={} len={} reason=force_disk_skip_sidecar_lock",
+                file.display(),
+                source,
+                fallback_markdown.len()
+            ),
+        );
+        return Ok(agent_doc_merge::crdt::CrdtDoc::from_text(fallback_markdown).encode_state());
+    }
+
+    Ok(agent_doc_snapshot_io::crdt_merge_base_state_with(
+        file,
+        fallback_markdown,
+        has_pending_editor_ops,
+        logger,
+    )?
+    .state)
+}
+
+fn editor_crdt_authority_attached(file: &Path) -> bool {
+    agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
+        .editor_attached()
+}
+
 fn merge_recovery_content(
     file: &Path,
     base: &str,
     content_ours: &str,
     content_current: &str,
     source: &str,
+    force_disk: bool,
 ) -> Result<String> {
     if content_current == base {
         return Ok(content_ours.to_string());
@@ -1621,13 +1726,14 @@ fn merge_recovery_content(
                 source
             ),
         );
-        let base_state = agent_doc_snapshot_io::crdt_merge_base_state_with(
+        let base_state = crdt_merge_base_state_for_write(
             file,
             base,
+            force_disk,
+            source,
             agent_doc_op_capture_io::has_pending_editor_ops,
             agent_doc_ops_log_io::log_op,
-        )?
-        .state;
+        )?;
         let (merged, _) = agent_doc_merge_io::merge_contents_crdt_with_ops(
             file,
             Some(&base_state),
@@ -1649,6 +1755,90 @@ fn save_recovery_snapshot(file: &Path, content: &str, use_crdt: bool) -> Result<
         agent_doc_merge_io::save_document_crdt(file, &doc.encode_state(), content)?;
     }
     Ok(())
+}
+
+fn apply_simple_exchange_patch_to_current(
+    file: &Path,
+    current: &str,
+    patches: &[agent_doc_template::PatchBlock],
+    unmatched: &str,
+) -> Option<Result<String>> {
+    if !unmatched.trim().is_empty() {
+        return None;
+    }
+
+    let mut exchange_patch: Option<&str> = None;
+    let mut frontmatter_patch: Option<&str> = None;
+    for patch in patches {
+        match patch.name.as_str() {
+            "exchange" => {
+                if exchange_patch.replace(patch.content.as_str()).is_some() {
+                    return None;
+                }
+            }
+            "frontmatter" => {
+                if frontmatter_patch.replace(patch.content.as_str()).is_some() {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    let exchange_patch = exchange_patch?;
+
+    Some((|| {
+        let components =
+            agent_doc_element::element::parse(current).context("failed to parse components")?;
+        let exchange = components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .ok_or_else(|| anyhow::anyhow!("missing exchange component"))?;
+        let exchange_content = exchange.content(current);
+        let exchange_without_boundaries = strip_exchange_boundary_lines(exchange_content);
+        let summary = file.file_stem().and_then(|stem| stem.to_str());
+        let boundary_id = agent_doc_element::id::new_boundary_id_with_summary(summary);
+        let boundary_marker = agent_doc_element::id::format_boundary_marker(&boundary_id);
+
+        let mut new_exchange = exchange_without_boundaries.trim_end().to_string();
+        if !new_exchange.is_empty() {
+            new_exchange.push_str("\n\n");
+        }
+        new_exchange.push_str(exchange_patch.trim());
+        if !new_exchange.ends_with('\n') {
+            new_exchange.push('\n');
+        }
+        new_exchange.push_str(&boundary_marker);
+        new_exchange.push('\n');
+
+        eprintln!(
+            "[template] force-disk current exchange fast path inserted boundary {}",
+            boundary_id
+        );
+
+        let mut result = exchange.replace_content(current, &new_exchange);
+        if let Some(frontmatter_patch) = frontmatter_patch {
+            result = agent_doc_frontmatter::frontmatter::merge_fields(&result, frontmatter_patch)
+                .context("failed to merge frontmatter patch")?;
+        }
+        Ok(result)
+    })())
+}
+
+fn strip_exchange_boundary_lines(content: &str) -> String {
+    let mut stripped = String::with_capacity(content.len());
+    for segment in content.split_inclusive('\n') {
+        if !segment.trim().starts_with("<!-- agent:boundary:") {
+            stripped.push_str(segment);
+        }
+    }
+    if !content.ends_with('\n')
+        && let Some(tail) = content.rsplit('\n').next()
+        && !tail.trim().starts_with("<!-- agent:boundary:")
+        && !stripped.ends_with(tail)
+    {
+        stripped.push_str(tail);
+    }
+    stripped
 }
 
 /// Apply an append-mode response from a string (not stdin).
@@ -1681,6 +1871,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
         &content_ours,
         &content_current,
         "apply_append_from_string",
+        false,
     )?;
 
     guard_visible_write_idle_current_or_target(
@@ -1781,6 +1972,7 @@ pub fn apply_template_from_string_with_options(
             &content_ours,
             &content_current,
             "apply_template_from_string",
+            options.force_disk,
         )?
     };
     let final_content = normalize_final_template_content(
@@ -1950,9 +2142,15 @@ mod tests {
         );
         fs::write(&doc, content_current.as_str()).unwrap();
 
-        let merged =
-            merge_recovery_content(&doc, base, &content_ours, &content_current, "test_recovery")
-                .unwrap();
+        let merged = merge_recovery_content(
+            &doc,
+            base,
+            &content_ours,
+            &content_current,
+            "test_recovery",
+            false,
+        )
+        .unwrap();
 
         assert!(merged.contains("### Re: recovery crdt - gpt-5"));
         assert!(merged.contains("while I was typing"));

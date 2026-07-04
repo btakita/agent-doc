@@ -3376,7 +3376,7 @@ Implemented.
 
         let head_before = head_count(root);
         let recovered =
-            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false)
+            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false, false)
                 .expect("strict-closeout empty-stdin path should recognize dedupe-only drift");
         assert!(
             recovered,
@@ -3428,7 +3428,8 @@ Implemented.
 
         let head_before = head_count(root);
         let recovered =
-            crate::repair::recover_empty_response_for_strict_closeout(&doc, false, false).unwrap();
+            crate::repair::recover_empty_response_for_strict_closeout(&doc, false, false, false)
+                .unwrap();
         assert!(
             !recovered,
             "non-strict empty-stdin path must not silently auto-commit dedupe drift"

@@ -594,6 +594,9 @@ pub fn prewrite_pending_done_check(
             )
         );
     }
+    if crate::resolve_auto_done(file)? {
+        return Ok(());
+    }
     let content = std::fs::read_to_string(file)?;
     let open_tracked_work_ids =
         agent_doc_document::tracked_work_projection::open_tracked_work_ids(&content);
@@ -1422,6 +1425,31 @@ mod precommit_pending_capture_tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert!(state.pending_done_ids.contains(&"4qja".to_string()));
         assert!(state.had_pending_mutations);
+    }
+
+    #[test]
+    fn prewrite_pending_done_auto_done_defers_mutation_until_response_lands() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\nauto_done: true\n---\n\n",
+            "placeholder response",
+            "- [ ] [#4qja] Stream orchestrate patchback\n",
+            &[],
+        );
+
+        super::prewrite_pending_done_check(
+            &doc,
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            &super::PendingWriteFlags {
+                strict_closeout: true,
+                ..Default::default()
+            },
+        )
+        .expect("auto_done should defer missing --done resolution to precommit");
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("- [ ] [#4qja] Stream orchestrate patchback"));
     }
 
     #[test]

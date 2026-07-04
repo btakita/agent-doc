@@ -39,6 +39,7 @@ use agent_doc_workflow::preflight_policy::ResolvedFreeTextExecution;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -60,6 +61,19 @@ impl From<agent_doc_workflow::preflight_policy::PreflightPolicyWarning> for Pref
             active_harness: None,
         }
     }
+}
+
+fn log_snapshot_recovery_warning(file: &Path, context: &str, detail: impl Display) {
+    eprintln!("[preflight] snapshot recovery warning during {context}: {detail}");
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "snapshot_recovery_warning file={} context={} detail={}",
+            file.display(),
+            context,
+            detail
+        ),
+    );
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -638,32 +652,32 @@ fn run_pending_maintenance_with_options(
         // which sets `mutated`; this also covers the no-reap mutations.
         if let Some(ref mut snap_content) = snapshot_content {
             let snap_comps = agent_doc_element::element::parse(snap_content).ok();
-            let snap_comp = snap_comps
-                .and_then(|cs| {
-                    cs.into_iter()
-                        .find(|c| component_matches_tracked_surface(&c.name, surface))
-                })
-                .with_context(|| {
-                    format!(
-                        "pending maintenance: snapshot is missing the {} component",
-                        surface
-                    )
-                })?;
-            let snap_body = snap_comp.content(snap_content).to_string();
-            if snap_body != current_body {
-                *snap_content = snap_comp.replace_content(snap_content, &current_body);
-                snapshot_mutated = true;
-            }
-            if !removed_items.is_empty()
-                && let Some(archived) =
-                    agent_doc_element_backlog_io::done_archive::archive_pending_done(
-                        file,
-                        snap_content,
-                        &removed_items,
-                    )?
-            {
-                *snap_content = archived;
-                snapshot_mutated = true;
+            if let Some(snap_comp) = snap_comps.and_then(|cs| {
+                cs.into_iter()
+                    .find(|c| component_matches_tracked_surface(&c.name, surface))
+            }) {
+                let snap_body = snap_comp.content(snap_content).to_string();
+                if snap_body != current_body {
+                    *snap_content = snap_comp.replace_content(snap_content, &current_body);
+                    snapshot_mutated = true;
+                }
+                if !removed_items.is_empty()
+                    && let Some(archived) =
+                        agent_doc_element_backlog_io::done_archive::archive_pending_done(
+                            file,
+                            snap_content,
+                            &removed_items,
+                        )?
+                {
+                    *snap_content = archived;
+                    snapshot_mutated = true;
+                }
+            } else {
+                log_snapshot_recovery_warning(
+                    file,
+                    "pending maintenance tracked-surface sync",
+                    format!("snapshot is missing the {} component", surface),
+                );
             }
         }
 
@@ -780,13 +794,25 @@ fn run_pending_maintenance_with_options(
         };
         ensure_no_completed_tracked_items(&persisted_content, "working tree")?;
 
-        let snapshot_content = agent_doc_snapshot_io::load(file)?.with_context(|| {
-            format!(
-                "pending maintenance reaped completed tracked items in {} but the snapshot is missing",
-                file.display()
-            )
-        })?;
-        ensure_no_completed_tracked_items(&snapshot_content, "snapshot")?;
+        match agent_doc_snapshot_io::load(file) {
+            Ok(Some(snapshot_content)) => {
+                if let Err(err) = ensure_no_completed_tracked_items(&snapshot_content, "snapshot") {
+                    log_snapshot_recovery_warning(
+                        file,
+                        "pending maintenance reap verification",
+                        err,
+                    );
+                }
+            }
+            Ok(None) => log_snapshot_recovery_warning(
+                file,
+                "pending maintenance reap verification",
+                "snapshot is missing after completed tracked items were reaped",
+            ),
+            Err(err) => {
+                log_snapshot_recovery_warning(file, "pending maintenance reap verification", err)
+            }
+        }
     }
 
     // 4. Reorder detection: compare the cycle-start snapshot's pending component
@@ -1111,13 +1137,37 @@ fn run_gate_verify_with_options(
             options.force_disk,
             write_effects,
         )?;
-        // Keep the snapshot in lockstep so the upcoming commit stages the flip.
-        if let Some(snap) = agent_doc_snapshot_io::load(file)?
-            && let Ok(snap_comps) = agent_doc_element::element::parse(&snap)
-            && let Some(snap_review) = snap_comps.iter().find(|c| is_review_component(&c.name))
-        {
-            let snap_new = snap_review.replace_content(&snap, &new_body);
-            agent_doc_snapshot_io::save(file, &snap_new, agent_doc_ops_log_io::log_op)?;
+        // Keep the snapshot in lockstep when possible; it is recovery state, so a
+        // missing/malformed sidecar must not veto the document mutation.
+        match agent_doc_snapshot_io::load(file) {
+            Ok(Some(snap)) => {
+                if let Ok(snap_comps) = agent_doc_element::element::parse(&snap) {
+                    if let Some(snap_review) =
+                        snap_comps.iter().find(|c| is_review_component(&c.name))
+                    {
+                        let snap_new = snap_review.replace_content(&snap, &new_body);
+                        if let Err(err) = agent_doc_snapshot_io::save(
+                            file,
+                            &snap_new,
+                            agent_doc_ops_log_io::log_op,
+                        ) {
+                            log_snapshot_recovery_warning(file, "optverify snapshot sync", err);
+                        }
+                    }
+                } else {
+                    log_snapshot_recovery_warning(
+                        file,
+                        "optverify snapshot sync",
+                        "failed to parse snapshot components",
+                    );
+                }
+            }
+            Ok(None) => log_snapshot_recovery_warning(
+                file,
+                "optverify snapshot sync",
+                "snapshot is missing",
+            ),
+            Err(err) => log_snapshot_recovery_warning(file, "optverify snapshot sync", err),
         }
         eprintln!(
             "[preflight] optverify: auto-resolved {} provable gate(s): {}",
@@ -7569,7 +7619,7 @@ mod tests {
         );
     }
     #[test]
-    fn pending_maintenance_fails_closed_when_snapshot_backlog_cannot_be_synced() {
+    fn pending_maintenance_continues_when_snapshot_backlog_cannot_be_synced() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let file_content = concat!(
@@ -7584,11 +7634,22 @@ mod tests {
         std::fs::write(&doc, file_content).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let err =
-            run_pending_maintenance(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap_err();
+        run_pending_maintenance(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            err.to_string()
-                .contains("snapshot is missing the backlog component")
+            !agent_doc_element::element::parse(&file_after)
+                .unwrap()
+                .into_iter()
+                .find(|c| c.name == "backlog")
+                .unwrap()
+                .content(&file_after)
+                .contains("[#reap1]"),
+            "completed item must be reaped from the authoritative document:\n{file_after}"
+        );
+        assert!(
+            file_after.contains("## Completed / Reaped") && file_after.contains("[#reap1] Reap me"),
+            "completed item must be archived in the document:\n{file_after}"
         );
     }
     #[test]

@@ -120,9 +120,15 @@ pub fn recover_empty_response_for_strict_closeout<
     file: &Path,
     strict_closeout: bool,
     has_pending_mutation: bool,
+    force_disk_override: Option<bool>,
 ) -> Result<bool> {
     if strict_closeout {
-        let outcome = run(effects, file)?;
+        let outcome = run_with_queue_completion_ids_and_force_disk(
+            effects,
+            file,
+            &[],
+            force_disk_override,
+        )?;
         if (effects.recover_missing_committed_head_response)(file)? {
             return Ok(true);
         }
@@ -161,6 +167,18 @@ pub fn run_with_queue_completion_ids<
     effects: RepairCoordinatorEffects<'_, R, W>,
     file: &Path,
     queue_completion_ids: &[String],
+) -> Result<RepairOutcome> {
+    run_with_queue_completion_ids_and_force_disk(effects, file, queue_completion_ids, None)
+}
+
+pub fn run_with_queue_completion_ids_and_force_disk<
+    R: RepairIoEffects + RepairTemplateWriteEffects,
+    W: RepairReplayWriteEffects,
+>(
+    effects: RepairCoordinatorEffects<'_, R, W>,
+    file: &Path,
+    queue_completion_ids: &[String],
+    force_disk_override: Option<bool>,
 ) -> Result<RepairOutcome> {
     // Canonicalize first to handle CWD drift (e.g., when CWD is in a submodule).
     let canonical = file
@@ -369,6 +387,7 @@ pub fn run_with_queue_completion_ids<
         &response,
         queue_completion_ids,
         historical_capture.is_some(),
+        force_disk_override,
     )
 }
 
@@ -482,6 +501,13 @@ pub fn ensure_repair_materialized_response(
 }
 
 pub fn repair_replay_force_disk(file: &Path) -> bool {
+    repair_replay_force_disk_with_override(file, None)
+}
+
+fn repair_replay_force_disk_with_override(file: &Path, force_disk_override: Option<bool>) -> bool {
+    if let Some(force_disk) = force_disk_override {
+        return force_disk;
+    }
     !agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
         .editor_attached()
 }
@@ -493,8 +519,9 @@ fn replay_orphaned_response_through_strict_write(
     is_template: bool,
     is_stream: bool,
     queue_completion_ids: &[String],
+    force_disk_override: Option<bool>,
 ) -> Result<()> {
-    let force_disk = repair_replay_force_disk(file);
+    let force_disk = repair_replay_force_disk_with_override(file, force_disk_override);
     let mode = if is_stream {
         "crdt"
     } else if is_template {
@@ -528,6 +555,7 @@ fn replay_crdt_patchback_through_strict_write(
     doc_content: &str,
     response: &str,
     queue_completion_ids: &[String],
+    force_disk_override: Option<bool>,
 ) -> Result<bool> {
     if !response.contains("<!-- patch:") {
         return Ok(false);
@@ -552,6 +580,7 @@ fn replay_crdt_patchback_through_strict_write(
         false,
         true,
         queue_completion_ids,
+        force_disk_override,
     )?;
     Ok(true)
 }
@@ -564,6 +593,7 @@ pub fn replay_orphaned_response(
     response: &str,
     queue_completion_ids: &[String],
     historical_capture_present: bool,
+    force_disk_override: Option<bool>,
 ) -> Result<agent_doc_turn::repair::RepairOutcome> {
     if replay_crdt_patchback_through_strict_write(
         effects,
@@ -571,6 +601,7 @@ pub fn replay_orphaned_response(
         doc_content,
         response,
         queue_completion_ids,
+        force_disk_override,
     )? {
         return Ok(agent_doc_turn::repair::RepairOutcome::ReplayedResponse);
     }
@@ -610,12 +641,13 @@ pub fn replay_orphaned_response(
                 true,
                 false,
                 queue_completion_ids,
+                force_disk_override,
             )?;
         } else {
             effects.apply_template_from_string(
                 file,
                 &response_to_write,
-                repair_replay_force_disk(file),
+                repair_replay_force_disk_with_override(file, force_disk_override),
             )?;
         }
     } else if agent_doc_git_io::status::is_in_git_repo(file) {
@@ -626,6 +658,7 @@ pub fn replay_orphaned_response(
             false,
             false,
             queue_completion_ids,
+            force_disk_override,
         )?;
     } else {
         effects.apply_append_from_string(file, &response_to_write)?;

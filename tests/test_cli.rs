@@ -9650,7 +9650,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 50,
+        ledger_rows.len() >= 51,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10151,6 +10151,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/route.rs",
             "agent-doc-route-io/src/queue_dispatch.rs",
             "Move the remaining `RouteQueueEffects` write callback",
+        ),
+        (
+            "Route closeout drain IO graph",
+            "agent-doc-orchestration/src/route.rs",
+            "agent-doc-route-io/src/closeout_drain.rs",
+            "Split the preflight, repair, and session-check callbacks",
         ),
     ] {
         let row_text = ledger_rows
@@ -14112,6 +14118,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
     let route_diagnostics_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/diagnostics.rs")).unwrap();
+    let route_closeout_drain_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/closeout_drain.rs")).unwrap();
     let route_pane_resolution_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
     )
@@ -14736,8 +14744,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && authoritative_actor.contains("RetryBudget")
             && authoritative_actor.contains("authoritative_actor_ready_retry_budget")
             && route_source.contains("CloseoutBlockDispatchDecision")
-            && route_source.contains("CloseoutBlockDispatchFacts")
-            && route_source.contains("classify_closeout_block_dispatch")
+            && route_closeout_drain_source.contains("CloseoutBlockDispatchFacts")
+            && route_closeout_drain_source.contains("classify_closeout_block_dispatch")
             && route_source.contains("RouteCloseoutDrainOutcome")
             && route_source.contains("route_closeout_user_outcome_fields")
             && route_source.contains("dispatch_only_starting_pane_ready_timeout_for_binary")
@@ -14775,8 +14783,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_pane_resolution_io_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")
-            && route_source.contains("DispatchDrainRetryDecision")
-            && route_source.contains("dispatch_drain_retry_decision("),
+            && route_closeout_drain_source.contains("DispatchDrainRetryDecision")
+            && route_closeout_drain_source.contains("dispatch_drain_retry_decision("),
         "route.rs should call focused controller dispatch policy directly"
     );
     assert!(
@@ -25481,6 +25489,46 @@ fn test_agent_doc_route_io_owns_route_document_prep() {
             )
             && route_source.contains("prepare_route_document(file, route_document_prep_effects())"),
         "route document preparation should live in agent-doc-route-io while orchestration injects only write authority"
+    );
+}
+
+#[test]
+fn test_agent_doc_route_io_owns_route_closeout_drain() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
+    let closeout_drain =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/closeout_drain.rs")).unwrap();
+
+    for forbidden_snippet in [
+        "fn drain_open_closeout_before_routed_dispatch(",
+        "fn classify_route_closeout_block(",
+        "const DRAIN_MAX_ATTEMPTS",
+        "dispatch_drain_retry_decision(",
+        "classify_closeout_block_dispatch(",
+        "route_dispatch_drain_pending_maintenance_warning",
+        "agent_doc_queue::queue_continuation::live_continuation_head(&content)",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own route closeout drain/classification after it moves to route IO: {forbidden_snippet}"
+        );
+    }
+
+    assert!(
+        route_io_lib.contains("pub mod closeout_drain;")
+            && closeout_drain.contains("pub struct RouteCloseoutDrainEffects")
+            && closeout_drain.contains("pub fn drain_open_closeout_before_routed_dispatch(")
+            && closeout_drain.contains("pub fn classify_route_closeout_block(")
+            && closeout_drain.contains("agent_doc_cycle_state_io::load(file)")
+            && closeout_drain.contains("dispatch_drain_retry_decision(")
+            && closeout_drain.contains("classify_closeout_block_dispatch(")
+            && closeout_drain.contains("agent_doc_ops_log_io::log_op")
+            && closeout_drain
+                .contains("agent_doc_queue::queue_continuation::live_continuation_head"),
+        "route closeout drain and block classification should live in agent-doc-route-io while orchestration injects only runtime closeout effects"
     );
 }
 

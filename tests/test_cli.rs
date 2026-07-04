@@ -11089,6 +11089,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split the runtime adapter once write command extraction lands",
         ),
         (
+            "Preflight direct write-authority and template-normalization edge removal",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-document-realtime-io::atomic_write_through_authority",
+            "relocate the write.rs template-normalization tests beside `agent-doc-template-io`",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

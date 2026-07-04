@@ -419,7 +419,7 @@ fn relocate_out_of_exchange_prompt_before_diff(
     if let Some(snapshot_content) = agent_doc_snapshot_io::load(file)? {
         repaired =
             normalize_user_prompts_in_exchange_safe(&repaired, &repaired, &snapshot_content, file);
-        repaired = crate::write::normalize_template_structure_or_fail(&repaired, file)?;
+        repaired = agent_doc_template_io::normalize_template_structure_or_fail(&repaired, file)?;
     }
 
     Ok((repaired != doc_content).then_some(repaired))
@@ -432,7 +432,7 @@ fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> 
         return Ok(false);
     };
 
-    crate::write::atomic_write_pub(file, &cleaned_doc)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &cleaned_doc)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -471,7 +471,7 @@ fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
         return Ok(false);
     };
 
-    crate::write::atomic_write_pub(file, &cleaned_doc)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &cleaned_doc)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -610,7 +610,10 @@ fn enforce_no_uncommitted_closeout_drift(
             replay.heading,
             file.display()
         );
-        crate::write::atomic_write_pub(file, &replay.deduped_content)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(
+            file,
+            &replay.deduped_content,
+        )?;
         agent_doc_snapshot_io::save(file, &replay.deduped_content, agent_doc_ops_log_io::log_op)?;
         return Ok(());
     }
@@ -635,7 +638,10 @@ fn enforce_no_uncommitted_closeout_drift(
             "[preflight] late_ipc_overapplication: restoring committed HEAD over re-added response for {}",
             file.display()
         );
-        crate::write::atomic_write_pub(file, &overapplication.remediated_content)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(
+            file,
+            &overapplication.remediated_content,
+        )?;
         agent_doc_snapshot_io::save(
             file,
             &overapplication.remediated_content,

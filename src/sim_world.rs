@@ -1707,13 +1707,12 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
         "preflight-style recovery must not delete visible scratch comments"
     );
 
-    let direct_write =
-        agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
-            &world.doc,
-            file,
-            Some(&world.snapshot),
-        )
-        .unwrap();
+    let direct_write = agent_doc_template_io::normalize_template_structure_or_fail_preserving(
+        &world.doc,
+        file,
+        Some(&world.snapshot),
+    )
+    .unwrap();
     assert_owned_scratch_comment_preserved(&direct_write, prompt);
 
     let (ipc_handoff, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
@@ -1732,13 +1731,12 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
     let mut repair_world = world;
     repair_world.captured_response = Some(response_patch("comment ownership"));
     repair_world.apply_captured_response().unwrap();
-    let repaired_write =
-        agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
-            &repair_world.doc,
-            file,
-            Some(&repair_world.snapshot),
-        )
-        .unwrap();
+    let repaired_write = agent_doc_template_io::normalize_template_structure_or_fail_preserving(
+        &repair_world.doc,
+        file,
+        Some(&repair_world.snapshot),
+    )
+    .unwrap();
     assert_owned_scratch_comment_preserved(&repaired_write, prompt);
 
     let compacted_exchange = "### Session Summary\n\nCompacted content archived.\n";

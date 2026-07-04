@@ -153,7 +153,11 @@ impl agent_doc_repair_io::RepairTemplateWriteEffects for OrchestrationRepairIoEf
         file: &std::path::Path,
         prompt_input: Option<&str>,
     ) -> anyhow::Result<String> {
-        crate::write::normalize_template_structure_or_fail_preserving(content, file, prompt_input)
+        agent_doc_template_io::normalize_template_structure_or_fail_preserving(
+            content,
+            file,
+            prompt_input,
+        )
     }
 }
 
@@ -317,7 +321,7 @@ impl agent_doc_run_io::DirectRunEffects for OrchestrationDirectRunEffects {
         content: &str,
         file: &std::path::Path,
     ) -> anyhow::Result<String> {
-        crate::write::normalize_template_structure_or_fail(content, file)
+        agent_doc_template_io::normalize_template_structure_or_fail(content, file)
     }
 
     fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {

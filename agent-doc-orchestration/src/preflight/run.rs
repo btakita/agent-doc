@@ -158,7 +158,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     {
         let migrated = frontmatter::strip_deprecated_queue_active_line(&current);
         if migrated != current {
-            match crate::write::atomic_write_pub(file, &migrated) {
+            match agent_doc_document_realtime_io::atomic_write_through_authority(file, &migrated) {
                 Ok(()) => {
                     if let Err(err) =
                         agent_doc_snapshot_io::save(file, &migrated, agent_doc_ops_log_io::log_op)
@@ -365,7 +365,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         && let Some(repaired_doc) =
             relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?
     {
-        crate::write::atomic_write_pub(file, &repaired_doc)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &repaired_doc)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

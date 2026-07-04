@@ -13,7 +13,8 @@ use agent_doc_template::response_materialization::sanitize_template_patchback_re
 use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;
 use agent_doc_template_io as template_io;
 use agent_doc_template_io::{
-    enforce_imperative_response_contract, normalize_user_prompts_in_exchange_safe,
+    enforce_imperative_response_contract, lift_pending_from_exchange_safe,
+    normalize_template_structure_or_fail_preserving, normalize_user_prompts_in_exchange_safe,
     template_mode_overrides_for_current_doc,
 };
 use agent_doc_write_ipc_io::build_ipc_patches_json;

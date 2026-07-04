@@ -137,6 +137,144 @@ pub fn log_template_structure_guard_event(
     );
 }
 
+pub fn lift_pending_from_exchange_safe(content: &str, file: &Path) -> String {
+    match agent_doc_document::write_normalization::lift_pending_from_exchange(content) {
+        Some(repaired) => {
+            eprintln!(
+                "[write] repaired: lifted agent:pending out of agent:exchange for {}",
+                file.display()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!("lift_pending_from_exchange file={}", file.display()),
+            );
+            repaired
+        }
+        None => content.to_string(),
+    }
+}
+
+pub fn log_duplicate_prompt_residue_guard(file: &Path) {
+    log_template_structure_guard_event(
+        file,
+        agent_doc_template::structure_guard::TemplateStructureGuardReason::DuplicatePromptResidue,
+        FlowOutcome::FailedClosed,
+        agent_doc_ops_log_io::log_op,
+    );
+}
+
+pub fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
+    normalize_template_structure_or_fail_preserving(content, file, None)
+}
+
+pub fn normalize_template_structure_or_fail_preserving(
+    content: &str,
+    file: &Path,
+    preserve_doc: Option<&str>,
+) -> Result<String> {
+    let lifted = lift_pending_from_exchange_safe(content, file);
+    let deduped_openers = {
+        let mut result = lifted;
+        while let Some(merged) = agent_doc_template::repair_duplicate_exchange_opener(&result)? {
+            eprintln!("[write] normalize_template_structure: merged duplicate exchange opener");
+            result = merged;
+        }
+        result
+    };
+    let (normalized, _) =
+        agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+            &agent_doc_element::element::strip_backlog_patch_attr(&deduped_openers),
+            file,
+            agent_doc_element_exchange_io::DuplicatePromptRepairOptions::new("structure")
+                .preserving(preserve_doc),
+            agent_doc_ops_log_io::log_op,
+            log_duplicate_prompt_residue_guard,
+        )?;
+    match agent_doc_template::guard_no_conversation_tail_outside_exchange(&normalized) {
+        Ok(()) => Ok(normalized),
+        Err(err)
+            if err.chain().any(|cause| {
+                cause
+                    .to_string()
+                    .contains("closing marker <!-- /agent:exchange --> without matching open")
+            }) =>
+        {
+            if let Some(repaired) =
+                agent_doc_template::repair_duplicate_exchange_close_scaffold(&normalized)?
+            {
+                log_template_structure_guard_event(
+                    file,
+                    agent_doc_template::structure_guard::TemplateStructureGuardReason::DuplicateScaffoldDropped,
+                    FlowOutcome::Completed,
+                    agent_doc_ops_log_io::log_op,
+                );
+                let (repaired, _) =
+                    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+                        &repaired,
+                        file,
+                        agent_doc_element_exchange_io::DuplicatePromptRepairOptions::new(
+                            "duplicate-scaffold repair",
+                        )
+                        .preserving(preserve_doc),
+                        agent_doc_ops_log_io::log_op,
+                        log_duplicate_prompt_residue_guard,
+                    )?;
+                agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
+                    .context(format!(
+                        "template structure guard failed for {} after duplicate-scaffold repair",
+                        file.display()
+                    ))?;
+                return Ok(repaired);
+            }
+            if agent_doc_template::repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
+                .is_some()
+            {
+                log_template_structure_guard_event(
+                    file,
+                    agent_doc_template::structure_guard::TemplateStructureGuardReason::MixedDuplicateScaffoldTail,
+                    FlowOutcome::FailedClosed,
+                    agent_doc_ops_log_io::log_op,
+                );
+                anyhow::bail!(
+                    "mixed duplicate scaffold tail for {}: live conversation text is interleaved with duplicated template scaffold; refusing automatic closeout repair",
+                    file.display()
+                );
+            }
+            if let Some(repaired) =
+                agent_doc_template::repair_duplicate_exchange_close_tail(&normalized)?
+            {
+                log_template_structure_guard_event(
+                    file,
+                    agent_doc_template::structure_guard::TemplateStructureGuardReason::DuplicateCloseTailMoved,
+                    FlowOutcome::Completed,
+                    agent_doc_ops_log_io::log_op,
+                );
+                let (repaired, _) =
+                    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+                        &repaired,
+                        file,
+                        agent_doc_element_exchange_io::DuplicatePromptRepairOptions::new(
+                            "duplicate-close repair",
+                        )
+                        .preserving(preserve_doc),
+                        agent_doc_ops_log_io::log_op,
+                        log_duplicate_prompt_residue_guard,
+                    )?;
+                agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
+                    .context(format!(
+                        "template structure guard failed for {} after duplicate-close repair",
+                        file.display()
+                    ))?;
+                return Ok(repaired);
+            }
+            Err(err)
+                .with_context(|| format!("template structure guard failed for {}", file.display()))
+        }
+        Err(err) => Err(err)
+            .with_context(|| format!("template structure guard failed for {}", file.display())),
+    }
+}
+
 pub fn response_materialization_probe_from_ipc_payload(payload: &serde_json::Value) -> String {
     let patches = payload
         .get("patches")

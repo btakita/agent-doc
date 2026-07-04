@@ -227,9 +227,8 @@ use std::path::{Path, PathBuf};
 use agent_doc_document::write_normalization::count_code_fence_openings;
 use agent_doc_document::write_normalization::{
     SplicePendingComponentWarning, cleanup_resolved_backlog_prompts_after_response,
-    latest_response_block_missing_from_current, lift_pending_from_exchange,
-    splice_pending_component, splice_response_block_into_current_exchange,
-    strip_boundary_for_dedup,
+    latest_response_block_missing_from_current, splice_pending_component,
+    splice_response_block_into_current_exchange, strip_boundary_for_dedup,
 };
 use agent_doc_document_realtime::write_policy::{
     reconcile_visible_write, response_already_in_current,
@@ -258,11 +257,13 @@ use agent_doc_workflow::session_cycle::{
 };
 
 use agent_doc_element_exchange_io::DuplicatePromptRepairOptions;
-use agent_doc_flow::types::FlowOutcome;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_template as template;
-use agent_doc_template::structure_guard::TemplateStructureGuardReason;
-use agent_doc_template_io::log_template_structure_guard_event;
+#[cfg(test)]
+use agent_doc_template_io::normalize_template_structure_or_fail;
+use agent_doc_template_io::{
+    log_duplicate_prompt_residue_guard, normalize_template_structure_or_fail_preserving,
+};
 
 use agent_doc_template::stale_baseline::{
     exchange_append_patch_can_rebase_to_head, is_stale_baseline, patch_touches_exchange,
@@ -1808,141 +1809,6 @@ fn log_partial_response_materialization_for_retry(
     response: &str,
 ) -> Result<()> {
     agent_doc_template_io::log_partial_response_materialization_for_retry(file, source, response)
-}
-
-pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) -> String {
-    match lift_pending_from_exchange(content) {
-        Some(repaired) => {
-            eprintln!(
-                "[write] repaired: lifted agent:pending out of agent:exchange for {}",
-                file.display()
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!("lift_pending_from_exchange file={}", file.display()),
-            );
-            repaired
-        }
-        None => content.to_string(),
-    }
-}
-
-fn log_duplicate_prompt_residue_guard(file: &Path) {
-    log_template_structure_guard_event(
-        file,
-        TemplateStructureGuardReason::DuplicatePromptResidue,
-        FlowOutcome::FailedClosed,
-        agent_doc_ops_log_io::log_op,
-    );
-}
-
-pub fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
-    normalize_template_structure_or_fail_preserving(content, file, None)
-}
-
-pub fn normalize_template_structure_or_fail_preserving(
-    content: &str,
-    file: &Path,
-    preserve_doc: Option<&str>,
-) -> Result<String> {
-    let lifted = lift_pending_from_exchange_safe(content, file);
-    // Defense-in-depth: merge any duplicate exchange openers that may have
-    // survived the patch application phase (e.g., via CRDT/git merge).
-    let deduped_openers = {
-        let mut result = lifted;
-        while let Some(merged) = agent_doc_template::repair_duplicate_exchange_opener(&result)? {
-            eprintln!("[write] normalize_template_structure: merged duplicate exchange opener");
-            result = merged;
-        }
-        result
-    };
-    let (normalized, _) =
-        agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
-            &agent_doc_element::element::strip_backlog_patch_attr(&deduped_openers),
-            file,
-            DuplicatePromptRepairOptions::new("structure").preserving(preserve_doc),
-            agent_doc_ops_log_io::log_op,
-            log_duplicate_prompt_residue_guard,
-        )?;
-    match agent_doc_template::guard_no_conversation_tail_outside_exchange(&normalized) {
-        Ok(()) => Ok(normalized),
-        Err(err)
-            if err.chain().any(|cause| {
-                cause
-                    .to_string()
-                    .contains("closing marker <!-- /agent:exchange --> without matching open")
-            }) =>
-        {
-            if let Some(repaired) =
-                agent_doc_template::repair_duplicate_exchange_close_scaffold(&normalized)?
-            {
-                log_template_structure_guard_event(
-                    file,
-                    TemplateStructureGuardReason::DuplicateScaffoldDropped,
-                    FlowOutcome::Completed,
-                    agent_doc_ops_log_io::log_op,
-                );
-                let (repaired, _) =
-                    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
-                        &repaired,
-                        file,
-                        DuplicatePromptRepairOptions::new("duplicate-scaffold repair")
-                            .preserving(preserve_doc),
-                        agent_doc_ops_log_io::log_op,
-                        log_duplicate_prompt_residue_guard,
-                    )?;
-                agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
-                    .context(format!(
-                        "template structure guard failed for {} after duplicate-scaffold repair",
-                        file.display()
-                    ))?;
-                return Ok(repaired);
-            }
-            if agent_doc_template::repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
-                .is_some()
-            {
-                log_template_structure_guard_event(
-                    file,
-                    TemplateStructureGuardReason::MixedDuplicateScaffoldTail,
-                    FlowOutcome::FailedClosed,
-                    agent_doc_ops_log_io::log_op,
-                );
-                anyhow::bail!(
-                    "mixed duplicate scaffold tail for {}: live conversation text is interleaved with duplicated template scaffold; refusing automatic closeout repair",
-                    file.display()
-                );
-            }
-            if let Some(repaired) =
-                agent_doc_template::repair_duplicate_exchange_close_tail(&normalized)?
-            {
-                log_template_structure_guard_event(
-                    file,
-                    TemplateStructureGuardReason::DuplicateCloseTailMoved,
-                    FlowOutcome::Completed,
-                    agent_doc_ops_log_io::log_op,
-                );
-                let (repaired, _) =
-                    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
-                        &repaired,
-                        file,
-                        DuplicatePromptRepairOptions::new("duplicate-close repair")
-                            .preserving(preserve_doc),
-                        agent_doc_ops_log_io::log_op,
-                        log_duplicate_prompt_residue_guard,
-                    )?;
-                agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
-                    .context(format!(
-                        "template structure guard failed for {} after duplicate-close repair",
-                        file.display()
-                    ))?;
-                return Ok(repaired);
-            }
-            Err(err)
-                .with_context(|| format!("template structure guard failed for {}", file.display()))
-        }
-        Err(err) => Err(err)
-            .with_context(|| format!("template structure guard failed for {}", file.display())),
-    }
 }
 
 /// Minimum byte count for exchange content before the shrink guard triggers.

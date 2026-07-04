@@ -125,6 +125,11 @@ struct OrchestrationGuardMarkerCleanupEffects;
 static GUARD_MARKER_CLEANUP_EFFECTS: OrchestrationGuardMarkerCleanupEffects =
     OrchestrationGuardMarkerCleanupEffects;
 
+struct OrchestrationLiveBufferGuardEffects;
+
+static LIVE_BUFFER_GUARD_EFFECTS: OrchestrationLiveBufferGuardEffects =
+    OrchestrationLiveBufferGuardEffects;
+
 impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
     for OrchestrationCommitPreStageRepairEffects
 {
@@ -206,6 +211,32 @@ impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
             target_content,
             reason,
         )
+    }
+}
+
+impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects
+    for OrchestrationLiveBufferGuardEffects
+{
+    fn live_buffer_diverges_from_content(
+        &self,
+        file: &Path,
+        file_content: &str,
+    ) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
+        let file_str = file.display().to_string();
+        agent_doc_debounce::live_buffer_diverges_from_content(&file_str, file_content)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+
+    fn log_live_buffer_guard_blocked(&self, file: &Path) {
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
+            file,
+            agent_doc_flow::types::FlowStage::PreCommitGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
+        );
     }
 }
 
@@ -926,7 +957,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             snapshot_content.as_deref(),
             head_doc.as_deref(),
         )?;
-        ensure_no_live_editor_buffer_ahead_of_disk(
+        agent_doc_git_io::live_buffer_guard::ensure_no_live_editor_buffer_ahead_of_disk(
+            &LIVE_BUFFER_GUARD_EFFECTS,
             file,
             &file_content,
             "already_current",
@@ -1095,7 +1127,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         &mut snapshot_content,
         &mut file_content,
     )?;
-    ensure_no_live_editor_buffer_ahead_of_disk(
+    agent_doc_git_io::live_buffer_guard::ensure_no_live_editor_buffer_ahead_of_disk(
+        &LIVE_BUFFER_GUARD_EFFECTS,
         file,
         &file_content,
         "pre_stage",
@@ -1355,138 +1388,6 @@ fn exchange_append_is_prompt_target_only(snapshot_doc: &str, current_doc: &str) 
         && changes
             .iter()
             .all(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
-}
-
-fn ensure_no_live_editor_buffer_ahead_of_disk(
-    file: &Path,
-    file_content: &str,
-    basis: &str,
-    staged_content: Option<&str>,
-) -> Result<()> {
-    let file_str = file.display().to_string();
-    let Some(snapshot) =
-        agent_doc_debounce::live_buffer_diverges_from_content(&file_str, file_content)
-    else {
-        return Ok(());
-    };
-    let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
-    if let Some(staged) = staged_content
-        && live_buffer_snapshot_matches_content(&snapshot, staged)
-        && snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
-        && snapshot.edit_epoch <= snapshot.last_synced_epoch
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "commit_live_buffer_ahead_of_disk_allowed file={} basis={} editor_id={} edit_epoch={} last_synced_epoch={} buffer_len={} disk_len={} reason=staged_snapshot_matches_synced_operator_buffer",
-                file.display(),
-                basis,
-                editor_id,
-                snapshot.edit_epoch,
-                snapshot.last_synced_epoch,
-                snapshot.len,
-                file_content.len()
-            ),
-        );
-        return Ok(());
-    }
-    if let Some(staged) = staged_content
-        && snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
-        && live_buffer_insertions_are_materialized_in_file(&snapshot, staged, file_content)
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "commit_live_buffer_ahead_of_disk_allowed file={} basis={} editor_id={} edit_epoch={} last_synced_epoch={} buffer_len={} disk_len={} allowance=staged_snapshot_excludes_materialized_operator_buffer",
-                file.display(),
-                basis,
-                editor_id,
-                snapshot.edit_epoch,
-                snapshot.last_synced_epoch,
-                snapshot.len,
-                file_content.len()
-            ),
-        );
-        return Ok(());
-    }
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "commit_blocked_live_buffer_ahead_of_disk file={} basis={} editor_id={} edit_epoch={} last_synced_epoch={} buffer_len={} disk_len={}",
-            file.display(),
-            basis,
-            editor_id,
-            snapshot.edit_epoch,
-            snapshot.last_synced_epoch,
-            snapshot.len,
-            file_content.len()
-        ),
-    );
-    agent_doc_flow_io::closeout::log_closeout_guard_event(
-        file,
-        agent_doc_flow::types::FlowStage::PreCommitGuard,
-        agent_doc_flow::types::FlowOutcome::Blocked,
-        agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
-    );
-    anyhow::bail!(
-        "live editor buffer has unflushed changes ahead of disk for {}; refusing to commit from stale disk (editor_id={}, edit_epoch={}, last_synced_epoch={})",
-        file.display(),
-        editor_id,
-        snapshot.edit_epoch,
-        snapshot.last_synced_epoch
-    );
-}
-
-fn live_buffer_snapshot_matches_content(
-    snapshot: &agent_doc_debounce::LiveBufferSnapshot,
-    content: &str,
-) -> bool {
-    if snapshot.len == content.len()
-        && snapshot
-            .hash
-            .eq_ignore_ascii_case(&agent_doc_hash::content_hash(content))
-    {
-        return true;
-    }
-    snapshot.content.as_ref().is_some_and(|editor_text| {
-        normalize_transient_agent_doc_markers(editor_text)
-            == normalize_transient_agent_doc_markers(content)
-    })
-}
-
-fn live_buffer_insertions_are_materialized_in_file(
-    snapshot: &agent_doc_debounce::LiveBufferSnapshot,
-    staged_content: &str,
-    file_content: &str,
-) -> bool {
-    let Some(editor_text) = snapshot.content.as_deref() else {
-        return false;
-    };
-
-    let normalized_file = normalize_transient_agent_doc_markers(file_content);
-    let normalized_staged = normalize_transient_agent_doc_markers(staged_content);
-    let diff = similar::TextDiff::from_lines(staged_content, editor_text);
-    let mut saw_insert = false;
-    for change in diff.iter_all_changes() {
-        if change.tag() != similar::ChangeTag::Insert {
-            continue;
-        }
-        let inserted = change.value().trim_end_matches('\n');
-        let normalized_inserted = normalize_transient_agent_doc_markers(inserted);
-        let trimmed = normalized_inserted.trim();
-        if trimmed.is_empty() || trimmed == "(HEAD)" || trimmed.starts_with("<!-- agent:boundary:")
-        {
-            continue;
-        }
-        saw_insert = true;
-        if normalized_staged.contains(trimmed) {
-            continue;
-        }
-        if !normalized_file.contains(trimmed) {
-            return false;
-        }
-    }
-    saw_insert
 }
 
 fn cycle_is_terminal(file: &Path) -> bool {
@@ -3573,11 +3474,15 @@ Duplicate replay should stay live.
         };
 
         assert!(
-            live_buffer_insertions_are_materialized_in_file(&snapshot, staged, file),
+            agent_doc_git_io::live_buffer_guard::live_buffer_insertions_are_materialized_in_file(
+                &snapshot, staged, file,
+            ),
             "operator insertion is present in the visible file and can be left uncommitted"
         );
         assert!(
-            !live_buffer_insertions_are_materialized_in_file(&snapshot, staged, staged),
+            !agent_doc_git_io::live_buffer_guard::live_buffer_insertions_are_materialized_in_file(
+                &snapshot, staged, staged,
+            ),
             "operator insertion missing from disk must still block"
         );
     }

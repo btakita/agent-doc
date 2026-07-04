@@ -9,6 +9,7 @@ pub mod commit;
 pub mod dirs;
 pub mod guard_marker_cleanup;
 pub mod index;
+pub mod live_buffer_guard;
 pub mod partial_staging;
 pub mod post_commit_cleanup;
 pub mod pre_stage_repair;

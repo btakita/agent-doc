@@ -10999,6 +10999,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split `CaptureMaterializationGuardEffects` into capture-read, log, and closeout-guard ports",
         ),
         (
+            "Git live-buffer precommit guard IO graph",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-git-io/src/live_buffer_guard.rs",
+            "Split `LiveBufferGuardEffects` into debounce-read, log, and closeout-guard ports",
+        ),
+        (
             "Codex hook user-prompt-submit tracking IO graph",
             "agent-doc-orchestration/src/codex_hook.rs",
             "agent-doc-codex-hook-io/src/lib.rs",

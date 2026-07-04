@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -110,10 +110,37 @@ Both new items are real features in `src/equityfundingsource-dev`; I'll explore 
 ### Re: wedge root-caused + fixed — opus-4-8
 
 Root cause: after repeated git-direct commits (my own wedge workaround), the JB plugin's native yrs CRDT node model diverged from disk, so `native node-patch apply` rejected every patch. Re-synced the plugin's native CRDT; this note verifies the editor apply path works again.
-<!-- agent:boundary:612c82ef -->
+<!-- agent:boundary:557b8af1 -->
+
+### Re: #pipe-rt-notify, #6em3, and #7jj2 deploy — gpt-5
+
+Implemented and deployed the queued EFS work.
+
+`#pipe-rt-notify`: admin pipeline realtime events now produce admin toasts and desktop notifications for configured pipeline events. The existing `AdminEventsRoom` / `notify_admin_event_` path remains the event bus; no separate `deal_pipeline_bus` was added. Investor self-service interest now emits `lender_interest_created`, and the public application lead path emits `application_lead_created` as the current prequalification-lead equivalent.
+
+`#6em3`: the admin lender pipeline dialog now lets an admin fill and save the lender Requirements/accreditation questionnaire, backed by a new `PUT /api/admin/users/:id/investor-accreditation` route, validation, persistence, and an `investor_accreditation_changed` admin event.
+
+`#7jj2` / deploy: shipped the changes to Cloudflare Workers production. Live URL: `https://equityfundingsource.brian-takita.workers.dev/`; deployed worker version `02ecd8c7-4e7b-4d8e-bb83-b6e9358dcd89`.
+
+Verification completed before deploy: focused `bun test` suites passed, full EFS `make check` passed with `1379 pass / 0 fail`, remote D1 migrations had nothing pending, and production returned HTTP `200`. EFS commit `fa4a6dc` and superproject submodule bump `697818aea` were pushed.
+
+CI note: `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in either the EFS subrepo or the superproject.
 <!-- /agent:exchange -->
-###
-<!--
+
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~~[#pipe-rt-notify]~~
+- ~~[#6em3]~~
+- ~~deploy~~
+- ~~do [#7jj2]~~
+<!-- /agent:queue -->
+
+## Notes
+
+<!-- agent:notes -->
+We are not using an evented FD because this path deliberately has no live bidirectional connection to the plugin. The evented transport is the socket IPC path; file IPC exists specifically for “socket absent/degraded/stale but plugin file
+watcher may still apply patches”. We could use notify/inotify/kqueue as an implementation detail for the filesystem wait, but it still needs the same timeout, nack, ack-content, committed-cycle, and post-apply validation fallback. The
+right extraction is probably a focused FileIpcAckWaiter/sidecar waiter with today’s poll backend first, then an evented backend as an optimization once it is out of orchestration.
+---
 - Admin loan delete: /api/admin/loans/:id
 - Admin bulk loan delete: /api/admin/loans/bulk-delete
 - Admin TMO loan delete: /api/admin/tmo-loans/:loan_number
@@ -127,14 +154,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 After 20:30
 - login to TMO. Make sure we are using the correct credentials.
 - TMO Syncs
--->
-
-<!-- agent:queue preset="#spec-test-commit-push" start -->
-- ~~[#pipe-rt-notify]~~
-- 🚧 [#6em3]
-- deploy
-- do [#7jj2]
-<!-- /agent:queue -->
+<!-- /agent:notes -->
 
 ## Backlog
 

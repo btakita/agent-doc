@@ -235,6 +235,3 @@ pub fn closeout_recovery_hint(file: &std::path::Path) -> String {
         ),
     }
 }
-
-#[cfg(test)]
-mod test_support;

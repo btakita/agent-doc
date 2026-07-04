@@ -1821,11 +1821,11 @@ mod th {
     use tmux_router::IsolatedTmux;
     pub(crate) struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
-        _env_guard: crate::test_support::ProcessGlobalLockGuard,
+        _env_guard: agent_doc_test_support::ProcessGlobalLockGuard,
     }
     impl ScopedCurrentDir {
         pub(crate) fn set(path: &std::path::Path) -> Self {
-            let env_guard = crate::test_support::env_lock();
+            let env_guard = agent_doc_test_support::env_lock();
             let prev_cwd = std::env::current_dir().unwrap();
             std::env::set_current_dir(path).unwrap();
             Self {
@@ -1842,11 +1842,11 @@ mod th {
     pub(crate) struct ScopedEnvVar {
         key: &'static str,
         previous: Option<String>,
-        _env_guard: crate::test_support::ProcessGlobalLockGuard,
+        _env_guard: agent_doc_test_support::ProcessGlobalLockGuard,
     }
     impl ScopedEnvVar {
         pub(crate) fn set(key: &'static str, value: String) -> Self {
-            let env_guard = crate::test_support::env_lock();
+            let env_guard = agent_doc_test_support::env_lock();
             let previous = std::env::var(key).ok();
             unsafe { std::env::set_var(key, &value) };
             Self {

@@ -2914,12 +2914,12 @@ mod tests {
         fs::write(&doc, &source).unwrap();
         agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so the
         // non-force consume fails closed (protects the buffer) rather than taking
         // an unproven editor-delivery disk fallback.
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = consume_queue_prompts_for_done_ids_closeout(&doc, &[], false).unwrap_err();
         let err = format!("{err:?}");
@@ -2969,9 +2969,9 @@ mod tests {
         fs::write(&doc, &source).unwrap();
         agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = agent_doc_session_check_io::run_closeout_pending_maintenance(
             &doc,
@@ -3088,9 +3088,9 @@ mod tests {
         )
         .unwrap();
 
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = agent_doc_session_check_io::run_closeout_pending_maintenance(
             &doc,
@@ -3155,9 +3155,9 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&source), Some(&source)).unwrap();
         agent_doc_capture_io::capture_response(&doc, "Done.").unwrap();
 
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         agent_doc_session_check_io::run_closeout_pending_maintenance(
             &doc,

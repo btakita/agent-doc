@@ -1,10 +1,5 @@
-//! Test-only synchronization helpers for orchestration tests that mutate
-//! process-global state (environment variables).
-//!
-//! Mirrors the main crate's `test_support`. Each crate's tests compile into a
-//! separate test executable, so a crate-local `TEST_ENV_LOCK` is sufficient to
-//! serialize env-mutating tests within *this* crate's test process — no
-//! cross-crate sharing is required (or possible) for a `#[cfg(test)]` static.
+//! Shared test-only helpers for agent-doc crates that need process-global
+//! locks, temporary git documents, and fake editor IPC listeners.
 
 use std::path::Path;
 use std::sync::MutexGuard;
@@ -50,8 +45,7 @@ pub fn env_lock() -> ProcessGlobalLockGuard {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn seed_live_plugin_owner_lease(file: &str) {
+pub fn seed_live_plugin_owner_lease(file: &str) {
     let pid = std::process::id();
     assert!(
         agent_doc_plugin_owner::try_acquire_plugin_owner(file, &format!("test-editor-{pid}"), pid),
@@ -59,17 +53,11 @@ pub(crate) fn seed_live_plugin_owner_lease(file: &str) {
     );
 }
 
-#[cfg(test)]
-pub(crate) fn patch_with_heading(heading: &str) -> agent_doc_template::PatchBlock {
+pub fn patch_with_heading(heading: &str) -> agent_doc_template::PatchBlock {
     agent_doc_template::PatchBlock::new("exchange", format!("{heading}\n\nbody line one\n"))
 }
 
-#[cfg(test)]
-pub(crate) fn init_repo_with_doc(
-    dir: &std::path::Path,
-    name: &str,
-    body: &str,
-) -> std::path::PathBuf {
+pub fn init_repo_with_doc(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
     std::process::Command::new("git")
         .current_dir(dir)
         .args(["init", "-q", "--initial-branch=main"])
@@ -100,8 +88,7 @@ pub(crate) fn init_repo_with_doc(
     path
 }
 
-#[cfg(test)]
-pub(crate) fn drift_baseline() -> String {
+pub fn drift_baseline() -> String {
     concat!(
         "---\nsession: test\n---\n\n",
         "<!-- agent:exchange patch=append -->\n",
@@ -114,8 +101,7 @@ pub(crate) fn drift_baseline() -> String {
     .to_string()
 }
 
-#[cfg(test)]
-pub(crate) fn drift_content_ours() -> String {
+pub fn drift_content_ours() -> String {
     // baseline + a substantial `### Re:` response (well over the 100-byte
     // stale-drift threshold) so adopting it is a real wedge.
     concat!(
@@ -134,8 +120,7 @@ pub(crate) fn drift_content_ours() -> String {
     .to_string()
 }
 
-#[cfg(test)]
-pub(crate) fn start_live_prompt_drift_ack_listener(
+pub fn start_live_prompt_drift_ack_listener(
     project_root: &Path,
     ack_content: String,
 ) -> std::thread::JoinHandle<()> {
@@ -160,10 +145,7 @@ pub(crate) fn start_live_prompt_drift_ack_listener(
     })
 }
 
-#[cfg(test)]
-pub(crate) fn start_ack_without_content_listener(
-    project_root: &Path,
-) -> std::thread::JoinHandle<()> {
+pub fn start_ack_without_content_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
     let root = project_root.to_path_buf();
     std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
     std::thread::spawn(move || {
@@ -178,8 +160,7 @@ pub(crate) fn start_ack_without_content_listener(
     })
 }
 
-#[cfg(test)]
-pub(crate) fn wait_for_live_prompt_drift_listener(project_root: &Path) {
+pub fn wait_for_live_prompt_drift_listener(project_root: &Path) {
     for _ in 0..100 {
         if agent_doc_ipc_io::is_listener_active(project_root) {
             return;
@@ -189,8 +170,7 @@ pub(crate) fn wait_for_live_prompt_drift_listener(project_root: &Path) {
     panic!("fake socket listener did not start within 1s");
 }
 
-#[cfg(test)]
-pub(crate) fn compact_convergence_source() -> String {
+pub fn compact_convergence_source() -> String {
     concat!(
         "---\nsession: test\n---\n\n",
         "<!-- agent:exchange patch=append -->\n",
@@ -208,8 +188,7 @@ pub(crate) fn compact_convergence_source() -> String {
     .to_string()
 }
 
-#[cfg(test)]
-pub(crate) fn compact_convergence_compacted() -> String {
+pub fn compact_convergence_compacted() -> String {
     concat!(
         "---\nsession: test\n---\n\n",
         "<!-- agent:exchange patch=append -->\n",
@@ -223,8 +202,7 @@ pub(crate) fn compact_convergence_compacted() -> String {
     .to_string()
 }
 
-#[cfg(test)]
-pub(crate) fn queue_consume_convergence_source() -> String {
+pub fn queue_consume_convergence_source() -> String {
     concat!(
         "---\nsession: test\n---\n\n",
         "<!-- agent:exchange patch=append -->\n",
@@ -239,8 +217,7 @@ pub(crate) fn queue_consume_convergence_source() -> String {
     .to_string()
 }
 
-#[cfg(test)]
-pub(crate) fn queue_consume_convergence_target() -> String {
+pub fn queue_consume_convergence_target() -> String {
     concat!(
         "---\nsession: test\n---\n\n",
         "<!-- agent:exchange patch=append -->\n",

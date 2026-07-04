@@ -5763,7 +5763,7 @@ mod core_tests {
             "- do [#head]\n",
             "<!-- /agent:queue -->\n",
         );
-        let doc = crate::test_support::init_repo_with_doc(dir.path(), "session.md", baseline);
+        let doc = agent_doc_test_support::init_repo_with_doc(dir.path(), "session.md", baseline);
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let mut decision = IpcRepairDecision::ack_content(candidate.to_string());
 
@@ -5825,12 +5825,12 @@ mod core_tests {
     #[test]
     fn patch_response_headings_already_in_head_true_when_heading_in_head() {
         let dir = TempDir::new().unwrap();
-        let doc = crate::test_support::init_repo_with_doc(
+        let doc = agent_doc_test_support::init_repo_with_doc(
             dir.path(),
             "session.md",
             "## Exchange\n\n### Re: shipped — opus-4-7\n\nbody\n",
         );
-        let patch = crate::test_support::patch_with_heading("### Re: shipped — opus-4-7");
+        let patch = agent_doc_test_support::patch_with_heading("### Re: shipped — opus-4-7");
         assert!(patch_response_headings_already_in_head(&doc, &[patch]));
     }
     #[test]
@@ -5840,12 +5840,12 @@ mod core_tests {
         // response we're about to apply. The late-fallback gate must allow
         // the patch through.
         let dir = TempDir::new().unwrap();
-        let doc = crate::test_support::init_repo_with_doc(
+        let doc = agent_doc_test_support::init_repo_with_doc(
             dir.path(),
             "session.md",
             "## Exchange\n\n### Re: prior cycle — opus-4-7\n\nold\n",
         );
-        let patch = crate::test_support::patch_with_heading("### Re: new response — opus-4-7");
+        let patch = agent_doc_test_support::patch_with_heading("### Re: new response — opus-4-7");
         assert!(
             !patch_response_headings_already_in_head(&doc, &[patch]),
             "mid-turn rotation must allow the patch (response not in HEAD)"
@@ -5854,14 +5854,14 @@ mod core_tests {
     #[test]
     fn patch_response_headings_already_in_head_false_when_any_heading_missing() {
         let dir = TempDir::new().unwrap();
-        let doc = crate::test_support::init_repo_with_doc(
+        let doc = agent_doc_test_support::init_repo_with_doc(
             dir.path(),
             "session.md",
             "## Exchange\n\n### Re: first — opus-4-7\n\nbody\n",
         );
         let patches = vec![
-            crate::test_support::patch_with_heading("### Re: first — opus-4-7"),
-            crate::test_support::patch_with_heading("### Re: second — opus-4-7"),
+            agent_doc_test_support::patch_with_heading("### Re: first — opus-4-7"),
+            agent_doc_test_support::patch_with_heading("### Re: second — opus-4-7"),
         ];
         assert!(
             !patch_response_headings_already_in_head(&doc, &patches),
@@ -5876,7 +5876,7 @@ mod core_tests {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
         fs::write(&doc, "no git\n").unwrap();
-        let patch = crate::test_support::patch_with_heading("### Re: something — opus-4-7");
+        let patch = agent_doc_test_support::patch_with_heading("### Re: something — opus-4-7");
         assert!(!patch_response_headings_already_in_head(&doc, &[patch]));
     }
     #[test]
@@ -5968,7 +5968,7 @@ mod core_tests {
         let server = std::thread::spawn(move || {
             let _ = agent_doc_ipc_io::start_listener(&root_clone, |_msg| None);
         });
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         assert!(
             ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
@@ -6117,8 +6117,8 @@ mod core_tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = dir.path().join("plan.md");
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
         // Trip the degraded latch (threshold = 2 distinct ack timeouts), mirroring
@@ -6172,8 +6172,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = dir.path().join("plan.md");
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "queue_consume").unwrap();

@@ -147,6 +147,7 @@ tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustl
 tsift-memory = "0.1.70"
 
 [dev-dependencies]
+agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.34.67" }
 tempfile = "3"
 filetime = "0.2"
 # Property tests for the unified queue convergence (`#cgfx`) prove idempotence /

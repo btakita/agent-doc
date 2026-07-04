@@ -78,11 +78,11 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     fn inspect(file: &std::path::Path) -> Result<SessionCheckStatus> {
-        let _process_global_lock = crate::test_support::env_lock();
+        let _process_global_lock = agent_doc_test_support::env_lock();
         super::inspect(file)
     }
     fn inspect_with_warnings(file: &std::path::Path) -> Result<SessionCheckReport> {
-        let _process_global_lock = crate::test_support::env_lock();
+        let _process_global_lock = agent_doc_test_support::env_lock();
         super::inspect_with_warnings(file)
     }
     /// Phase 6 (#lr-content-6): build a `RunContext` whose `DocContentCell` holds
@@ -129,11 +129,11 @@ mod tests {
     struct EnvGuard {
         key: &'static str,
         prev: Option<String>,
-        _lock: crate::test_support::ProcessGlobalLockGuard,
+        _lock: agent_doc_test_support::ProcessGlobalLockGuard,
     }
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
-            let lock = crate::test_support::env_lock();
+            let lock = agent_doc_test_support::env_lock();
             let prev = std::env::var(key).ok();
             unsafe { std::env::set_var(key, value) };
             Self {
@@ -273,7 +273,7 @@ mod tests {
         had_pending_mutations: bool,
         pending_done_ids: &[&str],
     ) -> std::path::PathBuf {
-        let _lock = crate::test_support::env_lock();
+        let _lock = agent_doc_test_support::env_lock();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
         let doc = root.join("doc.md");
@@ -313,7 +313,7 @@ mod tests {
         doc
     }
     fn write_queue_drain_doc(root: &std::path::Path, exchange_body: &str) -> std::path::PathBuf {
-        let _lock = crate::test_support::env_lock();
+        let _lock = agent_doc_test_support::env_lock();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
         let doc = root.join("doc.md");
@@ -1579,7 +1579,7 @@ Body\n\
         // converged the drained queue/backlog state. A later no-op closeout still
         // carried queue-turn evidence, but `commit_already_current` means no new
         // binary-owned content was committed without a response body.
-        let _lock = crate::test_support::env_lock();
+        let _lock = agent_doc_test_support::env_lock();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();

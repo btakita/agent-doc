@@ -3419,7 +3419,7 @@ mod tests {
     fn check_layout_returns_empty_outside_tmux() {
         // When TMUX env var is not set (typical in CI / test), check_layout
         // should return an empty vec silently.
-        let _env_guard = crate::test_support::env_lock();
+        let _env_guard = agent_doc_test_support::env_lock();
         let saved = std::env::var("TMUX").ok();
         // SAFETY: test is single-threaded; we restore the value immediately after.
         unsafe { std::env::remove_var("TMUX") };

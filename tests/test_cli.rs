@@ -1072,8 +1072,8 @@ fn process_global_test_mutations_share_session_check_lock() {
         session_check_tests.contains("fn inspect(file: &std::path::Path)")
             && session_check_tests.contains("fn inspect_with_warnings(file: &std::path::Path)")
             && session_check_tests
-                .contains("let _process_global_lock = crate::test_support::env_lock()"),
-        "session_check test inspection helpers must use the crate-wide process-global lock"
+                .contains("let _process_global_lock = agent_doc_test_support::env_lock()"),
+        "session_check test inspection helpers must use the focused process-global test lock"
     );
 
     let pty =
@@ -1084,6 +1084,54 @@ fn process_global_test_mutations_share_session_check_lock() {
             && pty.contains("std::env::remove_var(self.key)"),
         "parent env leak test must restore process env through a guard"
     );
+}
+
+#[test]
+fn agent_doc_test_support_owns_orchestration_test_helpers() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-test-support")),
+        "agent-doc-test-support must stay a first-class workspace crate"
+    );
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/test_support.rs")
+            .exists(),
+        "orchestration must not retain a crate-local test_support source module"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    assert!(
+        orchestration["dev-dependencies"]
+            .as_table()
+            .unwrap()
+            .contains_key("agent-doc-test-support"),
+        "orchestration tests should consume the focused test-support crate"
+    );
+
+    let test_support =
+        fs::read_to_string(manifest_dir.join("agent-doc-test-support/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct ProcessGlobalLockGuard",
+        "pub fn env_lock()",
+        "pub fn seed_live_plugin_owner_lease(",
+        "pub fn init_repo_with_doc(",
+        "pub fn start_live_prompt_drift_ack_listener(",
+        "pub fn queue_consume_convergence_source()",
+    ] {
+        assert!(
+            test_support.contains(required),
+            "agent-doc-test-support must own orchestration's moved helper: {required}"
+        );
+    }
 }
 
 #[test]
@@ -9649,7 +9697,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 54,
+        ledger_rows.len() >= 55,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10174,6 +10222,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/route.rs",
             "agent-doc-route-io/src/command.rs",
             "Split the remaining `RouteCommandEffects` bundle",
+        ),
+        (
+            "Orchestration test support helper graph",
+            "agent-doc-orchestration/src/test_support.rs",
+            "agent-doc-test-support/src/lib.rs",
+            "Move remaining orchestration integration fixtures into focused IO crate test helpers",
         ),
     ] {
         let row_text = ledger_rows

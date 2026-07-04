@@ -1103,6 +1103,7 @@ dependencies = [
  "agent-doc-sync-io",
  "agent-doc-template",
  "agent-doc-template-io",
+ "agent-doc-test-support",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
@@ -1917,6 +1918,17 @@ dependencies = [
  "anyhow",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-test-support"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-harness",
+ "agent-doc-ipc-io",
+ "agent-doc-plugin-owner",
+ "agent-doc-template",
+ "serde_json",
 ]
 
 [[package]]

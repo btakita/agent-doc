@@ -103,6 +103,7 @@ members = [
     "agent-doc-state-wire",
     "agent-doc-status-io",
     "agent-doc-stream-io",
+    "agent-doc-test-support",
     "agent-doc-turn",
     "agent-doc-turn-executor",
     "agent-doc-turn-executor-tmux",

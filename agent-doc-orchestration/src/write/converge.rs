@@ -1813,8 +1813,8 @@ mod core_tests {
     fn live_prompt_drift_auto_recovery_safe_accepts_benign_wedge() {
         // Snapshot owns the response the fragmented disk file lost; no disk-only
         // user prompt → safe to auto-recover.
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline();
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let fragmented = agent_doc_test_support::drift_baseline();
         assert!(
             live_prompt_drift_auto_recovery_safe(
                 &snapshot,
@@ -1828,11 +1828,11 @@ mod core_tests {
     fn live_prompt_drift_response_patches_ignore_operator_owned_components() {
         let snapshot = format!(
             "{}\n<!-- agent:backlog -->\n- existing backlog text\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_content_ours()
+            agent_doc_test_support::drift_content_ours()
         );
         let fragmented = format!(
             "{}\n<!-- agent:backlog -->\n- existing backlog text with operator word\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_baseline()
+            agent_doc_test_support::drift_baseline()
         );
 
         let generic = agent_doc_document::component_patches::component_replace_patches(
@@ -1866,8 +1866,8 @@ mod core_tests {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("plan.md");
-        let current = crate::test_support::drift_baseline();
-        let compacted = crate::test_support::drift_content_ours();
+        let current = agent_doc_test_support::drift_baseline();
+        let compacted = agent_doc_test_support::drift_content_ours();
         std::fs::write(&doc, &current).unwrap();
 
         let converged = try_editor_converge(&doc, &compacted, &current, "compact").unwrap();
@@ -1901,17 +1901,17 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::compact_convergence_source();
-        let compacted = crate::test_support::compact_convergence_compacted();
+        let source = agent_doc_test_support::compact_convergence_source();
+        let compacted = agent_doc_test_support::compact_convergence_compacted();
         fs::write(&doc, &source).unwrap();
 
         // The fake editor acks with the compacted content, mirroring a JB plugin
         // that applied the exchange `op:replace` and converged its buffer.
-        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(
+        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
             dir.path(),
             compacted.clone(),
         );
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let converged = try_editor_converge(&doc, &compacted, &source, "compact").unwrap();
         assert!(
@@ -1949,13 +1949,15 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let _listener =
-            crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), target.clone());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
+            dir.path(),
+            target.clone(),
+        );
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
         assert!(
@@ -1993,8 +1995,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
@@ -2026,7 +2028,7 @@ mod core_tests {
                 )
             });
         });
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let watcher_dir = agent_doc_dir.join("patches");
         let watcher_ack_dir = agent_doc_dir.join("ack-content");
@@ -2113,8 +2115,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         let stale_ack = target.replace(
             "<!-- /agent:exchange -->",
             "> **Queue prompt:** stale leftover from failed queue consume\n<!-- /agent:exchange -->",
@@ -2123,8 +2125,8 @@ mod core_tests {
 
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, stale_ack);
-        crate::test_support::wait_for_live_prompt_drift_listener(&root);
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(&root);
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -2169,8 +2171,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         let recovered = target.replace(
             "<!-- /agent:queue -->",
             "- do [#qftlossdelta]\n<!-- /agent:queue -->",
@@ -2179,8 +2181,8 @@ mod core_tests {
 
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, recovered.clone());
-        crate::test_support::wait_for_live_prompt_drift_listener(&root);
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(&root);
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .expect("queue consume should accept proven node patch plus editor-owned queue edits");
@@ -2231,8 +2233,8 @@ mod core_tests {
 
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, shorter_ack);
-        crate::test_support::wait_for_live_prompt_drift_listener(&root);
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(&root);
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         converge_document_or_disk(&doc, &target, &source, "pending_write")
             .expect("safe shorter ack should replay the target response through the editor");
@@ -2272,8 +2274,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         let user_ack = target.replace(
             "<!-- /agent:exchange -->",
             "❯ do [#followup] preserve this concurrent prompt\n<!-- /agent:exchange -->",
@@ -2282,8 +2284,8 @@ mod core_tests {
 
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, user_ack.clone());
-        crate::test_support::wait_for_live_prompt_drift_listener(&root);
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(&root);
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -2315,8 +2317,8 @@ mod core_tests {
     fn queue_consume_editor_convergence_payload_is_node_keyed_and_fenced() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("plan.md");
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
         let payload = editor_convergence_payload(
@@ -2369,11 +2371,11 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let converged = try_editor_converge(&doc, &source, &source, "pending_write").unwrap();
         assert!(
@@ -2405,8 +2407,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
         converge_document_or_disk(&doc, &target, &source, "queue_consume")
@@ -2438,8 +2440,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         agent_doc_debounce::record_live_buffer_digest_content_for_editor(
@@ -2479,8 +2481,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         agent_doc_debounce::record_live_buffer_digest_content_for_editor(
@@ -2520,7 +2522,7 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         agent_doc_debounce::record_live_buffer_digest_content_for_editor(
@@ -2593,7 +2595,7 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         agent_doc_debounce::record_live_buffer_digest_content_for_editor(
@@ -2676,8 +2678,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
@@ -2732,8 +2734,8 @@ mod core_tests {
             fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
             let doc = dir.path().join("plan.md");
 
-            let source = crate::test_support::queue_consume_convergence_source();
-            let target = crate::test_support::queue_consume_convergence_target();
+            let source = agent_doc_test_support::queue_consume_convergence_source();
+            let target = agent_doc_test_support::queue_consume_convergence_target();
             fs::write(&doc, &source).unwrap();
 
             converge_document_or_disk(&doc, &target, &source, source_label)
@@ -2764,16 +2766,16 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
         // the guard fails closed (protects the buffer) rather than treating the
         // ack-without-content listener as the editor-less CLI-only case.
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -2810,8 +2812,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
         converge_or_disk_write(&doc, &source, &target, "pending_write")
@@ -2842,15 +2844,15 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
         // the guard fails closed on unproven delivery.
-        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = converge_or_disk_write(&doc, &source, &target, "pending_write")
             .unwrap_err()
@@ -2887,12 +2889,12 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = dir.path().join("plan.md");
 
-        let source = crate::test_support::queue_consume_convergence_source();
-        let target = crate::test_support::queue_consume_convergence_target();
+        let source = agent_doc_test_support::queue_consume_convergence_source();
+        let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // No plugin-owner lease seeded → no live editor endpoint, but the
         // connectable socket still requires convergence proof.
 
@@ -2926,7 +2928,7 @@ mod core_tests {
     #[test]
     fn live_prompt_drift_auto_recovery_safe_rejects_no_wedge() {
         // Snapshot == file: no wedge, nothing to recover, must not fire.
-        let snapshot = crate::test_support::drift_content_ours();
+        let snapshot = agent_doc_test_support::drift_content_ours();
         assert!(
             !live_prompt_drift_auto_recovery_safe(
                 &snapshot,
@@ -2940,8 +2942,8 @@ mod core_tests {
     fn live_prompt_drift_auto_recovery_safe_rejects_disk_only_exchange_prompt() {
         // The visible file carries a NEW user prompt the snapshot never saw —
         // adopting content_ours would silently drop it. Fail closed.
-        let snapshot = crate::test_support::drift_content_ours();
-        let mut fragmented = crate::test_support::drift_baseline();
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let mut fragmented = agent_doc_test_support::drift_baseline();
         fragmented = fragmented.replace(
             "❯ do #fix\n<!-- /agent:exchange -->",
             "❯ do #fix\n❯ do #brand-new-user-prompt-typed-after-preflight\n<!-- /agent:exchange -->",
@@ -2959,8 +2961,8 @@ mod core_tests {
     fn live_prompt_drift_auto_recovery_preserves_disk_only_queue_item() {
         // A user-added `do [#id]` queue line is disjoint realtime state: the
         // response can land while the queue edit remains in the merged target.
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline().replace(
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let fragmented = agent_doc_test_support::drift_baseline().replace(
             "- do [#fix]\n<!-- /agent:queue -->",
             "- do [#fix]\n- do [#user-added-queue-item]\n<!-- /agent:queue -->",
         );
@@ -2980,8 +2982,8 @@ mod core_tests {
         // document text even when it is not yet a complete prompt. Recovery may
         // append the missing agent response, but it must not reset the exchange
         // back to the pre-typing snapshot.
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline().replace(
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let fragmented = agent_doc_test_support::drift_baseline().replace(
             "❯ do #fix\n<!-- /agent:exchange -->",
             "❯ do #fix\noperator-partial-wo\n<!-- /agent:exchange -->",
         );
@@ -3005,11 +3007,11 @@ mod core_tests {
         // realtime recovery keeps it and adds only the missing response.
         let snapshot = format!(
             "{}\n<!-- agent:backlog -->\n- existing backlog text\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_content_ours()
+            agent_doc_test_support::drift_content_ours()
         );
         let fragmented = format!(
             "{}\n<!-- agent:backlog -->\n- existing backlog text with operator word\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_baseline()
+            agent_doc_test_support::drift_baseline()
         );
 
         let target = live_prompt_drift_recovery_target(
@@ -3029,11 +3031,11 @@ mod core_tests {
         // a deleted backlog line while restoring the agent response.
         let snapshot = format!(
             "{}\n<!-- agent:backlog -->\n- keep this\n- operator deleted this\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_content_ours()
+            agent_doc_test_support::drift_content_ours()
         );
         let fragmented = format!(
             "{}\n<!-- agent:backlog -->\n- keep this\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_baseline()
+            agent_doc_test_support::drift_baseline()
         );
 
         let target = live_prompt_drift_recovery_target(
@@ -3053,11 +3055,11 @@ mod core_tests {
         // operator-visible value must win over the older snapshot value.
         let snapshot = format!(
             "{}\n<!-- agent:backlog -->\n- original backlog wording\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_content_ours()
+            agent_doc_test_support::drift_content_ours()
         );
         let fragmented = format!(
             "{}\n<!-- agent:backlog -->\n- edited backlog wording\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_baseline()
+            agent_doc_test_support::drift_baseline()
         );
 
         let target = live_prompt_drift_recovery_target(
@@ -3079,11 +3081,11 @@ mod core_tests {
 
         let historical =
             "### Re: do #old — gpt-5\n\nHistorical answer the operator deleted after preflight.\n";
-        let preflight = crate::test_support::drift_baseline().replace(
+        let preflight = agent_doc_test_support::drift_baseline().replace(
             "❯ do #fix\n",
             &format!("❯ do #old\n{historical}❯ do #fix\n"),
         );
-        let snapshot = crate::test_support::drift_content_ours().replace(
+        let snapshot = agent_doc_test_support::drift_content_ours().replace(
             "❯ do #fix\n",
             &format!("❯ do #old\n{historical}❯ do #fix\n"),
         );
@@ -3117,11 +3119,11 @@ mod core_tests {
 
         let snapshot = format!(
             "{}\n<!-- agent:backlog -->\n- original backlog wording\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_content_ours()
+            agent_doc_test_support::drift_content_ours()
         );
         let fragmented = format!(
             "{}\n<!-- agent:backlog -->\n- edited backlog wording\n<!-- /agent:backlog -->\n",
-            crate::test_support::drift_baseline()
+            agent_doc_test_support::drift_baseline()
         );
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
@@ -3151,8 +3153,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = dir.path().join("test.md");
 
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline();
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         // The drift guard fired this cycle and adopted content_ours.
@@ -3185,17 +3187,19 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         let doc = dir.path().join("test.md");
 
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline();
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
-        let _listener =
-            crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), snapshot.clone());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
+            dir.path(),
+            snapshot.clone(),
+        );
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert_eq!(
@@ -3235,8 +3239,8 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         let doc = dir.path().join("test.md");
 
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline().replace(
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let fragmented = agent_doc_test_support::drift_baseline().replace(
             "❯ do #fix\n<!-- /agent:exchange -->",
             "❯ do #fix\noperator-partial-wo\n<!-- /agent:exchange -->",
         );
@@ -3252,11 +3256,11 @@ mod core_tests {
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
-        let _listener = crate::test_support::start_live_prompt_drift_ack_listener(
+        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
             dir.path(),
             recovery_target.clone(),
         );
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert_eq!(
@@ -3287,16 +3291,16 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         let doc = dir.path().join("test.md");
 
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline();
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
-        let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert!(
@@ -3331,8 +3335,8 @@ mod core_tests {
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("test.md");
 
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline();
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         // A cycle exists but the drift guard never fired (flag stays false) →
@@ -3357,8 +3361,8 @@ mod core_tests {
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("test.md");
 
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline();
+        let snapshot = agent_doc_test_support::drift_content_ours();
+        let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
@@ -3407,10 +3411,10 @@ mod core_tests {
         // Snapshot consumed the queued `do [#fix]` (struck) and carries the full
         // `### Re:` response; the fragmented disk file also struck it but lost the
         // response body → wedge shape.
-        let snapshot =
-            crate::test_support::drift_content_ours().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
+        let snapshot = agent_doc_test_support::drift_content_ours()
+            .replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
         let fragmented =
-            crate::test_support::drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
+            agent_doc_test_support::drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
         fs::write(&doc, &fragmented).unwrap();
         agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))

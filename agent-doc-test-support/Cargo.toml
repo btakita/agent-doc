@@ -1,0 +1,18 @@
+[package]
+name = "agent-doc-test-support"
+version = "0.34.67"
+edition = "2024"
+description = "Shared test support helpers for agent-doc crates"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
+
+[lib]
+name = "agent_doc_test_support"
+
+[dependencies]
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.67" }
+agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
+serde_json = "1"

@@ -663,8 +663,8 @@ pub(crate) static TMUX_INJECT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::ne
 #[cfg(test)]
 pub(crate) static ROUTE_BIN_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(test)]
-pub(crate) fn env_lock() -> crate::test_support::ProcessGlobalLockGuard {
-    crate::test_support::env_lock()
+pub(crate) fn env_lock() -> agent_doc_test_support::ProcessGlobalLockGuard {
+    agent_doc_test_support::env_lock()
 }
 // #codex-route-busy-ctrl-g-opens-editor: the busy-pane reroute must only send
 // `C-g` when the live capture proves a shell reverse-i-search / history-search.
@@ -720,7 +720,7 @@ pub(crate) fn test_registry_entry(
 #[cfg(test)]
 pub(crate) struct ScopedCurrentDir {
     prev_cwd: std::path::PathBuf,
-    _env_guard: crate::test_support::ProcessGlobalLockGuard,
+    _env_guard: agent_doc_test_support::ProcessGlobalLockGuard,
 }
 #[cfg(test)]
 impl ScopedCurrentDir {
@@ -1264,12 +1264,12 @@ mod tests {
     struct EnvGuard {
         key: &'static str,
         prior: Option<String>,
-        _lock: crate::test_support::ProcessGlobalLockGuard,
+        _lock: agent_doc_test_support::ProcessGlobalLockGuard,
     }
 
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
-            let lock = crate::test_support::env_lock();
+            let lock = agent_doc_test_support::env_lock();
             let prior = std::env::var(key).ok();
             unsafe {
                 std::env::set_var(key, value);
@@ -1854,9 +1854,11 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _listener =
-            crate::test_support::start_live_prompt_drift_ack_listener(dir.path(), expected.into());
-        crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
+        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
+            dir.path(),
+            expected.into(),
+        );
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let outcome = enqueue_route_dispatch_prompt(
             &doc,

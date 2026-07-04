@@ -10646,6 +10646,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the test-only session-check boundary tests into `agent-doc-session-check-io`",
         ),
         (
+            "Session-check test-only command facade deletion",
+            "agent-doc-orchestration/src/session_check.rs",
+            "agent-doc-session-check-io/src/command.rs",
+            "Move the remaining session-check boundary tests into `agent-doc-session-check-io`",
+        ),
+        (
             "Flow closeout effects facade demotion",
             "agent-doc-orchestration/src/flow/mod.rs",
             "agent-doc-flow-io",
@@ -10704,6 +10710,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/route.rs",
             "agent-doc-route-io/src/command.rs",
             "Split the remaining `RouteCommandEffects` bundle",
+        ),
+        (
+            "Route startup test-only provisioning facade deletion",
+            "agent-doc-orchestration/src/route/startup.rs",
+            "agent-doc-route-io/src/startup.rs",
+            "Move the remaining route-startup integration tests",
         ),
         (
             "Orchestration test support helper graph",
@@ -10914,6 +10926,11 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         );
     }
     for forbidden in [
+        "pub use agent_doc_session_check_io",
+        "pub fn run_with_options(",
+        "pub fn inspect(",
+        "pub fn inspect_with_warnings(",
+        "pub fn enforce_clean_closeout(",
         "mod backlog_guards;",
         "mod partial_staging;",
         "mod queue_head_guards;",
@@ -10926,6 +10943,17 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         assert!(
             !session_check.contains(forbidden),
             "orchestration session_check.rs must not retain moved guard module facade: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_session_check_io::inspect(file, &crate::session_check_effects())",
+        "agent_doc_session_check_io::inspect_with_warnings(file, &crate::session_check_effects())",
+        "agent_doc_session_check_io::run_with_options(",
+        "agent_doc_session_check_io::enforce_clean_closeout(",
+    ] {
+        assert!(
+            session_check.contains(required),
+            "remaining orchestration session-check tests should call focused command IO directly: {required}"
         );
     }
     let closeout_guards =
@@ -13228,6 +13256,26 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
 
     let route_startup_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup.rs")).unwrap();
+    let orchestration_route_startup_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub fn auto_start(",
+        "pub fn provision_pane(",
+        "pub fn try_provision_pane(",
+        "pub(crate) fn auto_start_ext(",
+        "pub(crate) fn auto_start_in_session(",
+    ] {
+        assert!(
+            !orchestration_route_startup_source.contains(forbidden_snippet),
+            "orchestration route/startup.rs must not keep test-only startup/provisioning facades: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_route_startup_source
+            .contains("agent_doc_route_io::startup::provision_pane("),
+        "retained route-startup tests should call the focused startup IO API directly"
+    );
     let route_startup_locks =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_locks.rs")).unwrap();
     for forbidden_snippet in [

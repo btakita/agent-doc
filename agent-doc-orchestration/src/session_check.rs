@@ -10,7 +10,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-pub use agent_doc_session_check_io::{
+use agent_doc_session_check_io::{
     SessionCheckReport, SessionCheckStatus, first_unstarted_prompt_bearing_change,
 };
 #[cfg(test)]
@@ -48,27 +48,6 @@ fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
     );
 }
 
-/// `session-check` with the optional Codex final-gate.
-pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
-    agent_doc_session_check_io::run_with_options(
-        file,
-        codex_final_gate,
-        &crate::session_check_effects(),
-    )
-}
-
-pub fn inspect(file: &Path) -> Result<SessionCheckStatus> {
-    agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
-}
-
-pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
-    agent_doc_session_check_io::inspect_with_warnings(file, &crate::session_check_effects())
-}
-
-pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
-    agent_doc_session_check_io::enforce_clean_closeout(file, &crate::session_check_effects())
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -79,11 +58,11 @@ mod tests {
     use std::process::Command;
     fn inspect(file: &std::path::Path) -> Result<SessionCheckStatus> {
         let _process_global_lock = agent_doc_test_support::env_lock();
-        super::inspect(file)
+        agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
     }
     fn inspect_with_warnings(file: &std::path::Path) -> Result<SessionCheckReport> {
         let _process_global_lock = agent_doc_test_support::env_lock();
-        super::inspect_with_warnings(file)
+        agent_doc_session_check_io::inspect_with_warnings(file, &crate::session_check_effects())
     }
     /// Phase 6 (#lr-content-6): build a `RunContext` whose `DocContentCell` holds
     /// the file's current content, mirroring how `inspect_with_warnings` shares
@@ -5317,7 +5296,11 @@ Body\n\
 
         // The response is visible in exchange (no unresolved prompt), so
         // codex_final_gate should adopt it instead of blocking.
-        match run_with_options(&doc, true) {
+        match agent_doc_session_check_io::run_with_options(
+            &doc,
+            true,
+            &crate::session_check_effects(),
+        ) {
             Ok(()) => {}
             other => panic!("expected codex_final_gate to adopt manual patchback, got {other:?}"),
         }
@@ -7065,7 +7048,8 @@ Body\n\
             "precondition: late-IPC over-application present"
         );
 
-        enforce_clean_closeout(&doc).expect("enforce_clean_closeout should self-heal, not bail");
+        agent_doc_session_check_io::enforce_clean_closeout(&doc, &crate::session_check_effects())
+            .expect("enforce_clean_closeout should self-heal, not bail");
         assert_eq!(fs::read_to_string(&doc).unwrap(), committed);
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),

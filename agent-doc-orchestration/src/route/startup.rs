@@ -1,187 +1,12 @@
-//! Route startup/provisioning adapters.
+//! Route startup/provisioning adapter tests.
 
 #![allow(dead_code)]
 
 use super::*;
 #[cfg(test)]
 use agent_doc_route_io::session_resolution::evict_previous_stash_pane_entry;
-use agent_doc_route_io::startup::RouteStartupEffects;
 #[cfg(test)]
 use agent_doc_route_io::startup_ready::{wait_for_agent_ready, wait_for_agent_ready_outcome};
-
-fn route_startup_effects() -> RouteStartupEffects {
-    RouteStartupEffects {
-        route_dispatch_effects: route_dispatch_effects(),
-        dispatch_only_route_effects: route_dispatch_only_effects(),
-        route_cycle_ack_effects: route_cycle_ack_effects(),
-    }
-}
-
-/// Auto-start a new agent session in tmux using the default session name.
-pub fn auto_start(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    file_path: &str,
-    context_session: Option<&str>,
-) -> Result<String> {
-    agent_doc_route_io::startup::auto_start(
-        tmux,
-        file,
-        session_id,
-        file_path,
-        context_session,
-        route_startup_effects(),
-    )
-}
-
-/// Provision a pane without waiting for the agent to initialize.
-pub fn provision_pane(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    file_path: &str,
-    context_session: Option<&str>,
-    col_args: &[String],
-) -> Result<String> {
-    agent_doc_route_io::startup::provision_pane(
-        tmux,
-        file,
-        session_id,
-        file_path,
-        context_session,
-        col_args,
-        route_startup_effects(),
-    )
-}
-
-/// Try to provision a pane, returning `Ok(None)` when startup locks are busy.
-pub fn try_provision_pane(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    file_path: &str,
-    context_session: Option<&str>,
-    col_args: &[String],
-) -> Result<Option<String>> {
-    agent_doc_route_io::startup::try_provision_pane(
-        tmux,
-        file,
-        session_id,
-        file_path,
-        context_session,
-        col_args,
-        route_startup_effects(),
-    )
-}
-
-#[allow(clippy::too_many_arguments, dead_code)]
-pub(crate) fn auto_start_ext(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    file_path: &str,
-    context_session: Option<&str>,
-    skip_wait: bool,
-    split_before: bool,
-) -> Result<String> {
-    agent_doc_route_io::startup::auto_start_ext(
-        tmux,
-        file,
-        session_id,
-        file_path,
-        context_session,
-        skip_wait,
-        split_before,
-        route_startup_effects(),
-    )
-}
-
-#[allow(clippy::too_many_arguments, dead_code)]
-pub(crate) fn auto_start_ext_with_lock_mode(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    file_path: &str,
-    context_session: Option<&str>,
-    skip_wait: bool,
-    split_before: bool,
-    startup_lock_mode: agent_doc_route_io::startup_locks::StartupLockMode,
-) -> Result<Option<String>> {
-    agent_doc_route_io::startup::auto_start_ext_with_lock_mode(
-        tmux,
-        file,
-        session_id,
-        file_path,
-        context_session,
-        skip_wait,
-        split_before,
-        startup_lock_mode,
-        route_startup_effects(),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn auto_start_in_session(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    file_path: &str,
-    session_name: &str,
-    skip_wait: bool,
-    split_before: bool,
-    harness: &HarnessConfig,
-    startup_miss_handoff_blocked_pane: Option<&str>,
-    created_panes: Option<&mut Vec<String>>,
-    dispatch_only: bool,
-) -> Result<String> {
-    agent_doc_route_io::startup::auto_start_in_session(
-        tmux,
-        file,
-        session_id,
-        file_path,
-        session_name,
-        skip_wait,
-        split_before,
-        harness,
-        startup_miss_handoff_blocked_pane,
-        created_panes,
-        dispatch_only,
-        route_startup_effects(),
-    )
-}
-
-#[allow(clippy::too_many_arguments, dead_code)]
-pub(crate) fn auto_start_in_session_with_lock_mode(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    file_path: &str,
-    session_name: &str,
-    skip_wait: bool,
-    split_before: bool,
-    harness: &HarnessConfig,
-    startup_miss_handoff_blocked_pane: Option<&str>,
-    created_panes: Option<&mut Vec<String>>,
-    dispatch_only: bool,
-    startup_lock_mode: agent_doc_route_io::startup_locks::StartupLockMode,
-) -> Result<Option<String>> {
-    agent_doc_route_io::startup::auto_start_in_session_with_lock_mode(
-        tmux,
-        file,
-        session_id,
-        file_path,
-        session_name,
-        skip_wait,
-        split_before,
-        harness,
-        startup_miss_handoff_blocked_pane,
-        created_panes,
-        dispatch_only,
-        startup_lock_mode,
-        route_startup_effects(),
-    )
-}
 
 #[cfg(test)]
 mod tests {
@@ -3998,13 +3823,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
         // Call provision_pane with file in the FIRST column
         let file_a_rel = Path::new("tasks/file_a.md");
-        let result = provision_pane(
+        let result = agent_doc_route_io::startup::provision_pane(
             &iso,
             file_a_rel,
             "route-test-provision-first-col-session-a",
             "tasks/file_a.md",
             Some(session),
             &col_args,
+            route_startup_effects(),
         );
         assert!(
             result.is_ok(),
@@ -4066,13 +3892,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
         // Call provision_pane with file in the SECOND column
         let file_b_rel = Path::new("tasks/file_b.md");
-        let result = provision_pane(
+        let result = agent_doc_route_io::startup::provision_pane(
             &iso,
             file_b_rel,
             "route-test-provision-second-col-session-b",
             "tasks/file_b.md",
             Some(session),
             &col_args,
+            route_startup_effects(),
         );
         assert!(
             result.is_ok(),
@@ -4208,13 +4035,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         // Provision a right-column file — should split from pane_a (rightmost by screen).
         let col_args = vec!["tasks/file_a.md".to_string(), "tasks/file_b.md".to_string()];
         let file_b_rel = Path::new("tasks/file_b.md");
-        let result = provision_pane(
+        let result = agent_doc_route_io::startup::provision_pane(
             &iso,
             file_b_rel,
             "route-test-provision-rearranged-session-b",
             "tasks/file_b.md",
             Some(session),
             &col_args,
+            route_startup_effects(),
         );
         assert!(
             result.is_ok(),
@@ -4261,13 +4089,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let doc_a_thread = doc_a.clone();
         let handle_a = std::thread::spawn(move || {
             barrier_a.wait();
-            provision_pane(
+            agent_doc_route_io::startup::provision_pane(
                 &iso_a,
                 &doc_a_thread,
                 "route-test-concurrent-provision-session-a",
                 doc_a_thread.to_string_lossy().as_ref(),
                 Some(session),
                 &[],
+                route_startup_effects(),
             )
         });
 
@@ -4276,13 +4105,14 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let doc_b_thread = doc_b.clone();
         let handle_b = std::thread::spawn(move || {
             barrier_b.wait();
-            provision_pane(
+            agent_doc_route_io::startup::provision_pane(
                 &iso_b,
                 &doc_b_thread,
                 "route-test-concurrent-provision-session-b",
                 doc_b_thread.to_string_lossy().as_ref(),
                 Some(session),
                 &[],
+                route_startup_effects(),
             )
         });
 

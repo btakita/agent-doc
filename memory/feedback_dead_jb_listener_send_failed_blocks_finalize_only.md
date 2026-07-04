@@ -1,0 +1,20 @@
+---
+name: feedback_dead_jb_listener_send_failed_blocks_finalize_only
+description: "finalize refused \"editor IPC listener is active (reason=send_failed)\" while supervisor auto-commits succeed = dead JB plugin listener socket, not a stale/wedged supervisor; in-session recovery can't clear it"
+metadata: 
+  node_type: memory
+  type: feedback
+  originSessionId: 05a09ed6-211f-4ea5-937f-19ccd1d5ffb6
+---
+
+When `agent-doc finalize` (every mode, incl. `--force-disk`) fails with `pending_write: refused direct disk write ... while editor IPC listener is active (reason=send_failed)` AND `[write] IPC listener degraded ... after repeated pending_write ack timeouts`, but the route-owned **supervisor is still writing the doc on its own** (e.g. a `agent-doc(tsift): ...` auto-commit lands a queue re-mirror on disk at the same time), the wedged party is the **JetBrains plugin's listener socket** (the live `idea` PID is alive but its agent-doc socket thread is dead), NOT a stale/wedged supervisor.
+
+Diagnosis that nails it:
+- `agent-doc admin inspect <FILE>` shows `state=ready freshness=controller:fresh,supervisor:fresh` (supervisor is fine) with at most `projection_lag=true`.
+- The superproject HEAD advances via supervisor auto-commits (own write authority) while your finalize client is the only thing refused — proves the supervisor disk path works and the block is the editor-IPC-listener guard your client hits.
+
+**Why:** the finalize client routes the streaming write through the registered editor listener and fail-closes when the send fails (to avoid the stale editor buffer clobbering disk); it will not fall through to disk while a listener is registered, even a dead one.
+
+**`ack status error` / `live_prompt_drift_after_preflight` variant (2026-06-21, agent-doc-bugs2):** the same dead-JB-listener root also shows up *without* an outright refusal — instead every `finalize` hits `IPC proof insufficient ... invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle` (socket `ack status error`), then "recovers" via `content_ours`/`disk_after_failed_editor_refresh`, which is **not** a proven editor-buffer closeout and **twice clobbered concurrent operator queue edits** (`#queue-user-edit-overwrite`/`#hap7` per-cell merge). Crucially, a **completed supervisor recycle onto a freshly-built binary did NOT clear it** (proven: the new `#opslogtrack` ops.log suffix went live, so the supervisor recycled — yet the editor IPC stayed wedged). Confirms the wedge is the **IDE-side plugin socket**, not the supervisor: `agent-doc admin recycle` is the wrong tool; only an **IDE/plugin restart** fixes it. Recover the doc with `reset --from-current --preserve-session` → `agent-doc commit` (esp. after a concurrent compaction left a stale-large snapshot), then STOP.
+
+**How to apply:** NONE of these clear it in-session — don't burn cycles: retry `finalize --stream`, `finalize --force-disk`, `reset --from-current --preserve-session`, `admin recycle` (only *marks* recycle for the next idle boundary — won't fire mid-turn), or moving the `.agent-doc/live-buffer/<short>.jetbrains-<PID>-<UUID>` sidecar aside (the "active listener" is a live socket registration, not the sidecar file). `admin kill-supervisor` refuses your own ancestor. `lib-install` would reconnect the plugin via cdylib mtime reload but needs an agent-doc release build (out of scope from a non-agent-doc session + violates [[feedback_stop_cutting_agent_doc_releases]]). This is a **failed closeout → STOP, don't loop**; the work that was already committed+pushed is safe in git. Operator fix: restart the IntelliJ IDE / close-reopen the session doc tab (plugin re-establishes its listener), or restart the session — then the next cycle sees the committed work in git and writes a clean closeout. Don't direct-disk-write the response (fights the live editor buffer). Related: [[feedback_supervisor_streaming_socket_wedge_forcedisk]] (that one force-disk DID work; here force-disk is also refused, the distinguishing signal).

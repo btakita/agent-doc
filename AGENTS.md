@@ -27,6 +27,7 @@ the dynamic file that owns its details:
 - **Code navigation:** See [`runbooks/code-navigation.md`](runbooks/code-navigation.md); use `tsift` envelopes instead of copying search, diff, log, or transcript content into prompts.
 - **Private name hygiene:** See [`runbooks/private-name-hygiene.md`](runbooks/private-name-hygiene.md) before editing public or shared subrepos from this private workspace.
 - **Task-specific procedures:** Use the referenced file under [`runbooks/`](runbooks/) rather than expanding procedures inline.
+- **Operator memory (all harnesses):** Curated cross-session memories live in [`memory/`](memory/) (index: [`memory/MEMORY.md`](memory/MEMORY.md)); retrieve via `tsift --envelope search '<query>'` or `tsift graph-db --path . --json related '<query>'`. Session-event memory lives in `.tsift/memory.db` (query via `tsift memory status` / `graph-db related`). Claude Code's memory dir symlinks to `memory/`, so treat `memory/` as the single source of truth; other harnesses read it the same way.
 
 **Full workflow:** See [`.claude/skills/agent-doc/SKILL.md`](.claude/skills/agent-doc/SKILL.md) for the complete agent-doc workflow (preflight, respond, persist, pending ops, auto-loop).
 
@@ -59,7 +60,7 @@ Prefer bounded digest commands over raw transcript, diff, and verbose-log reads:
 - If RTK is installed, digest-runner delegates supported generic command families through `rtk rewrite` and records the chosen compact filter in `report.filter` while preserving tsift artifact handles.
 - Codex, OpenCode, and other harnesses without Claude-style `PreToolUse` hooks should run `tsift rewrite --run '<command>'` before broad `rg`/recursive grep, raw transcript/session/log reads, `git diff`/`git show`/single-patch `git log`, `cargo test`/`pytest`, and cargo build/check/clippy/install commands so the same search, session-digest, diff-digest, and digest-runner rewrites apply manually. OpenCode can install this path as `/tsift-rewrite-run` with `tsift init --opencode`.
 
-For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --workflow CI --limit 1` and fix any failing tests before calling the work complete.
+For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --workflow CI --limit 1`. Treat queued/in-progress CI and other external async signals as record-only unless the user explicitly asks you to wait. If the latest CI is already failed, investigate and fix it only when the failure belongs to the current change or reproduces locally; otherwise record it as an external baseline. End turns with minimal blockers: once requested work is implemented, local verification is sufficient, and required closeout checks have passed, close out instead of extending the turn for nonessential waiting.
 
 Only read full source files when tsift results are insufficient.
 <!-- /tsift:code-navigation -->

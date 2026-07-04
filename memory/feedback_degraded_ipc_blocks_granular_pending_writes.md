@@ -1,0 +1,16 @@
+---
+name: feedback_degraded_ipc_blocks_granular_pending_writes
+description: "degraded editor IPC refuses out-of-band granular --pending-add/--pending-edit even after reset --preserve, while finalize exchange still commits"
+metadata: 
+  node_type: memory
+  type: feedback
+  originSessionId: e6c21fed-7fee-479d-80fc-aa04fab4b989
+---
+
+When the live editor IPC is in the blocked-snapshot-adoption state (a finalize logged `live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle` and committed the exchange response fine), a follow-up granular `agent-doc write --commit --pending-add/--pending-edit` is REFUSED with `refusing to absorb out-of-band pending mutation after IPC snapshot adoption was blocked` → it closes as `already_current` and the backlog mutation does NOT land. `reset --from-current --preserve-session` (snapshot==HEAD, worktree clean) does **not** clear it — the block is the active JB plugin listener guarding against editor races, not a stale snapshot.
+
+**Why:** the exchange `finalize` path recovers via `content_ours` and reaches HEAD, but out-of-band component mutations are fail-closed while the editor holds a blocked-adoption listener. This is the same `#postcommit-ipc` / degraded-IPC class the pause reason flags as needing operator `agent-doc session restart-supervisor`.
+
+**How to apply:** don't fight it with repeated retries (each churns). The substantive response is already safe in HEAD — verify `git show HEAD:FILE` + `session-check` ok, recover the worktree drift with `git checkout HEAD -- FILE`, and tell the operator the backlog bookkeeping (a `[recommended]` item, `--pending-edit` kept-open notes for `pending_done_guard`) couldn't be written this cycle and will land after a supervisor restart. If your already-committed exchange prose CLAIMS you filed a backlog item, flag the discrepancy in the chat report.
+
+**`--done` reap is also blocked, but recover it DIFFERENTLY (don't checkout HEAD).** A `do #id` whose work you completed: the finalize commits the exchange via `content_ours`, then `agent-doc write --done <id> --pending-only --commit` is refused by the same guard AND `agent-doc commit` also refuses (`refusing to absorb out-of-band pending mutation…`), with `session-check INTERRUPTED: document still contains completed tracked item(s)`. BUT the `--done` already flipped the backlog line `[ ]`→`[x]` in the **working tree** (uncommitted; HEAD still `[ ]`). That uncommitted `[x]` is the durable done-intent — **LEAVE it (do NOT `git checkout HEAD -- FILE` on the session doc here)** so the next clean preflight after the operator restarts/recycles the supervisor sees the `[x]` and reaps it to the `.done.md` archive through an un-guarded boundary. This is the opposite of the response-prose worktree-drift case (where you DO checkout HEAD): for a blocked `--done`, checkout HEAD would discard the completion marker and lose the reap. Snapshot is re-synced to HEAD by the closing commit, so the leftover `[x]` is a normal diff next cycle, not a snapshot-guard wedge. Hit 2026-06-26 closing `#qcellconflict` (work done+committed on the celltree branch; backlog reap deferred to operator restart). See [[feedback_post_commit_worktree_drift_checkout_head_recovery]], [[feedback_snapshot_vs_head_guard_stash_reset_to_head]].

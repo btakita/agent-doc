@@ -3,13 +3,12 @@
 use super::*;
 use agent_doc_document_realtime::write_policy::normalize_patch_content;
 use agent_doc_element_boundary::boundary::find_boundary_id;
-use agent_doc_element_exchange::extract_post_commit_normalization_targets;
+use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, FullContentIpcMode, IpcRepairDecision, IpcSnapshotSource,
     build_ipc_node_patches_json, effective_unmatched_for_patch_payload,
-    existing_patch_is_reposition_only, is_already_applied_ack_error_message,
-    is_socket_ack_timeout_error,
+    is_already_applied_ack_error_message, is_socket_ack_timeout_error,
 };
 use agent_doc_write_converge_io::{
     AlreadyAppliedSocketSnapshotContext, ack_content_disk_write_proof, cleanup_legacy_ipc_degraded,
@@ -17,114 +16,15 @@ use agent_doc_write_converge_io::{
     guard_ipc_snapshot_adoption_against_live_prompt_drift,
     guard_ipc_snapshot_adoption_against_prompt_duplication, ipc_direct_disk_degraded,
     ipc_repair_decision_from_sidecar, log_full_content_ipc_disabled,
-    log_ipc_dewedge_direct_disk_skip, log_ipc_dewedge_prefer_file_ipc,
-    log_ipc_snapshot_adoption_allowed, log_ipcfullprompt_corruption_if_any,
-    mark_ack_content_live_buffer_synced_after_write,
+    log_ipc_dewedge_prefer_file_ipc, log_ipc_snapshot_adoption_allowed,
+    log_ipcfullprompt_corruption_if_any, mark_ack_content_live_buffer_synced_after_write,
     materialize_missing_response_for_socket_ack_drift,
     persist_already_applied_socket_content_ours_snapshot, poll_ack_content_sidecar,
     prefer_visible_content_over_stale_ack_content, reconcile_ack_snapshot_to_newer_operator_buffer,
     record_ipc_socket_ack_timeout, save_ipc_snapshot_and_crdt_nonfatal,
     stale_supervisor_write_short_circuit, write_ack_content_through_to_disk,
 };
-
-pub fn queue_file_ipc_reposition_boundary(
-    file: &Path,
-    boundary_id: Option<&str>,
-    normalize_prefix_lines: &[String],
-) -> Result<FileIpcRepositionResult> {
-    let canonical = file.canonicalize()?;
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let patches_dir = project_root.join(".agent-doc/patches");
-    if !patches_dir.exists() {
-        return Ok(FileIpcRepositionResult::Unavailable);
-    }
-
-    let hash = agent_doc_fs::document_state_hash(file)?;
-    let patch_file = patches_dir.join(format!("{hash}.json"));
-    if patch_file.exists() {
-        let existing = std::fs::read_to_string(&patch_file).unwrap_or_default();
-        match serde_json::from_str::<serde_json::Value>(&existing) {
-            Ok(payload) if existing_patch_is_reposition_only(&payload) => {}
-            Ok(_) => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "file_ipc_reposition_deferred_existing_patch file={} patch_file={}",
-                        file.display(),
-                        patch_file.display()
-                    ),
-                );
-                return Ok(FileIpcRepositionResult::DeferredExistingPatch);
-            }
-            Err(e) => {
-                eprintln!(
-                    "[commit] replacing unreadable file IPC reposition patch {}: {}",
-                    patch_file.display(),
-                    e
-                );
-            }
-        }
-    }
-
-    let patch_id = uuid::Uuid::new_v4().to_string();
-    let mut payload = serde_json::json!({
-        "file": canonical.to_string_lossy(),
-        "patches": [],
-        "unmatched": "",
-        "baseline": "",
-        "patch_id": patch_id,
-        "reposition_boundary": true,
-        "preserve_head": true,
-    });
-    if let Some(boundary_id) = boundary_id {
-        payload["reposition_boundary_id"] = serde_json::Value::String(boundary_id.to_string());
-    }
-    if !normalize_prefix_lines.is_empty() {
-        payload["normalize_prefix_lines"] = serde_json::Value::Array(
-            normalize_prefix_lines
-                .iter()
-                .map(|line| serde_json::Value::String(line.clone()))
-                .collect(),
-        );
-    }
-
-    // #late-ipc-patch-duplicate-stall: tag the queued file patch with the cycle
-    // id + a baseline content hash of the doc it targets so a LATE applier (the
-    // plugin's PatchWatcher, or the supervisor IPC listener) can fence a
-    // superseded patch — drop a patch whose cycle already committed or whose
-    // baseline no longer matches the live doc instead of blindly re-applying it
-    // minutes late and re-materializing a duplicate response block. The
-    // write-side guard in `try_ipc` already rejects a fresh send for an
-    // already-committed cycle; this carries the same generation token on the
-    // durable file patch so the asynchronous apply side can make the identical
-    // decision. (Plan: tasks/agent-doc/plan-late-ipc-patch-duplicate-stalls-queue.md.)
-    if let Ok(Some(cs)) = agent_doc_cycle_state_io::load(file) {
-        payload["cycle_id"] = serde_json::Value::String(cs.cycle_id);
-    }
-    if let Ok(live) = std::fs::read_to_string(file) {
-        payload["baseline_hash"] = serde_json::Value::String(agent_doc_hash::content_hash(&live));
-    }
-    target_payload_to_live_editor(file, &mut payload, "file_reposition");
-
-    atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "file_ipc_reposition_queued file={} patch_file={} patch_id={}",
-            file.display(),
-            patch_file.display(),
-            payload
-                .get("patch_id")
-                .and_then(|value| value.as_str())
-                .unwrap_or("")
-        ),
-    );
-    eprintln!(
-        "[commit] file IPC reposition patch queued: {}",
-        patch_file.display()
-    );
-    Ok(FileIpcRepositionResult::Queued)
-}
+use agent_doc_write_ipc_io::{IpcResult, patch_response_headings_already_in_head};
 
 /// Attempt to write via IPC (socket-first, file-based fallback).
 ///
@@ -984,173 +884,6 @@ pub(crate) struct IpcPollOptions<'a> {
     normalize_prefix_lines: Option<&'a [String]>,
     project_root: &'a Path,
     guard_committed_cycle: bool,
-}
-
-/// Send a reposition-only IPC signal to the plugin.
-///
-/// No content changes — just tells the plugin to move the boundary marker
-/// to the end of the exchange component. Used by `commit()` to keep the
-/// boundary at end-of-exchange without writing to the working tree
-/// (which would cause keystroke loss if the user is typing).
-///
-/// Returns `true` if the plugin consumed the signal, `false` on timeout
-/// or if no plugin is active.
-pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
-    let canonical = match file.canonicalize() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    cleanup_legacy_ipc_degraded(&project_root);
-    match ipc_direct_disk_degraded(&project_root, file) {
-        Ok(true) => {
-            eprintln!(
-                "[commit] IPC reposition skipped for {}: listener degraded for this session",
-                file.display()
-            );
-            log_ipc_dewedge_direct_disk_skip(file, "reposition");
-            return false;
-        }
-        Ok(false) => {}
-        Err(e) => {
-            eprintln!(
-                "[commit] IPC reposition degradation check failed (non-fatal): {}",
-                e
-            );
-        }
-    }
-    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-    let working_doc = std::fs::read_to_string(file).ok();
-    let boundary_id = snapshot_doc
-        .as_deref()
-        .and_then(|doc| find_boundary_id(doc, "exchange"))
-        .or_else(|| {
-            working_doc
-                .as_deref()
-                .and_then(|doc| find_boundary_id(doc, "exchange"))
-        });
-    let normalize_prefix_lines = match (snapshot_doc.as_deref(), working_doc.as_deref()) {
-        (Some(committed), Some(working)) => {
-            extract_post_commit_normalization_targets(committed, working)
-        }
-        _ => vec![],
-    };
-
-    if !agent_doc_ipc_io::is_listener_active(&project_root) {
-        return match queue_file_ipc_reposition_boundary(
-            file,
-            boundary_id.as_deref(),
-            &normalize_prefix_lines,
-        ) {
-            Ok(FileIpcRepositionResult::Queued) => true,
-            Ok(FileIpcRepositionResult::DeferredExistingPatch) => true,
-            Ok(FileIpcRepositionResult::Unavailable) => false,
-            Err(e) => {
-                eprintln!("[commit] file IPC reposition queue failed (non-fatal): {e}");
-                false
-            }
-        };
-    }
-
-    let result = if normalize_prefix_lines.is_empty() {
-        let mut message = serde_json::json!({
-            "type": "reposition",
-            "file": canonical.to_string_lossy(),
-            "preserve_head": true,
-        });
-        if let Some(boundary_id) = boundary_id.as_deref() {
-            message["boundary_id"] = serde_json::Value::String(boundary_id.to_string());
-        }
-        target_payload_to_live_editor(file, &mut message, "socket_reposition");
-        agent_doc_ipc_io::send_message(&project_root, &message).map(|_| true)
-    } else {
-        let mut message = serde_json::json!({
-            "type": "patch",
-            "file": canonical.to_string_lossy(),
-            "patches": [],
-            "unmatched": "",
-            "reposition_boundary": true,
-            "preserve_head": true,
-            "normalize_prefix_lines": normalize_prefix_lines.clone(),
-        });
-        if let Some(boundary_id) = boundary_id.as_deref() {
-            message["reposition_boundary_id"] = serde_json::Value::String(boundary_id.to_string());
-        }
-        target_payload_to_live_editor(file, &mut message, "socket_reposition_patch");
-        agent_doc_ipc_io::send_message(&project_root, &message).map(|_| true)
-    };
-
-    match result {
-        Ok(true) => {
-            if let Err(e) =
-                clear_ipc_socket_ack_timeouts(&project_root, file, "reposition_socket_ack")
-            {
-                eprintln!(
-                    "[commit] IPC reposition timeout clear failed (non-fatal): {}",
-                    e
-                );
-            }
-            if normalize_prefix_lines.is_empty() {
-                eprintln!("[commit] IPC reposition boundary signal sent");
-            } else {
-                eprintln!(
-                    "[commit] IPC prefix repair + boundary signal sent ({} lines)",
-                    normalize_prefix_lines.len()
-                );
-            }
-            true
-        }
-        Ok(false) => {
-            eprintln!("[commit] IPC reposition: no ack (non-fatal)");
-            match queue_file_ipc_reposition_boundary(
-                file,
-                boundary_id.as_deref(),
-                &normalize_prefix_lines,
-            ) {
-                Ok(FileIpcRepositionResult::Queued) => true,
-                Ok(FileIpcRepositionResult::DeferredExistingPatch) => true,
-                Ok(FileIpcRepositionResult::Unavailable) => false,
-                Err(e) => {
-                    eprintln!("[commit] file IPC reposition queue failed (non-fatal): {e}");
-                    false
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("[commit] IPC reposition failed (non-fatal): {}", e);
-            if is_socket_ack_timeout_error(e.to_string()) {
-                match record_ipc_socket_ack_timeout(&project_root, file, None, "reposition") {
-                    Ok(true) => {
-                        eprintln!(
-                            "[commit] IPC listener degraded for {} after repeated reposition ack timeouts",
-                            file.display()
-                        );
-                        log_ipc_dewedge_direct_disk_skip(file, "reposition_timeout");
-                        cleanup_fallback_patch_files(file);
-                        return false;
-                    }
-                    Ok(false) => {}
-                    Err(record_err) => eprintln!(
-                        "[commit] IPC reposition timeout record failed (non-fatal): {}",
-                        record_err
-                    ),
-                }
-            }
-            match queue_file_ipc_reposition_boundary(
-                file,
-                boundary_id.as_deref(),
-                &normalize_prefix_lines,
-            ) {
-                Ok(FileIpcRepositionResult::Queued) => true,
-                Ok(FileIpcRepositionResult::DeferredExistingPatch) => true,
-                Ok(FileIpcRepositionResult::Unavailable) => false,
-                Err(e) => {
-                    eprintln!("[commit] file IPC reposition queue failed (non-fatal): {e}");
-                    false
-                }
-            }
-        }
-    }
 }
 
 /// Write an IPC patch file and poll for plugin ACK (file deletion).
@@ -3707,9 +3440,9 @@ Can you preserve the second paragraph too?
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
     use super::{
-        WriteFlags, cleanup_fallback_patch_files, cycle_already_committed,
-        recover_dedupe_only_drift, recover_empty_response_for_strict_closeout, try_ipc,
+        WriteFlags, recover_dedupe_only_drift, recover_empty_response_for_strict_closeout, try_ipc,
     };
+    use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
     use agent_doc_ipc_protocol::{
         EditorBadStateFingerprint, FullContentRepairRedelivery, IpcDiskRepairReason,
         IpcRepairDecision, IpcSnapshotSource,

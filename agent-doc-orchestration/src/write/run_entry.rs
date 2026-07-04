@@ -906,7 +906,10 @@ pub fn run_stream(
                         serde_json::from_str::<serde_json::Value>(&stale_content)
                     && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
                 {
-                    write_claimed_patch_sentinel(&project_root, patch_id);
+                    agent_doc_flow_io::closeout::write_claimed_patch_sentinel(
+                        &project_root,
+                        patch_id,
+                    );
                 }
                 let _ = std::fs::remove_file(&patch_file);
             }
@@ -1546,7 +1549,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
 
     // Guard: if the cycle was already committed by a concurrent closeout,
     // clean stale IPC files to prevent re-dirtying the document.
-    if let Some(ref committed_id) = cycle_already_committed(file) {
+    if let Some(ref committed_id) = agent_doc_flow_io::closeout::cycle_already_committed(file) {
         eprintln!(
             "[write] run_ipc timeout retry: cycle {} already committed — cleaning stale patch",
             committed_id
@@ -1565,7 +1568,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 committed_id
             ),
         );
-        cleanup_fallback_patch_files(file);
+        agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
         drop(doc_lock);
         agent_doc_repair_io::pending::clear_pending(file)?;
         return Ok(());

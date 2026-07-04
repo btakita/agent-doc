@@ -9699,7 +9699,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 78,
+        ledger_rows.len() >= 79,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10368,6 +10368,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
             "Split remaining transport delivery loops and test-only IPC repair fixtures",
+        ),
+        (
+            "Write IPC reposition transport IO graph",
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "agent-doc-write-ipc-io/src/lib.rs",
+            "Split file-patch payload construction from socket send/fallback handling",
         ),
     ] {
         let row_text = ledger_rows
@@ -21429,15 +21435,26 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let write_ipc_transport_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
             .unwrap();
+    let write_ipc_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
     assert!(
         write_ipc_transport_source.contains("use agent_doc_ipc_protocol::{")
             && write_ipc_transport_source
                 .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor")
             && write_ipc_transport_source.contains("FullContentIpcMode")
             && write_ipc_transport_source.contains("is_already_applied_ack_error_message")
-            && write_ipc_transport_source.contains("is_socket_ack_timeout_error")
-            && write_ipc_transport_source.contains("existing_patch_is_reposition_only"),
-        "write IPC transport should import IPC protocol vocabulary from the focused protocol crate"
+            && write_ipc_transport_source.contains("is_socket_ack_timeout_error"),
+        "write IPC transport should import remaining IPC protocol vocabulary from the focused protocol crate"
+    );
+    assert!(
+        write_ipc_io_source.contains("use agent_doc_ipc_protocol::{")
+            && write_ipc_io_source.contains("existing_patch_is_reposition_only")
+            && write_ipc_io_source.contains("is_socket_ack_timeout_error")
+            && write_ipc_io_source.contains("pub fn queue_file_ipc_reposition_boundary(")
+            && write_ipc_io_source.contains("pub fn try_ipc_reposition_boundary(")
+            && write_ipc_io_source
+                .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor"),
+        "agent-doc-write-ipc-io should own reposition IPC transport and protocol imports"
     );
     for forbidden in [
         "pub enum FullContentIpcMode",
@@ -25083,20 +25100,23 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
 
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let write_ipc_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
     assert!(
         !write_ipc.contains("fn extract_response_headings_from_patches("),
         "write IPC must not re-own or facade response heading extraction"
     );
     assert!(
-        write_ipc.contains("extract_response_headings_from_patches"),
-        "write IPC should call the focused response heading extractor directly"
+        write_ipc_io.contains("extract_response_headings_from_patches")
+            && write_ipc_io.contains("pub fn patch_response_headings_already_in_head("),
+        "agent-doc-write-ipc-io should own the response heading HEAD gate while calling the focused extractor directly"
     );
 
     let focused_callers = [
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
-        "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-write-ipc-io/src/lib.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-template-io/src/write_normalize.rs",
     ];
@@ -25999,6 +26019,12 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
             .iter()
             .any(|member| member.as_str() == Some("agent-doc-write-converge-io")),
         "agent-doc-write-converge-io must stay a first-class workspace crate for write convergence sidecar adapters"
+    );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-write-ipc-io")),
+        "agent-doc-write-ipc-io must stay a first-class workspace crate for high-level write IPC transport adapters"
     );
     let realtime_write_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))

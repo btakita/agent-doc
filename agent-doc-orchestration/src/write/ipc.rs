@@ -11,7 +11,6 @@ use agent_doc_element_exchange::normalize_exchange_prefixes_for_targets;
 use agent_doc_element_exchange::verify_sidecar_normalization;
 #[cfg(test)]
 use agent_doc_ipc_protocol::{IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource};
-use agent_doc_template::response_materialization::extract_response_headings_from_patches;
 #[cfg(test)]
 use agent_doc_write_converge_io::{
     ack_content_disk_write_proof, guard_ipc_snapshot_adoption_against_live_prompt_drift,
@@ -25,35 +24,6 @@ use agent_doc_write_converge_io::{
     guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning, ipc_direct_disk_degraded,
     read_ack_content_sidecar, record_ipc_socket_ack_timeout, try_semantic_merge_convergence,
 };
-
-/// Return `true` when every `### Re:` response heading carried in the
-/// incoming patches is already present in the document's `HEAD` content.
-///
-/// Used inside the late-fallback gate (see `#adoc-compact-during-turn-response-loss`)
-/// to distinguish:
-/// - "cycle committed because this response already landed" (skip apply), and
-/// - "cycle committed by an unrelated mid-turn operation, but the response
-///   is still waiting to be written" (rotate the cycle, apply the patch).
-///
-/// Returns `true` when there are no headings to check (no patches), which
-/// preserves the gate's previous conservative behavior for empty patch lists.
-/// Returns `false` if `git show HEAD:<file>` fails — the caller treats that
-/// the same as "not in HEAD" and rotates the cycle, which is fail-safe for
-/// the mid-turn race.
-pub(crate) fn patch_response_headings_already_in_head(
-    file: &Path,
-    patches: &[agent_doc_template::PatchBlock],
-) -> bool {
-    let headings = extract_response_headings_from_patches(patches);
-    if headings.is_empty() {
-        return true;
-    }
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
-    let Some(head) = rc.head_content() else {
-        return false;
-    };
-    headings.iter().all(|h| head.contains(h.as_str()))
-}
 
 #[cfg(test)]
 pub(crate) fn content_ours_with_pending_from_disk(file: &Path, content_ours: &str) -> String {
@@ -159,47 +129,6 @@ pub(crate) fn normalized_content_ours_fallback(
     )
     .map(|(repaired, _)| repaired)
     .unwrap_or(normalized)
-}
-
-/// Result of an IPC write attempt, including the patch_id used.
-///
-/// The `patch_id` is returned so callers can report/retry the same logical
-/// response — the plugin tracks applied patch_ids and skips duplicates,
-/// preventing double-apply when both socket and file IPC fire.
-#[derive(Debug)]
-pub struct IpcResult {
-    /// Whether the plugin successfully consumed the patch.
-    pub success: bool,
-    /// The patch_id used for this write attempt. Reuse in fallback writes
-    /// so the plugin can deduplicate.
-    pub patch_id: String,
-    /// True when IPC was intentionally skipped because the current cycle has
-    /// already reached the terminal committed state.
-    pub skipped_committed_cycle: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileIpcRepositionResult {
-    Queued,
-    DeferredExistingPatch,
-    Unavailable,
-}
-
-/// Remove leftover fallback patch files for a document after closeout commits.
-/// Prevents late file-watcher or plugin recovery from re-applying a stale patch
-/// to an already-committed document.
-pub fn cleanup_fallback_patch_files(file: &Path) {
-    agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
-}
-
-/// Check if the current cycle for `file` is already in Committed phase.
-/// Returns `Some(cycle_id)` if committed, `None` if no cycle or cycle is open.
-pub(crate) fn cycle_already_committed(file: &Path) -> Option<String> {
-    agent_doc_flow_io::closeout::cycle_already_committed(file)
-}
-
-pub(crate) fn write_claimed_patch_sentinel(project_root: &Path, patch_id: &str) {
-    agent_doc_flow_io::closeout::write_claimed_patch_sentinel(project_root, patch_id);
 }
 
 mod transport;
@@ -3056,72 +2985,6 @@ mod core_tests {
                 && log.contains("dropped_queue_prompt_recorded"),
             "queue deletion must be ignored while queue additions still leave dropped-edit proof:\n{log}"
         );
-    }
-    #[test]
-    fn patch_response_headings_already_in_head_true_when_no_patches() {
-        // Empty patch list — conservatively preserve the existing late-fallback
-        // gate behavior (reject when no response evidence is present).
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("session.md");
-        fs::write(&doc, "doc body\n").unwrap();
-        assert!(patch_response_headings_already_in_head(&doc, &[]));
-    }
-    #[test]
-    fn patch_response_headings_already_in_head_true_when_heading_in_head() {
-        let dir = TempDir::new().unwrap();
-        let doc = agent_doc_test_support::init_repo_with_doc(
-            dir.path(),
-            "session.md",
-            "## Exchange\n\n### Re: shipped — opus-4-7\n\nbody\n",
-        );
-        let patch = agent_doc_test_support::patch_with_heading("### Re: shipped — opus-4-7");
-        assert!(patch_response_headings_already_in_head(&doc, &[patch]));
-    }
-    #[test]
-    fn patch_response_headings_already_in_head_false_when_heading_missing_from_head() {
-        // Mid-turn rotation signature: HEAD has been advanced by a different
-        // operation (compact, sibling commit) and does not yet contain the
-        // response we're about to apply. The late-fallback gate must allow
-        // the patch through.
-        let dir = TempDir::new().unwrap();
-        let doc = agent_doc_test_support::init_repo_with_doc(
-            dir.path(),
-            "session.md",
-            "## Exchange\n\n### Re: prior cycle — opus-4-7\n\nold\n",
-        );
-        let patch = agent_doc_test_support::patch_with_heading("### Re: new response — opus-4-7");
-        assert!(
-            !patch_response_headings_already_in_head(&doc, &[patch]),
-            "mid-turn rotation must allow the patch (response not in HEAD)"
-        );
-    }
-    #[test]
-    fn patch_response_headings_already_in_head_false_when_any_heading_missing() {
-        let dir = TempDir::new().unwrap();
-        let doc = agent_doc_test_support::init_repo_with_doc(
-            dir.path(),
-            "session.md",
-            "## Exchange\n\n### Re: first — opus-4-7\n\nbody\n",
-        );
-        let patches = vec![
-            agent_doc_test_support::patch_with_heading("### Re: first — opus-4-7"),
-            agent_doc_test_support::patch_with_heading("### Re: second — opus-4-7"),
-        ];
-        assert!(
-            !patch_response_headings_already_in_head(&doc, &patches),
-            "all headings must be in HEAD for the gate to skip"
-        );
-    }
-    #[test]
-    fn patch_response_headings_already_in_head_false_when_file_not_in_git() {
-        // No git repo → show_head returns Ok(None). Fail-safe: treat as not
-        // in HEAD so the late-fallback gate rotates the cycle rather than
-        // rejecting the patch.
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("session.md");
-        fs::write(&doc, "no git\n").unwrap();
-        let patch = agent_doc_test_support::patch_with_heading("### Re: something — opus-4-7");
-        assert!(!patch_response_headings_already_in_head(&doc, &[patch]));
     }
     #[test]
     fn ipc_ack_timeouts_degrade_current_session_to_file_ipc_retry() {

@@ -1,0 +1,33 @@
+[package]
+name = "agent-doc-write-ipc-io"
+version = "0.34.67"
+edition = "2024"
+description = "High-level write IPC transport adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_write_ipc_io"
+
+[dependencies]
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.67" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.34.67" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.67" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.67" }
+agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.67" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.67" }
+anyhow = "1"
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.34.67" }
+tempfile = "3"

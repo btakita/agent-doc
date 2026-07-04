@@ -563,7 +563,7 @@ fn guard_no_explicit_baseline_replay_after_committed_cycle(
         return Ok(None);
     }
 
-    let Some(cycle_id) = cycle_already_committed(file) else {
+    let Some(cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file) else {
         return Ok(None);
     };
 
@@ -812,7 +812,7 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceE
     }
 
     fn cycle_already_committed(&self, file: &Path) -> Option<String> {
-        cycle_already_committed(file)
+        agent_doc_flow_io::closeout::cycle_already_committed(file)
     }
 
     fn log_file_ipc_already_committed(&self, file: &Path, _cycle_id: &str) {
@@ -825,7 +825,7 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceE
     }
 
     fn cleanup_fallback_patch_files(&self, file: &Path) {
-        cleanup_fallback_patch_files(file);
+        agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
     }
 
     fn log_file_ipc_proof_failure(
@@ -2860,52 +2860,6 @@ mod tests {
         fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
         atomic_write(&sidecar, "sidecar bytes").unwrap();
         assert_eq!(fs::read_to_string(&sidecar).unwrap(), "sidecar bytes");
-    }
-    #[test]
-    fn queued_file_reposition_patch_carries_generation_token() {
-        // #late-ipc-patch-duplicate-stall: the durable file reposition patch must
-        // carry the cycle id + a baseline content hash so a LATE applier can
-        // fence a superseded patch (drop instead of re-materialize a duplicate
-        // response block). Reposition-only body invariant must hold too.
-        let dir = TempDir::new().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
-        let doc = root.join("plan.md");
-        let content = concat!(
-            "---\nqueue_active: true\n---\n\n",
-            "<!-- agent:exchange -->\n",
-            "### Re: prior — opus\nDone.\n",
-            "<!-- /agent:exchange -->\n",
-        );
-        fs::write(&doc, content).unwrap();
-        let cs =
-            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-
-        let result = queue_file_ipc_reposition_boundary(&doc, Some("abc123"), &[]).unwrap();
-        assert!(matches!(result, FileIpcRepositionResult::Queued));
-
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        let patch_file = root.join(".agent-doc/patches").join(format!("{hash}.json"));
-        let payload: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&patch_file).unwrap()).unwrap();
-
-        assert_eq!(
-            payload["cycle_id"].as_str(),
-            Some(cs.cycle_id.as_str()),
-            "queued reposition patch must tag the originating cycle id"
-        );
-        assert_eq!(
-            payload["baseline_hash"].as_str(),
-            Some(agent_doc_hash::content_hash(content).as_str()),
-            "queued reposition patch must tag the baseline content hash it targets"
-        );
-        // Reposition-only invariant: no response body re-materialized.
-        assert_eq!(payload["patches"], serde_json::json!([]));
-        assert_eq!(payload["unmatched"], serde_json::json!(""));
-        assert_eq!(payload["reposition_boundary"], serde_json::json!(true));
-        assert!(agent_doc_ipc_protocol::existing_patch_is_reposition_only(
-            &payload
-        ));
     }
     #[test]
     fn write_appends_response() {

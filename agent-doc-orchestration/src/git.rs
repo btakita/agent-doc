@@ -1124,7 +1124,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         // save can otherwise flush a stale live buffer and drop freshly
         // committed queue/backlog/icebox state.
         if should_send_post_commit_ipc_reposition(file) {
-            crate::write::try_ipc_reposition_boundary(file);
+            agent_doc_write_ipc_io::try_ipc_reposition_boundary(file);
         } else {
             eprintln!(
                 "[commit] skipping IPC boundary reposition: commit changed non-exchange tracked surfaces"
@@ -1428,23 +1428,23 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
             let committed_boundary_id = snapshot_after_reposition.as_deref().and_then(|snapshot| {
                 agent_doc_element_boundary::boundary::find_boundary_id(snapshot, "exchange")
             });
-            let file_ipc = crate::write::queue_file_ipc_reposition_boundary(
+            let file_ipc = agent_doc_write_ipc_io::queue_file_ipc_reposition_boundary(
                 file,
                 committed_boundary_id.as_deref(),
                 &normalize_prefix_lines,
             );
             match file_ipc {
-                Ok(crate::write::FileIpcRepositionResult::Queued) => {
+                Ok(agent_doc_write_ipc_io::FileIpcRepositionResult::Queued) => {
                     eprintln!("[commit] queued working-tree boundary reposition through file IPC");
                     changed = true;
                 }
-                Ok(crate::write::FileIpcRepositionResult::DeferredExistingPatch) => {
+                Ok(agent_doc_write_ipc_io::FileIpcRepositionResult::DeferredExistingPatch) => {
                     eprintln!(
                         "[commit] deferred working-tree boundary reposition to existing file IPC patch"
                     );
                     changed = true;
                 }
-                Ok(crate::write::FileIpcRepositionResult::Unavailable) => {
+                Ok(agent_doc_write_ipc_io::FileIpcRepositionResult::Unavailable) => {
                     match crate::write::atomic_write_pub(file, &repositioned) {
                         Ok(()) => {
                             if normalize_prefix_lines.is_empty() {

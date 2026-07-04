@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub use pending::{clear_pending, save_pending};
+pub use pending::{load_active_pending_response, load_pending_projection_file};
 
 pub trait RepairIoEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
@@ -123,12 +124,8 @@ pub fn recover_empty_response_for_strict_closeout<
     force_disk_override: Option<bool>,
 ) -> Result<bool> {
     if strict_closeout {
-        let outcome = run_with_queue_completion_ids_and_force_disk(
-            effects,
-            file,
-            &[],
-            force_disk_override,
-        )?;
+        let outcome =
+            run_with_queue_completion_ids_and_force_disk(effects, file, &[], force_disk_override)?;
         if (effects.recover_missing_committed_head_response)(file)? {
             return Ok(true);
         }
@@ -381,13 +378,15 @@ pub fn run_with_queue_completion_ids_and_force_disk<
 
     replay_orphaned_response(
         effects.replay_write_effects,
-        &canonical,
-        file,
-        &doc_content,
-        &response,
-        queue_completion_ids,
-        historical_capture.is_some(),
-        force_disk_override,
+        OrphanedResponseReplay {
+            canonical: &canonical,
+            file,
+            doc_content: &doc_content,
+            response: &response,
+            queue_completion_ids,
+            historical_capture_present: historical_capture.is_some(),
+            force_disk_override,
+        },
     )
 }
 
@@ -585,16 +584,30 @@ fn replay_crdt_patchback_through_strict_write(
     Ok(true)
 }
 
+pub struct OrphanedResponseReplay<'a> {
+    pub canonical: &'a Path,
+    pub file: &'a Path,
+    pub doc_content: &'a str,
+    pub response: &'a str,
+    pub queue_completion_ids: &'a [String],
+    pub historical_capture_present: bool,
+    pub force_disk_override: Option<bool>,
+}
+
 pub fn replay_orphaned_response(
     effects: &impl RepairReplayWriteEffects,
-    canonical: &Path,
-    file: &Path,
-    doc_content: &str,
-    response: &str,
-    queue_completion_ids: &[String],
-    historical_capture_present: bool,
-    force_disk_override: Option<bool>,
+    request: OrphanedResponseReplay<'_>,
 ) -> Result<agent_doc_turn::repair::RepairOutcome> {
+    let OrphanedResponseReplay {
+        canonical,
+        file,
+        doc_content,
+        response,
+        queue_completion_ids,
+        historical_capture_present,
+        force_disk_override,
+    } = request;
+
     if replay_crdt_patchback_through_strict_write(
         effects,
         file,

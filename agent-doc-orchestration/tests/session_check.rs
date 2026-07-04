@@ -2129,6 +2129,35 @@ Body\n\
             other => panic!("expected interrupted state, got {other:?}"),
         }
     }
+
+    #[test]
+    fn session_check_prefers_committed_closeout_projection_over_stale_open_sidecar() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let opened =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "commit", Some("body"), Some("body"))
+            .unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle sidecar path");
+        fs::write(sidecar_path, serde_json::to_string_pretty(&opened).unwrap()).unwrap();
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open()
+        );
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+                assert!(message.contains("state_backbone_commit_observed"));
+            }
+            other => panic!("expected projection-backed ok state, got {other:?}"),
+        }
+    }
+
     #[test]
     fn session_check_open_cycle_surfaces_ipc_proof_diagnostic() {
         let tmp = tempfile::TempDir::new().unwrap();

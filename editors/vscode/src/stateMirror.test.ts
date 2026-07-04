@@ -105,7 +105,7 @@ describe('StateGraphMirror (#r5at lazily-js reactive mirror)', () => {
                 {
                     op: 'cell_set',
                     slot_id: patchSlot(),
-                    payload: payload({ phase: 'acked' }),
+                    payload: payload({ phase: 'applied' }),
                 },
             ],
         });
@@ -115,7 +115,7 @@ describe('StateGraphMirror (#r5at lazily-js reactive mirror)', () => {
 
         const summary = mirror.summary();
         assert.strictEqual(summary.routeReadiness, 'dispatch_proven', 'cell_set flips route reactively');
-        assert.strictEqual(summary.latestTransportPhase, 'acked', 'cell_set advances transport phase reactively');
+        assert.strictEqual(summary.latestTransportPhase, 'applied', 'cell_set advances transport phase reactively');
         assert.strictEqual(summary.proofMarkers, 1, 'node_add proof marker counted reactively');
     });
 
@@ -186,10 +186,10 @@ describe('StateGraphMirror (#r5at lazily-js reactive mirror)', () => {
                 routeReadiness: 'dispatch_proven',
                 routePaneId: '%2',
                 latestTransportPatchId: 'patch-2',
-                latestTransportPhase: 'acked',
+                latestTransportPhase: 'applied',
                 proofMarkers: 1,
             }),
-            'route=dispatch_proven pane=%2 transport=patch-2:acked proof_markers=1',
+            'route=dispatch_proven pane=%2 transport=patch-2:applied proof_markers=1',
         );
         assert.strictEqual(
             compactMirrorSummary({ proofMarkers: 0 }),

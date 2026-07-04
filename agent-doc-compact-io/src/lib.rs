@@ -149,7 +149,7 @@ fn runtime_effects() -> Result<&'static dyn CompactRuntimeEffects> {
     }
     #[cfg(test)]
     {
-        return Ok(&TEST_RUNTIME_EFFECTS);
+        Ok(&TEST_RUNTIME_EFFECTS)
     }
     #[cfg(not(test))]
     anyhow::bail!("agent-doc compact runtime effects are not installed")

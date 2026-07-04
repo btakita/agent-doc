@@ -1058,7 +1058,7 @@ impl SimWorld {
             return Ok(());
         }
         // `#clearcontresume`: an operator `session clear` / JB `Clear Exchange`
-        // writes the manual clear cooldown (`queue_continuation::write_clear_cooldown`).
+        // records the manual clear-cooldown projection.
         // It suppresses passive queue dispatch until the cleared pane settles to a
         // fresh idle prompt — at which point `clear_cooldown_resume_ready` lets an
         // active go-mode drain resume as a continuation step. Reset the idle-tick
@@ -1075,7 +1075,7 @@ impl SimWorld {
 
     /// `#qflood2`: model the idle-queue watch sending its OWN `/clear` between
     /// queue items (an opt-in context reset or a `/clear` queue head). Unlike an
-    /// operator clear this never writes the manual cooldown marker, so the next
+    /// operator clear this never records the manual cooldown projection, so the next
     /// drain trigger must be held by the in-memory settle gate
     /// (`drain_blocked_awaiting_clear_settle`) until the cleared pane shows a
     /// fresh idle prompt for `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls.
@@ -2015,7 +2015,7 @@ impl SimWorld {
     pub(crate) fn dispatch_operator_prompt_with_protected_draft(&mut self) -> Result<()> {
         let pane_id = self.current_dispatch_pane()?;
         let harness = agent_doc_harness::HarnessConfig::codex();
-        let pane_content = "› Implement {feature}\n";
+        let pane_content = "› implement the feature\n";
         let Some(reason) = harness.protected_prompt_input_reason(pane_content) else {
             bail!("protected draft fixture no longer blocks route dispatch");
         };

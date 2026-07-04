@@ -360,8 +360,9 @@ Semantics:
   `setText` + `saveDocument`, no IntelliJ `File Cache Conflict` dialog) and skips
   the `std::fs::write`, recording `write_authority action=routed
   surface=queue_maintenance` in `ops.log`. With no listener and no live editor
-  sidecar it writes to the detached disk replica as before, so non-IDE behavior is
-  byte-identical. This brings queue maintenance to
+  owner it writes to the detached disk replica as before, so non-IDE behavior is
+  byte-identical. The legacy live-buffer sidecar is not a document-authority
+  source. This brings queue maintenance to
   the same `#fcc0` converge-or-disk discipline the pending/review maintenance
   sites already use, and closes the 08b gap where preflight queue maintenance
   bypassed the write-authority routing the finalize/response path uses. The

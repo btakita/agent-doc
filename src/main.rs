@@ -24,7 +24,8 @@
 //! - `ListCommands` emits a JSON array of all available subcommand names for plugin autocomplete.
 //!
 //! ## Agentic Contracts
-//! - `main` returns `anyhow::Result<()>`; any subcommand error propagates and prints to stderr.
+//! - `try_main` returns `anyhow::Result<()>`; `main` renders any error with
+//!   CRLF terminal newlines before exiting non-zero.
 //! - Subcommand modules are the single source of truth for their behavior; `main` only routes.
 //! - Config is loaded once and passed by reference; subcommands must not reload config.
 //! - `Upgrade` bypasses the version check that all other subcommands run on startup.
@@ -101,7 +102,9 @@ use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -3289,7 +3292,33 @@ fn init_tracing() {
     tracing::debug!("agent-doc tracing initialized (filter: {})", filter);
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> ExitCode {
+    match try_main() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            print_terminal_error_report(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn print_terminal_error_report(err: &anyhow::Error) {
+    let report = format!("Error: {err:?}");
+    let mut stderr = std::io::stderr().lock();
+    let _ = write_terminal_error_report(&mut stderr, &report);
+}
+
+fn write_terminal_error_report(writer: &mut impl Write, report: &str) -> std::io::Result<()> {
+    let report = report.trim_end_matches(&['\r', '\n'][..]);
+    for line in report.split('\n') {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        writer.write_all(line.as_bytes())?;
+        writer.write_all(b"\r\n")?;
+    }
+    writer.flush()
+}
+
+fn try_main() -> anyhow::Result<()> {
     // `#supresilience` — crash resilience before any output (SIGPIPE reset + panic hook).
     crash_resilience::install();
     // Initialize structured logging via AGENT_DOC_LOG env var.
@@ -3925,8 +3954,11 @@ fn main() -> anyhow::Result<()> {
         Commands::Admit { file } => {
             let output = agent_doc_cycle_state_io::admit_with_current_resolver(
                 &file,
-                |file, disk| {
-                    agent_doc_document_realtime_io::resolve_current_doc(file, disk).content
+                |file| {
+                    Ok(
+                        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?
+                            .content,
+                    )
                 },
                 agent_doc_snapshot_io::load,
                 agent_doc_ops_log_io::log_op,
@@ -5129,6 +5161,56 @@ fn main() -> anyhow::Result<()> {
                 agent_doc_callback_io::cleanup_expired(&root_path, 300)
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod terminal_error_report_tests {
+    use super::*;
+
+    fn bare_lf_positions(s: &str) -> Vec<usize> {
+        s.as_bytes()
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, byte)| {
+                if *byte == b'\n' && (idx == 0 || s.as_bytes()[idx - 1] != b'\r') {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn top_level_error_report_uses_crlf_for_anyhow_cause_chain() {
+        let err = Err::<(), _>(anyhow::anyhow!("Connection reset by peer (os error 104)"))
+            .context("failed to read project controller response")
+            .unwrap_err();
+        let mut rendered = Vec::new();
+
+        write_terminal_error_report(&mut rendered, &format!("Error: {err:?}")).unwrap();
+
+        let rendered = String::from_utf8(rendered).unwrap();
+        assert!(rendered.starts_with("Error: failed to read project controller response"));
+        assert!(rendered.contains("\r\n\r\nCaused by:\r\n"));
+        assert!(
+            bare_lf_positions(&rendered).is_empty(),
+            "terminal report must not contain bare LF newlines: {rendered:?}"
+        );
+        assert!(rendered.ends_with("\r\n"));
+    }
+
+    #[test]
+    fn top_level_error_report_trims_terminal_reset_carriage_return() {
+        let mut rendered = Vec::new();
+
+        write_terminal_error_report(&mut rendered, "Error: first\r\nsecond\r").unwrap();
+
+        assert_eq!(
+            String::from_utf8(rendered).unwrap(),
+            "Error: first\r\nsecond\r\n"
+        );
     }
 }
 

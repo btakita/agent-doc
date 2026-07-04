@@ -58,10 +58,14 @@ fn resolve_agent_doc_start_bin(
         return override_bin;
     }
 
-    current_exe
-        .unwrap_or_else(|| "agent-doc".into())
-        .to_string_lossy()
-        .to_string()
+    if let Some(current_exe) = current_exe {
+        let current_exe = current_exe.to_string_lossy();
+        if !current_exe.ends_with(" (deleted)") {
+            return current_exe.to_string();
+        }
+    }
+
+    "agent-doc".to_string()
 }
 
 /// State handed from a stale supervisor to its freshly-execed replacement.
@@ -196,6 +200,28 @@ mod tests {
     #[test]
     fn agent_doc_start_bin_falls_back_to_agent_doc_when_current_exe_is_unavailable() {
         assert_eq!(resolve_agent_doc_start_bin(None, None), "agent-doc");
+    }
+
+    #[test]
+    fn agent_doc_start_bin_ignores_deleted_current_exe() {
+        assert_eq!(
+            resolve_agent_doc_start_bin(
+                None,
+                Some("/home/brian/.cargo/bin/agent-doc (deleted)".into())
+            ),
+            "agent-doc"
+        );
+    }
+
+    #[test]
+    fn agent_doc_start_bin_keeps_override_when_current_exe_is_deleted() {
+        assert_eq!(
+            resolve_agent_doc_start_bin(
+                Some("/home/brian/.cargo/bin/agent-doc".to_string()),
+                Some("/home/brian/.cargo/bin/agent-doc (deleted)".into())
+            ),
+            "/home/brian/.cargo/bin/agent-doc"
+        );
     }
 
     #[cfg(unix)]

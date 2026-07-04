@@ -1620,6 +1620,7 @@ mod tests {
         assert!(h.is_dispatch_ready_prompt_line("› Find and fix a bug in @filename"));
         assert!(h.is_dispatch_ready_prompt_line("› Improve documentation in @filename"));
         assert!(h.is_dispatch_ready_prompt_line("› Explain this module in @filename"));
+        assert!(h.is_dispatch_ready_prompt_line("› Implement {feature}"));
     }
 
     #[test]
@@ -2497,6 +2498,29 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used
     }
 
     #[test]
+    fn protected_prompt_input_reason_ignores_startup_feature_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+╭─────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.142.5)                  │
+│                                             │
+│ model:     gpt-5.5 xhigh   /model to change │
+│ directory: ~/work/sample                    │
+╰─────────────────────────────────────────────╯
+
+› Implement {feature}
+
+gpt-5.5 xhigh · ~/work/sample · Context 0% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Implement {feature}")
+        );
+        assert!(h.is_dispatch_ready_prompt_line("› Implement {feature}"));
+    }
+
+    #[test]
     fn protected_prompt_input_reason_skips_non_codex_harnesses() {
         let opencode_output = "\
 › investigate this issue
@@ -2806,17 +2830,18 @@ Press Enter to restart, or 'q' to exit.
     #[test]
     fn protected_prompt_draft_preview_redacts_and_bounds_latest_draft() {
         let harness = HarnessConfig::codex();
+        let draft = format!(
+            "Implement feature using OPENAI_API_KEY=sk-proj-{} and then {}",
+            "a".repeat(32),
+            "continue ".repeat(40)
+        );
         let content = format!(
             "\
 history
 › {}
 gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
 ",
-            format!(
-                "Implement feature using OPENAI_API_KEY=sk-proj-{} and then {}",
-                "a".repeat(32),
-                "continue ".repeat(40)
-            )
+            draft
         );
 
         let preview = protected_prompt_draft_preview(&harness, &content).unwrap();

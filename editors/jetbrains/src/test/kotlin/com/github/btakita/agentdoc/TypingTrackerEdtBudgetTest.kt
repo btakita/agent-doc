@@ -61,9 +61,10 @@ class TypingTrackerEdtBudgetTest {
             source.contains("pendingEditorOps"),
         )
         assertTrue(
-            "JetBrains live-buffer reports should advertise the operator-text authority capability",
+            "JetBrains live-buffer reports should advertise operator-text and lazily receipt capabilities",
             source.contains("agent_doc_document_changed_digest_content_for_editor_v2") &&
-                source.contains("operator_text_authority_v1"),
+                source.contains("operator_text_authority_v1") &&
+                source.contains("lazily_transport_receipts_v1"),
         )
         assertTrue(
             "full-buffer report should drain the accumulated op burst",

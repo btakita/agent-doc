@@ -203,15 +203,48 @@ pub fn multinode_crdt_state(
 /// Persist the legacy whole-document CRDT state, structured overlay state, and
 /// per-node merge sidecar for the same markdown snapshot.
 pub fn save_document_crdt(doc: &Path, legacy_state: &[u8], markdown: &str) -> Result<()> {
-    agent_doc_snapshot_io::save_crdt(doc, legacy_state)?;
-    agent_doc_snapshot_io::save_overlay_crdt_from_markdown(doc, markdown)?;
-    match agent_doc_merge::crdt::MultiNodeState::from_text(markdown) {
-        Ok(multinode) => agent_doc_snapshot_io::save_multinode_crdt(doc, &multinode.encode())?,
-        Err(e) => eprintln!(
-            "[crdt] save_document_crdt: failed to build per-node state ({e}); skipping nodes sidecar"
-        ),
-    }
-    Ok(())
+    let started = std::time::Instant::now();
+    let legacy = legacy_state.to_vec();
+    let overlay = agent_doc_snapshot_io::overlay_crdt_state_from_markdown(markdown);
+    let multinode = match agent_doc_merge::crdt::MultiNodeState::from_text(markdown) {
+        Ok(multinode) => Some(multinode.encode()),
+        Err(e) => {
+            eprintln!(
+                "[crdt] projection: failed to build per-node state for {} ({e}); skipping nodes sidecar",
+                doc.display()
+            );
+            None
+        }
+    };
+
+    agent_doc_snapshot_io::with_crdt_lock_labeled(doc, "sidecar_projection", || {
+        let legacy_path = agent_doc_fs::crdt_path_for(doc)?;
+        let overlay_path = agent_doc_fs::overlay_crdt_path_for(doc)?;
+        let nodes_path = agent_doc_fs::multinode_crdt_path_for(doc)?;
+        let legacy_changed =
+            agent_doc_snapshot_io::write_crdt_state_file_if_changed(&legacy_path, &legacy)?;
+        let overlay_changed =
+            agent_doc_snapshot_io::write_crdt_state_file_if_changed(&overlay_path, &overlay)?;
+        let nodes_changed = match multinode.as_deref() {
+            Some(nodes) => {
+                agent_doc_snapshot_io::write_crdt_state_file_if_changed(&nodes_path, nodes)?
+            }
+            None => false,
+        };
+        let elapsed_ms = started.elapsed().as_millis();
+        eprintln!(
+            "[crdt] projection saved file={} elapsed_ms={} legacy_changed={} overlay_changed={} nodes_changed={} legacy_len={} overlay_len={} nodes_len={}",
+            doc.display(),
+            elapsed_ms,
+            legacy_changed,
+            overlay_changed,
+            nodes_changed,
+            legacy.len(),
+            overlay.len(),
+            multinode.as_ref().map(|nodes| nodes.len()).unwrap_or(0)
+        );
+        Ok(())
+    })
 }
 
 #[cfg(test)]

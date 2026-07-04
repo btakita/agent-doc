@@ -27,7 +27,7 @@ The cycle FSM is the closeout gate. A response is not complete until the cycle
 reaches `committed` and `session-check` can prove there is no unresolved prompt
 or pending write boundary for that turn.
 
-The cycle FSM must not directly encode queue ordering, editor ACK shapes,
+The cycle FSM must not directly encode queue ordering, editor receipt wire shapes,
 supervisor restart policy, route prompt readiness, or proof-specific transport
 facts. Those are inputs to the cycle closeout decision, not cycle phases.
 
@@ -40,21 +40,34 @@ Examples:
 - `BaselineSaved`
 - `QueueHeadSelected`
 - `QueueHeadCompleted`
+- `QueueContextClearDeferred`
+- `QueueContextClearStarted`
+- `QueueContextClearSettled`
+- `QueueDrainStallContinuationRecorded`
+- `QueueDrainStallContinuationCleared`
 - `ResponseCaptured`
-- `EditorAckObserved`
+- `WriteApplied`
+- `EditorPatchApplied`
+- `EditorPatchRejected`
 - `IpcProofInsufficient`
 - `CommitObserved`
 - `SessionCheckPassed`
+- `CycleAbandoned`
 - `AgentRestartPerformed`
 - `CapabilityProofObserved`
 - `ActorGenerationChanged`
+- `SupervisorRecycleStarted`
+- `SupervisorRecycleSettled`
+- `RouteSubmitStarted`
+- `RouteSubmitSettled`
+- `RouteSubmitBlocked`
 
 Events must carry stable ids where available: document hash, session id, cycle
 id, actor generation, patch id, queue node key, backlog id, and causation id.
 The event log is append-only. Corrections are new events that supersede earlier
 facts by projection rules; they are not in-place mutation of old facts.
 
-Implementation: `agent-doc-orchestration/src/state_backbone.rs` defines
+Implementation: `agent-doc-state-backbone/src/lib.rs` defines
 `StateEvent`, `StateFact`, and `EventLedger`. The ledger deduplicates event ids
 during projection replay so duplicate delivery stays idempotent, while
 `causation_id` preserves the chain from prompt, queue head, IPC patch, route
@@ -67,12 +80,12 @@ document components. Required projections include:
 
 | Projection | Owns |
 |---|---|
-| Document projection | current component bodies, boundaries, snapshot relation, prompt-bearing tail |
-| Queue projection | active head, struck/completed heads, drainability, backlog-to-queue sync |
+| Document projection | current component bodies, boundaries, snapshot relation, prompt-bearing tail, editor attachment, CRDT relay model/replica status, document-model ensure outcome |
+| Queue projection | active head, struck/completed heads, drainability, backlog-to-queue sync, context-clear phase |
 | Closeout projection | latest cycle phase, captured response materialization, pending write boundary |
-| Transport projection | socket/file IPC patch state, ACK proof, retry/no-disk fallback state |
-| Supervisor projection | actor state, child pid, harness, capability proof, restart epoch |
-| Route projection | authoritative pane, readiness, dispatch authorization, dispatch proof |
+| Transport projection | socket/file IPC patch state, binary write intent, expected response hash, editor patch-received/applied/rejected facts, visible-buffer hash, retry/no-disk fallback state |
+| Supervisor projection | actor state, child pid, harness, capability proof, restart/recycle epoch |
+| Route projection | authoritative pane, readiness, dispatch authorization, route-submit phase, dispatch proof |
 | Proof projection | ops-log markers, typed verify/disproof predicates, semantic completion advisories |
 
 Reducers must be idempotent and replay-testable. If two modules need the same
@@ -85,6 +98,25 @@ The closeout projection delegates phase advancement to the existing
 `CyclePhaseMachine`; the other projections use their own small state machines
 for closed subdomains.
 
+During the sidecar-retirement migration, `agent-doc-cycle-state-io` bridges the
+legacy cycle-state writer into the closeout projection by appending
+`PreflightStarted`, `ResponseCaptured`, `WriteApplied`, `CommitObserved`, and
+`CycleAbandoned` facts with stable event ids after accepted lifecycle
+transitions. A transition must not be reported as successful if the matching
+closeout fact cannot be recorded. The `.agent-doc/state/cycles` JSON file is a
+compatibility recovery projection while readers are cut over to the closeout
+projection. `session-check` and preflight have the first reader cutovers: they
+use the closeout projection for open/terminal phase authority, override stale
+same-cycle JSON, and treat projection-only or mismatched-stale open projections
+as interrupted closeouts while retaining JSON guard/recovery payloads as
+compatibility evidence.
+
+The git closeout layer also appends `CommitObserved` with the exact `HEAD` SHA
+after a successful real commit or an already-current no-op closeout. That
+git-owned fact is the authoritative commit identity when available; the
+cycle-state bridge's content-hash observation is a compatibility signal for
+older readers and crash recovery during migration.
+
 ## Editor Projection Bridge
 
 Editor integrations must treat the FFI state backbone as the shared foundation.
@@ -95,17 +127,18 @@ JetBrains, VS Code, and later editors should:
 - compute the canonical document hash with the same canonical-path SHA-256 key
   used by snapshots;
 - report editor transport observations as typed events such as
-  `OwnerGenerationChanged`, `EditorPatchQueued`, `EditorAckObserved`, and
-  `EditorPatchRetryRequested`;
+  `OwnerGenerationChanged`, `EditorPatchQueued`, `EditorPatchApplied`,
+  `EditorPatchRejected`, and `EditorPatchRetryRequested`;
 - report route dispatch observations as route-owner generation plus
   readiness/proof events instead of relying only on plugin-local booleans; and
 - render route, transport, and proof status from `DocumentStateProjection`
   slices where status/log output needs current state.
 
 The editor bridge may keep small in-process counters for owner generations, but
-it must not implement a second route, IPC, or proof FSM. If an older native
-library lacks the projection ABI, plugins fail open to existing behavior and log
-that projection reporting is unavailable.
+it must not implement a second route, IPC, or proof FSM. If an installed plugin
+or native library cannot publish lazily transport receipts, it is incompatible:
+install/reload must surface a version error instead of falling back to
+ACK-shaped proof.
 
 Package-level bridge parity is explicit:
 
@@ -122,7 +155,7 @@ Package-level bridge parity is explicit:
 - Rust owns the authoritative `ProjectionSummary` compact string. Editor
   compact-summary helpers must keep matching `route=<readiness> pane=<pane>
   transport=<patch>:<phase> proof_markers=<count>`, and Rust coverage must drive
-  JB socket IPC, JB file IPC, and VS Code file IPC through live queued/retry/ack
+  JB socket IPC, JB file IPC, and VS Code file IPC through live queued/retry/applied
   transport plus route started/proven/blocked events.
 
 ## State Wire (lazily-spec snapshot/delta)
@@ -162,7 +195,7 @@ across the three languages — no platform `Hasher` drift).
 | `agent_doc.closeout.cycle` | cycle_id | `CloseoutProjection` |
 | `agent_doc.transport.patch` | patch_id | `TransportPatchProjection` |
 | `agent_doc.supervisor.owner` | owner name | `OwnerProjection` |
-| `agent_doc.route` | document_hash | `RouteProjection` (singleton) |
+| `agent_doc.route` | document_hash | `RouteProjection` (singleton, including `RouteSubmitProjection`) |
 | `agent_doc.proof.marker` | marker | `ProofMarkerProjection` |
 
 Node payloads are `base64(serde_json(struct))`.
@@ -234,9 +267,13 @@ Implemented local FSMs:
 |---|---|---|
 | `CyclePhaseMachine` | closeout | existing turn lifecycle authority |
 | `QueueHeadMachine` | queue | pending, selected, deferred, completed head lifecycle |
-| `TransportPatchMachine` | transport | queued IPC patch, insufficient proof, retry, ACK, force-disk fallback |
+| `QueueContextClearMachine` | queue | deferred operator clear, explicit context-clear in-flight, and settled window |
+| `QueueDrainStallMachine` | queue | one-shot continuation-pending stall signal versus reconciled/cleared |
+| `TransportPatchMachine` | transport | queued IPC patch, applied/rejected receipt, insufficient proof, retry, force-disk fallback |
 | `ActorLifecycleMachine` | supervisor/owner | starting, ready, busy, waiting-input, restarting, stale, closed |
+| `SupervisorRecycleMachine` | supervisor/recycle | in-flight versus settled supervisor recycle gates |
 | `RouteReadinessMachine` | route | pane observed through dispatch proof |
+| `RouteSubmitMachine` | route | idle, in-flight, and bounded blocked submit windows |
 | `ProofGateMachine` | proof | marker observed versus disproved |
 
 ## Regression Rule

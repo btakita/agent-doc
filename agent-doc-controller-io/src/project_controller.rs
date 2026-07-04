@@ -28,6 +28,7 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerNonblockingMode, ListenerOptions, ToFsName,
     traits::{Listener as _, Stream as _},
 };
+use lazily::{CellHandle, ThreadSafeContext, ThreadSafeSignalHandle};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -55,13 +56,14 @@ use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{
-    Arc, Mutex, OnceLock,
+    Arc, Condvar, Mutex, OnceLock,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_LAYOUT_SCOPE: &str = "default";
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
+const HANDOFF_CONNECT_WAIT: Duration = Duration::from_secs(30);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
 /// How long a contended launch waits for the current holder to finish before
 /// giving up. Sized above `CONNECT_WAIT` so a waiter outlasts the holder's full
@@ -74,6 +76,7 @@ const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(any(test, feature = "test-support"))]
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_millis(250);
 const CONTROLLER_IDLE_CLIENT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
+const SUPERVISOR_RECYCLE_SETTLE_WAIT: Duration = Duration::from_secs(10);
 
 const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS";
 
@@ -255,10 +258,11 @@ impl ControllerMemoryState {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
     memory: Mutex<ControllerMemoryState>,
+    supervisor_recycle_graph: ControllerSupervisorRecycleGraph,
+    supervisor_recycle_waiters: Condvar,
     /// `#ctlrecycle` R2 — set true by the `recycle` RPC (`agent-doc admin recycle`).
     /// The serve-loop idle poll honors it the same way it honors binary staleness:
     /// once no dispatch is in flight (debounced), the controller self-terminates and
@@ -281,9 +285,14 @@ impl ControllerRuntime {
             recover_controller_after_restart(&bootstrap)?;
         }
         let memory = ControllerMemoryState::load(&bootstrap.project_root)?;
+        let supervisor_recycle_graph = ControllerSupervisorRecycleGraph::new(
+            memory.state_projection.project_supervisor_recycle(),
+        );
         Ok(Self {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
+            supervisor_recycle_graph,
+            supervisor_recycle_waiters: Condvar::new(),
             recycle_requested: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
         })
@@ -330,12 +339,79 @@ impl ControllerRuntime {
     fn refresh_memory(&self) -> Result<()> {
         let project_root = self.bootstrap_snapshot()?.project_root;
         let next = ControllerMemoryState::load(&project_root)?;
+        let recycle = next.state_projection.project_supervisor_recycle();
         let mut memory = self
             .memory
             .lock()
             .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
         *memory = next;
+        drop(memory);
+        self.supervisor_recycle_graph.set(recycle);
+        self.supervisor_recycle_waiters.notify_all();
         Ok(())
+    }
+
+    fn apply_state_event(&self, event: &agent_doc_state_backbone::StateEvent) -> Result<()> {
+        let recycle = {
+            let mut memory = self
+                .memory
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+            memory.state_projection.apply(event);
+            memory.state_projection.project_supervisor_recycle()
+        };
+        self.supervisor_recycle_graph.set(recycle);
+        self.supervisor_recycle_waiters.notify_all();
+        Ok(())
+    }
+
+    fn supervisor_recycle_projection(
+        &self,
+    ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+        Ok(self.supervisor_recycle_graph.projection())
+    }
+
+    fn document_state_projection(
+        &self,
+        document_hash: &str,
+    ) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
+        self.memory
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))
+            .map(|memory| memory.state_projection.document(document_hash).cloned())
+    }
+
+    fn wait_for_supervisor_recycle_settle(
+        &self,
+        timeout: Duration,
+    ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+        let started = Instant::now();
+        let mut memory = self
+            .memory
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+        loop {
+            let projection = memory.state_projection.project_supervisor_recycle();
+            self.supervisor_recycle_graph.set(projection.clone());
+            if !self.supervisor_recycle_graph.in_flight() {
+                return Ok(projection);
+            }
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
+                anyhow::bail!(
+                    "supervisor recycle still in flight after {}ms reason={} recycle_epoch={}",
+                    elapsed.as_millis(),
+                    projection.reason.as_deref().unwrap_or("unknown"),
+                    projection.recycle_epoch
+                );
+            }
+            let remaining = timeout.saturating_sub(elapsed);
+            let (next_memory, _wait) = self
+                .supervisor_recycle_waiters
+                .wait_timeout(memory, remaining)
+                .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+            memory = next_memory;
+        }
     }
 
     fn memory_categories(&self) -> Result<BTreeMap<String, usize>> {
@@ -355,6 +431,42 @@ impl ControllerRuntime {
             ),
             ("write_through_sqlite", 1),
         ]))
+    }
+}
+
+struct ControllerSupervisorRecycleGraph {
+    ctx: ThreadSafeContext,
+    projection: CellHandle<agent_doc_state_backbone::SupervisorRecycleProjection>,
+    in_flight: ThreadSafeSignalHandle<bool>,
+}
+
+impl ControllerSupervisorRecycleGraph {
+    fn new(initial: agent_doc_state_backbone::SupervisorRecycleProjection) -> Self {
+        let ctx = ThreadSafeContext::new();
+        let projection = ctx.cell(initial);
+        let in_flight = ctx.signal(move |ctx| {
+            matches!(
+                ctx.get_cell(&projection).phase,
+                agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+            )
+        });
+        Self {
+            ctx,
+            projection,
+            in_flight,
+        }
+    }
+
+    fn set(&self, projection: agent_doc_state_backbone::SupervisorRecycleProjection) {
+        self.ctx.set_cell(&self.projection, projection);
+    }
+
+    fn projection(&self) -> agent_doc_state_backbone::SupervisorRecycleProjection {
+        self.ctx.get_cell(&self.projection)
+    }
+
+    fn in_flight(&self) -> bool {
+        self.ctx.get_signal(&self.in_flight)
     }
 }
 
@@ -2321,6 +2433,25 @@ pub(crate) fn spawn_preparing_controller_sentinel(project_root: &Path) -> std::p
 }
 
 #[cfg(test)]
+pub(crate) fn wait_for_test_child_exit(
+    mut child: std::process::Child,
+    timeout: Duration,
+    failure: &str,
+) -> std::process::ExitStatus {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        match child.try_wait().expect("poll test child") {
+            Some(status) => return status,
+            None => std::thread::sleep(Duration::from_millis(25)),
+        }
+    }
+    let pid = child.id();
+    let _ = child.kill();
+    let status = child.wait().expect("wait for timed-out test child");
+    panic!("{failure}; child pid {pid} was still running, cleaned up with status {status:?}");
+}
+
+#[cfg(test)]
 pub(crate) fn test_bootstrap(dir: &tempfile::TempDir) -> ControllerBootstrap {
     ControllerBootstrap {
         project_root: dir.path().to_path_buf(),
@@ -3040,6 +3171,50 @@ mod tests {
         assert_eq!(promoted.socket_path, socket_path(dir.path()));
         assert_eq!(promoted.handoff_state, ControllerHandoffState::Stable);
         assert_eq!(promoted.handoff_started_at, None);
+    }
+
+    #[test]
+    fn prepare_handoff_is_reentrant_and_abort_reconciles_state() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut bootstrap = write_bootstrap_with_options(
+            dir.path(),
+            socket_path(dir.path()),
+            LaunchMode::Lazy,
+            4,
+            ControllerHandoffState::Preparing,
+            None,
+        )
+        .unwrap();
+        let original_started = timestamp_secs().saturating_sub(600);
+        bootstrap.handoff_started_at = Some(original_started);
+        write_bootstrap_state(&bootstrap).unwrap();
+        let mut should_stop = false;
+
+        let prepare = handle_request(
+            &(serde_json::json!({ "command": "prepare_handoff" }).to_string() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        assert!(prepare.contains("\"ok\":true"), "{prepare}");
+        let prepared = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(prepared.handoff_state, ControllerHandoffState::Preparing);
+        assert_eq!(
+            prepared.handoff_started_at,
+            Some(original_started),
+            "reentrant prepare must not refresh the watchdog deadline"
+        );
+
+        let abort = handle_request(
+            &(serde_json::json!({ "command": "abort_handoff" }).to_string() + "\n"),
+            &prepared,
+            &mut should_stop,
+        )
+        .unwrap();
+        assert!(abort.contains("\"ok\":true"), "{abort}");
+        let aborted = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(aborted.handoff_state, ControllerHandoffState::Stable);
+        assert_eq!(aborted.handoff_started_at, None);
     }
     #[test]
     fn missing_or_changed_controller_binary_identity_is_stale() {
@@ -5669,13 +5844,18 @@ agent:queue\n\
     fn runtime_for_bootstrap(bootstrap: ControllerBootstrap) -> ControllerRuntime {
         // Construct directly (bypassing `ControllerRuntime::new`'s restart-recovery /
         // state-DB load) so the self-watchdog predicate is exercised in isolation.
+        let state_projection = agent_doc_state_backbone::StateBackboneProjection::default();
+        let supervisor_recycle_graph =
+            ControllerSupervisorRecycleGraph::new(state_projection.project_supervisor_recycle());
         ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(ControllerMemoryState {
                 actor_store: BTreeMap::new(),
-                state_projection: agent_doc_state_backbone::StateBackboneProjection::default(),
+                state_projection,
                 map_backend: "std_btree_map",
             }),
+            supervisor_recycle_graph,
+            supervisor_recycle_waiters: Condvar::new(),
             recycle_requested: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
         }
@@ -5928,7 +6108,7 @@ agent:queue\n\
 
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let sentinel = spawn_preparing_controller_sentinel(dir.path());
         let pid = sentinel.id();
         assert!(crate::process::cmdline_has_preparing_handoff(pid));
 
@@ -5946,28 +6126,11 @@ agent:queue\n\
         );
 
         // The aged orphan is our child; poll try_wait for its termination.
-        let start = Instant::now();
-        let mut exit = None;
-        while start.elapsed() < Duration::from_secs(2) {
-            match sentinel.try_wait().unwrap() {
-                Some(status) => {
-                    exit = Some(status);
-                    break;
-                }
-                None => std::thread::sleep(Duration::from_millis(25)),
-            }
-        }
-        let status = match exit {
-            Some(status) => {
-                let _ = sentinel.wait();
-                status
-            }
-            None => {
-                let _ = sentinel.kill();
-                let _ = sentinel.wait();
-                panic!("aged preparing orphan must be reaped by recycle");
-            }
-        };
+        let status = wait_for_test_child_exit(
+            sentinel,
+            Duration::from_secs(2),
+            "aged preparing orphan must be reaped by recycle",
+        );
         assert!(
             !status.success(),
             "orphan must be signal-terminated: {status:?}"
@@ -6292,7 +6455,7 @@ agent:queue\n\
         // Preparing controller purely from `/proc` and reap it keyed to its OWN root.
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let sentinel = spawn_preparing_controller_sentinel(dir.path());
         let pid = sentinel.id();
         assert!(crate::process::cmdline_has_preparing_handoff(pid));
         assert_eq!(
@@ -6313,28 +6476,11 @@ agent:queue\n\
 
         // The live orphan must actually be terminated. The sentinel is our child, so
         // a killed process lingers as a zombie until `wait()` — poll `try_wait`.
-        let start = Instant::now();
-        let mut exit = None;
-        while start.elapsed() < Duration::from_secs(2) {
-            match sentinel.try_wait().unwrap() {
-                Some(status) => {
-                    exit = Some(status);
-                    break;
-                }
-                None => std::thread::sleep(Duration::from_millis(25)),
-            }
-        }
-        let status = match exit {
-            Some(status) => {
-                let _ = sentinel.wait();
-                status
-            }
-            None => {
-                let _ = sentinel.kill();
-                let _ = sentinel.wait();
-                panic!("aged cross-project preparing orphan must be reaped");
-            }
-        };
+        let status = wait_for_test_child_exit(
+            sentinel,
+            Duration::from_secs(2),
+            "aged cross-project preparing orphan must be reaped",
+        );
         assert!(
             !status.success(),
             "orphan must be signal-terminated: {status:?}"

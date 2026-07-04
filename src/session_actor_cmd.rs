@@ -30,6 +30,8 @@ use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tm
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(2);
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str =
+    agent_doc_state_backbone::QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DirectSubmitPaneSource {
@@ -131,6 +133,31 @@ struct SessionContext {
     log_status: Option<SessionLogStatus>,
     supervisor_runtime: SupervisorRuntime,
     supervisor_socket: PathBuf,
+}
+
+fn manual_clear_cooldown_target(ctx: &SessionContext) -> String {
+    ctx.supervisor_runtime
+        .actor_pane_id
+        .clone()
+        .or_else(|| {
+            ctx.actor_record
+                .as_ref()
+                .map(|record| record.pane_id.clone())
+        })
+        .or_else(|| ctx.registry_entry.as_ref().map(|entry| entry.pane.clone()))
+        .filter(|pane| !pane.trim().is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn record_manual_clear_cooldown_projection(ctx: &SessionContext) -> Result<()> {
+    let target = manual_clear_cooldown_target(ctx);
+    agent_doc_controller_io::project_controller::queue_context_clear_manual_cooldown_for_file(
+        &ctx.canonical_file,
+        &target,
+        &ctx.harness,
+        harness_clear_command(&ctx.harness),
+    )?;
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -563,12 +590,12 @@ pub fn clear(file: &Path) -> Result<()> {
             harness_clear_command(&ctx.harness),
         )?;
     }
-    match agent_doc_queue_io::continuation_marker::write_clear_cooldown(&ctx.canonical_file) {
+    match record_manual_clear_cooldown_projection(&ctx) {
         Ok(()) => {
             agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
-                    "session_clear_queue_cooldown file={} harness={}",
+                    "session_clear_queue_cooldown file={} harness={} authority=projection",
                     ctx.canonical_file.display(),
                     ctx.harness
                 ),
@@ -576,13 +603,13 @@ pub fn clear(file: &Path) -> Result<()> {
         }
         Err(err) => {
             eprintln!(
-                "[clear] warning: failed to write queue cooldown marker for {}: {err:#}",
+                "[clear] warning: failed to record queue clear-cooldown projection for {}: {err:#}",
                 ctx.canonical_file.display()
             );
             agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
-                    "session_clear_queue_cooldown_failed file={} error={:?}",
+                    "session_clear_queue_cooldown_failed file={} authority=projection error={:?}",
                     ctx.canonical_file.display(),
                     err.to_string()
                 ),
@@ -826,7 +853,7 @@ fn reconcile_idle_projection_before_clear(
                 .unwrap_or(None)
                 .is_some();
             let deferred_clear_pending =
-                agent_doc_queue_io::continuation_marker::read_deferred_operator_clear(
+                agent_doc_controller_io::project_controller::queue_context_clear_deferred_operator_for_file(
                     &ctx.canonical_file,
                 )?
                 .is_some();
@@ -835,17 +862,18 @@ fn reconcile_idle_projection_before_clear(
                 deferred_clear_pending,
             ) {
                 agent_doc_queue::queue_preemption::BusyClearOutcome::PauseAndDefer => {
-                    // Pause the loop (the idle-queue watch honors this cooldown)
-                    // AND record the deferred clear so the supervisor delivers it
-                    // at the next idle gap and resumes (`#autoloop-command-preemption`
-                    // Phase 2b). The two markers are the durable hand-off between
-                    // this command path and the supervisor watch thread.
-                    agent_doc_queue_io::continuation_marker::write_clear_cooldown(
+                    // Record the deferred clear so the supervisor pauses the loop,
+                    // delivers it at the next idle gap, and resumes
+                    // (`#autoloop-command-preemption` Phase 2b). The controller
+                    // projection is the durable hand-off between this command path
+                    // and the supervisor watch thread.
+                    agent_doc_controller_io::project_controller::queue_context_clear_deferred_for_file(
                         &ctx.canonical_file,
-                    )?;
-                    agent_doc_queue_io::continuation_marker::write_deferred_operator_clear(
-                        &ctx.canonical_file,
+                        evidence.pane_id.as_deref().unwrap_or("unknown"),
+                        &ctx.harness,
                         harness_clear_command(&ctx.harness),
+                        CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED,
+                        None,
                     )?;
                     agent_doc_ops_log_io::log_op(
                         &ctx.canonical_file,
@@ -1324,13 +1352,15 @@ pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
     )?;
     // The explicit interrupt-clear is the destructive path and runs now, so it
     // supersedes any clear the non-interrupting path deferred to the idle gap —
-    // drop the deferred-clear marker so the supervisor watch does not ALSO
+    // settle the deferred-clear projection so the supervisor watch does not ALSO
     // deliver a second clear (`#autoloop-command-preemption` Phase 2b).
-    if let Err(err) = agent_doc_queue_io::continuation_marker::clear_deferred_operator_clear_marker(
-        &ctx.canonical_file,
-    ) {
+    if let Err(err) =
+        agent_doc_controller_io::project_controller::clear_queue_context_clear_deferred_for_file(
+            &ctx.canonical_file,
+        )
+    {
         eprintln!(
-            "[interrupt-clear] warning: failed to drop deferred-clear marker for {}: {err:#}",
+            "[interrupt-clear] warning: failed to settle deferred-clear projection for {}: {err:#}",
             ctx.canonical_file.display()
         );
     }
@@ -1452,18 +1482,20 @@ fn force_interrupt_clear(file: &Path) -> Result<()> {
         ..ForceInterruptClearReport::default()
     };
 
-    if let Err(err) = agent_doc_queue_io::continuation_marker::clear_deferred_operator_clear_marker(
-        &ctx.canonical_file,
-    ) {
+    if let Err(err) =
+        agent_doc_controller_io::project_controller::clear_queue_context_clear_deferred_for_file(
+            &ctx.canonical_file,
+        )
+    {
         eprintln!(
-            "[interrupt-clear --force] warning: failed to drop deferred-clear marker for {}: {err:#}",
+            "[interrupt-clear --force] warning: failed to settle deferred-clear projection for {}: {err:#}",
             ctx.canonical_file.display()
         );
     }
-    match agent_doc_queue_io::continuation_marker::write_clear_cooldown(&ctx.canonical_file) {
+    match record_manual_clear_cooldown_projection(&ctx) {
         Ok(()) => report.cooldown_written = true,
         Err(err) => eprintln!(
-            "[interrupt-clear --force] warning: failed to write queue cooldown marker for {}: {err:#}",
+            "[interrupt-clear --force] warning: failed to record queue clear-cooldown projection for {}: {err:#}",
             ctx.canonical_file.display()
         ),
     }

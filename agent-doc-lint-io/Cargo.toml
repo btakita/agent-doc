@@ -11,6 +11,8 @@ name = "agent_doc_lint_io"
 
 [dependencies]
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-element-registry = { path = "../agent-doc-element-registry", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
 anyhow = "1"
 tagpath = { version = "0.12.1", default-features = false }

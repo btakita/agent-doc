@@ -313,10 +313,11 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
         return Ok(AlreadyAppliedSnapshotOutcome::Persisted);
     };
 
-    let ack_content = if !patch_id.is_empty() {
+    let visible_write_content = if !patch_id.is_empty() {
         file.canonicalize().ok().and_then(|canonical| {
             let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-            poll_ack_content_sidecar(
+            poll_visible_write_content_lazily_event_or_projection(
+                file,
                 &project_root,
                 patch_id,
                 std::time::Duration::from_millis(500),
@@ -324,16 +325,17 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             )
             .ok()
             .flatten()
+            .map(|content| content.content)
         })
     } else {
         None
     };
-    let current_source = if ack_content.is_some() {
-        IpcSnapshotSource::AckContentSidecar
+    let current_source = if visible_write_content.is_some() {
+        IpcSnapshotSource::LazilyVisibleWriteEvent
     } else {
         IpcSnapshotSource::FileRead
     };
-    let current = ack_content.or_else(|| std::fs::read_to_string(file).ok());
+    let current = visible_write_content.or_else(|| std::fs::read_to_string(file).ok());
     let mut repair_decision = IpcRepairDecision::content_ours(ours.to_string());
     if let Some(current) = current.as_deref()
         && strip_boundary_for_dedup(current) != strip_boundary_for_dedup(ours)
@@ -437,7 +439,8 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             }
         } else {
             repair_decision = match current_source {
-                IpcSnapshotSource::AckContentSidecar => {
+                IpcSnapshotSource::AckContentSidecar
+                | IpcSnapshotSource::LazilyVisibleWriteEvent => {
                     IpcRepairDecision::ack_content(current.to_string())
                 }
                 IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
@@ -483,7 +486,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
         }
     } else if let Some(current) = current.as_deref() {
         repair_decision = match current_source {
-            IpcSnapshotSource::AckContentSidecar => {
+            IpcSnapshotSource::AckContentSidecar | IpcSnapshotSource::LazilyVisibleWriteEvent => {
                 IpcRepairDecision::ack_content(current.to_string())
             }
             IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
@@ -1230,6 +1233,157 @@ pub fn materialize_missing_response_for_socket_ack_drift(
         ),
     );
     true
+}
+
+fn record_visible_write_commit_candidate_receipt(
+    file: &Path,
+    patch_id: &str,
+    candidate_content: &str,
+    source: &str,
+) {
+    if let Err(err) =
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            file,
+            patch_id,
+            candidate_content,
+            source,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_visible_write_commit_candidate_proof_failed file={} patch_id={} error={}",
+                file.display(),
+                patch_id,
+                err.to_string().replace('\n', " ")
+            ),
+        );
+    }
+}
+
+fn visible_write_content_hash(content: &str) -> String {
+    agent_doc_hash::content_hash(
+        &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content),
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VisibleWriteContentAuthority {
+    LazilyEvent,
+    Projection,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VisibleWriteContent {
+    pub content: String,
+    pub authority: VisibleWriteContentAuthority,
+}
+
+fn ack_content_from_lazily_event(
+    file: &Path,
+    patch_id: &str,
+) -> Result<
+    Option<(
+        String,
+        agent_doc_state_backbone::VisibleWriteCommitCandidateProjection,
+    )>,
+> {
+    let Some(proof) =
+        agent_doc_controller_io::project_controller::visible_write_commit_candidate_for_patch_file(
+            file, patch_id,
+        )
+    else {
+        return Ok(None);
+    };
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let canonical_str = canonical.to_string_lossy().to_string();
+    for snapshot in agent_doc_debounce::live_buffer_snapshots(&canonical_str) {
+        let Some(content) = snapshot.content.as_deref() else {
+            continue;
+        };
+        if visible_write_content_hash(content).eq_ignore_ascii_case(&proof.commit_candidate_hash) {
+            return Ok(Some((content.to_string(), proof)));
+        }
+    }
+    if let Ok(content) = std::fs::read_to_string(&canonical)
+        && visible_write_content_hash(&content).eq_ignore_ascii_case(&proof.commit_candidate_hash)
+    {
+        return Ok(Some((content, proof)));
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "visible_write_lazily_event_content_missing file={} patch_id={} candidate_hash={} source={}",
+            file.display(),
+            patch_id,
+            proof.commit_candidate_hash,
+            proof.source
+        ),
+    );
+    Ok(None)
+}
+
+pub fn poll_ack_content_lazily_event(
+    file: &Path,
+    patch_id: &str,
+    timeout: std::time::Duration,
+    poll_interval: std::time::Duration,
+) -> Result<Option<String>> {
+    let start = std::time::Instant::now();
+    loop {
+        if let Some((content, proof)) = ack_content_from_lazily_event(file, patch_id)? {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "visible_write_lazily_event_observed file={} patch_id={} model_revision={} candidate_hash={} source={} len={}",
+                    file.display(),
+                    patch_id,
+                    proof.model_revision,
+                    proof.commit_candidate_hash,
+                    proof.source,
+                    content.len()
+                ),
+            );
+            return Ok(Some(content));
+        }
+        if start.elapsed() >= timeout {
+            return Ok(None);
+        }
+        std::thread::sleep(poll_interval);
+    }
+}
+
+pub fn poll_ack_content_lazily_event_or_projection(
+    file: &Path,
+    project_root: &Path,
+    patch_id: &str,
+    timeout: std::time::Duration,
+    poll_interval: std::time::Duration,
+) -> Result<Option<String>> {
+    Ok(poll_visible_write_content_lazily_event_or_projection(
+        file,
+        project_root,
+        patch_id,
+        timeout,
+        poll_interval,
+    )?
+    .map(|value| value.content))
+}
+
+pub fn poll_visible_write_content_lazily_event_or_projection(
+    file: &Path,
+    _project_root: &Path,
+    patch_id: &str,
+    timeout: std::time::Duration,
+    poll_interval: std::time::Duration,
+) -> Result<Option<VisibleWriteContent>> {
+    if let Some(content) = poll_ack_content_lazily_event(file, patch_id, timeout, poll_interval)? {
+        return Ok(Some(VisibleWriteContent {
+            content,
+            authority: VisibleWriteContentAuthority::LazilyEvent,
+        }));
+    }
+    Ok(None)
 }
 
 /// Effects still owned by the orchestration command crate while the write
@@ -2255,7 +2409,8 @@ pub fn try_editor_converge_live_prompt_drift(
                 .get("patch_id")
                 .and_then(|value| value.as_str())
                 .unwrap_or("-");
-            let sidecar = poll_ack_content_sidecar(
+            let sidecar = poll_ack_content_lazily_event_or_projection(
+                file,
                 project_root,
                 patch_id,
                 std::time::Duration::from_millis(500),
@@ -2286,6 +2441,12 @@ pub fn try_editor_converge_live_prompt_drift(
                         recovered.len()
                     ),
                 );
+                record_visible_write_commit_candidate_receipt(
+                    file,
+                    patch_id,
+                    target,
+                    "editor_convergence",
+                );
                 Ok(Some(recovered))
             } else if convergence_recovered_editor_wins_outside_response(&recovered, target) {
                 agent_doc_ops_log_io::log_op(
@@ -2297,6 +2458,12 @@ pub fn try_editor_converge_live_prompt_drift(
                         recovered.len(),
                         target.len()
                     ),
+                );
+                record_visible_write_commit_candidate_receipt(
+                    file,
+                    patch_id,
+                    &recovered,
+                    "editor_convergence",
                 );
                 Ok(Some(recovered))
             } else {
@@ -2813,26 +2980,38 @@ pub fn verify_normalization_repair_observed(
     repaired_content: &str,
     transport: &str,
 ) -> bool {
-    let observed = match poll_ack_content_sidecar(
+    let observed = match poll_visible_write_content_lazily_event_or_projection(
+        file,
         project_root,
         patch_id,
         std::time::Duration::from_millis(200),
         std::time::Duration::from_millis(25),
     ) {
-        Ok(Some(content)) => content,
-        Ok(None) => std::fs::read_to_string(file).unwrap_or_default(),
+        Ok(Some(content)) => content.content,
+        Ok(None) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "sidecar_normalization_fallback_narrow_repair_lazily_receipt_missing file={} patch_id={} transport={}",
+                    file.display(),
+                    patch_id,
+                    transport,
+                ),
+            );
+            return false;
+        }
         Err(e) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "sidecar_normalization_fallback_narrow_repair_ack_read_failed file={} patch_id={} transport={} error={}",
+                    "sidecar_normalization_fallback_narrow_repair_lazily_receipt_read_failed file={} patch_id={} transport={} error={}",
                     file.display(),
                     patch_id,
                     transport,
                     e
                 ),
             );
-            std::fs::read_to_string(file).unwrap_or_default()
+            return false;
         }
     };
 
@@ -3640,7 +3819,8 @@ pub fn try_editor_converge(
 
     match agent_doc_ipc_io::send_message(&project_root, &payload) {
         Ok(Some(_ack)) => {
-            let sidecar = poll_ack_content_sidecar(
+            let sidecar = poll_ack_content_lazily_event_or_projection(
+                file,
                 &project_root,
                 &patch_id,
                 std::time::Duration::from_millis(500),
@@ -3673,6 +3853,12 @@ pub fn try_editor_converge(
                         "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
                     );
                 }
+                record_visible_write_commit_candidate_receipt(
+                    file,
+                    &patch_id,
+                    target,
+                    "editor_convergence",
+                );
                 Ok(true)
             } else if convergence_recovered_editor_wins_for_payload(&recovered, target, &payload) {
                 agent_doc_ops_log_io::log_op(
@@ -3690,6 +3876,12 @@ pub fn try_editor_converge(
                         "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
                     );
                 }
+                record_visible_write_commit_candidate_receipt(
+                    file,
+                    &patch_id,
+                    &recovered,
+                    "editor_convergence",
+                );
                 Ok(true)
             } else {
                 let recovery = refresh_editor_after_ack_mismatch(
@@ -3717,6 +3909,12 @@ pub fn try_editor_converge(
                             "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
                         );
                     }
+                    record_visible_write_commit_candidate_receipt(
+                        file,
+                        &patch_id,
+                        target,
+                        "editor_convergence",
+                    );
                     return Ok(true);
                 }
                 agent_doc_ops_log_io::log_op(
@@ -3987,22 +4185,6 @@ pub fn live_prompt_drift_convergence_frontmatter(
     }
 }
 
-/// Read the ack-content sidecar file written by the plugin after apply.
-/// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).
-/// Deletes the sidecar on success. Returns None if no sidecar present (old plugin).
-pub fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Option<String>> {
-    let sidecar = project_root
-        .join(".agent-doc/ack-content")
-        .join(format!("{patch_id}.md"));
-    if !sidecar.exists() {
-        return Ok(None);
-    }
-    let content = std::fs::read_to_string(&sidecar)
-        .with_context(|| format!("failed to read ack-content sidecar {sidecar:?}"))?;
-    let _ = std::fs::remove_file(&sidecar);
-    Ok(Some(content))
-}
-
 pub fn cleanup_legacy_ipc_degraded(project_root: &Path) {
     let marker = project_root.join(".agent-doc/ipc-degraded");
     if marker.is_file()
@@ -4198,23 +4380,6 @@ pub fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &
         return Ok(());
     }
     remove_ipc_dewedge_marker(project_root, file, reason)
-}
-
-/// Poll for the ack-content sidecar with timeout.
-pub fn poll_ack_content_sidecar(
-    project_root: &Path,
-    patch_id: &str,
-    timeout: std::time::Duration,
-    poll_interval: std::time::Duration,
-) -> Result<Option<String>> {
-    let start = std::time::Instant::now();
-    loop {
-        match read_ack_content_sidecar(project_root, patch_id)? {
-            Some(content) => return Ok(Some(content)),
-            None if start.elapsed() >= timeout => return Ok(None),
-            None => std::thread::sleep(poll_interval),
-        }
-    }
 }
 
 /// `#supselfheal` Phase 2 — read the persisted editor-IPC wedge fact for `file`

@@ -65,6 +65,52 @@ pub(crate) fn read_controller_response_line<R: BufRead>(
     }
 }
 
+fn controller_transport_drop_is_retryable(err: &anyhow::Error) -> bool {
+    if err.chain().any(|cause| {
+        cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(
+                io.kind(),
+                ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::BrokenPipe
+                    | ErrorKind::UnexpectedEof
+            )
+        })
+    }) {
+        return true;
+    }
+    format!("{err:#}").contains("project controller closed connection without a response")
+}
+
+fn compact_controller_error(err: &anyhow::Error) -> String {
+    format!("{err:#}")
+        .replace('\n', " | ")
+        .chars()
+        .take(240)
+        .collect()
+}
+
+fn retry_controller_transport_drop<T>(
+    retry_log_path: &Path,
+    command: &str,
+    mut request_once: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    match request_once() {
+        Err(err) if controller_transport_drop_is_retryable(&err) => {
+            let detail = compact_controller_error(&err);
+            agent_doc_ops_log_io::log_op(
+                retry_log_path,
+                &format!(
+                    "controller_rpc_transport_retry command={} reason=stale_or_recycled_controller detail={}",
+                    command, detail
+                ),
+            );
+            request_once()
+        }
+        other => other,
+    }
+}
+
 pub(crate) fn request_controller<T: DeserializeOwned>(
     project_root: &Path,
     request: ControllerRequest,
@@ -95,6 +141,18 @@ pub(crate) fn request_controller<T: DeserializeOwned>(
     let mut response = String::new();
     read_controller_response_line(&mut reader, &mut response)?;
     decode_controller_response(project_root, &request, response.trim())
+}
+
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn request_controller_with_transport_retry<T: DeserializeOwned>(
+    project_root: &Path,
+    request: ControllerRequest,
+    retry_log_path: &Path,
+) -> Result<T> {
+    let command = request.command.clone();
+    retry_controller_transport_drop(retry_log_path, &command, || {
+        request_controller(project_root, request.clone())
+    })
 }
 
 pub(crate) fn decode_controller_response<T: DeserializeOwned>(
@@ -328,7 +386,7 @@ pub fn authoritative_actor_binding(
 
     #[cfg(not(any(test, feature = "test-support")))]
     {
-        let response: ActorBindingResponse = request_controller(
+        let response: ActorBindingResponse = request_controller_with_transport_retry(
             project_root,
             ControllerRequest {
                 command: "actor_binding".to_string(),
@@ -345,6 +403,7 @@ pub fn authoritative_actor_binding(
                 command_kind: None,
                 diagnostic_payload: None,
             },
+            file,
         )?;
         match response.status {
             ActorBindingStatus::Bound => response.record.map(Some).with_context(|| {
@@ -460,8 +519,15 @@ pub fn authorize_dispatch(
         // promotes the freshly-installed binary via the two-phase handoff, so the
         // re-dispatch lands on the fresh controller. One retry only — a still-failing
         // recycle surfaces the error to the caller instead of looping.
-        match request_controller::<DispatchAuthorization>(project_root, controller_request.clone())
-        {
+        let file_for_log = request.file.clone();
+        let request_dispatch = |controller_request: ControllerRequest| {
+            request_controller_with_transport_retry::<DispatchAuthorization>(
+                project_root,
+                controller_request,
+                &file_for_log,
+            )
+        };
+        match request_dispatch(controller_request.clone()) {
             Err(err) if err.to_string().contains("controller_binary_stale") => {
                 agent_doc_ops_log_io::log_op(
                     &request.file,
@@ -470,7 +536,7 @@ pub fn authorize_dispatch(
                         request.file.display()
                     ),
                 );
-                request_controller(project_root, controller_request)
+                request_dispatch(controller_request)
             }
             Err(err)
                 if dispatch_error_stale_generation_redirect_target(&err.to_string()).is_some() =>
@@ -490,7 +556,7 @@ pub fn authorize_dispatch(
                 );
                 let mut redirected = controller_request.clone();
                 redirected.generation = Some(target);
-                request_controller(project_root, redirected)
+                request_dispatch(redirected)
             }
             other => other,
         }
@@ -1499,6 +1565,1006 @@ pub(crate) fn shutdown_stale_controller(project_root: &Path) {
     }
 }
 
+pub fn supervisor_recycle_started(
+    project_root: &Path,
+    reason: &str,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    ensure_controller_running(project_root, LaunchMode::Lazy)?;
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "supervisor_recycle_started".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn supervisor_recycle_started_for_file(
+    file: &Path,
+    reason: &str,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    supervisor_recycle_started(&project_root, reason)
+}
+
+pub fn supervisor_recycle_settled(
+    project_root: &Path,
+    reason: &str,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    ensure_controller_running(project_root, LaunchMode::Lazy)?;
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "supervisor_recycle_settled".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn supervisor_recycle_settled_for_file(
+    file: &Path,
+    reason: &str,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    supervisor_recycle_settled(&project_root, reason)
+}
+
+pub fn supervisor_recycle_status(
+    project_root: &Path,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    if connect(project_root).is_err() {
+        return Ok(agent_doc_state_backbone::SupervisorRecycleProjection::default());
+    }
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "supervisor_recycle_status".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("route".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn supervisor_recycle_status_for_file(
+    file: &Path,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(agent_doc_state_backbone::SupervisorRecycleProjection::default());
+    };
+    supervisor_recycle_status(&project_root)
+}
+
+pub fn supervisor_recycle_pending(project_root: &Path) -> bool {
+    supervisor_recycle_status(project_root)
+        .map(|projection| {
+            matches!(
+                projection.phase,
+                agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+            )
+        })
+        .unwrap_or(false)
+}
+
+pub fn supervisor_recycle_pending_for_file(file: &Path) -> bool {
+    supervisor_recycle_status_for_file(file)
+        .map(|projection| {
+            matches!(
+                projection.phase,
+                agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn supervisor_recycle_reason_is_yield(reason: Option<&str>) -> bool {
+    matches!(
+        reason,
+        Some(agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY)
+            | Some(agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STATE_FLUSH)
+    )
+}
+
+/// Ask the in-session loop to yield one boundary through the PCP recycle graph.
+///
+/// This replaces the legacy `.agent-doc/recycle-yield` sidecar. A yield is a
+/// pre-recycle in-flight phase: route callers defer through the same lazily-backed
+/// projection, while queue/preflight/session-check surfaces suppress unattended
+/// continuation until the projection settles.
+pub fn supervisor_recycle_yield_requested_for_file(
+    file: &Path,
+    reason: &str,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    supervisor_recycle_started_for_file(file, reason)
+}
+
+pub fn supervisor_recycle_yield_pending_for_file(file: &Path) -> bool {
+    supervisor_recycle_status_for_file(file)
+        .map(|projection| {
+            matches!(
+                projection.phase,
+                agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+            ) && supervisor_recycle_reason_is_yield(projection.reason.as_deref())
+        })
+        .unwrap_or(false)
+}
+
+pub fn clear_supervisor_recycle_yield_for_file(file: &Path) -> Result<bool> {
+    let projection = supervisor_recycle_status_for_file(file)?;
+    if !matches!(
+        projection.phase,
+        agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+    ) || !supervisor_recycle_reason_is_yield(projection.reason.as_deref())
+    {
+        return Ok(false);
+    }
+    supervisor_recycle_settled_for_file(file, "recycle_yield_cleared")?;
+    Ok(true)
+}
+
+pub struct RouteSubmitProjectionGuard {
+    file: PathBuf,
+    pane: String,
+    harness: String,
+    reason: String,
+    submit_epoch: u64,
+}
+
+impl Drop for RouteSubmitProjectionGuard {
+    fn drop(&mut self) {
+        let _ = route_submit_settled_for_file(
+            &self.file,
+            &self.pane,
+            &self.harness,
+            &self.reason,
+            self.submit_epoch,
+        );
+    }
+}
+
+pub fn begin_route_submit(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+) -> Result<RouteSubmitProjectionGuard> {
+    begin_route_submit_with_reason(
+        file,
+        pane,
+        harness,
+        agent_doc_state_backbone::ROUTE_DISPATCH_SUBMIT_REASON,
+    )
+}
+
+pub fn begin_route_submit_with_reason(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    reason: &str,
+) -> Result<RouteSubmitProjectionGuard> {
+    let projection = route_submit_started_for_file(file, pane, harness, reason)?;
+    Ok(RouteSubmitProjectionGuard {
+        file: file.to_path_buf(),
+        pane: pane.to_string(),
+        harness: harness.to_string(),
+        reason: reason.to_string(),
+        submit_epoch: projection.submit_epoch,
+    })
+}
+
+pub fn route_submit_started_for_file(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    reason: &str,
+) -> Result<agent_doc_state_backbone::RouteSubmitProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "route_submit_started".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: Some(pane.to_string()),
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("route".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(harness.to_string()),
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn route_submit_settled_for_file(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    reason: &str,
+    submit_epoch: u64,
+) -> Result<agent_doc_state_backbone::RouteSubmitProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    if connect(&project_root).is_err() {
+        return Ok(agent_doc_state_backbone::RouteSubmitProjection::default());
+    }
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "route_submit_settled".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: Some(pane.to_string()),
+            window_id: None,
+            generation: Some(submit_epoch),
+            state: None,
+            caller: Some("route".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(harness.to_string()),
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn mark_route_submit_blocked(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    reason: &str,
+) -> Result<agent_doc_state_backbone::RouteSubmitProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "route_submit_blocked".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: Some(pane.to_string()),
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("route".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(harness.to_string()),
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn route_submit_status_for_file(
+    file: &Path,
+) -> Result<agent_doc_state_backbone::RouteSubmitProjection> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(agent_doc_state_backbone::RouteSubmitProjection::default());
+    };
+    if connect(&project_root).is_err() {
+        return Ok(agent_doc_state_backbone::RouteSubmitProjection::default());
+    }
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "route_submit_status".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn route_submit_in_flight_for_file(file: &Path) -> Result<bool> {
+    route_submit_status_for_file(file).map(|projection| projection.is_pending_at(timestamp_secs()))
+}
+
+pub fn wait_for_supervisor_recycle_settle(
+    project_root: &Path,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    if connect(project_root).is_err() {
+        return Ok(agent_doc_state_backbone::SupervisorRecycleProjection::default());
+    }
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "supervisor_recycle_wait_settled".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("route".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn wait_for_supervisor_recycle_settle_for_file(
+    file: &Path,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(agent_doc_state_backbone::SupervisorRecycleProjection::default());
+    };
+    wait_for_supervisor_recycle_settle(&project_root)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct QueueContextClearPayload {
+    command: String,
+    head_sha256: Option<String>,
+    head_bytes: Option<usize>,
+}
+
+pub fn queue_context_clear_started_for_file(
+    file: &Path,
+    target: &str,
+    harness: &str,
+    command: &str,
+    source: &str,
+    active_head: Option<&str>,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    let payload = QueueContextClearPayload {
+        command: command.to_string(),
+        head_sha256: active_head.map(agent_doc_hash::content_hash),
+        head_bytes: active_head.map(str::len),
+    };
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "queue_context_clear_started".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: Some(target.to_string()),
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: Some(source.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(harness.to_string()),
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )
+}
+
+pub fn queue_context_clear_manual_cooldown_for_file(
+    file: &Path,
+    target: &str,
+    harness: &str,
+    command: &str,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    queue_context_clear_started_for_file(
+        file,
+        target,
+        harness,
+        command,
+        agent_doc_state_backbone::QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_MANUAL_COOLDOWN,
+        None,
+    )
+}
+
+pub fn queue_context_clear_deferred_for_file(
+    file: &Path,
+    target: &str,
+    harness: &str,
+    command: &str,
+    source: &str,
+    active_head: Option<&str>,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    let payload = QueueContextClearPayload {
+        command: command.to_string(),
+        head_sha256: active_head.map(agent_doc_hash::content_hash),
+        head_bytes: active_head.map(str::len),
+    };
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "queue_context_clear_deferred".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: Some(target.to_string()),
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: Some(source.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(harness.to_string()),
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )
+}
+
+pub fn queue_context_clear_settled_for_file(
+    file: &Path,
+    target: &str,
+    harness: &str,
+    command: &str,
+    source: Option<&str>,
+    clear_epoch: u64,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    if connect(&project_root).is_err() {
+        return Ok(agent_doc_state_backbone::QueueContextClearProjection::default());
+    }
+    let payload = QueueContextClearPayload {
+        command: command.to_string(),
+        head_sha256: None,
+        head_bytes: None,
+    };
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "queue_context_clear_settled".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: Some(target.to_string()),
+            window_id: None,
+            generation: Some(clear_epoch),
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: source.map(str::to_string),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(harness.to_string()),
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )
+}
+
+pub fn queue_context_clear_status_for_file(
+    file: &Path,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(agent_doc_state_backbone::QueueContextClearProjection::default());
+    };
+    if connect(&project_root).is_err() {
+        return Ok(agent_doc_state_backbone::QueueContextClearProjection::default());
+    }
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "queue_context_clear_status".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn queue_context_clear_in_flight_for_file(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::QueueContextClearProjection>> {
+    let projection = queue_context_clear_status_for_file(file)?;
+    if projection.is_pending_at(timestamp_secs()) {
+        Ok(Some(projection))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn queue_context_clear_deferred_operator_for_file(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::QueueContextClearProjection>> {
+    let projection = queue_context_clear_status_for_file(file)?;
+    if projection.is_deferred_operator_clear() {
+        Ok(Some(projection))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn queue_context_clear_manual_cooldown_active_for_file(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::QueueContextClearProjection>> {
+    let projection = queue_context_clear_status_for_file(file)?;
+    if projection.is_manual_operator_clear_cooldown() {
+        Ok(Some(projection))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn clear_queue_context_clear_in_flight_for_file(file: &Path) -> Result<bool> {
+    let projection = queue_context_clear_status_for_file(file)?;
+    if !matches!(
+        projection.phase,
+        agent_doc_state_backbone::QueueContextClearPhase::InFlight
+    ) {
+        return Ok(false);
+    }
+    queue_context_clear_settled_for_file(
+        file,
+        &projection.target,
+        &projection.harness,
+        &projection.command,
+        projection.source.as_deref(),
+        projection.clear_epoch,
+    )?;
+    Ok(true)
+}
+
+pub fn clear_queue_context_clear_manual_cooldown_for_file(file: &Path) -> Result<bool> {
+    let projection = queue_context_clear_status_for_file(file)?;
+    if !projection.is_manual_operator_clear_cooldown() {
+        return Ok(false);
+    }
+    queue_context_clear_settled_for_file(
+        file,
+        &projection.target,
+        &projection.harness,
+        &projection.command,
+        projection.source.as_deref(),
+        projection.clear_epoch,
+    )?;
+    Ok(true)
+}
+
+pub fn clear_queue_context_clear_deferred_for_file(file: &Path) -> Result<bool> {
+    let projection = queue_context_clear_status_for_file(file)?;
+    if !matches!(
+        projection.phase,
+        agent_doc_state_backbone::QueueContextClearPhase::Deferred
+    ) {
+        return Ok(false);
+    }
+    queue_context_clear_settled_for_file(
+        file,
+        &projection.target,
+        &projection.harness,
+        &projection.command,
+        projection.source.as_deref(),
+        projection.clear_epoch,
+    )?;
+    Ok(true)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct QueueDrainStallPayload {
+    cycle_id: Option<String>,
+}
+
+pub fn record_queue_drain_stall_continuation_pending_for_file(
+    file: &Path,
+    cycle_id: &str,
+) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    let payload = QueueDrainStallPayload {
+        cycle_id: Some(cycle_id.to_string()),
+    };
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "queue_drain_stall_continuation_recorded".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("queue_drain_stall".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )
+}
+
+pub fn queue_drain_stall_status_for_file(
+    file: &Path,
+) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(agent_doc_state_backbone::QueueDrainStallProjection::default());
+    };
+    if connect(&project_root).is_err() {
+        return Ok(agent_doc_state_backbone::QueueDrainStallProjection::default());
+    }
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "queue_drain_stall_status".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("queue_drain_stall".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn queue_drain_stall_continuation_pending_for_file(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::QueueDrainStallProjection>> {
+    let projection = queue_drain_stall_status_for_file(file)?;
+    if projection.is_pending() {
+        Ok(Some(projection))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn clear_queue_drain_stall_continuation_pending_for_file(
+    file: &Path,
+    reason: &str,
+) -> Result<bool> {
+    let projection = queue_drain_stall_status_for_file(file)?;
+    if !projection.is_pending() {
+        return Ok(false);
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(false);
+    };
+    if connect(&project_root).is_err() {
+        return Ok(false);
+    }
+    let payload = QueueDrainStallPayload { cycle_id: None };
+    request_controller::<agent_doc_state_backbone::QueueDrainStallProjection>(
+        &project_root,
+        ControllerRequest {
+            command: "queue_drain_stall_continuation_cleared".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(projection.stall_epoch),
+            state: None,
+            caller: Some("queue_drain_stall".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )?;
+    Ok(true)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VisibleWriteCommitCandidatePayload {
+    patch_id: String,
+    model_revision: u64,
+    editor_visible_hash: String,
+    commit_candidate_hash: String,
+    source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VisibleWriteCommitCandidateStatus {
+    proof: Option<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VisibleWriteCommitCandidatePatchStatus {
+    proof: Option<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VisibleWriteMaterializedCarryForwardPayload {
+    model_revision: u64,
+    live_buffer_hash: String,
+    file_content_hash: String,
+    commit_candidate_hash: String,
+    source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VisibleWriteMaterializedCarryForwardStatus {
+    proof: Option<agent_doc_state_backbone::VisibleWriteMaterializedCarryForwardProjection>,
+}
+
+fn visible_write_commit_candidate_hash(candidate_content: &str) -> String {
+    agent_doc_hash::content_hash(
+        &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            candidate_content,
+        ),
+    )
+}
+
+fn visible_write_live_buffer_revision(canonical: &Path, live_buffer_hash: &str) -> u64 {
+    let canonical_str = canonical.to_string_lossy().to_string();
+    agent_doc_debounce::live_buffer_snapshots(&canonical_str)
+        .into_iter()
+        .filter(|snapshot| {
+            snapshot.hash.eq_ignore_ascii_case(live_buffer_hash)
+                || snapshot.content.as_ref().is_some_and(|content| {
+                    visible_write_commit_candidate_hash(content)
+                        .eq_ignore_ascii_case(live_buffer_hash)
+                })
+        })
+        .map(|snapshot| snapshot.edit_epoch)
+        .max()
+        .unwrap_or_default()
+}
+
+pub fn record_visible_write_commit_candidate_for_file(
+    file: &Path,
+    patch_id: &str,
+    candidate_content: &str,
+    source: &str,
+) -> Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let canonical_str = canonical.to_string_lossy().to_string();
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let commit_candidate_hash = visible_write_commit_candidate_hash(candidate_content);
+    let model_revision = agent_doc_debounce::live_buffer_snapshots(&canonical_str)
+        .into_iter()
+        .filter(|snapshot| {
+            snapshot.hash.eq_ignore_ascii_case(&commit_candidate_hash)
+                || snapshot.content.as_ref().is_some_and(|content| {
+                    visible_write_commit_candidate_hash(content)
+                        .eq_ignore_ascii_case(&commit_candidate_hash)
+                })
+        })
+        .filter(|snapshot| snapshot.edit_epoch <= snapshot.last_synced_epoch)
+        .map(|snapshot| snapshot.edit_epoch)
+        .max()
+        .unwrap_or_default();
+    let payload = VisibleWriteCommitCandidatePayload {
+        patch_id: patch_id.to_string(),
+        model_revision,
+        editor_visible_hash: commit_candidate_hash.clone(),
+        commit_candidate_hash,
+        source: source.to_string(),
+    };
+    record_visible_write_commit_candidate_direct(
+        &project_root,
+        &canonical,
+        &document_hash,
+        &payload,
+        &anyhow::anyhow!("durable_lazily_receipt_primary"),
+    )
+}
+
+pub fn visible_write_commit_candidate_applied_for_file(
+    file: &Path,
+    commit_candidate_hash: &str,
+) -> Option<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if connect(&project_root).is_ok() {
+        let payload = serde_json::json!({
+            "commit_candidate_hash": commit_candidate_hash,
+        });
+        let request = ControllerRequest {
+            command: "visible_write_commit_candidate_status".to_string(),
+            file: Some(canonical.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("visible_write".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(payload.to_string()),
+        };
+        if let Ok(status) =
+            request_controller::<VisibleWriteCommitCandidateStatus>(&project_root, request)
+            && status.proof.is_some()
+        {
+            return status.proof;
+        }
+    }
+    visible_write_commit_candidate_from_projection(
+        &load_state_backbone_projection(&project_root).ok()?,
+        &canonical,
+        commit_candidate_hash,
+    )
+}
+
+pub fn visible_write_commit_candidate_for_patch_file(
+    file: &Path,
+    patch_id: &str,
+) -> Option<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if connect(&project_root).is_ok() {
+        let payload = serde_json::json!({
+            "patch_id": patch_id,
+        });
+        let request = ControllerRequest {
+            command: "visible_write_commit_candidate_patch_status".to_string(),
+            file: Some(canonical.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("visible_write".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(payload.to_string()),
+        };
+        if let Ok(status) =
+            request_controller::<VisibleWriteCommitCandidatePatchStatus>(&project_root, request)
+            && status.proof.is_some()
+        {
+            return status.proof;
+        }
+    }
+    visible_write_commit_candidate_for_patch_from_projection(
+        &load_state_backbone_projection(&project_root).ok()?,
+        &canonical,
+        patch_id,
+    )
+}
+
+pub fn record_visible_write_materialized_carry_forward_for_file(
+    file: &Path,
+    live_buffer_content: &str,
+    file_content: &str,
+    commit_candidate_content: &str,
+    source: &str,
+) -> Result<agent_doc_state_backbone::VisibleWriteMaterializedCarryForwardProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let live_buffer_hash = visible_write_commit_candidate_hash(live_buffer_content);
+    let file_content_hash = visible_write_commit_candidate_hash(file_content);
+    let commit_candidate_hash = visible_write_commit_candidate_hash(commit_candidate_content);
+    let model_revision = visible_write_live_buffer_revision(&canonical, &live_buffer_hash);
+    let payload = VisibleWriteMaterializedCarryForwardPayload {
+        model_revision,
+        live_buffer_hash,
+        file_content_hash,
+        commit_candidate_hash,
+        source: source.to_string(),
+    };
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "visible_write_materialized_carry_forward_observed".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(model_revision),
+            state: None,
+            caller: Some("visible_write".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )
+}
+
+pub fn visible_write_materialized_carry_forward_for_file(
+    file: &Path,
+    commit_candidate_hash: &str,
+    file_content_hash: &str,
+    live_buffer_hash: &str,
+) -> Option<agent_doc_state_backbone::VisibleWriteMaterializedCarryForwardProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if connect(&project_root).is_ok() {
+        let payload = serde_json::json!({
+            "commit_candidate_hash": commit_candidate_hash,
+            "file_content_hash": file_content_hash,
+            "live_buffer_hash": live_buffer_hash,
+        });
+        let request = ControllerRequest {
+            command: "visible_write_materialized_carry_forward_status".to_string(),
+            file: Some(canonical.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("visible_write".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(payload.to_string()),
+        };
+        if let Ok(status) =
+            request_controller::<VisibleWriteMaterializedCarryForwardStatus>(&project_root, request)
+            && status.proof.is_some()
+        {
+            return status.proof;
+        }
+    }
+    visible_write_materialized_carry_forward_from_projection(
+        &load_state_backbone_projection(&project_root).ok()?,
+        &canonical,
+        commit_candidate_hash,
+        file_content_hash,
+        live_buffer_hash,
+    )
+}
+
 /// `#ctlrecycle` R2 — ask the active controller for `project_root` to recycle at its
 /// next idle boundary (`agent-doc admin recycle`). Returns `Ok(true)` when a
 /// controller was reached, `Ok(false)` when none is running (nothing to recycle).
@@ -1512,6 +2578,18 @@ pub fn recycle_controller(project_root: &Path) -> Result<bool> {
 /// tick WITHOUT waiting on the in-flight-dispatch idle gate (`agent-doc admin recycle
 /// --force`). `force == false` is byte-for-byte the prior defer-at-idle behavior.
 pub fn recycle_controller_force(project_root: &Path, force: bool) -> Result<bool> {
+    let checkpoint =
+        checkpoint_supervisors_for_project(project_root, "controller_recycle_request")?;
+    if !checkpoint.all_clear() {
+        anyhow::bail!(
+            "refusing controller recycle for {}: CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped)",
+            project_root.display(),
+            checkpoint.failed,
+            checkpoint.checkpointed,
+            checkpoint.detached,
+            checkpoint.skipped,
+        );
+    }
     // The `recycle` RPC re-execs only the *authoritative* controller reachable over
     // the project socket. Capture its result but DON'T early-return — the orphan
     // reap below must run even when no authoritative controller answers (an orphaned
@@ -1550,6 +2628,16 @@ pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
 /// --all-projects --force`). `force == false` is the prior defer-at-idle behavior.
 pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usize)> {
     let roots = crate::process::controller_project_roots(std::process::id());
+    let checkpoint = checkpoint_supervisors_all_projects("controller_recycle_request")?;
+    if !checkpoint.all_clear() {
+        anyhow::bail!(
+            "refusing controller recycle: CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped)",
+            checkpoint.failed,
+            checkpoint.checkpointed,
+            checkpoint.detached,
+            checkpoint.skipped,
+        );
+    }
     let mut recycled = 0;
     let mut skipped = 0;
     for root in roots {
@@ -1579,6 +2667,168 @@ pub fn recycle_supervisors_all_projects() -> Result<(usize, usize)> {
     recycle_supervisors_all_projects_force(false)
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SupervisorCrdtCheckpointSummary {
+    pub checkpointed: usize,
+    pub detached: usize,
+    pub skipped: usize,
+    pub failed: usize,
+}
+
+impl SupervisorCrdtCheckpointSummary {
+    pub fn all_clear(self) -> bool {
+        self.failed == 0
+    }
+
+    pub fn total(self) -> usize {
+        self.checkpointed + self.detached + self.skipped + self.failed
+    }
+}
+
+fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option<String>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "supervisor_crdt_checkpoint_skipped file={} source={} reason=no_project_root",
+                doc.display(),
+                source,
+            ),
+        );
+        return Ok(None);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &canonical.to_string_lossy(),
+    );
+    let Some(record) = load_actor_record(&project_root, &document_id)? else {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_checkpoint_skipped file={} source={} reason=no_actor_record",
+                canonical.display(),
+                source,
+            ),
+        );
+        return Ok(None);
+    };
+    let conn = open_state_db(&project_root)?;
+    let lease = load_supervisor_lease_from_db(&conn, &document_id, record.generation)?;
+    let Some(socket) = lease.and_then(|lease| lease.supervisor_socket) else {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_checkpoint_skipped file={} source={} reason=no_supervisor_socket generation={}",
+                canonical.display(),
+                source,
+                record.generation,
+            ),
+        );
+        return Ok(None);
+    };
+    let response = agent_doc_supervisor_io::ipc::send_command(
+        Path::new(&socket),
+        &agent_doc_supervisor::ipc_protocol::IpcMethod::CrdtCheckpoint {
+            file: canonical.to_string_lossy().to_string(),
+            source: source.to_string(),
+        },
+    )
+    .with_context(|| {
+        format!("failed to request CRDT durable checkpoint from supervisor socket {socket}")
+    })?;
+    if !response.ok {
+        anyhow::bail!(
+            "supervisor CRDT durable checkpoint rejected for {}: {}",
+            canonical.display(),
+            response
+                .error
+                .unwrap_or_else(|| "unknown error".to_string())
+        );
+    }
+    let status = response
+        .data
+        .as_ref()
+        .and_then(|data| data.get("status"))
+        .and_then(|status| status.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "supervisor_crdt_checkpoint file={} source={} status={} socket={}",
+            canonical.display(),
+            source,
+            status,
+            socket,
+        ),
+    );
+    Ok(Some(status))
+}
+
+pub fn checkpoint_supervisors_all_projects(
+    source: &str,
+) -> Result<SupervisorCrdtCheckpointSummary> {
+    let docs = crate::process::route_owned_supervisor_documents(std::process::id());
+    let mut summary = SupervisorCrdtCheckpointSummary::default();
+    for doc in docs {
+        match checkpoint_supervisor_crdt_for_doc(&doc, source) {
+            Ok(Some(status)) if status == "checkpointed" => summary.checkpointed += 1,
+            Ok(Some(status)) if status == "detached" => summary.detached += 1,
+            Ok(Some(_)) | Ok(None) => summary.skipped += 1,
+            Err(err) => {
+                summary.failed += 1;
+                agent_doc_ops_log_io::log_op(
+                    &doc,
+                    &format!(
+                        "supervisor_crdt_checkpoint_failed file={} source={} error={:?}",
+                        doc.display(),
+                        source,
+                        err.to_string(),
+                    ),
+                );
+                eprintln!(
+                    "[agent-doc] warning: failed to checkpoint CRDT durable projection for {} before {source}: {err:#}",
+                    doc.display()
+                );
+            }
+        }
+    }
+    Ok(summary)
+}
+
+pub fn checkpoint_supervisors_for_project(
+    project_root: &Path,
+    source: &str,
+) -> Result<SupervisorCrdtCheckpointSummary> {
+    let store = load_actor_store(project_root)?;
+    let mut summary = SupervisorCrdtCheckpointSummary::default();
+    for record in store.values() {
+        match checkpoint_supervisor_crdt_for_doc(Path::new(&record.document_id), source) {
+            Ok(Some(status)) if status == "checkpointed" => summary.checkpointed += 1,
+            Ok(Some(status)) if status == "detached" => summary.detached += 1,
+            Ok(Some(_)) | Ok(None) => summary.skipped += 1,
+            Err(err) => {
+                summary.failed += 1;
+                agent_doc_ops_log_io::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "supervisor_crdt_checkpoint_failed file={} source={} error={:?}",
+                        record.document_id,
+                        source,
+                        err.to_string(),
+                    ),
+                );
+                eprintln!(
+                    "[agent-doc] warning: failed to checkpoint CRDT durable projection for {} before {source}: {err:#}",
+                    record.document_id
+                );
+            }
+        }
+    }
+    Ok(summary)
+}
+
 pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usize)> {
     let docs = crate::process::route_owned_supervisor_documents(std::process::id());
     let reason = if force {
@@ -1589,6 +2839,17 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
     let mut marked = 0;
     let mut skipped = 0;
     for doc in docs {
+        match checkpoint_supervisor_crdt_for_doc(&doc, "supervisor_recycle_request") {
+            Ok(_) => {}
+            Err(err) => {
+                skipped += 1;
+                eprintln!(
+                    "[agent-doc] warning: not marking supervisor recycle-request for {} because CRDT durable checkpoint failed: {err:#}",
+                    doc.display()
+                );
+                continue;
+            }
+        }
         match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(&doc, reason) {
             Ok(()) => marked += 1,
             Err(err) => {
@@ -1626,10 +2887,11 @@ pub fn editor_broadcast_project_root_count() -> usize {
 /// wedged in `Preparing` forever — the exact orphan M1's self-watchdog and the
 /// M3/M5 reapers exist to clean up *after the fact*. This guard prevents the wedge
 /// at the source: on drop without a completed promotion it tells that replacement
-/// (still listening on the temp socket) to `shutdown`, so an aborted handoff never
-/// leaves a `Preparing` controller behind. The success path calls
-/// [`HandoffDropGuard::complete`] after the socket rename + reap so a promoted,
-/// now-authoritative controller is never shut down.
+/// (still listening on the temp socket) to `shutdown` and rolls the old public
+/// controller back through `abort_handoff`, so an aborted handoff never leaves
+/// either side in `Preparing`. The success path calls [`HandoffDropGuard::complete`]
+/// after the socket rename + reap so a promoted, now-authoritative controller is
+/// never shut down.
 pub(crate) struct HandoffDropGuard<'a> {
     project_root: &'a Path,
     temp_sock: &'a Path,
@@ -1656,15 +2918,20 @@ impl Drop for HandoffDropGuard<'_> {
             return;
         }
         // Aborted before promotion: best-effort shutdown of the half-launched
-        // replacement so it never lingers in `Preparing`. If the temp socket is
-        // already gone (the abort happened before the replacement came up) the
-        // request fails harmlessly and M1's self-watchdog remains the backstop.
+        // replacement and rollback of the old public controller's `Preparing`
+        // marker. Both operations are idempotent; failures leave the watchdog and
+        // process reapers as backstops.
         let _ = request_path(self.temp_sock, "shutdown");
+        let rollback = request(self.project_root, "abort_handoff");
         agent_doc_ops_log_io::log_op(
             self.project_root,
             &format!(
-                "handoff_drop_guard_aborted_handoff_shutdown temp_sock={}",
-                self.temp_sock.display()
+                "handoff_drop_guard_aborted_handoff_shutdown temp_sock={} rollback={}",
+                self.temp_sock.display(),
+                rollback
+                    .as_ref()
+                    .map(|_| "ok".to_string())
+                    .unwrap_or_else(|err| format!("failed:{}", compact_controller_error(err)))
             ),
         );
     }
@@ -1698,9 +2965,10 @@ pub(crate) fn handoff_stale_controller(
     // M4: from here until the promotion+rename succeed, any early return aborts the
     // handoff and must not leak the `Preparing` replacement.
     let mut drop_guard = HandoffDropGuard::new(project_root, &temp_sock);
-    let _temp_stream = wait_for_controller_path(&temp_sock)?;
+    let _temp_stream = wait_for_controller_path_with_timeout(&temp_sock, HANDOFF_CONNECT_WAIT)?;
     let replacement_status: ControllerStatus = serde_json::from_str(
-        &request_path(&temp_sock, "status").context("failed to read replacement status")?,
+        &request_path(&temp_sock, "handoff_status")
+            .context("failed to read replacement handoff status")?,
     )
     .context("failed to parse replacement controller status")?;
     let promoted_response = request_path(&temp_sock, "promote_handoff")?;
@@ -1933,12 +3201,19 @@ pub(crate) fn wait_for_controller(
 }
 
 pub(crate) fn wait_for_controller_path(path: &Path) -> Result<interprocess::local_socket::Stream> {
+    wait_for_controller_path_with_timeout(path, CONNECT_WAIT)
+}
+
+pub(crate) fn wait_for_controller_path_with_timeout(
+    path: &Path,
+    timeout: Duration,
+) -> Result<interprocess::local_socket::Stream> {
     let start = Instant::now();
     loop {
         if let Ok(stream) = connect_path(path) {
             return Ok(stream);
         }
-        if start.elapsed() >= CONNECT_WAIT {
+        if start.elapsed() >= timeout {
             anyhow::bail!(
                 "timed out waiting for project controller at {}",
                 path.display()
@@ -2000,6 +3275,7 @@ pub(crate) fn serve_with_options(
     } else {
         write_bootstrap(project_root, launch_mode)?
     };
+    let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
     let name = sock.clone().to_fs_name::<GenericFilePath>()?;
     let listener = ListenerOptions::new()
         .name(name)
@@ -2009,7 +3285,6 @@ pub(crate) fn serve_with_options(
         .set_nonblocking(ListenerNonblockingMode::Accept)
         .context("failed to set project controller listener nonblocking")?;
 
-    let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
     let should_stop = Arc::new(AtomicBool::new(false));
     let watchdog_threshold = stale_preparing_controller_threshold();
     let controller_launched_at = Instant::now();
@@ -2635,8 +3910,7 @@ pub(crate) fn serve_client(
         match reader.read_line(&mut line) {
             Ok(0) => return Ok(()),
             Ok(_) => {
-                let mut request_should_stop = false;
-                let response = handle_request_locked(&line, runtime, &mut request_should_stop)?;
+                let (response, request_should_stop) = handle_request_for_client(&line, runtime)?;
                 writer_half.write_all(response.as_bytes())?;
                 writer_half.write_all(b"\n")?;
                 writer_half.flush()?;
@@ -2662,6 +3936,21 @@ pub(crate) fn serve_client(
             Err(err) => return Err(err).context("failed to read project controller request"),
         }
     }
+}
+
+pub(crate) fn handle_request_for_client(
+    line: &str,
+    runtime: &Arc<ControllerRuntime>,
+) -> Result<(String, bool)> {
+    let mut request_should_stop = false;
+    let response = match handle_request_locked(line, runtime, &mut request_should_stop) {
+        Ok(response) => response,
+        Err(err) => {
+            eprintln!("[controller] request error: {err:#}");
+            controller_envelope::<serde_json::Value>(Err(err))?
+        }
+    };
+    Ok((response, request_should_stop))
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -2716,14 +4005,54 @@ pub(crate) fn handle_request_locked(
                 ),
             ),
         )?),
+        "handoff_status" => Ok(serde_json::to_string(
+            &status::controller_status_from_bootstrap(
+                &controller_bootstrap_status_facts(&bootstrap_snapshot),
+                true,
+                Vec::new(),
+                status::controller_freshness_status(controller_freshness_facts(
+                    Some(bootstrap_snapshot.pid),
+                    None,
+                )),
+                status::default_control_plane_status(),
+            ),
+        )?),
         "prepare_handoff" => {
             let mut state = runtime
                 .bootstrap
                 .lock()
                 .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+            let already_in_flight = matches!(
+                state.handoff_state,
+                ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
+            ) && state.handoff_started_at.is_some();
             state.handoff_state = ControllerHandoffState::Preparing;
-            state.handoff_started_at = Some(timestamp_secs());
+            if !already_in_flight {
+                state.handoff_started_at = Some(timestamp_secs());
+            }
             write_bootstrap_state(&state)?;
+            Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
+        }
+        "abort_handoff" => {
+            let mut state = runtime
+                .bootstrap
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+            if matches!(
+                state.handoff_state,
+                ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
+            ) {
+                state.handoff_state = ControllerHandoffState::Stable;
+                state.handoff_started_at = None;
+                write_bootstrap_state(&state)?;
+                agent_doc_ops_log_io::log_op(
+                    &state.project_root,
+                    &format!(
+                        "controller_handoff_aborted pid={} generation={}",
+                        state.pid, state.controller_generation
+                    ),
+                );
+            }
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "promote_handoff" => {
@@ -2790,6 +4119,108 @@ pub(crate) fn handle_request_locked(
                 ),
             );
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
+        }
+        "supervisor_recycle_started" => controller_envelope(handle_supervisor_recycle_started(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "supervisor_recycle_settled" => controller_envelope(handle_supervisor_recycle_settled(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "supervisor_recycle_status" => controller_envelope(runtime.supervisor_recycle_projection()),
+        "supervisor_recycle_wait_settled" => controller_envelope(
+            runtime.wait_for_supervisor_recycle_settle(SUPERVISOR_RECYCLE_SETTLE_WAIT),
+        ),
+        "queue_context_clear_started" => controller_envelope(handle_queue_context_clear_started(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "queue_context_clear_deferred" => controller_envelope(handle_queue_context_clear_deferred(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "queue_context_clear_settled" => controller_envelope(handle_queue_context_clear_settled(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "queue_context_clear_status" => {
+            controller_envelope(handle_queue_context_clear_status(runtime.as_ref(), request))
+        }
+        "queue_drain_stall_continuation_recorded" => {
+            controller_envelope(handle_queue_drain_stall_continuation_recorded(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        }
+        "queue_drain_stall_continuation_cleared" => {
+            controller_envelope(handle_queue_drain_stall_continuation_cleared(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        }
+        "queue_drain_stall_status" => {
+            controller_envelope(handle_queue_drain_stall_status(runtime.as_ref(), request))
+        }
+        "route_submit_started" => controller_envelope(handle_route_submit_started(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "route_submit_settled" => controller_envelope(handle_route_submit_settled(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "route_submit_blocked" => controller_envelope(handle_route_submit_blocked(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "route_submit_status" => {
+            controller_envelope(handle_route_submit_status(runtime.as_ref(), request))
+        }
+        "visible_write_commit_candidate_observed" => {
+            controller_envelope(handle_visible_write_commit_candidate_observed(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        }
+        "visible_write_commit_candidate_status" => {
+            controller_envelope(handle_visible_write_commit_candidate_status(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        }
+        "visible_write_commit_candidate_patch_status" => {
+            controller_envelope(handle_visible_write_commit_candidate_patch_status(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        }
+        "visible_write_materialized_carry_forward_observed" => {
+            controller_envelope(handle_visible_write_materialized_carry_forward_observed(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        }
+        "visible_write_materialized_carry_forward_status" => {
+            controller_envelope(handle_visible_write_materialized_carry_forward_status(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
         }
         "start_session" => controller_envelope(handle_start_session(
             &bootstrap_snapshot,
@@ -2928,6 +4359,846 @@ pub(crate) fn request_string(value: &Option<String>, name: &str) -> Result<Strin
 
 pub(crate) fn request_u64(value: Option<u64>, name: &str) -> Result<u64> {
     value.with_context(|| format!("controller request missing {name}"))
+}
+
+fn route_submit_event_id(kind: &str, document_hash: &str, submit_epoch: u64) -> String {
+    format!("route-submit-{kind}-{document_hash}-{submit_epoch}")
+}
+
+fn queue_context_clear_event_id(kind: &str, document_hash: &str, clear_epoch: u64) -> String {
+    format!("queue-context-clear-{kind}-{document_hash}-{clear_epoch}")
+}
+
+fn queue_context_clear_request_fields(
+    request: &ControllerRequest,
+) -> Result<(PathBuf, String, String, String, QueueContextClearPayload)> {
+    let file = request_file(request)?;
+    let target = request_string(&request.pane_id, "pane_id")?;
+    let harness = request
+        .command_kind
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+    let source = request
+        .reason
+        .clone()
+        .unwrap_or_else(|| "context_clear".to_string());
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: QueueContextClearPayload =
+        serde_json::from_str(&payload_json).context("parse queue context-clear payload")?;
+    Ok((file, target, harness, source, payload))
+}
+
+fn queue_context_clear_projection(
+    runtime: &ControllerRuntime,
+    file: &Path,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    Ok(runtime
+        .document_state_projection(&document_hash)?
+        .map(|projection| projection.queue.context_clear)
+        .unwrap_or_default())
+}
+
+pub(crate) fn handle_queue_context_clear_started(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    let (file, target, harness, source, payload) = queue_context_clear_request_fields(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let current = queue_context_clear_projection(runtime, &file)?;
+    let clear_epoch = current.clear_epoch.saturating_add(1);
+    let event = agent_doc_state_backbone::StateEvent::new(
+        queue_context_clear_event_id("started", &document_hash, clear_epoch),
+        agent_doc_state_backbone::StateFact::QueueContextClearStarted {
+            document_hash,
+            file: file.to_string_lossy().into_owned(),
+            target: target.clone(),
+            harness: harness.clone(),
+            command: payload.command.clone(),
+            source: Some(source.clone()),
+            head_sha256: payload.head_sha256.clone(),
+            head_bytes: payload.head_bytes,
+            clear_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    append_apply_state_event(bootstrap, runtime, event)?;
+    let projection = queue_context_clear_projection(runtime, &file)?;
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "queue_context_clear_projection_started file={} target={} harness={} source={} clear_epoch={} phase={:?}",
+            file.display(),
+            target,
+            harness,
+            source,
+            projection.clear_epoch,
+            projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_queue_context_clear_deferred(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    let (file, target, harness, source, payload) = queue_context_clear_request_fields(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let current = queue_context_clear_projection(runtime, &file)?;
+    let clear_epoch = current.clear_epoch.saturating_add(1);
+    let event = agent_doc_state_backbone::StateEvent::new(
+        queue_context_clear_event_id("deferred", &document_hash, clear_epoch),
+        agent_doc_state_backbone::StateFact::QueueContextClearDeferred {
+            document_hash,
+            file: file.to_string_lossy().into_owned(),
+            target: target.clone(),
+            harness: harness.clone(),
+            command: payload.command.clone(),
+            source: Some(source.clone()),
+            head_sha256: payload.head_sha256.clone(),
+            head_bytes: payload.head_bytes,
+            clear_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    append_apply_state_event(bootstrap, runtime, event)?;
+    let projection = queue_context_clear_projection(runtime, &file)?;
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "queue_context_clear_projection_deferred file={} target={} harness={} source={} clear_epoch={} phase={:?}",
+            file.display(),
+            target,
+            harness,
+            source,
+            projection.clear_epoch,
+            projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_queue_context_clear_settled(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    let (file, target, harness, source, payload) = queue_context_clear_request_fields(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let clear_epoch = request.generation.unwrap_or_else(|| {
+        queue_context_clear_projection(runtime, &file).map_or(0, |p| p.clear_epoch)
+    });
+    let event = agent_doc_state_backbone::StateEvent::new(
+        queue_context_clear_event_id("settled", &document_hash, clear_epoch),
+        agent_doc_state_backbone::StateFact::QueueContextClearSettled {
+            document_hash,
+            file: file.to_string_lossy().into_owned(),
+            target: target.clone(),
+            harness: harness.clone(),
+            command: payload.command.clone(),
+            source: Some(source.clone()),
+            clear_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    append_apply_state_event(bootstrap, runtime, event)?;
+    let projection = queue_context_clear_projection(runtime, &file)?;
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "queue_context_clear_projection_settled file={} target={} harness={} source={} clear_epoch={} phase={:?}",
+            file.display(),
+            target,
+            harness,
+            source,
+            clear_epoch,
+            projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_queue_context_clear_status(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    let file = request_file(&request)?;
+    queue_context_clear_projection(runtime, &file)
+}
+
+fn queue_drain_stall_event_id(kind: &str, document_hash: &str, stall_epoch: u64) -> String {
+    format!("queue-drain-stall-{kind}-{document_hash}-{stall_epoch}")
+}
+
+fn queue_drain_stall_payload(request: &ControllerRequest) -> Result<QueueDrainStallPayload> {
+    match request.diagnostic_payload.as_deref() {
+        Some(payload_json) => {
+            serde_json::from_str(payload_json).context("parse queue drain-stall payload")
+        }
+        None => Ok(QueueDrainStallPayload { cycle_id: None }),
+    }
+}
+
+fn queue_drain_stall_projection(
+    runtime: &ControllerRuntime,
+    file: &Path,
+) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    Ok(runtime
+        .document_state_projection(&document_hash)?
+        .map(|projection| projection.queue.drain_stall)
+        .unwrap_or_default())
+}
+
+pub(crate) fn handle_queue_drain_stall_continuation_recorded(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
+    let file = request_file(&request)?;
+    let payload = queue_drain_stall_payload(&request)?;
+    let cycle_id = payload
+        .cycle_id
+        .with_context(|| "queue drain-stall record missing cycle_id")?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let current = queue_drain_stall_projection(runtime, &file)?;
+    let stall_epoch = current.stall_epoch.saturating_add(1);
+    let event = agent_doc_state_backbone::StateEvent::new(
+        queue_drain_stall_event_id("recorded", &document_hash, stall_epoch),
+        agent_doc_state_backbone::StateFact::QueueDrainStallContinuationRecorded {
+            document_hash,
+            file: file.to_string_lossy().into_owned(),
+            cycle_id: cycle_id.clone(),
+            stall_epoch,
+            recorded_secs: timestamp_secs(),
+        },
+    );
+    append_apply_state_event(bootstrap, runtime, event)?;
+    let projection = queue_drain_stall_projection(runtime, &file)?;
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "queue_drain_stall_continuation_recorded file={} cycle_id={} stall_epoch={} phase={:?}",
+            file.display(),
+            cycle_id,
+            projection.stall_epoch,
+            projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_queue_drain_stall_continuation_cleared(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
+    let file = request_file(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let stall_epoch = request.generation.unwrap_or_else(|| {
+        queue_drain_stall_projection(runtime, &file).map_or(0, |p| p.stall_epoch)
+    });
+    let reason = request
+        .reason
+        .clone()
+        .unwrap_or_else(|| "reconciled".to_string());
+    let event = agent_doc_state_backbone::StateEvent::new(
+        queue_drain_stall_event_id("cleared", &document_hash, stall_epoch),
+        agent_doc_state_backbone::StateFact::QueueDrainStallContinuationCleared {
+            document_hash,
+            file: file.to_string_lossy().into_owned(),
+            stall_epoch,
+            cleared_secs: timestamp_secs(),
+            reason: Some(reason.clone()),
+        },
+    );
+    append_apply_state_event(bootstrap, runtime, event)?;
+    let projection = queue_drain_stall_projection(runtime, &file)?;
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "queue_drain_stall_continuation_cleared file={} reason={} stall_epoch={} phase={:?}",
+            file.display(),
+            reason,
+            stall_epoch,
+            projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_queue_drain_stall_status(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
+    let file = request_file(&request)?;
+    queue_drain_stall_projection(runtime, &file)
+}
+
+fn route_submit_request_fields(
+    request: &ControllerRequest,
+) -> Result<(PathBuf, String, String, String)> {
+    let file = request_file(request)?;
+    let pane = request_string(&request.pane_id, "pane_id")?;
+    let harness = request
+        .command_kind
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+    let reason = request
+        .reason
+        .clone()
+        .unwrap_or_else(|| "route_submit".to_string());
+    Ok((file, pane, harness, reason))
+}
+
+fn route_submit_projection(
+    runtime: &ControllerRuntime,
+    file: &Path,
+) -> Result<agent_doc_state_backbone::RouteSubmitProjection> {
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    Ok(runtime
+        .document_state_projection(&document_hash)?
+        .map(|projection| projection.route.submit)
+        .unwrap_or_default())
+}
+
+pub(crate) fn handle_route_submit_started(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::RouteSubmitProjection> {
+    let (file, pane, harness, reason) = route_submit_request_fields(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let current = route_submit_projection(runtime, &file)?;
+    let submit_epoch = current.submit_epoch.saturating_add(1);
+    let event = agent_doc_state_backbone::StateEvent::new(
+        route_submit_event_id("started", &document_hash, submit_epoch),
+        agent_doc_state_backbone::StateFact::RouteSubmitStarted {
+            document_hash: document_hash.clone(),
+            pane_id: pane.clone(),
+            harness: harness.clone(),
+            reason: reason.clone(),
+            submit_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    append_apply_state_event(bootstrap, runtime, event)?;
+    let projection = route_submit_projection(runtime, &file)?;
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "route_submit_projection_started file={} pane={} harness={} reason={} submit_epoch={} phase={:?}",
+            file.display(),
+            pane,
+            harness,
+            reason,
+            projection.submit_epoch,
+            projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_route_submit_settled(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::RouteSubmitProjection> {
+    let (file, pane, harness, reason) = route_submit_request_fields(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let submit_epoch = request
+        .generation
+        .unwrap_or_else(|| route_submit_projection(runtime, &file).map_or(0, |p| p.submit_epoch));
+    let event = agent_doc_state_backbone::StateEvent::new(
+        route_submit_event_id("settled", &document_hash, submit_epoch),
+        agent_doc_state_backbone::StateFact::RouteSubmitSettled {
+            document_hash,
+            pane_id: pane.clone(),
+            harness: harness.clone(),
+            reason: reason.clone(),
+            submit_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    append_apply_state_event(bootstrap, runtime, event)?;
+    let projection = route_submit_projection(runtime, &file)?;
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "route_submit_projection_settled file={} pane={} harness={} reason={} submit_epoch={} phase={:?}",
+            file.display(),
+            pane,
+            harness,
+            reason,
+            submit_epoch,
+            projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_route_submit_blocked(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::RouteSubmitProjection> {
+    let (file, pane, harness, reason) = route_submit_request_fields(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let current = route_submit_projection(runtime, &file)?;
+    let submit_epoch = current.submit_epoch.saturating_add(1);
+    let event = agent_doc_state_backbone::StateEvent::new(
+        route_submit_event_id("blocked", &document_hash, submit_epoch),
+        agent_doc_state_backbone::StateFact::RouteSubmitBlocked {
+            document_hash,
+            pane_id: pane.clone(),
+            harness: harness.clone(),
+            reason: reason.clone(),
+            submit_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    append_apply_state_event(bootstrap, runtime, event)?;
+    let projection = route_submit_projection(runtime, &file)?;
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "route_submit_projection_blocked file={} pane={} harness={} reason={} submit_epoch={} phase={:?}",
+            file.display(),
+            pane,
+            harness,
+            reason,
+            projection.submit_epoch,
+            projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_route_submit_status(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::RouteSubmitProjection> {
+    let file = request_file(&request)?;
+    route_submit_projection(runtime, &file)
+}
+
+fn supervisor_recycle_event_id(kind: &str, recycle_epoch: u64) -> String {
+    format!("project-supervisor-recycle-{kind}-{recycle_epoch}")
+}
+
+fn visible_write_event_id(
+    kind: &str,
+    document_hash: &str,
+    patch_id: &str,
+    candidate_hash: &str,
+) -> String {
+    format!("visible-write-{kind}-{document_hash}-{patch_id}-{candidate_hash}")
+}
+
+fn visible_write_commit_candidate_events(
+    document_hash: &str,
+    payload: &VisibleWriteCommitCandidatePayload,
+) -> (
+    agent_doc_state_backbone::StateEvent,
+    agent_doc_state_backbone::StateEvent,
+) {
+    let applied_event = agent_doc_state_backbone::StateEvent::new(
+        visible_write_event_id(
+            "applied",
+            document_hash,
+            &payload.patch_id,
+            &payload.commit_candidate_hash,
+        ),
+        agent_doc_state_backbone::StateFact::EditorPatchApplied {
+            document_hash: document_hash.to_string(),
+            patch_id: payload.patch_id.clone(),
+            actor_generation: payload.model_revision,
+        },
+    );
+    let proof_event = agent_doc_state_backbone::StateEvent::new(
+        visible_write_event_id(
+            "candidate",
+            document_hash,
+            &payload.patch_id,
+            &payload.commit_candidate_hash,
+        ),
+        agent_doc_state_backbone::StateFact::VisibleWriteCommitCandidateObserved {
+            document_hash: document_hash.to_string(),
+            patch_id: payload.patch_id.clone(),
+            model_revision: payload.model_revision,
+            editor_visible_hash: payload.editor_visible_hash.clone(),
+            commit_candidate_hash: payload.commit_candidate_hash.clone(),
+            source: payload.source.clone(),
+        },
+    );
+    (applied_event, proof_event)
+}
+
+fn record_visible_write_commit_candidate_direct(
+    project_root: &Path,
+    canonical: &Path,
+    document_hash: &str,
+    payload: &VisibleWriteCommitCandidatePayload,
+    controller_err: &anyhow::Error,
+) -> Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+    let (applied_event, proof_event) =
+        visible_write_commit_candidate_events(document_hash, payload);
+    let applied_inserted = append_state_event(project_root, &applied_event)?;
+    let candidate_inserted = append_state_event(project_root, &proof_event)?;
+    let projection = load_state_backbone_projection(project_root)?;
+    let proof = visible_write_commit_candidate_from_projection(
+        &projection,
+        canonical,
+        &payload.commit_candidate_hash,
+    )
+    .with_context(|| {
+        format!(
+            "durable visible write event did not fold for {} candidate={}",
+            canonical.display(),
+            payload.commit_candidate_hash
+        )
+    })?;
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "visible_write_commit_candidate_durable_event_recorded file={} patch_id={} model_revision={} commit_candidate_hash={} source={} applied_inserted={} candidate_inserted={} authority=state_backbone recovery=controller_reconcile controller_error={}",
+            canonical.display(),
+            payload.patch_id,
+            proof.model_revision,
+            proof.commit_candidate_hash,
+            proof.source,
+            applied_inserted,
+            candidate_inserted,
+            compact_controller_error(controller_err)
+        ),
+    );
+    Ok(proof)
+}
+
+fn visible_write_commit_candidate_from_projection(
+    projection: &agent_doc_state_backbone::StateBackboneProjection,
+    file: &Path,
+    commit_candidate_hash: &str,
+) -> Option<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    projection
+        .document(&document_hash)
+        .and_then(|document| document.applied_visible_write_candidate(commit_candidate_hash))
+        .cloned()
+}
+
+fn visible_write_commit_candidate_for_patch_from_projection(
+    projection: &agent_doc_state_backbone::StateBackboneProjection,
+    file: &Path,
+    patch_id: &str,
+) -> Option<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    projection
+        .document(&document_hash)
+        .and_then(|document| document.applied_visible_write_candidate_for_patch(patch_id))
+        .cloned()
+}
+
+fn visible_write_materialized_carry_forward_from_projection(
+    projection: &agent_doc_state_backbone::StateBackboneProjection,
+    file: &Path,
+    commit_candidate_hash: &str,
+    file_content_hash: &str,
+    live_buffer_hash: &str,
+) -> Option<agent_doc_state_backbone::VisibleWriteMaterializedCarryForwardProjection> {
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    projection
+        .document(&document_hash)
+        .and_then(|document| {
+            document.materialized_visible_write_carry_forward(
+                commit_candidate_hash,
+                file_content_hash,
+                live_buffer_hash,
+            )
+        })
+        .cloned()
+}
+
+fn append_apply_state_event(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    event: agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    let inserted = append_state_event(&bootstrap.project_root, &event)?;
+    runtime.apply_state_event(&event)?;
+    Ok(inserted)
+}
+
+fn append_and_apply_state_event(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    event: agent_doc_state_backbone::StateEvent,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    append_apply_state_event(bootstrap, runtime, event)?;
+    runtime.supervisor_recycle_projection()
+}
+
+pub(crate) fn handle_supervisor_recycle_started(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let current = runtime.supervisor_recycle_projection()?;
+    let recycle_epoch = current.recycle_epoch.saturating_add(1);
+    let reason = request
+        .reason
+        .as_deref()
+        .unwrap_or("supervisor_recycle_started");
+    let event = agent_doc_state_backbone::StateEvent::new(
+        supervisor_recycle_event_id("started", recycle_epoch),
+        agent_doc_state_backbone::StateFact::SupervisorRecycleStarted {
+            document_hash: agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH.to_string(),
+            reason: reason.to_string(),
+            recycle_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    let projection = append_and_apply_state_event(bootstrap, runtime, event)?;
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "supervisor_recycle_graph_started reason={} recycle_epoch={} phase={:?}",
+            reason, projection.recycle_epoch, projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_supervisor_recycle_settled(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let current = runtime.supervisor_recycle_projection()?;
+    if matches!(
+        current.phase,
+        agent_doc_state_backbone::SupervisorRecyclePhase::Settled
+    ) {
+        return Ok(current);
+    }
+    let recycle_epoch = current.recycle_epoch;
+    let reason = request
+        .reason
+        .as_deref()
+        .unwrap_or("supervisor_recycle_settled");
+    let event = agent_doc_state_backbone::StateEvent::new(
+        supervisor_recycle_event_id("settled", recycle_epoch),
+        agent_doc_state_backbone::StateFact::SupervisorRecycleSettled {
+            document_hash: agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH.to_string(),
+            reason: reason.to_string(),
+            recycle_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    let projection = append_and_apply_state_event(bootstrap, runtime, event)?;
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "supervisor_recycle_graph_settled reason={} recycle_epoch={} phase={:?}",
+            reason, projection.recycle_epoch, projection.phase
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_visible_write_commit_candidate_observed(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: VisibleWriteCommitCandidatePayload = serde_json::from_str(&payload_json)
+        .context("parse visible write commit candidate payload")?;
+    let (applied_event, proof_event) =
+        visible_write_commit_candidate_events(&document_hash, &payload);
+    append_apply_state_event(bootstrap, runtime, applied_event)?;
+    append_apply_state_event(bootstrap, runtime, proof_event)?;
+    let projection = runtime
+        .document_state_projection(&document_hash)?
+        .and_then(|document| {
+            document
+                .applied_visible_write_candidate(&payload.commit_candidate_hash)
+                .cloned()
+        })
+        .with_context(|| {
+            format!(
+                "visible write commit candidate proof did not fold for {} candidate={}",
+                canonical.display(),
+                payload.commit_candidate_hash
+            )
+        })?;
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "visible_write_commit_candidate_observed file={} patch_id={} model_revision={} commit_candidate_hash={} source={}",
+            canonical.display(),
+            projection.patch_id,
+            projection.model_revision,
+            projection.commit_candidate_hash,
+            projection.source
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_visible_write_commit_candidate_status(
+    _bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<VisibleWriteCommitCandidateStatus> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: serde_json::Value = serde_json::from_str(&payload_json)
+        .context("parse visible write candidate status payload")?;
+    let commit_candidate_hash = payload
+        .get("commit_candidate_hash")
+        .and_then(|value| value.as_str())
+        .context("visible write candidate status missing commit_candidate_hash")?;
+    Ok(VisibleWriteCommitCandidateStatus {
+        proof: runtime
+            .document_state_projection(&document_hash)?
+            .and_then(|document| {
+                document
+                    .applied_visible_write_candidate(commit_candidate_hash)
+                    .cloned()
+            }),
+    })
+}
+
+pub(crate) fn handle_visible_write_commit_candidate_patch_status(
+    _bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<VisibleWriteCommitCandidatePatchStatus> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: serde_json::Value = serde_json::from_str(&payload_json)
+        .context("parse visible write candidate patch status payload")?;
+    let patch_id = payload
+        .get("patch_id")
+        .and_then(|value| value.as_str())
+        .context("visible write candidate patch status missing patch_id")?;
+    Ok(VisibleWriteCommitCandidatePatchStatus {
+        proof: runtime
+            .document_state_projection(&document_hash)?
+            .and_then(|document| {
+                document
+                    .applied_visible_write_candidate_for_patch(patch_id)
+                    .cloned()
+            }),
+    })
+}
+
+pub(crate) fn handle_visible_write_materialized_carry_forward_observed(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::VisibleWriteMaterializedCarryForwardProjection> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: VisibleWriteMaterializedCarryForwardPayload = serde_json::from_str(&payload_json)
+        .context("parse visible write materialized carry-forward payload")?;
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!(
+            "visible-write-materialized-carry-forward-{document_hash}-{}-{}-{}",
+            payload.commit_candidate_hash, payload.file_content_hash, payload.live_buffer_hash
+        ),
+        agent_doc_state_backbone::StateFact::VisibleWriteMaterializedCarryForwardObserved {
+            document_hash: document_hash.clone(),
+            model_revision: payload.model_revision,
+            live_buffer_hash: payload.live_buffer_hash.clone(),
+            file_content_hash: payload.file_content_hash.clone(),
+            commit_candidate_hash: payload.commit_candidate_hash.clone(),
+            source: payload.source.clone(),
+        },
+    );
+    append_apply_state_event(bootstrap, runtime, event)?;
+    let projection = runtime
+        .document_state_projection(&document_hash)?
+        .and_then(|document| {
+            document
+                .materialized_visible_write_carry_forward(
+                    &payload.commit_candidate_hash,
+                    &payload.file_content_hash,
+                    &payload.live_buffer_hash,
+                )
+                .cloned()
+        })
+        .with_context(|| {
+            format!(
+                "visible write materialized carry-forward proof did not fold for {} candidate={}",
+                canonical.display(),
+                payload.commit_candidate_hash
+            )
+        })?;
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "visible_write_materialized_carry_forward_observed file={} model_revision={} commit_candidate_hash={} file_content_hash={} live_buffer_hash={} source={}",
+            canonical.display(),
+            projection.model_revision,
+            projection.commit_candidate_hash,
+            projection.file_content_hash,
+            projection.live_buffer_hash,
+            projection.source
+        ),
+    );
+    Ok(projection)
+}
+
+pub(crate) fn handle_visible_write_materialized_carry_forward_status(
+    _bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<VisibleWriteMaterializedCarryForwardStatus> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: serde_json::Value = serde_json::from_str(&payload_json)
+        .context("parse visible write materialized carry-forward status payload")?;
+    let commit_candidate_hash = payload
+        .get("commit_candidate_hash")
+        .and_then(|value| value.as_str())
+        .context("visible write materialized carry-forward status missing commit_candidate_hash")?;
+    let file_content_hash = payload
+        .get("file_content_hash")
+        .and_then(|value| value.as_str())
+        .context("visible write materialized carry-forward status missing file_content_hash")?;
+    let live_buffer_hash = payload
+        .get("live_buffer_hash")
+        .and_then(|value| value.as_str())
+        .context("visible write materialized carry-forward status missing live_buffer_hash")?;
+    Ok(VisibleWriteMaterializedCarryForwardStatus {
+        proof: runtime
+            .document_state_projection(&document_hash)?
+            .and_then(|document| {
+                document
+                    .materialized_visible_write_carry_forward(
+                        commit_candidate_hash,
+                        file_content_hash,
+                        live_buffer_hash,
+                    )
+                    .cloned()
+            }),
+    })
 }
 
 pub(crate) fn handle_start_session(
@@ -4920,6 +7191,151 @@ mod tests {
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
 
+    #[test]
+    fn controller_client_handler_errors_return_error_envelope() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = Arc::new(ControllerRuntime::new(bootstrap).unwrap());
+        let request = serde_json::json!({
+            "command": "register_supervisor",
+            "file": "missing.md",
+            "session_id": "session-1",
+            "pane_id": "%1",
+            "generation": 1,
+            "state": "ready",
+            "supervisor_pid": 1234,
+            "supervisor_socket": "/tmp/missing.sock"
+        });
+
+        let (response, should_stop) =
+            handle_request_for_client(&(request.to_string() + "\n"), &runtime).unwrap();
+        let envelope: ControllerEnvelope<serde_json::Value> =
+            serde_json::from_str(&response).unwrap();
+
+        assert!(!should_stop);
+        assert!(!envelope.ok);
+        assert!(envelope.data.is_none());
+        let error = envelope
+            .error
+            .expect("error envelope should include detail");
+        assert!(
+            error.contains("missing actor record for supervisor missing.md"),
+            "unexpected error envelope: {error}"
+        );
+    }
+
+    #[test]
+    fn controller_transport_drop_retries_once_and_logs() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/retry.md");
+        std::fs::write(&doc, "Body\n").unwrap();
+        let mut attempts = 0;
+
+        let result = retry_controller_transport_drop(&doc, "actor_binding", || {
+            attempts += 1;
+            if attempts == 1 {
+                Err(std::io::Error::from(ErrorKind::ConnectionReset))
+                    .context("failed to read project controller response")
+            } else {
+                Ok("ok")
+            }
+        })
+        .unwrap();
+
+        assert_eq!(result, "ok");
+        assert_eq!(attempts, 2, "transport drop must retry exactly once");
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("controller_rpc_transport_retry command=actor_binding"),
+            "transport retry must be visible in ops.log:\n{ops_log}"
+        );
+        assert!(ops_log.contains("failed to read project controller response"));
+    }
+
+    #[test]
+    fn controller_command_errors_do_not_retry_as_transport_drops() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/no-retry.md");
+        std::fs::write(&doc, "Body\n").unwrap();
+        let mut attempts = 0;
+
+        let err = retry_controller_transport_drop::<&str>(&doc, "dispatch", || {
+            attempts += 1;
+            anyhow::bail!("project controller command `dispatch` failed: queue_paused")
+        })
+        .unwrap_err();
+
+        assert_eq!(attempts, 1, "controller rejections must not be retried");
+        assert!(format!("{err:#}").contains("queue_paused"));
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            !ops_log.contains("controller_rpc_transport_retry"),
+            "ordinary controller command errors must not log transport retry:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn controller_closed_without_response_is_retryable_transport_drop() {
+        let err = anyhow::anyhow!("project controller closed connection without a response");
+        assert!(controller_transport_drop_is_retryable(&err));
+
+        let command_err = anyhow::anyhow!(
+            "project controller command `dispatch` failed: failed_stage=queue_paused"
+        );
+        assert!(!controller_transport_drop_is_retryable(&command_err));
+    }
+
+    #[test]
+    fn visible_write_commit_candidate_direct_durable_event_reconciles_without_controller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        let content = "before\n### Re: done\n";
+        std::fs::write(&doc, content).unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let commit_candidate_hash = visible_write_commit_candidate_hash(content);
+        let payload = VisibleWriteCommitCandidatePayload {
+            patch_id: "patch-direct-durable".to_string(),
+            model_revision: 7,
+            editor_visible_hash: commit_candidate_hash.clone(),
+            commit_candidate_hash: commit_candidate_hash.clone(),
+            source: "test_direct_durable".to_string(),
+        };
+
+        let proof = record_visible_write_commit_candidate_direct(
+            dir.path(),
+            &canonical,
+            &document_hash,
+            &payload,
+            &anyhow::anyhow!("controller unavailable"),
+        )
+        .unwrap();
+
+        assert_eq!(proof.patch_id, "patch-direct-durable");
+        assert_eq!(proof.model_revision, 7);
+        assert_eq!(proof.commit_candidate_hash, commit_candidate_hash);
+
+        let reconciled =
+            visible_write_commit_candidate_for_patch_file(&canonical, "patch-direct-durable")
+                .expect("durable lazily event should reconcile without a live controller");
+        assert_eq!(
+            reconciled.commit_candidate_hash,
+            proof.commit_candidate_hash
+        );
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("visible_write_commit_candidate_durable_event_recorded"));
+        assert!(ops_log.contains("authority=state_backbone"));
+        assert!(ops_log.contains("recovery=controller_reconcile"));
+    }
+
     /// `#restartstderrbleed` — the auto-install child must NOT inherit the
     /// supervisor's fd1 (the agent pane). Prove that `make install`-style output
     /// on BOTH stdout and stderr is redirected to the supervisor-log target fd,
@@ -5139,6 +7555,33 @@ mod tests {
         assert_eq!(freshness.controller.pid, Some(bootstrap.pid));
         assert!(freshness.installed_binary.is_some());
     }
+
+    #[test]
+    fn controller_handoff_status_uses_lightweight_control_plane() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({ "command": "handoff_status" }).to_string() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+
+        assert!(status.active);
+        assert_eq!(status.pid, Some(bootstrap.pid));
+        assert_eq!(
+            status.controller_generation,
+            Some(bootstrap.controller_generation)
+        );
+        assert!(status.stale_duplicate_pids.is_empty());
+        assert_eq!(status.control_plane.store_actor.state, "unknown");
+        assert_eq!(status.control_plane.store_actor.owned_items, 0);
+        assert!(status.control_plane.store_actor.categories.is_empty());
+    }
+
     #[test]
     fn controller_client_response_read_times_out() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -5894,7 +8337,7 @@ mod tests {
     fn reaper_terminates_wedged_same_project_controller_and_marks_failed() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let mut sentinel = spawn_controller_sentinel(dir.path());
+        let sentinel = spawn_controller_sentinel(dir.path());
         let pid = sentinel.id();
         assert!(
             is_same_project_controller_pid(dir.path(), pid),
@@ -5912,28 +8355,11 @@ mod tests {
         // projection reaper). The sentinel is a child of this test, so a killed
         // process lingers as a zombie (with `/proc/<pid>` still present) until we
         // `wait()` it — poll `try_wait` instead of `process_is_alive`.
-        let start = Instant::now();
-        let mut exit = None;
-        while start.elapsed() < Duration::from_secs(2) {
-            match sentinel.try_wait().unwrap() {
-                Some(status) => {
-                    exit = Some(status);
-                    break;
-                }
-                None => std::thread::sleep(Duration::from_millis(25)),
-            }
-        }
-        let status = match exit {
-            Some(status) => {
-                let _ = sentinel.wait();
-                status
-            }
-            None => {
-                let _ = sentinel.kill();
-                let _ = sentinel.wait();
-                panic!("wedged sentinel pid must be reaped");
-            }
-        };
+        let status = wait_for_test_child_exit(
+            sentinel,
+            Duration::from_secs(2),
+            "wedged sentinel pid must be reaped",
+        );
         assert!(
             !status.success(),
             "sentinel must be signal-terminated, not exit cleanly: {status:?}"
@@ -5950,7 +8376,7 @@ mod tests {
     fn orphan_reaper_reaps_aged_preparing_sentinel() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let sentinel = spawn_preparing_controller_sentinel(dir.path());
         let pid = sentinel.id();
         // Let the process age past a zero threshold (start age is /proc dir mtime).
         std::thread::sleep(Duration::from_millis(1100));
@@ -5962,28 +8388,11 @@ mod tests {
         // The live orphan must actually be terminated (the whole point vs. the
         // record-scoped reaper). The sentinel is our child, so a killed process
         // lingers as a zombie until `wait()` — poll `try_wait`.
-        let start = Instant::now();
-        let mut exit = None;
-        while start.elapsed() < Duration::from_secs(2) {
-            match sentinel.try_wait().unwrap() {
-                Some(status) => {
-                    exit = Some(status);
-                    break;
-                }
-                None => std::thread::sleep(Duration::from_millis(25)),
-            }
-        }
-        let status = match exit {
-            Some(status) => {
-                let _ = sentinel.wait();
-                status
-            }
-            None => {
-                let _ = sentinel.kill();
-                let _ = sentinel.wait();
-                panic!("aged preparing orphan must be reaped");
-            }
-        };
+        let status = wait_for_test_child_exit(
+            sentinel,
+            Duration::from_secs(2),
+            "aged preparing orphan must be reaped",
+        );
         assert!(
             !status.success(),
             "orphan must be signal-terminated: {status:?}"

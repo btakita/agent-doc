@@ -67,7 +67,7 @@
 //! - reposition_boundary_removes_stale: two boundary markers in exchange → exactly one marker at end
 //! - crdt_merge_no_base: identical `ours`/`theirs` with null base → merged text equals input
 
-use agent_doc_state_backbone::{EventLedger, StateEvent};
+use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact};
 use anyhow::Context as _;
 use serde::Serialize;
 use std::ffi::{CStr, CString, c_char};
@@ -567,9 +567,9 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3
 
 /// Record a supervisor-origin editor buffer proof as already synced.
 ///
-/// Used by editor IPC ack-content paths after the Document API has proven the
-/// buffer content that the binary is about to snapshot. This intentionally does
-/// not call `document_changed` or broadcast a realtime editor edit.
+/// Used by editor content-projection paths after the Document API has proven
+/// the buffer content that the binary is about to snapshot. This intentionally
+/// does not call `document_changed` or broadcast a realtime editor edit.
 ///
 /// # Safety
 ///
@@ -1360,17 +1360,15 @@ pub unsafe extern "C" fn agent_doc_stop_ipc_listener(project_root: *const c_char
     }
 }
 
-/// Write the final applied document content to the ack-content sidecar file.
+/// Legacy ACK-content ABI retained only to fail old editor plugins closed.
 ///
-/// The binary reads this after receiving IPC ACK to use as snapshot content,
-/// eliminating the 200ms sleep + re-read. If the plugin doesn't call this,
-/// the binary falls back to the 200ms sleep heuristic.
-///
-/// Sidecar path: `<project_root>/.agent-doc/ack-content/<patch_id>.md`
+/// Current editor plugins must publish lazily transport receipts through
+/// `agent_doc_editor_patch_applied` / `agent_doc_editor_patch_rejected` and use
+/// the capability-bearing editor content bridge below.
 ///
 /// # Safety
 ///
-/// All three pointers must be valid, NUL-terminated UTF-8 strings.
+/// `project_root` and `patch_id` must be valid, NUL-terminated UTF-8 strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_write_ack_content(
     project_root: *const c_char,
@@ -1385,50 +1383,145 @@ pub unsafe extern "C" fn agent_doc_write_ack_content(
         Ok(s) => s,
         Err(_) => return 0,
     };
-    let content_str = match unsafe { CStr::from_ptr(content) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 0,
-    };
+    let _ = content;
+    eprintln!(
+        "[ffi] incompatible editor plugin for {root_str}: agent_doc_write_ack_content is no longer supported for patch_id {}; update/reinstall the plugin so it publishes lazily transport receipts",
+        &patch_id_str[..patch_id_str.len().min(8)]
+    );
+    0
+}
 
-    match write_ack_content_sidecar(root_str, patch_id_str, content_str) {
-        Ok(_) => 1,
-        Err(e) => {
-            eprintln!("[ffi] agent_doc_write_ack_content: write error: {e}");
+fn record_lazily_visible_write_receipt(
+    file: &Path,
+    patch_id_str: &str,
+    content_str: &str,
+    source: &str,
+) -> anyhow::Result<()> {
+    let proof =
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            file,
+            patch_id_str,
+            content_str,
+            source,
+    )?;
+    eprintln!(
+        "[ffi] lazily visible-write receipt recorded: patch_id {} model_revision={} candidate_hash={} source={}",
+        &patch_id_str[..patch_id_str.len().min(8)],
+        proof.model_revision,
+        proof.commit_candidate_hash,
+        source
+    );
+    Ok(())
+}
+
+fn record_editor_patch_receipt(
+    file_path: &str,
+    patch_id: &str,
+    actor_generation: u64,
+    rejected_reason: Option<&str>,
+) -> i32 {
+    let canonical = Path::new(file_path)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(file_path));
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let event_suffix = match rejected_reason {
+        Some(reason) => format!(
+            "editor-patch-rejected-{patch_id}-{actor_generation}-{}",
+            agent_doc_hash::content_hash(reason)
+        ),
+        None => format!("editor-patch-applied-{patch_id}-{actor_generation}"),
+    };
+    let fact = match rejected_reason {
+        Some(reason) => StateFact::EditorPatchRejected {
+            document_hash: document_hash.clone(),
+            patch_id: patch_id.to_string(),
+            actor_generation,
+            reason: reason.to_string(),
+        },
+        None => StateFact::EditorPatchApplied {
+            document_hash: document_hash.clone(),
+            patch_id: patch_id.to_string(),
+            actor_generation,
+        },
+    };
+    match state_ledger().lock() {
+        Ok(mut ledger) => {
+            ledger.append(StateEvent::new(
+                format!("{document_hash}:{event_suffix}"),
+                fact,
+            ));
+            1
+        }
+        Err(err) => {
+            eprintln!(
+                "[state-projection] editor patch receipt rejected for {file_path}: ledger lock poisoned: {err}"
+            );
             0
         }
     }
 }
 
-fn write_ack_content_sidecar(
-    root_str: &str,
-    patch_id_str: &str,
-    content_str: &str,
-) -> std::io::Result<std::path::PathBuf> {
-    let ack_dir = std::path::Path::new(root_str).join(".agent-doc/ack-content");
-    std::fs::create_dir_all(&ack_dir)?;
-
-    let sidecar = ack_dir.join(format!("{patch_id_str}.md"));
-    std::fs::write(&sidecar, content_str)?;
-    eprintln!(
-        "[ffi] ack_content written: {} bytes for patch_id {}",
-        content_str.len(),
-        &patch_id_str[..patch_id_str.len().min(8)]
-    );
-    Ok(sidecar)
+/// Record that the editor applied a queued patch as a lazily transport receipt.
+///
+/// # Safety
+///
+/// `file_path` and `patch_id` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_editor_patch_applied(
+    file_path: *const c_char,
+    patch_id: *const c_char,
+    actor_generation: u64,
+) -> i32 {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return 0,
+    };
+    let patch = match unsafe { CStr::from_ptr(patch_id) }.to_str() {
+        Ok(patch) => patch,
+        Err(_) => return 0,
+    };
+    record_editor_patch_receipt(path, patch, actor_generation, None)
 }
 
-/// Write ACK-content and the matching editor-visible synced live-buffer proof
-/// through one ABI call.
+/// Record that the editor rejected a queued patch as a lazily transport receipt.
+///
+/// # Safety
+///
+/// `file_path`, `patch_id`, and `reason` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_editor_patch_rejected(
+    file_path: *const c_char,
+    patch_id: *const c_char,
+    actor_generation: u64,
+    reason: *const c_char,
+) -> i32 {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return 0,
+    };
+    let patch = match unsafe { CStr::from_ptr(patch_id) }.to_str() {
+        Ok(patch) => patch,
+        Err(_) => return 0,
+    };
+    let rejection = match unsafe { CStr::from_ptr(reason) }.to_str() {
+        Ok(reason) => reason,
+        Err(_) => return 0,
+    };
+    record_editor_patch_receipt(path, patch, actor_generation, Some(rejection))
+}
+
+/// Record editor-applied content and the matching editor-visible synced
+/// live-buffer proof through one lazily receipt capability-bearing ABI call.
 ///
 /// This is the preferred editor endpoint when the content came from the live
-/// editor buffer: the sidecar and synced live-buffer epoch represent the same
+/// editor buffer: the projection sidecar and synced live-buffer epoch represent the same
 /// proof contract and must not be emitted as independently ordered facts.
 ///
 /// # Safety
 ///
 /// All pointers must be valid, NUL-terminated UTF-8 strings.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_write_ack_content_for_editor_v2(
+pub unsafe extern "C" fn agent_doc_editor_content_applied_for_editor_v1(
     project_root: *const c_char,
     patch_id: *const c_char,
     file_path: *const c_char,
@@ -1438,7 +1531,7 @@ pub unsafe extern "C" fn agent_doc_write_ack_content_for_editor_v2(
     editor_version: *const c_char,
     capabilities_csv: *const c_char,
 ) -> i32 {
-    let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
+    let _root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
         Ok(s) => s,
         Err(_) => return 0,
     };
@@ -1475,14 +1568,14 @@ pub unsafe extern "C" fn agent_doc_write_ack_content_for_editor_v2(
         .map(str::trim)
         .filter(|capability| !capability.is_empty())
         .collect();
+    if !capabilities.contains(&agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY) {
+        eprintln!(
+            "[ffi] incompatible editor plugin for {path}: agent_doc_editor_content_applied_for_editor_v1 requires {}; update/reinstall the plugin so it publishes editor_patch_applied/editor_patch_rejected lazily receipts",
+            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+        );
+        return 0;
+    }
 
-    let sidecar = match write_ack_content_sidecar(root_str, patch_id_str, text) {
-        Ok(sidecar) => sidecar,
-        Err(err) => {
-            eprintln!("[ffi] consolidated ack-content sidecar write failed for {path}: {err}");
-            return 0;
-        }
-    };
     if let Err(err) =
         agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
             path,
@@ -1493,16 +1586,57 @@ pub unsafe extern "C" fn agent_doc_write_ack_content_for_editor_v2(
             &capabilities,
         )
     {
-        let _ = std::fs::remove_file(&sidecar);
-        eprintln!("[ffi] consolidated ack-content live-buffer proof failed for {path}: {err}");
+        eprintln!(
+            "[ffi] consolidated content-projection live-buffer proof failed for {path}: {err}"
+        );
+        return 0;
+    }
+    if let Err(err) = record_lazily_visible_write_receipt(
+        Path::new(path),
+        patch_id_str,
+        text,
+        "editor_patch_applied_for_editor_v2",
+    ) {
+        eprintln!("[ffi] consolidated lazily receipt event failed for {path}: {err}");
         return 0;
     }
     eprintln!(
-        "[ffi] ack_content live-buffer proof written: {} bytes for patch_id {}",
+        "[ffi] lazily content/projection proof recorded: {} bytes for patch_id {}",
         text.len(),
         &patch_id_str[..patch_id_str.len().min(8)]
     );
     1
+}
+
+/// Legacy ACK-content ABI retained only to fail old editor plugins closed.
+///
+/// # Safety
+///
+/// All pointers must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_write_ack_content_for_editor_v2(
+    _project_root: *const c_char,
+    patch_id: *const c_char,
+    file_path: *const c_char,
+    _content: *const c_char,
+    _editor_id: *const c_char,
+    _editor_kind: *const c_char,
+    _editor_version: *const c_char,
+    _capabilities_csv: *const c_char,
+) -> i32 {
+    let patch_id_str = match unsafe { CStr::from_ptr(patch_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return 0,
+    };
+    eprintln!(
+        "[ffi] incompatible editor plugin for {path}: agent_doc_write_ack_content_for_editor_v2 is no longer supported for patch_id {}; update/reinstall the plugin so it publishes lazily transport receipts",
+        &patch_id_str[..patch_id_str.len().min(8)]
+    );
+    0
 }
 
 /// Check if the CLI claimed this patch by writing a local-closeout sentinel.
@@ -2772,6 +2906,74 @@ mod tests {
     }
 
     #[test]
+    fn state_projection_ffi_accepts_editor_patch_applied_event() {
+        let doc_hash = "state_projection_ffi_applied_doc";
+        let event_json = CString::new(format!(
+            r#"{{
+                "event_id":"{doc_hash}:applied",
+                "fact":{{
+                    "type":"editor_patch_applied",
+                    "document_hash":"{doc_hash}",
+                    "patch_id":"patch-applied",
+                    "actor_generation":1
+                }}
+            }}"#
+        ))
+        .unwrap();
+        let doc_hash_c = CString::new(doc_hash).unwrap();
+
+        let rc = unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), event_json.as_ptr()) };
+        assert_eq!(1, rc, "applied lazily receipt events should be accepted");
+    }
+
+    #[test]
+    fn state_projection_ffi_rejects_unknown_legacy_receipt_event() {
+        let doc_hash = "state_projection_ffi_legacy_receipt_doc";
+        let event_json = CString::new(format!(
+            r#"{{
+                "event_id":"{doc_hash}:legacy-receipt",
+                "fact":{{
+                    "type":"legacy_editor_receipt_observed",
+                    "document_hash":"{doc_hash}",
+                    "patch_id":"patch-legacy",
+                    "actor_generation":1
+                }}
+            }}"#
+        ))
+        .unwrap();
+        let doc_hash_c = CString::new(doc_hash).unwrap();
+
+        let rc = unsafe { agent_doc_record_state_event(doc_hash_c.as_ptr(), event_json.as_ptr()) };
+        assert_eq!(0, rc, "unknown legacy receipt events must be rejected");
+    }
+
+    #[test]
+    fn editor_patch_applied_ffi_records_lazily_receipt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("doc.md");
+        std::fs::write(&file, "hello\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let doc_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let file_c = CString::new(canonical.to_string_lossy().as_ref()).unwrap();
+        let patch_c = CString::new("patch-applied-ffi").unwrap();
+
+        let rc = unsafe { agent_doc_editor_patch_applied(file_c.as_ptr(), patch_c.as_ptr(), 7) };
+        assert_eq!(1, rc, "applied receipt should be recorded");
+
+        let doc_hash_c = CString::new(doc_hash).unwrap();
+        let proj_ptr = unsafe { agent_doc_state_projection(doc_hash_c.as_ptr()) };
+        let proj = unsafe { CStr::from_ptr(proj_ptr) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        drop(unsafe { CString::from_raw(proj_ptr) });
+        assert!(
+            proj.contains(r#""phase":"applied""#),
+            "projection should contain applied transport receipt: {proj}"
+        );
+    }
+
+    #[test]
     fn turn_projection_ffi_defaults_to_idle_for_unknown_document() {
         // No cycle state for this path → idle projection, valid JSON, not in flight.
         let path = CString::new("/nonexistent/agent-doc/turnproj.md").unwrap();
@@ -3791,7 +3993,7 @@ mod ack_content_tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_write_ack_content_creates_file() {
+    fn test_write_ack_content_legacy_abi_is_rejected() {
         let tmp = TempDir::new().unwrap();
         let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
         let patch_id = CString::new("test-patch-id-123").unwrap();
@@ -3800,21 +4002,20 @@ mod ack_content_tests {
         let result = unsafe {
             agent_doc_write_ack_content(project_root.as_ptr(), patch_id.as_ptr(), content.as_ptr())
         };
-        assert_eq!(result, 1, "should return 1 on success");
+        assert_eq!(result, 0, "legacy no-capability ABI should fail closed");
 
         let sidecar = tmp
             .path()
             .join(".agent-doc/ack-content/test-patch-id-123.md");
         assert!(
-            sidecar.exists(),
-            "sidecar file should exist at {:?}",
+            !sidecar.exists(),
+            "legacy ABI must not write a projection sidecar at {:?}",
             sidecar
         );
-        assert_eq!(std::fs::read_to_string(&sidecar).unwrap(), "hello world");
     }
 
     #[test]
-    fn test_write_ack_content_for_editor_v2_consolidates_ack_and_live_buffer_proof() {
+    fn test_editor_content_applied_for_editor_v1_consolidates_receipt_and_live_buffer_proof() {
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("session.md");
@@ -3826,8 +4027,122 @@ mod ack_content_tests {
         let editor_id = CString::new("jetbrains:test").unwrap();
         let editor_kind = CString::new("jetbrains").unwrap();
         let editor_version = CString::new("test").unwrap();
+        let capabilities = CString::new(format!(
+            "{},{}",
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+        ))
+        .unwrap();
+
+        let result = unsafe {
+            agent_doc_editor_content_applied_for_editor_v1(
+                project_root.as_ptr(),
+                patch_id.as_ptr(),
+                file_path.as_ptr(),
+                content.as_ptr(),
+                editor_id.as_ptr(),
+                editor_kind.as_ptr(),
+                editor_version.as_ptr(),
+                capabilities.as_ptr(),
+            )
+        };
+        assert_eq!(result, 1, "should return 1 on success");
+
+        assert!(
+            !tmp.path()
+                .join(".agent-doc/ack-content/test-patch-id-ack-v2.md")
+                .exists(),
+            "current lazily receipt ABI must not write an ack-content compatibility sidecar"
+        );
+        let proof =
+            agent_doc_controller_io::project_controller::visible_write_commit_candidate_for_patch_file(
+                &doc,
+                "test-patch-id-ack-v2",
+            )
+            .expect("consolidated receipt should publish a visible-write projection");
+        assert_eq!(
+            proof.commit_candidate_hash,
+            agent_doc_hash::content_hash(
+                &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                    "before\n### Re: done\n"
+                )
+            )
+        );
+        assert_eq!(
+            proof.source, "editor_patch_applied_for_editor_v2",
+            "visible-write projection should record the editor ABI source"
+        );
+
+        let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
+            .expect("consolidated receipt should record live-buffer proof");
+        assert_eq!(snapshot.content.as_deref(), Some("before\n### Re: done\n"));
+        assert_eq!(snapshot.edit_epoch, snapshot.last_synced_epoch);
+        assert!(snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY));
+        assert!(snapshot.has_capability(agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY));
+    }
+
+    #[test]
+    fn test_editor_content_applied_for_editor_v1_requires_lazily_receipt_capability() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
+        let doc = tmp.path().join("session.md");
+        std::fs::write(&doc, "before\n").unwrap();
+        let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let patch_id = CString::new("test-patch-id-missing-cap").unwrap();
+        let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
+        let content = CString::new("before\n### Re: done\n").unwrap();
+        let editor_id = CString::new("jetbrains:test").unwrap();
+        let editor_kind = CString::new("jetbrains").unwrap();
+        let editor_version = CString::new("test").unwrap();
         let capabilities =
             CString::new(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY).unwrap();
+
+        let result = unsafe {
+            agent_doc_editor_content_applied_for_editor_v1(
+                project_root.as_ptr(),
+                patch_id.as_ptr(),
+                file_path.as_ptr(),
+                content.as_ptr(),
+                editor_id.as_ptr(),
+                editor_kind.as_ptr(),
+                editor_version.as_ptr(),
+                capabilities.as_ptr(),
+            )
+        };
+        assert_eq!(
+            result, 0,
+            "current editor bridge should reject plugins without lazily receipt support"
+        );
+        assert!(
+            !tmp.path()
+                .join(".agent-doc/ack-content/test-patch-id-missing-cap.md")
+                .exists(),
+            "missing-capability call must not write a projection sidecar"
+        );
+        assert!(
+            agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy()).is_none(),
+            "missing-capability call must not record live-buffer proof"
+        );
+    }
+
+    #[test]
+    fn test_write_ack_content_for_editor_v2_legacy_abi_is_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("session.md");
+        std::fs::write(&doc, "before\n").unwrap();
+        let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let patch_id = CString::new("test-patch-id-old-v2").unwrap();
+        let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
+        let content = CString::new("before\n### Re: done\n").unwrap();
+        let editor_id = CString::new("jetbrains:test").unwrap();
+        let editor_kind = CString::new("jetbrains").unwrap();
+        let editor_version = CString::new("test").unwrap();
+        let capabilities = CString::new(format!(
+            "{},{}",
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+        ))
+        .unwrap();
 
         let result = unsafe {
             agent_doc_write_ack_content_for_editor_v2(
@@ -3841,21 +4156,13 @@ mod ack_content_tests {
                 capabilities.as_ptr(),
             )
         };
-        assert_eq!(result, 1, "should return 1 on success");
-
-        let sidecar = tmp
-            .path()
-            .join(".agent-doc/ack-content/test-patch-id-ack-v2.md");
-        assert_eq!(
-            std::fs::read_to_string(&sidecar).unwrap(),
-            "before\n### Re: done\n"
+        assert_eq!(result, 0, "legacy receipt-named v2 ABI should fail closed");
+        assert!(
+            !tmp.path()
+                .join(".agent-doc/ack-content/test-patch-id-old-v2.md")
+                .exists(),
+            "legacy receipt-named v2 ABI must not write a projection sidecar"
         );
-
-        let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
-            .expect("consolidated ACK should record live-buffer proof");
-        assert_eq!(snapshot.content.as_deref(), Some("before\n### Re: done\n"));
-        assert_eq!(snapshot.edit_epoch, snapshot.last_synced_epoch);
-        assert!(snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY));
     }
 
     #[test]

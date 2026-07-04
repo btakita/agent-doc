@@ -83,6 +83,25 @@ class SyncLayoutActionTest {
     }
 
     @Test
+    fun `deferred sync retries are bounded while guard is held`() {
+        assertEquals(
+            SyncLayoutAction.SYNC_DEFERRED_RETRY_MS,
+            SyncLayoutAction.deferredSyncRetryDelayMs(0),
+        )
+        assertEquals(
+            SyncLayoutAction.SYNC_DEFERRED_RETRY_MS,
+            SyncLayoutAction.deferredSyncRetryDelayMs(
+                SyncLayoutAction.SYNC_DEFERRED_MAX_RETRIES - 1,
+            ),
+        )
+        assertNull(
+            SyncLayoutAction.deferredSyncRetryDelayMs(
+                SyncLayoutAction.SYNC_DEFERRED_MAX_RETRIES,
+            )
+        )
+    }
+
+    @Test
     fun `focus command targets a single document without sync args`() {
         assertEquals(
             listOf("agent-doc", "focus", "tasks/one.md"),

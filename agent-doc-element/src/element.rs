@@ -625,6 +625,19 @@ pub fn is_agent_marker(comment_text: &str) -> bool {
     }
 }
 
+fn is_agent_boundary_marker(comment_text: &str) -> bool {
+    let trimmed = comment_text.trim();
+    if let Some(rest) = trimmed.strip_prefix("/agent:") {
+        rest.starts_with("boundary:")
+    } else if let Some(rest) = trimmed.strip_prefix("agent:") {
+        rest.split_whitespace()
+            .next()
+            .is_some_and(|name| name.starts_with("boundary:"))
+    } else {
+        false
+    }
+}
+
 fn bounded_preview(doc: &str, start: usize, max_bytes: usize) -> &str {
     debug_assert!(doc.is_char_boundary(start));
     let mut end = doc.len().min(start.saturating_add(max_bytes));
@@ -783,7 +796,7 @@ pub fn find_non_agent_html_comment_ranges(doc: &str) -> Vec<(usize, usize)> {
         }
         let Some(end) = find_comment_end(bytes, pos + 4) else {
             let inner = &doc[pos + 4..];
-            if !is_agent_marker(inner) && !inner.trim_start().starts_with("agent:boundary:") {
+            if !is_agent_marker(inner) && !is_agent_boundary_marker(inner) {
                 ranges.push((pos, len));
                 break;
             }
@@ -791,7 +804,7 @@ pub fn find_non_agent_html_comment_ranges(doc: &str) -> Vec<(usize, usize)> {
             continue;
         };
         let inner = &doc[pos + 4..end - 3];
-        if !is_agent_marker(inner) && !inner.trim().starts_with("agent:boundary:") {
+        if !is_agent_marker(inner) && !is_agent_boundary_marker(inner) {
             ranges.push((pos, end));
         }
         pos = end;
@@ -865,6 +878,11 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
             marker_end += 1;
         }
 
+        if is_agent_boundary_marker(trimmed) {
+            pos = close;
+            continue;
+        }
+
         if let Some(name) = trimmed.strip_prefix("/agent:") {
             // Closing marker
             if !is_valid_name(name) {
@@ -895,7 +913,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
             }
         } else if let Some(rest) = trimmed.strip_prefix("agent:") {
             // Skip boundary markers — these are not component markers
-            if rest.starts_with("boundary:") {
+            if is_agent_boundary_marker(trimmed) {
                 pos = close;
                 continue;
             }
@@ -1683,6 +1701,33 @@ new content here\n\
         let components = parse(doc).expect("prompt glyphs near markers must not panic");
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "exchange");
+    }
+
+    #[test]
+    fn parse_skips_boundary_close_artifact_as_non_component() {
+        let doc = "<!-- agent:exchange -->\nanswer\n<!-- /agent:boundary:a37c9696 -->\n<!-- /agent:exchange -->\n";
+        let components = parse(doc).expect("boundary close artifact must not be a component");
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "exchange");
+        assert!(
+            components[0]
+                .content(doc)
+                .contains("<!-- /agent:boundary:a37c9696 -->")
+        );
+    }
+
+    #[test]
+    fn boundary_close_artifact_is_not_an_ordinary_comment_range() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "answer\n",
+            "<!-- /agent:boundary:a37c9696 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        assert!(
+            find_non_agent_html_comment_ranges(doc).is_empty(),
+            "boundary close artifacts are transient agent comments, not ordinary comments"
+        );
     }
 
     #[test]

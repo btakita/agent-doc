@@ -271,7 +271,7 @@ One.
         assertTrue(source.contains("reread_disk repair is disabled"))
         assertTrue(saveBody.contains("awaitIdleBeforeDocumentMutation(filePath, \"save_document\")"))
         assertTrue(saveBody.contains("fdm.saveDocument(document)"))
-        assertTrue(saveBody.contains("writeAckContent(patchId, content, filePath)"))
+        assertTrue(saveBody.contains("writeEditorContentProjection(patchId, content, filePath)"))
         assertFalse(source.contains("document.setText(patch.fullContent)"))
         assertFalse(source.contains("setBinaryContent(patch.fullContent"))
         assertFalse(source.contains("setBinaryContent("))
@@ -360,12 +360,12 @@ One.
     }
 
     @Test
-    fun `editor surface ops marker distinguishes ack content save and vcs surfaces`() {
-        val ack = buildEditorSurfaceOpsLogLine(
+    fun `editor surface ops marker distinguishes content projection and vcs surfaces`() {
+        val projection = buildEditorSurfaceOpsLogLine(
             timestamp = "2026-06-24T12:34:56Z",
             relativePath = "tasks/agent-doc/agent-doc-bugs2.md",
-            surface = "ack_content",
-            action = "write_ack_content",
+            surface = "content_projection",
+            action = "editor_content_applied_for_editor_v1",
             agentCommand = "write_finalize_ipc",
             patchId = "patch-1",
             status = "ok",
@@ -380,11 +380,11 @@ One.
             status = "triggered",
         )
 
-        assertTrue(ack.contains("editor_surface_event"))
-        assertTrue(ack.contains("surface=ack_content"))
-        assertTrue(ack.contains("action=write_ack_content"))
-        assertTrue(ack.contains("agent_command=write_finalize_ipc"))
-        assertTrue(ack.contains("patch_id=patch-1"))
+        assertTrue(projection.contains("editor_surface_event"))
+        assertTrue(projection.contains("surface=content_projection"))
+        assertTrue(projection.contains("action=editor_content_applied_for_editor_v1"))
+        assertTrue(projection.contains("agent_command=write_finalize_ipc"))
+        assertTrue(projection.contains("patch_id=patch-1"))
         assertTrue(vcs.contains("surface=vcs_refresh"))
         assertTrue(vcs.contains("agent_command=commit_vcs_refresh"))
         assertTrue(vcs.contains("doc=project"))
@@ -427,7 +427,7 @@ One.
 
         assertTrue(replaceIdx >= 0)
         assertTrue(
-            "minimal edit helper must verify the post-apply buffer before ACKing",
+            "minimal edit helper must verify the post-apply buffer before recording receipt",
             postApplyProofIdx > replaceIdx,
         )
     }
@@ -466,17 +466,17 @@ One.
     }
 
     @Test
-    fun `file patch success requires ack content before deleting patch file`() {
+    fun `file patch success requires content projection before deleting patch file`() {
         val patchWatcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
         ).first { Files.exists(it) }
         val patchWatcher = Files.readString(patchWatcherPath)
 
-        assertTrue(patchWatcher.contains("private fun writeAckContent(patchId: String?, content: String, filePath: String? = null): Boolean"))
-        assertTrue(patchWatcher.contains("FFI unavailable, cannot write ack-content"))
-        assertTrue(patchWatcher.contains("if (!writeAckContent(patch.patchId, document.text, patch.file))"))
-        assertTrue(patchWatcher.contains("if (!writeAckContent(patch.patchId, content, patch.file))"))
+        assertTrue(patchWatcher.contains("private fun writeEditorContentProjection(patchId: String?, content: String, filePath: String? = null): Boolean"))
+        assertTrue(patchWatcher.contains("FFI unavailable, cannot write content projection"))
+        assertTrue(patchWatcher.contains("if (!writeEditorContentProjection(patch.patchId, document.text, patch.file))"))
+        assertTrue(patchWatcher.contains("if (!writeEditorContentProjection(patch.patchId, content, patch.file))"))
         assertTrue(patchWatcher.contains("applyMinimalDocumentEditUtil(document, content, result)"))
         assertFalse(patchWatcher.contains("document.setText(result)"))
         assertFalse(patchWatcher.contains("setBinaryContent("))
@@ -490,34 +490,34 @@ One.
     }
 
     @Test
-    fun `already applied dedup publishes ack content before ack or delete`() {
+    fun `already applied dedup publishes content projection before already_applied or delete`() {
         val patchWatcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
         ).first { Files.exists(it) }
         val patchWatcher = Files.readString(patchWatcherPath)
 
-        assertTrue(patchWatcher.contains("private fun writeAlreadyAppliedAckContent(patch: IpcPatch, source: String): Boolean"))
-        assertTrue(patchWatcher.contains("currentContentForAck(patch.file)"))
-        assertTrue(patchWatcher.contains("agent_doc_write_ack_content_for_editor_v2"))
-        assertTrue(patchWatcher.contains("write_ack_content_for_editor_v2"))
+        assertTrue(patchWatcher.contains("private fun writeAlreadyAppliedContentProjection(patch: IpcPatch, source: String): Boolean"))
+        assertTrue(patchWatcher.contains("currentContentForProjection(patch.file)"))
+        assertTrue(patchWatcher.contains("agent_doc_editor_content_applied_for_editor_v1"))
+        assertTrue(patchWatcher.contains("editor_content_applied_for_editor_v1"))
 
         val socketPatch = patchWatcher
             .substringAfter("\"patch\" -> {")
             .substringBefore("\"reposition\" -> {")
         val socketPrecheck = socketPatch.indexOf("isAlreadyApplied(patch.patchId)")
-        val socketAckContent = socketPatch.indexOf("writeAlreadyAppliedAckContent(patch, \"socket_precheck\")")
+        val socketAckContent = socketPatch.indexOf("writeAlreadyAppliedContentProjection(patch, \"socket_precheck\")")
         val socketAlreadyApplied = socketPatch.indexOf("APPLY_ALREADY_APPLIED", socketAckContent)
-        assertTrue("socket dedup must publish ack-content before already_applied", socketPrecheck >= 0 && socketPrecheck < socketAckContent && socketAckContent < socketAlreadyApplied)
+        assertTrue("socket dedup must publish content projection before already_applied", socketPrecheck >= 0 && socketPrecheck < socketAckContent && socketAckContent < socketAlreadyApplied)
 
         val filePrecheck = patchWatcher.indexOf("// patch_id dedup: if socket IPC already applied")
-        val fileAckContent = patchWatcher.indexOf("writeAlreadyAppliedAckContent(patch, \"file_precheck\")", filePrecheck)
+        val fileAckContent = patchWatcher.indexOf("writeAlreadyAppliedContentProjection(patch, \"file_precheck\")", filePrecheck)
         val fileDelete = patchWatcher.indexOf("patchFile.delete()", fileAckContent)
-        assertTrue("file watcher dedup must publish ack-content before deleting the patch", filePrecheck >= 0 && filePrecheck < fileAckContent && fileAckContent < fileDelete)
+        assertTrue("file watcher dedup must publish content projection before deleting the patch", filePrecheck >= 0 && filePrecheck < fileAckContent && fileAckContent < fileDelete)
     }
 
     @Test
-    fun `socket patch publishes plugin owner before editor ack`() {
+    fun `socket patch publishes plugin owner before editor receipt`() {
         val patchWatcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
@@ -530,11 +530,11 @@ One.
         val owner = socketBranch.indexOf("ownsDocument(patch.file)")
         val queued = socketBranch.indexOf("StateProjectionBridge.recordEditorPatchQueued")
         val apply = socketBranch.indexOf("applyPatch(patch)")
-        val ack = socketBranch.indexOf("StateProjectionBridge.recordEditorAckObserved")
+        val ack = socketBranch.indexOf("StateProjectionBridge.recordEditorPatchApplied")
 
         assertTrue("socket IPC must acquire/publish plugin-owner proof before queueing", owner >= 0 && owner < queued)
         assertTrue("socket IPC must acquire/publish plugin-owner proof before applying", owner >= 0 && owner < apply)
-        assertTrue("socket IPC must acquire/publish plugin-owner proof before ACKing", owner >= 0 && owner < ack)
+        assertTrue("socket IPC must acquire/publish plugin-owner proof before recording receipt", owner >= 0 && owner < ack)
     }
 
     @Test

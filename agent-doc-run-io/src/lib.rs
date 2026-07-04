@@ -1103,7 +1103,10 @@ pub fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
 pub fn start_run_cycle(file: &Path) -> Result<()> {
     agent_doc_cycle_state_io::admit_with_current_resolver(
         file,
-        |file, disk| agent_doc_document_realtime_io::resolve_current_doc(file, disk).content,
+        |file| {
+            agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)
+                .map(|resolved| resolved.content)
+        },
         agent_doc_snapshot_io::load,
         agent_doc_ops_log_io::log_op,
     )?;

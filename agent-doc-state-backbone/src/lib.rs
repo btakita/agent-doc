@@ -7,7 +7,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
+use lazily::{
+    CausalReceipt, ReceiptApplyStatus, ReceiptOutcome, ReceiptProjection, ThreadSafeContext,
+    ThreadSafeStateMachine,
+};
 use serde::{Deserialize, Serialize};
 
 use agent_doc_turn::CyclePhase;
@@ -15,6 +18,20 @@ use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 
 /// Phase E (`#adstatechart`) local-process Harel state chart consolidation.
 pub mod adstatechart;
+
+/// Project-scoped supervisor graph document. Most state facts are per session
+/// document; supervisor recycle is a project-wide gate shared by every routed
+/// document, so the PCP folds it under this reserved document id.
+pub const PROJECT_SUPERVISOR_DOCUMENT_HASH: &str = "__agent_doc_project_supervisor__";
+pub const ROUTE_SUBMIT_IN_FLIGHT_TTL_SECS: u64 = 30;
+pub const ROUTE_SUBMIT_READY_PROBE_TTL_SECS: u64 = 150;
+pub const ROUTE_SUBMIT_BLOCKED_TTL_SECS: u64 = 120;
+pub const ROUTE_DISPATCH_SUBMIT_REASON: &str = "dispatch_submit";
+pub const ROUTE_DISPATCH_ONLY_READY_PROBE_REASON: &str = "dispatch_only_ready_probe";
+pub const QUEUE_CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS: u64 = 60;
+pub const QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferred_clear";
+pub const QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_MANUAL_COOLDOWN: &str =
+    "operator_manual_clear_cooldown";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -95,6 +112,17 @@ pub enum StateFact {
         watch_generation: u64,
         content_hash: String,
     },
+    DocumentAuthorityObserved {
+        document_hash: String,
+        authority: DocumentAuthority,
+        authority_epoch: u64,
+        source: String,
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content_hash: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        editor_id: Option<String>,
+    },
     QueueHeadSelected {
         document_hash: String,
         node_key: String,
@@ -133,6 +161,73 @@ pub enum StateFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hosting_epoch: Option<u64>,
     },
+    /// A supervisor-owned `/clear` or equivalent context-clear command is
+    /// pending/settling for this document. The PCP queue projection is the
+    /// durable authority for this gate.
+    QueueContextClearStarted {
+        document_hash: String,
+        file: String,
+        target: String,
+        harness: String,
+        command: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head_sha256: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head_bytes: Option<usize>,
+        clear_epoch: u64,
+        marked_secs: u64,
+    },
+    /// The supervisor-owned context-clear window settled; queue drains may resume
+    /// once this fact is folded into the PCP graph.
+    QueueContextClearSettled {
+        document_hash: String,
+        file: String,
+        target: String,
+        harness: String,
+        command: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        clear_epoch: u64,
+        marked_secs: u64,
+    },
+    /// An explicit operator clear was deferred while a queue-owned pane was busy;
+    /// the supervisor idle watch should submit it at the next dispatch-ready gap.
+    QueueContextClearDeferred {
+        document_hash: String,
+        file: String,
+        target: String,
+        harness: String,
+        command: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head_sha256: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head_bytes: Option<usize>,
+        clear_epoch: u64,
+        marked_secs: u64,
+    },
+    /// A clean closeout still required queue continuation; the next preflight
+    /// reconciles this one-shot queue-stall signal.
+    QueueDrainStallContinuationRecorded {
+        document_hash: String,
+        file: String,
+        cycle_id: String,
+        stall_epoch: u64,
+        recorded_secs: u64,
+    },
+    /// The one-shot continuation-pending queue-stall signal was reconciled or
+    /// superseded by active supervisor drain progress.
+    QueueDrainStallContinuationCleared {
+        document_hash: String,
+        file: String,
+        stall_epoch: u64,
+        cleared_secs: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
     /// A route-owned supervisor process begins hosting (or switches to) a
     /// document on a tmux pane/session (`#xdocsuper1`/`#xdocsuper3`).
     ///
@@ -147,11 +242,79 @@ pub enum StateFact {
         pane_session: String,
         lease_epoch: u64,
     },
+    /// Project-scoped supervisor recycle began. The PCP owns this fact instead
+    /// of an on-disk recycle marker so route callers can wait on the lazily
+    /// state graph.
+    SupervisorRecycleStarted {
+        document_hash: String,
+        reason: String,
+        recycle_epoch: u64,
+        marked_secs: u64,
+    },
+    /// Project-scoped supervisor recycle settled; route callers may inject
+    /// triggers again once this fact is folded into the PCP graph.
+    SupervisorRecycleSettled {
+        document_hash: String,
+        reason: String,
+        recycle_epoch: u64,
+        marked_secs: u64,
+    },
+    /// Route input delivery is active for this document. This replaces the
+    /// old route-submit marker files with a controller-backed route projection.
+    RouteSubmitStarted {
+        document_hash: String,
+        pane_id: String,
+        harness: String,
+        reason: String,
+        submit_epoch: u64,
+        marked_secs: u64,
+    },
+    /// Route input delivery has settled, either through observed acceptance or
+    /// by leaving the protected pane-input window.
+    RouteSubmitSettled {
+        document_hash: String,
+        pane_id: String,
+        harness: String,
+        reason: String,
+        submit_epoch: u64,
+        marked_secs: u64,
+    },
+    /// Route input was accepted but did not produce dispatch-start proof; idle
+    /// queue draining remains suppressed for the bounded blocked window.
+    RouteSubmitBlocked {
+        document_hash: String,
+        pane_id: String,
+        harness: String,
+        reason: String,
+        submit_epoch: u64,
+        marked_secs: u64,
+    },
     ResponseCaptured {
         document_hash: String,
         cycle_id: String,
         capture_id: String,
         response_sha256: String,
+    },
+    /// The currently durable pending response body for an open closeout cycle.
+    ///
+    /// This is the lazily state-backbone authority. Files under
+    /// `.agent-doc/pending/` are crash-recovery projections of this fact, not
+    /// hot-path read or gating state.
+    PendingResponseCaptured {
+        document_hash: String,
+        cycle_id: String,
+        capture_id: String,
+        response_sha256: String,
+        response_body: String,
+    },
+    /// The pending response projection was retired after write/commit success
+    /// or explicit discard.
+    PendingResponseCleared {
+        document_hash: String,
+        cycle_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capture_id: Option<String>,
+        reason: String,
     },
     WriteApplied {
         document_hash: String,
@@ -183,10 +346,32 @@ pub enum StateFact {
         patch_id: String,
         actor_generation: u64,
     },
-    EditorAckObserved {
+    EditorPatchApplied {
         document_hash: String,
         patch_id: String,
         actor_generation: u64,
+    },
+    EditorPatchRejected {
+        document_hash: String,
+        patch_id: String,
+        actor_generation: u64,
+        reason: String,
+    },
+    VisibleWriteCommitCandidateObserved {
+        document_hash: String,
+        patch_id: String,
+        model_revision: u64,
+        editor_visible_hash: String,
+        commit_candidate_hash: String,
+        source: String,
+    },
+    VisibleWriteMaterializedCarryForwardObserved {
+        document_hash: String,
+        model_revision: u64,
+        live_buffer_hash: String,
+        file_content_hash: String,
+        commit_candidate_hash: String,
+        source: String,
     },
     IpcProofInsufficient {
         document_hash: String,
@@ -256,10 +441,16 @@ impl StateFact {
             Self::PreflightStarted { document_hash, .. }
             | Self::BaselineSaved { document_hash, .. }
             | Self::FileWatchChangeObserved { document_hash, .. }
+            | Self::DocumentAuthorityObserved { document_hash, .. }
             | Self::QueueHeadSelected { document_hash, .. }
             | Self::QueueHeadDeferred { document_hash, .. }
             | Self::QueueHeadCompleted { document_hash, .. }
             | Self::QueueWorklistProjected { document_hash, .. }
+            | Self::QueueContextClearStarted { document_hash, .. }
+            | Self::QueueContextClearSettled { document_hash, .. }
+            | Self::QueueContextClearDeferred { document_hash, .. }
+            | Self::QueueDrainStallContinuationRecorded { document_hash, .. }
+            | Self::QueueDrainStallContinuationCleared { document_hash, .. }
             | Self::ResponseCaptured { document_hash, .. }
             | Self::WriteApplied { document_hash, .. }
             | Self::CommitObserved { document_hash, .. }
@@ -267,7 +458,10 @@ impl StateFact {
             | Self::CycleAbandoned { document_hash, .. }
             | Self::OwnerGenerationChanged { document_hash, .. }
             | Self::EditorPatchQueued { document_hash, .. }
-            | Self::EditorAckObserved { document_hash, .. }
+            | Self::EditorPatchApplied { document_hash, .. }
+            | Self::EditorPatchRejected { document_hash, .. }
+            | Self::VisibleWriteCommitCandidateObserved { document_hash, .. }
+            | Self::VisibleWriteMaterializedCarryForwardObserved { document_hash, .. }
             | Self::IpcProofInsufficient { document_hash, .. }
             | Self::EditorPatchRetryRequested { document_hash, .. }
             | Self::ForceDiskFallbackRecorded { document_hash, .. }
@@ -277,9 +471,16 @@ impl StateFact {
             | Self::RoutePaneObserved { document_hash, .. }
             | Self::RouteReadinessObserved { document_hash, .. }
             | Self::DispatchProofObserved { document_hash, .. }
+            | Self::RouteSubmitStarted { document_hash, .. }
+            | Self::RouteSubmitSettled { document_hash, .. }
+            | Self::RouteSubmitBlocked { document_hash, .. }
             | Self::ProofMarkerObserved { document_hash, .. }
             | Self::ProofMarkerDisproved { document_hash, .. }
-            | Self::SupervisorHosting { document_hash, .. } => document_hash,
+            | Self::PendingResponseCaptured { document_hash, .. }
+            | Self::PendingResponseCleared { document_hash, .. }
+            | Self::SupervisorHosting { document_hash, .. }
+            | Self::SupervisorRecycleStarted { document_hash, .. }
+            | Self::SupervisorRecycleSettled { document_hash, .. } => document_hash,
         }
     }
 
@@ -287,19 +488,29 @@ impl StateFact {
         match self {
             Self::PreflightStarted { .. }
             | Self::ResponseCaptured { .. }
+            | Self::PendingResponseCaptured { .. }
+            | Self::PendingResponseCleared { .. }
             | Self::WriteApplied { .. }
             | Self::CommitObserved { .. }
             | Self::SessionCheckPassed { .. }
             | Self::CycleAbandoned { .. } => StateDomain::Closeout,
-            Self::BaselineSaved { .. } | Self::FileWatchChangeObserved { .. } => {
-                StateDomain::Document
-            }
+            Self::BaselineSaved { .. }
+            | Self::FileWatchChangeObserved { .. }
+            | Self::DocumentAuthorityObserved { .. } => StateDomain::Document,
             Self::QueueHeadSelected { .. }
             | Self::QueueHeadDeferred { .. }
             | Self::QueueHeadCompleted { .. }
-            | Self::QueueWorklistProjected { .. } => StateDomain::Queue,
+            | Self::QueueWorklistProjected { .. }
+            | Self::QueueContextClearStarted { .. }
+            | Self::QueueContextClearSettled { .. }
+            | Self::QueueContextClearDeferred { .. }
+            | Self::QueueDrainStallContinuationRecorded { .. }
+            | Self::QueueDrainStallContinuationCleared { .. } => StateDomain::Queue,
             Self::EditorPatchQueued { .. }
-            | Self::EditorAckObserved { .. }
+            | Self::EditorPatchApplied { .. }
+            | Self::EditorPatchRejected { .. }
+            | Self::VisibleWriteCommitCandidateObserved { .. }
+            | Self::VisibleWriteMaterializedCarryForwardObserved { .. }
             | Self::IpcProofInsufficient { .. }
             | Self::EditorPatchRetryRequested { .. }
             | Self::ForceDiskFallbackRecorded { .. } => StateDomain::Transport,
@@ -307,10 +518,15 @@ impl StateFact {
             | Self::ActorLifecycleObserved { .. }
             | Self::AgentRestartPerformed { .. }
             | Self::CapabilityProofObserved { .. }
-            | Self::SupervisorHosting { .. } => StateDomain::Supervisor,
+            | Self::SupervisorHosting { .. }
+            | Self::SupervisorRecycleStarted { .. }
+            | Self::SupervisorRecycleSettled { .. } => StateDomain::Supervisor,
             Self::RoutePaneObserved { .. }
             | Self::RouteReadinessObserved { .. }
-            | Self::DispatchProofObserved { .. } => StateDomain::Route,
+            | Self::DispatchProofObserved { .. }
+            | Self::RouteSubmitStarted { .. }
+            | Self::RouteSubmitSettled { .. }
+            | Self::RouteSubmitBlocked { .. } => StateDomain::Route,
             Self::ProofMarkerObserved { .. } | Self::ProofMarkerDisproved { .. } => {
                 StateDomain::Proof
             }
@@ -322,19 +538,38 @@ impl StateFact {
             Self::PreflightStarted { .. } => "preflight_started",
             Self::BaselineSaved { .. } => "baseline_saved",
             Self::FileWatchChangeObserved { .. } => "file_watch_change_observed",
+            Self::DocumentAuthorityObserved { .. } => "document_authority_observed",
             Self::QueueHeadSelected { .. } => "queue_head_selected",
             Self::QueueHeadDeferred { .. } => "queue_head_deferred",
             Self::QueueHeadCompleted { .. } => "queue_head_completed",
             Self::QueueWorklistProjected { .. } => "queue_worklist_projected",
+            Self::QueueContextClearStarted { .. } => "queue_context_clear_started",
+            Self::QueueContextClearSettled { .. } => "queue_context_clear_settled",
+            Self::QueueContextClearDeferred { .. } => "queue_context_clear_deferred",
+            Self::QueueDrainStallContinuationRecorded { .. } => {
+                "queue_drain_stall_continuation_recorded"
+            }
+            Self::QueueDrainStallContinuationCleared { .. } => {
+                "queue_drain_stall_continuation_cleared"
+            }
             Self::SupervisorHosting { .. } => "supervisor_hosting",
             Self::ResponseCaptured { .. } => "response_captured",
+            Self::PendingResponseCaptured { .. } => "pending_response_captured",
+            Self::PendingResponseCleared { .. } => "pending_response_cleared",
             Self::WriteApplied { .. } => "write_applied",
             Self::CommitObserved { .. } => "commit_observed",
             Self::SessionCheckPassed { .. } => "session_check_passed",
             Self::CycleAbandoned { .. } => "cycle_abandoned",
             Self::OwnerGenerationChanged { .. } => "owner_generation_changed",
             Self::EditorPatchQueued { .. } => "editor_patch_queued",
-            Self::EditorAckObserved { .. } => "editor_ack_observed",
+            Self::EditorPatchApplied { .. } => "editor_patch_applied",
+            Self::EditorPatchRejected { .. } => "editor_patch_rejected",
+            Self::VisibleWriteCommitCandidateObserved { .. } => {
+                "visible_write_commit_candidate_observed"
+            }
+            Self::VisibleWriteMaterializedCarryForwardObserved { .. } => {
+                "visible_write_materialized_carry_forward_observed"
+            }
             Self::IpcProofInsufficient { .. } => "ipc_proof_insufficient",
             Self::EditorPatchRetryRequested { .. } => "editor_patch_retry_requested",
             Self::ForceDiskFallbackRecorded { .. } => "force_disk_fallback_recorded",
@@ -344,8 +579,13 @@ impl StateFact {
             Self::RoutePaneObserved { .. } => "route_pane_observed",
             Self::RouteReadinessObserved { .. } => "route_readiness_observed",
             Self::DispatchProofObserved { .. } => "dispatch_proof_observed",
+            Self::RouteSubmitStarted { .. } => "route_submit_started",
+            Self::RouteSubmitSettled { .. } => "route_submit_settled",
+            Self::RouteSubmitBlocked { .. } => "route_submit_blocked",
             Self::ProofMarkerObserved { .. } => "proof_marker_observed",
             Self::ProofMarkerDisproved { .. } => "proof_marker_disproved",
+            Self::SupervisorRecycleStarted { .. } => "supervisor_recycle_started",
+            Self::SupervisorRecycleSettled { .. } => "supervisor_recycle_settled",
         }
     }
 }
@@ -470,6 +710,12 @@ impl StateBackboneProjection {
         self.documents.get(document_hash)
     }
 
+    pub fn project_supervisor_recycle(&self) -> SupervisorRecycleProjection {
+        self.document(PROJECT_SUPERVISOR_DOCUMENT_HASH)
+            .map(|document| document.supervisor.recycle.clone())
+            .unwrap_or_default()
+    }
+
     pub fn apply(&mut self, event: &StateEvent) {
         if !self.seen_event_ids.insert(event.event_id.clone()) {
             return;
@@ -489,6 +735,7 @@ pub struct DocumentStateProjection {
     pub queue: QueueProjection,
     pub closeout: CloseoutProjection,
     pub transport: TransportProjection,
+    pub visible_write: VisibleWriteProjection,
     pub supervisor: SupervisorProjection,
     pub route: RouteProjection,
     pub proof: ProofProjection,
@@ -513,6 +760,7 @@ impl DocumentStateProjection {
             queue: QueueProjection::default(),
             closeout: CloseoutProjection::default(),
             transport: TransportProjection::default(),
+            visible_write: VisibleWriteProjection::default(),
             supervisor: SupervisorProjection::default(),
             route: RouteProjection::default(),
             proof: ProofProjection::default(),
@@ -530,6 +778,35 @@ impl DocumentStateProjection {
     /// facts with this value so a later host/switch makes them stale.
     pub fn hosting_epoch(&self) -> Option<u64> {
         self.hosting.as_ref().map(|hosting| hosting.hosting_epoch)
+    }
+
+    pub fn applied_visible_write_candidate(
+        &self,
+        commit_candidate_hash: &str,
+    ) -> Option<&VisibleWriteCommitCandidateProjection> {
+        self.visible_write
+            .applied_candidate(&self.transport, commit_candidate_hash)
+    }
+
+    pub fn applied_visible_write_candidate_for_patch(
+        &self,
+        patch_id: &str,
+    ) -> Option<&VisibleWriteCommitCandidateProjection> {
+        self.visible_write
+            .applied_candidate_for_patch(&self.transport, patch_id)
+    }
+
+    pub fn materialized_visible_write_carry_forward(
+        &self,
+        commit_candidate_hash: &str,
+        file_content_hash: &str,
+        live_buffer_hash: &str,
+    ) -> Option<&VisibleWriteMaterializedCarryForwardProjection> {
+        self.visible_write.materialized_carry_forward(
+            commit_candidate_hash,
+            file_content_hash,
+            live_buffer_hash,
+        )
     }
 
     /// Apply a single state fact to this document projection. Public so the
@@ -565,6 +842,26 @@ impl DocumentStateProjection {
                     watch_generation: *watch_generation,
                     content_hash: content_hash.clone(),
                 });
+            }
+            StateFact::DocumentAuthorityObserved {
+                authority,
+                authority_epoch,
+                source,
+                reason,
+                content_hash,
+                editor_id,
+                ..
+            } => {
+                if !self.document.apply_authority(
+                    *authority,
+                    *authority_epoch,
+                    source,
+                    reason,
+                    content_hash.as_deref(),
+                    editor_id.as_deref(),
+                ) {
+                    self.reject_stale(StateDomain::Document, StateOwner::DocumentWriter);
+                }
             }
             StateFact::QueueHeadSelected {
                 node_key,
@@ -622,6 +919,121 @@ impl DocumentStateProjection {
                     self.reject_stale(StateDomain::Queue, StateOwner::QueueOrchestrator);
                 }
             }
+            StateFact::QueueContextClearStarted {
+                file,
+                target,
+                harness,
+                command,
+                source,
+                head_sha256,
+                head_bytes,
+                clear_epoch,
+                marked_secs,
+                ..
+            } => {
+                self.queue.apply_context_clear_event(
+                    QueueContextClearEvent::Started,
+                    QueueContextClearFields {
+                        file,
+                        target,
+                        harness,
+                        command,
+                        source: source.as_deref(),
+                        head_sha256: head_sha256.as_deref(),
+                        head_bytes: *head_bytes,
+                    },
+                    *clear_epoch,
+                    *marked_secs,
+                );
+            }
+            StateFact::QueueContextClearSettled {
+                file,
+                target,
+                harness,
+                command,
+                source,
+                clear_epoch,
+                marked_secs,
+                ..
+            } => {
+                self.queue.apply_context_clear_event(
+                    QueueContextClearEvent::Settled,
+                    QueueContextClearFields {
+                        file,
+                        target,
+                        harness,
+                        command,
+                        source: source.as_deref(),
+                        head_sha256: None,
+                        head_bytes: None,
+                    },
+                    *clear_epoch,
+                    *marked_secs,
+                );
+            }
+            StateFact::QueueContextClearDeferred {
+                file,
+                target,
+                harness,
+                command,
+                source,
+                head_sha256,
+                head_bytes,
+                clear_epoch,
+                marked_secs,
+                ..
+            } => {
+                self.queue.apply_context_clear_event(
+                    QueueContextClearEvent::Deferred,
+                    QueueContextClearFields {
+                        file,
+                        target,
+                        harness,
+                        command,
+                        source: source.as_deref(),
+                        head_sha256: head_sha256.as_deref(),
+                        head_bytes: *head_bytes,
+                    },
+                    *clear_epoch,
+                    *marked_secs,
+                );
+            }
+            StateFact::QueueDrainStallContinuationRecorded {
+                file,
+                cycle_id,
+                stall_epoch,
+                recorded_secs,
+                ..
+            } => {
+                self.queue.apply_drain_stall_event(
+                    QueueDrainStallEvent::Recorded,
+                    QueueDrainStallFields {
+                        file,
+                        cycle_id: Some(cycle_id),
+                        reason: None,
+                    },
+                    *stall_epoch,
+                    *recorded_secs,
+                );
+            }
+            StateFact::QueueDrainStallContinuationCleared {
+                file,
+                stall_epoch,
+                cleared_secs,
+                reason,
+                ..
+            } => {
+                self.queue.apply_drain_stall_event(
+                    QueueDrainStallEvent::Cleared,
+                    QueueDrainStallFields {
+                        file,
+                        cycle_id: None,
+                        reason: reason.as_deref(),
+                    },
+                    *stall_epoch,
+                    *cleared_secs,
+                );
+            }
             StateFact::PreflightStarted {
                 cycle_id,
                 session_id,
@@ -642,12 +1054,56 @@ impl DocumentStateProjection {
                 self.closeout.capture_id = Some(capture_id.clone());
                 self.closeout.response_sha256 = Some(response_sha256.clone());
             }
+            StateFact::PendingResponseCaptured {
+                cycle_id,
+                capture_id,
+                response_sha256,
+                response_body,
+                ..
+            } => {
+                if self.closeout.cycle_id.as_deref() != Some(cycle_id) {
+                    self.closeout.cycle_id = Some(cycle_id.clone());
+                    self.closeout.phase = Some(CyclePhase::ResponseCaptured);
+                    self.closeout.session_check_passed = false;
+                }
+                self.closeout.capture_id = Some(capture_id.clone());
+                self.closeout.response_sha256 = Some(response_sha256.clone());
+                self.closeout.pending_response = Some(PendingResponseProjection {
+                    cycle_id: cycle_id.clone(),
+                    capture_id: capture_id.clone(),
+                    response_sha256: response_sha256.clone(),
+                    response_body: response_body.clone(),
+                });
+            }
+            StateFact::PendingResponseCleared {
+                cycle_id,
+                capture_id,
+                reason,
+                ..
+            } => {
+                let should_clear = self
+                    .closeout
+                    .pending_response
+                    .as_ref()
+                    .is_some_and(|pending| {
+                        pending.cycle_id == *cycle_id
+                            && capture_id
+                                .as_ref()
+                                .is_none_or(|id| pending.capture_id == *id)
+                    });
+                if should_clear {
+                    self.closeout.pending_response = None;
+                    self.closeout.pending_response_clear_reason = Some(reason.clone());
+                }
+            }
             StateFact::WriteApplied {
                 cycle_id, patch_id, ..
             } => {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::WriteApplied);
                 self.closeout.patch_id = patch_id.clone();
+                self.closeout
+                    .clear_pending_response_for_cycle(cycle_id, "write_applied");
             }
             StateFact::CommitObserved {
                 cycle_id, commit, ..
@@ -655,6 +1111,8 @@ impl DocumentStateProjection {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::Committed);
                 self.closeout.commit = Some(commit.clone());
+                self.closeout
+                    .clear_pending_response_for_cycle(cycle_id, "committed");
             }
             StateFact::SessionCheckPassed { cycle_id, .. } => {
                 if self.closeout.cycle_id.as_deref() == Some(cycle_id) {
@@ -667,6 +1125,8 @@ impl DocumentStateProjection {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::Abandoned);
                 self.closeout.abandoned_reason = Some(reason.clone());
+                self.closeout
+                    .clear_pending_response_for_cycle(cycle_id, "abandoned");
             }
             StateFact::OwnerGenerationChanged {
                 owner, generation, ..
@@ -695,20 +1155,67 @@ impl DocumentStateProjection {
                     self.reject_stale(StateDomain::Transport, StateOwner::EditorIpcBridge);
                 }
             }
-            StateFact::EditorAckObserved {
+            StateFact::EditorPatchApplied {
                 patch_id,
                 actor_generation,
                 ..
             } => {
                 if self.current_generation_matches(StateOwner::EditorIpcBridge, *actor_generation) {
-                    self.transport.apply_patch_event(
-                        patch_id,
-                        TransportPatchEvent::AckObserved,
-                        *actor_generation,
-                    );
+                    self.transport
+                        .apply_patch_applied_receipt(patch_id, *actor_generation);
                 } else {
                     self.reject_stale(StateDomain::Transport, StateOwner::EditorIpcBridge);
                 }
+            }
+            StateFact::EditorPatchRejected {
+                patch_id,
+                actor_generation,
+                reason,
+                ..
+            } => {
+                if self.current_generation_matches(StateOwner::EditorIpcBridge, *actor_generation) {
+                    if self.transport.apply_patch_rejected_receipt(
+                        patch_id,
+                        *actor_generation,
+                        reason,
+                    ) {
+                        self.transport.last_rejected_reason = Some(reason.clone());
+                    }
+                } else {
+                    self.reject_stale(StateDomain::Transport, StateOwner::EditorIpcBridge);
+                }
+            }
+            StateFact::VisibleWriteCommitCandidateObserved {
+                patch_id,
+                model_revision,
+                editor_visible_hash,
+                commit_candidate_hash,
+                source,
+                ..
+            } => {
+                self.visible_write.observe_commit_candidate(
+                    patch_id,
+                    *model_revision,
+                    editor_visible_hash,
+                    commit_candidate_hash,
+                    source,
+                );
+            }
+            StateFact::VisibleWriteMaterializedCarryForwardObserved {
+                model_revision,
+                live_buffer_hash,
+                file_content_hash,
+                commit_candidate_hash,
+                source,
+                ..
+            } => {
+                self.visible_write.observe_materialized_carry_forward(
+                    *model_revision,
+                    live_buffer_hash,
+                    file_content_hash,
+                    commit_candidate_hash,
+                    source,
+                );
             }
             StateFact::IpcProofInsufficient {
                 patch_id,
@@ -807,6 +1314,32 @@ impl DocumentStateProjection {
             } => {
                 self.apply_supervisor_hosting(pane_session, *lease_epoch);
             }
+            StateFact::SupervisorRecycleStarted {
+                reason,
+                recycle_epoch,
+                marked_secs,
+                ..
+            } => {
+                self.supervisor.apply_recycle_event(
+                    SupervisorRecycleEvent::Started,
+                    reason,
+                    *recycle_epoch,
+                    *marked_secs,
+                );
+            }
+            StateFact::SupervisorRecycleSettled {
+                reason,
+                recycle_epoch,
+                marked_secs,
+                ..
+            } => {
+                self.supervisor.apply_recycle_event(
+                    SupervisorRecycleEvent::Settled,
+                    reason,
+                    *recycle_epoch,
+                    *marked_secs,
+                );
+            }
             StateFact::RoutePaneObserved {
                 pane_id,
                 actor_generation,
@@ -846,6 +1379,57 @@ impl DocumentStateProjection {
                 } else {
                     self.reject_stale(StateDomain::Route, StateOwner::RouteDispatch);
                 }
+            }
+            StateFact::RouteSubmitStarted {
+                pane_id,
+                harness,
+                reason,
+                submit_epoch,
+                marked_secs,
+                ..
+            } => {
+                self.route.apply_submit_event(
+                    RouteSubmitEvent::Started,
+                    pane_id,
+                    harness,
+                    reason,
+                    *submit_epoch,
+                    *marked_secs,
+                );
+            }
+            StateFact::RouteSubmitSettled {
+                pane_id,
+                harness,
+                reason,
+                submit_epoch,
+                marked_secs,
+                ..
+            } => {
+                self.route.apply_submit_event(
+                    RouteSubmitEvent::Settled,
+                    pane_id,
+                    harness,
+                    reason,
+                    *submit_epoch,
+                    *marked_secs,
+                );
+            }
+            StateFact::RouteSubmitBlocked {
+                pane_id,
+                harness,
+                reason,
+                submit_epoch,
+                marked_secs,
+                ..
+            } => {
+                self.route.apply_submit_event(
+                    RouteSubmitEvent::Blocked,
+                    pane_id,
+                    harness,
+                    reason,
+                    *submit_epoch,
+                    *marked_secs,
+                );
             }
             StateFact::ProofMarkerObserved { marker, source, .. } => {
                 self.proof
@@ -977,6 +1561,76 @@ pub struct DocumentProjection {
     pub latest_baseline: Option<BaselineProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_file_watch_change: Option<FileWatchChangeProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_authority: Option<DocumentAuthorityProjection>,
+}
+
+impl DocumentProjection {
+    fn apply_authority(
+        &mut self,
+        authority: DocumentAuthority,
+        authority_epoch: u64,
+        source: &str,
+        reason: &str,
+        content_hash: Option<&str>,
+        editor_id: Option<&str>,
+    ) -> bool {
+        let accept = match &self.latest_authority {
+            None => true,
+            Some(current) if authority_epoch > current.authority_epoch => true,
+            Some(current) if authority_epoch == current.authority_epoch => {
+                authority.editor_active() && !current.authority.editor_active()
+            }
+            Some(_) => false,
+        };
+        if !accept {
+            return false;
+        }
+        self.latest_authority = Some(DocumentAuthorityProjection {
+            authority,
+            authority_epoch,
+            source: source.to_string(),
+            reason: reason.to_string(),
+            content_hash: content_hash.map(str::to_string),
+            editor_id: editor_id.map(str::to_string),
+        });
+        true
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentAuthority {
+    /// No active editor replica owns the document; disk participates as the
+    /// current document replica.
+    DiskReplica,
+    /// A live editor relay supplied the authoritative current text.
+    EditorRelay,
+    /// A live editor owns the document, but no relay replica has registered yet.
+    EditorAttachedMissingReplica,
+    /// A live editor owns the document, but relay delivery has not converged.
+    EditorSyncPending,
+}
+
+impl DocumentAuthority {
+    pub fn editor_active(self) -> bool {
+        matches!(
+            self,
+            Self::EditorRelay | Self::EditorAttachedMissingReplica | Self::EditorSyncPending
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentAuthorityProjection {
+    pub authority: DocumentAuthority,
+    pub authority_epoch: u64,
+    pub source: String,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1010,6 +1664,10 @@ pub struct QueueProjection {
     pub worklist_queue_hash: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub worklist_active: bool,
+    #[serde(default)]
+    pub context_clear: QueueContextClearProjection,
+    #[serde(default)]
+    pub drain_stall: QueueDrainStallProjection,
 }
 
 impl QueueProjection {
@@ -1066,6 +1724,280 @@ impl QueueProjection {
         self.worklist_queue_hash = Some(queue_hash.to_string());
         self.worklist_active = active;
         self.worklist = if active { entries.to_vec() } else { Vec::new() };
+    }
+
+    fn apply_context_clear_event(
+        &mut self,
+        event: QueueContextClearEvent,
+        fields: QueueContextClearFields<'_>,
+        clear_epoch: u64,
+        marked_secs: u64,
+    ) {
+        self.context_clear
+            .apply_event(event, fields, clear_epoch, marked_secs);
+    }
+
+    fn apply_drain_stall_event(
+        &mut self,
+        event: QueueDrainStallEvent,
+        fields: QueueDrainStallFields<'_>,
+        stall_epoch: u64,
+        event_secs: u64,
+    ) {
+        self.drain_stall
+            .apply_event(event, fields, stall_epoch, event_secs);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct QueueDrainStallFields<'a> {
+    file: &'a str,
+    cycle_id: Option<&'a str>,
+    reason: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct QueueDrainStallProjection {
+    pub phase: QueueDrainStallPhase,
+    pub file: String,
+    pub cycle_id: String,
+    pub stall_epoch: u64,
+    pub recorded_secs: u64,
+    pub cleared_secs: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_reason: Option<String>,
+}
+
+impl QueueDrainStallProjection {
+    fn apply_event(
+        &mut self,
+        event: QueueDrainStallEvent,
+        fields: QueueDrainStallFields<'_>,
+        stall_epoch: u64,
+        event_secs: u64,
+    ) {
+        if stall_epoch < self.stall_epoch {
+            return;
+        }
+        if let Some(next) = QueueDrainStallMachine::transition(self.phase, event) {
+            self.phase = next;
+            self.file = fields.file.to_string();
+            self.stall_epoch = stall_epoch;
+            match event {
+                QueueDrainStallEvent::Recorded => {
+                    self.cycle_id = fields.cycle_id.unwrap_or_default().to_string();
+                    self.recorded_secs = event_secs;
+                    self.cleared_secs = 0;
+                    self.clear_reason = None;
+                }
+                QueueDrainStallEvent::Cleared => {
+                    self.cleared_secs = event_secs;
+                    self.clear_reason = fields.reason.map(str::to_string);
+                }
+            }
+        }
+    }
+
+    pub fn is_pending(&self) -> bool {
+        matches!(self.phase, QueueDrainStallPhase::Pending)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueDrainStallPhase {
+    #[default]
+    Idle,
+    Pending,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueDrainStallEvent {
+    Recorded,
+    Cleared,
+}
+
+pub struct QueueDrainStallMachine {
+    ctx: ThreadSafeContext,
+    machine: ThreadSafeStateMachine<QueueDrainStallPhase, QueueDrainStallEvent>,
+}
+
+impl QueueDrainStallMachine {
+    pub fn new(initial: QueueDrainStallPhase) -> Self {
+        let ctx = ThreadSafeContext::new();
+        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_queue_drain_stall);
+        Self { ctx, machine }
+    }
+
+    pub fn send(&self, event: QueueDrainStallEvent) -> bool {
+        self.machine.send(&self.ctx, event)
+    }
+
+    pub fn state(&self) -> QueueDrainStallPhase {
+        self.machine.state(&self.ctx)
+    }
+
+    pub fn transition(
+        initial: QueueDrainStallPhase,
+        event: QueueDrainStallEvent,
+    ) -> Option<QueueDrainStallPhase> {
+        let machine = Self::new(initial);
+        if machine.send(event) {
+            Some(machine.state())
+        } else {
+            None
+        }
+    }
+}
+
+pub fn transition_queue_drain_stall(
+    _current: &QueueDrainStallPhase,
+    event: &QueueDrainStallEvent,
+) -> Option<QueueDrainStallPhase> {
+    match event {
+        QueueDrainStallEvent::Recorded => Some(QueueDrainStallPhase::Pending),
+        QueueDrainStallEvent::Cleared => Some(QueueDrainStallPhase::Idle),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct QueueContextClearFields<'a> {
+    file: &'a str,
+    target: &'a str,
+    harness: &'a str,
+    command: &'a str,
+    source: Option<&'a str>,
+    head_sha256: Option<&'a str>,
+    head_bytes: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct QueueContextClearProjection {
+    pub phase: QueueContextClearPhase,
+    pub file: String,
+    pub target: String,
+    pub harness: String,
+    pub command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_bytes: Option<usize>,
+    pub clear_epoch: u64,
+    pub marked_secs: u64,
+}
+
+impl QueueContextClearProjection {
+    fn apply_event(
+        &mut self,
+        event: QueueContextClearEvent,
+        fields: QueueContextClearFields<'_>,
+        clear_epoch: u64,
+        marked_secs: u64,
+    ) {
+        if clear_epoch < self.clear_epoch {
+            return;
+        }
+        if let Some(next) = QueueContextClearMachine::transition(self.phase, event) {
+            self.phase = next;
+            self.file = fields.file.to_string();
+            self.target = fields.target.to_string();
+            self.harness = fields.harness.to_string();
+            self.command = fields.command.to_string();
+            self.source = fields.source.map(str::to_string);
+            if matches!(
+                event,
+                QueueContextClearEvent::Deferred | QueueContextClearEvent::Started
+            ) {
+                self.head_sha256 = fields.head_sha256.map(str::to_string);
+                self.head_bytes = fields.head_bytes;
+            }
+            self.clear_epoch = clear_epoch;
+            self.marked_secs = marked_secs;
+        }
+    }
+
+    pub fn ttl_secs(&self) -> u64 {
+        match self.phase {
+            QueueContextClearPhase::InFlight => QUEUE_CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,
+            QueueContextClearPhase::Deferred | QueueContextClearPhase::Idle => 0,
+        }
+    }
+
+    pub fn is_pending_at(&self, now_secs: u64) -> bool {
+        matches!(self.phase, QueueContextClearPhase::InFlight)
+            && now_secs.saturating_sub(self.marked_secs) <= self.ttl_secs()
+    }
+
+    pub fn is_deferred_operator_clear(&self) -> bool {
+        matches!(self.phase, QueueContextClearPhase::Deferred)
+            && self.source.as_deref() == Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED)
+    }
+
+    pub fn is_manual_operator_clear_cooldown(&self) -> bool {
+        matches!(self.phase, QueueContextClearPhase::InFlight)
+            && self.source.as_deref() == Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_MANUAL_COOLDOWN)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueContextClearPhase {
+    #[default]
+    Idle,
+    Deferred,
+    InFlight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueContextClearEvent {
+    Deferred,
+    Started,
+    Settled,
+}
+
+pub struct QueueContextClearMachine {
+    ctx: ThreadSafeContext,
+    machine: ThreadSafeStateMachine<QueueContextClearPhase, QueueContextClearEvent>,
+}
+
+impl QueueContextClearMachine {
+    pub fn new(initial: QueueContextClearPhase) -> Self {
+        let ctx = ThreadSafeContext::new();
+        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_queue_context_clear);
+        Self { ctx, machine }
+    }
+
+    pub fn send(&self, event: QueueContextClearEvent) -> bool {
+        self.machine.send(&self.ctx, event)
+    }
+
+    pub fn state(&self) -> QueueContextClearPhase {
+        self.machine.state(&self.ctx)
+    }
+
+    pub fn transition(
+        initial: QueueContextClearPhase,
+        event: QueueContextClearEvent,
+    ) -> Option<QueueContextClearPhase> {
+        let machine = Self::new(initial);
+        if machine.send(event) {
+            Some(machine.state())
+        } else {
+            None
+        }
+    }
+}
+
+pub fn transition_queue_context_clear(
+    _current: &QueueContextClearPhase,
+    event: &QueueContextClearEvent,
+) -> Option<QueueContextClearPhase> {
+    match event {
+        QueueContextClearEvent::Deferred => Some(QueueContextClearPhase::Deferred),
+        QueueContextClearEvent::Started => Some(QueueContextClearPhase::InFlight),
+        QueueContextClearEvent::Settled => Some(QueueContextClearPhase::Idle),
     }
 }
 
@@ -1141,12 +2073,20 @@ pub struct CloseoutProjection {
     pub session_check_passed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abandoned_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_response: Option<PendingResponseProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_response_clear_reason: Option<String>,
 }
 
 impl CloseoutProjection {
     fn apply_cycle_event(&mut self, cycle_id: &str, event: CycleEvent) {
         if self.cycle_id.as_deref() != Some(cycle_id) || matches!(event, CycleEvent::StartPreflight)
         {
+            if self.cycle_id.as_deref() != Some(cycle_id) {
+                self.pending_response = None;
+                self.pending_response_clear_reason = None;
+            }
             self.cycle_id = Some(cycle_id.to_string());
             self.phase = Some(CyclePhase::PreflightStarted);
             self.session_check_passed = false;
@@ -1156,21 +2096,57 @@ impl CloseoutProjection {
             self.phase = Some(next);
         }
     }
+
+    fn clear_pending_response_for_cycle(&mut self, cycle_id: &str, reason: &str) {
+        if self
+            .pending_response
+            .as_ref()
+            .is_some_and(|pending| pending.cycle_id == cycle_id)
+        {
+            self.pending_response = None;
+            self.pending_response_clear_reason = Some(reason.to_string());
+        }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingResponseProjection {
+    pub cycle_id: String,
+    pub capture_id: String,
+    pub response_sha256: String,
+    pub response_body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TransportProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editor_generation: Option<u64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub patches: BTreeMap<String, TransportPatchProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_rejected_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_unproven_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_retry_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub force_disk_reason: Option<String>,
+    #[serde(skip)]
+    receipt_projection: ReceiptProjection,
 }
+
+impl PartialEq for TransportProjection {
+    fn eq(&self, other: &Self) -> bool {
+        self.editor_generation == other.editor_generation
+            && self.patches == other.patches
+            && self.last_rejected_reason == other.last_rejected_reason
+            && self.last_unproven_reason == other.last_unproven_reason
+            && self.last_retry_reason == other.last_retry_reason
+            && self.force_disk_reason == other.force_disk_reason
+    }
+}
+
+impl Eq for TransportProjection {}
 
 impl TransportProjection {
     fn apply_patch_event(
@@ -1178,7 +2154,100 @@ impl TransportProjection {
         patch_id: &str,
         event: TransportPatchEvent,
         actor_generation: u64,
-    ) {
+    ) -> bool {
+        self.apply_patch_phase_event(patch_id, event, actor_generation)
+    }
+
+    fn apply_patch_applied_receipt(&mut self, patch_id: &str, actor_generation: u64) -> bool {
+        self.apply_patch_receipt(
+            patch_id,
+            actor_generation,
+            ReceiptOutcome::Applied,
+            None,
+            TransportPatchEvent::PatchApplied,
+        )
+    }
+
+    fn apply_patch_rejected_receipt(
+        &mut self,
+        patch_id: &str,
+        actor_generation: u64,
+        reason: &str,
+    ) -> bool {
+        self.apply_patch_receipt(
+            patch_id,
+            actor_generation,
+            ReceiptOutcome::Rejected,
+            Some(reason),
+            TransportPatchEvent::PatchRejected,
+        )
+    }
+
+    pub fn patch_terminal_receipt_outcome(&self, patch_id: &str) -> Option<ReceiptOutcome> {
+        self.receipt_projection
+            .terminal_for(patch_id)
+            .map(|receipt| receipt.outcome)
+            .or_else(|| {
+                self.patches
+                    .get(patch_id)
+                    .and_then(|patch| patch.phase.terminal_receipt_outcome())
+            })
+    }
+
+    fn apply_patch_receipt(
+        &mut self,
+        patch_id: &str,
+        actor_generation: u64,
+        outcome: ReceiptOutcome,
+        reason: Option<&str>,
+        phase_event: TransportPatchEvent,
+    ) -> bool {
+        if let Some(existing) = self.patch_terminal_receipt_outcome(patch_id)
+            && existing != outcome
+        {
+            return false;
+        }
+
+        let receipt = match outcome {
+            ReceiptOutcome::Applied => CausalReceipt::applied(
+                patch_receipt_id(patch_id, actor_generation, outcome),
+                patch_id,
+                "agent-doc.editor-ipc-bridge",
+                actor_generation,
+            ),
+            ReceiptOutcome::Rejected => {
+                let receipt = CausalReceipt::rejected(
+                    patch_receipt_id(patch_id, actor_generation, outcome),
+                    patch_id,
+                    "agent-doc.editor-ipc-bridge",
+                    actor_generation,
+                );
+                match reason {
+                    Some(reason) => receipt.with_reason(reason),
+                    None => receipt,
+                }
+            }
+            ReceiptOutcome::Observed | ReceiptOutcome::Accepted => return false,
+        };
+
+        match self
+            .receipt_projection
+            .observe(self.editor_generation, receipt)
+        {
+            ReceiptApplyStatus::Recorded | ReceiptApplyStatus::Duplicate => {
+                self.apply_patch_phase_event(patch_id, phase_event, actor_generation)
+            }
+            ReceiptApplyStatus::StaleGeneration { .. }
+            | ReceiptApplyStatus::TerminalConflict { .. } => false,
+        }
+    }
+
+    fn apply_patch_phase_event(
+        &mut self,
+        patch_id: &str,
+        event: TransportPatchEvent,
+        actor_generation: u64,
+    ) -> bool {
         self.editor_generation = Some(actor_generation);
         let patch =
             self.patches
@@ -1190,8 +2259,166 @@ impl TransportProjection {
         patch.actor_generation = actor_generation;
         if let Some(next) = TransportPatchMachine::transition(patch.phase, event) {
             patch.phase = next;
+            true
+        } else {
+            false
         }
     }
+}
+
+fn patch_receipt_id(patch_id: &str, actor_generation: u64, outcome: ReceiptOutcome) -> String {
+    let outcome = match outcome {
+        ReceiptOutcome::Observed => "observed",
+        ReceiptOutcome::Accepted => "accepted",
+        ReceiptOutcome::Applied => "applied",
+        ReceiptOutcome::Rejected => "rejected",
+    };
+    format!("agent-doc-editor:{patch_id}:{actor_generation}:{outcome}")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct VisibleWriteProjection {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub commit_candidates: BTreeMap<String, VisibleWriteCommitCandidateProjection>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub materialized_carry_forward:
+        BTreeMap<String, VisibleWriteMaterializedCarryForwardProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_model_revision: Option<u64>,
+}
+
+impl VisibleWriteProjection {
+    pub fn observe_commit_candidate(
+        &mut self,
+        patch_id: &str,
+        model_revision: u64,
+        editor_visible_hash: &str,
+        commit_candidate_hash: &str,
+        source: &str,
+    ) {
+        let current_revision = self
+            .commit_candidates
+            .get(commit_candidate_hash)
+            .map(|candidate| candidate.model_revision);
+        if current_revision.is_some_and(|current| current > model_revision) {
+            return;
+        }
+        self.latest_model_revision = Some(
+            self.latest_model_revision
+                .unwrap_or_default()
+                .max(model_revision),
+        );
+        self.commit_candidates.insert(
+            commit_candidate_hash.to_string(),
+            VisibleWriteCommitCandidateProjection {
+                patch_id: patch_id.to_string(),
+                model_revision,
+                editor_visible_hash: editor_visible_hash.to_string(),
+                commit_candidate_hash: commit_candidate_hash.to_string(),
+                source: source.to_string(),
+            },
+        );
+    }
+
+    pub fn applied_candidate<'a>(
+        &'a self,
+        transport: &'a TransportProjection,
+        commit_candidate_hash: &str,
+    ) -> Option<&'a VisibleWriteCommitCandidateProjection> {
+        self.commit_candidates
+            .get(commit_candidate_hash)
+            .filter(|candidate| {
+                transport
+                    .patches
+                    .get(&candidate.patch_id)
+                    .is_some_and(|patch| patch.phase.is_applied())
+            })
+    }
+
+    pub fn applied_candidate_for_patch<'a>(
+        &'a self,
+        transport: &'a TransportProjection,
+        patch_id: &str,
+    ) -> Option<&'a VisibleWriteCommitCandidateProjection> {
+        self.commit_candidates
+            .values()
+            .filter(|candidate| candidate.patch_id == patch_id)
+            .filter(|candidate| {
+                transport
+                    .patches
+                    .get(&candidate.patch_id)
+                    .is_some_and(|patch| patch.phase.is_applied())
+            })
+            .max_by_key(|candidate| candidate.model_revision)
+    }
+
+    pub fn observe_materialized_carry_forward(
+        &mut self,
+        model_revision: u64,
+        live_buffer_hash: &str,
+        file_content_hash: &str,
+        commit_candidate_hash: &str,
+        source: &str,
+    ) {
+        let current_revision = self
+            .materialized_carry_forward
+            .get(commit_candidate_hash)
+            .map(|proof| proof.model_revision);
+        if current_revision.is_some_and(|current| current > model_revision) {
+            return;
+        }
+        self.latest_model_revision = Some(
+            self.latest_model_revision
+                .unwrap_or_default()
+                .max(model_revision),
+        );
+        self.materialized_carry_forward.insert(
+            commit_candidate_hash.to_string(),
+            VisibleWriteMaterializedCarryForwardProjection {
+                model_revision,
+                live_buffer_hash: live_buffer_hash.to_string(),
+                file_content_hash: file_content_hash.to_string(),
+                commit_candidate_hash: commit_candidate_hash.to_string(),
+                source: source.to_string(),
+            },
+        );
+    }
+
+    pub fn materialized_carry_forward(
+        &self,
+        commit_candidate_hash: &str,
+        file_content_hash: &str,
+        live_buffer_hash: &str,
+    ) -> Option<&VisibleWriteMaterializedCarryForwardProjection> {
+        self.materialized_carry_forward
+            .get(commit_candidate_hash)
+            .filter(|proof| {
+                proof
+                    .file_content_hash
+                    .eq_ignore_ascii_case(file_content_hash)
+                    && proof
+                        .live_buffer_hash
+                        .eq_ignore_ascii_case(live_buffer_hash)
+            })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisibleWriteCommitCandidateProjection {
+    pub patch_id: String,
+    pub model_revision: u64,
+    pub editor_visible_hash: String,
+    pub commit_candidate_hash: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisibleWriteMaterializedCarryForwardProjection {
+    pub model_revision: u64,
+    pub live_buffer_hash: String,
+    pub file_content_hash: String,
+    pub commit_candidate_hash: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1218,6 +2445,8 @@ pub struct SupervisorHostingProjection {
 pub struct SupervisorProjection {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub owners: BTreeMap<StateOwner, OwnerProjection>,
+    #[serde(default)]
+    pub recycle: SupervisorRecycleProjection,
 }
 
 impl SupervisorProjection {
@@ -1264,6 +2493,100 @@ impl SupervisorProjection {
             actor.phase = next;
         }
     }
+
+    fn apply_recycle_event(
+        &mut self,
+        event: SupervisorRecycleEvent,
+        reason: &str,
+        recycle_epoch: u64,
+        marked_secs: u64,
+    ) {
+        if recycle_epoch < self.recycle.recycle_epoch {
+            return;
+        }
+        if let Some(next) = SupervisorRecycleMachine::transition(self.recycle.phase, event) {
+            self.recycle.phase = next;
+            self.recycle.reason = Some(reason.to_string());
+            self.recycle.recycle_epoch = recycle_epoch;
+            self.recycle.marked_secs = marked_secs;
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupervisorRecycleProjection {
+    pub phase: SupervisorRecyclePhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub recycle_epoch: u64,
+    pub marked_secs: u64,
+}
+
+impl Default for SupervisorRecycleProjection {
+    fn default() -> Self {
+        Self {
+            phase: SupervisorRecyclePhase::Settled,
+            reason: None,
+            recycle_epoch: 0,
+            marked_secs: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SupervisorRecyclePhase {
+    Settled,
+    InFlight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorRecycleEvent {
+    Started,
+    Settled,
+}
+
+pub struct SupervisorRecycleMachine {
+    ctx: ThreadSafeContext,
+    machine: ThreadSafeStateMachine<SupervisorRecyclePhase, SupervisorRecycleEvent>,
+}
+
+impl SupervisorRecycleMachine {
+    pub fn new(initial: SupervisorRecyclePhase) -> Self {
+        let ctx = ThreadSafeContext::new();
+        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_supervisor_recycle);
+        Self { ctx, machine }
+    }
+
+    pub fn send(&self, event: SupervisorRecycleEvent) -> bool {
+        self.machine.send(&self.ctx, event)
+    }
+
+    pub fn state(&self) -> SupervisorRecyclePhase {
+        self.machine.state(&self.ctx)
+    }
+
+    pub fn transition(
+        initial: SupervisorRecyclePhase,
+        event: SupervisorRecycleEvent,
+    ) -> Option<SupervisorRecyclePhase> {
+        let machine = Self::new(initial);
+        if machine.send(event) {
+            Some(machine.state())
+        } else {
+            None
+        }
+    }
+}
+
+pub fn transition_supervisor_recycle(
+    _current: &SupervisorRecyclePhase,
+    event: &SupervisorRecycleEvent,
+) -> Option<SupervisorRecyclePhase> {
+    match event {
+        SupervisorRecycleEvent::Started => Some(SupervisorRecyclePhase::InFlight),
+        SupervisorRecycleEvent::Settled => Some(SupervisorRecyclePhase::Settled),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -1292,6 +2615,8 @@ pub struct RouteProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane_id: Option<String>,
     pub readiness: RouteReadinessPhase,
+    #[serde(default)]
+    pub submit: RouteSubmitProjection,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub dispatch_proofs: BTreeSet<String>,
 }
@@ -1301,6 +2626,121 @@ impl RouteProjection {
         if let Some(next) = RouteReadinessMachine::transition(self.readiness, event) {
             self.readiness = next;
         }
+    }
+
+    fn apply_submit_event(
+        &mut self,
+        event: RouteSubmitEvent,
+        pane_id: &str,
+        harness: &str,
+        reason: &str,
+        submit_epoch: u64,
+        marked_secs: u64,
+    ) {
+        if submit_epoch < self.submit.submit_epoch {
+            return;
+        }
+        if let Some(next) = RouteSubmitMachine::transition(self.submit.phase, event) {
+            self.submit.phase = next;
+            self.submit.pane_id = Some(pane_id.to_string());
+            self.submit.harness = Some(harness.to_string());
+            self.submit.reason = Some(reason.to_string());
+            self.submit.submit_epoch = submit_epoch;
+            self.submit.marked_secs = marked_secs;
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RouteSubmitProjection {
+    pub phase: RouteSubmitPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub submit_epoch: u64,
+    pub marked_secs: u64,
+}
+
+impl RouteSubmitProjection {
+    pub fn ttl_secs(&self) -> u64 {
+        match self.phase {
+            RouteSubmitPhase::Blocked => ROUTE_SUBMIT_BLOCKED_TTL_SECS,
+            RouteSubmitPhase::InFlight
+                if self.reason.as_deref() == Some(ROUTE_DISPATCH_ONLY_READY_PROBE_REASON) =>
+            {
+                ROUTE_SUBMIT_READY_PROBE_TTL_SECS
+            }
+            RouteSubmitPhase::InFlight => ROUTE_SUBMIT_IN_FLIGHT_TTL_SECS,
+            RouteSubmitPhase::Idle => 0,
+        }
+    }
+
+    pub fn is_pending_at(&self, now_secs: u64) -> bool {
+        !matches!(self.phase, RouteSubmitPhase::Idle)
+            && now_secs.saturating_sub(self.marked_secs) <= self.ttl_secs()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteSubmitPhase {
+    #[default]
+    Idle,
+    InFlight,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteSubmitEvent {
+    Started,
+    Settled,
+    Blocked,
+}
+
+pub struct RouteSubmitMachine {
+    ctx: ThreadSafeContext,
+    machine: ThreadSafeStateMachine<RouteSubmitPhase, RouteSubmitEvent>,
+}
+
+impl RouteSubmitMachine {
+    pub fn new(initial: RouteSubmitPhase) -> Self {
+        let ctx = ThreadSafeContext::new();
+        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_route_submit);
+        Self { ctx, machine }
+    }
+
+    pub fn send(&self, event: RouteSubmitEvent) -> bool {
+        self.machine.send(&self.ctx, event)
+    }
+
+    pub fn state(&self) -> RouteSubmitPhase {
+        self.machine.state(&self.ctx)
+    }
+
+    pub fn transition(
+        initial: RouteSubmitPhase,
+        event: RouteSubmitEvent,
+    ) -> Option<RouteSubmitPhase> {
+        let machine = Self::new(initial);
+        if machine.send(event) {
+            Some(machine.state())
+        } else {
+            None
+        }
+    }
+}
+
+pub fn transition_route_submit(
+    _current: &RouteSubmitPhase,
+    event: &RouteSubmitEvent,
+) -> Option<RouteSubmitPhase> {
+    match event {
+        RouteSubmitEvent::Started => Some(RouteSubmitPhase::InFlight),
+        RouteSubmitEvent::Settled => Some(RouteSubmitPhase::Idle),
+        RouteSubmitEvent::Blocked => Some(RouteSubmitPhase::Blocked),
     }
 }
 
@@ -1411,16 +2851,34 @@ pub fn transition_queue_head(
 #[serde(rename_all = "snake_case")]
 pub enum TransportPatchPhase {
     Queued,
-    Acked,
+    Applied,
+    Rejected,
     InsufficientProof,
     Retrying,
     ForceDiskFallback,
 }
 
+impl TransportPatchPhase {
+    pub fn is_applied(self) -> bool {
+        matches!(self, Self::Applied)
+    }
+
+    pub fn terminal_receipt_outcome(self) -> Option<ReceiptOutcome> {
+        match self {
+            Self::Applied => Some(ReceiptOutcome::Applied),
+            Self::Rejected => Some(ReceiptOutcome::Rejected),
+            Self::Queued | Self::InsufficientProof | Self::Retrying | Self::ForceDiskFallback => {
+                None
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportPatchEvent {
     PatchQueued,
-    AckObserved,
+    PatchApplied,
+    PatchRejected,
     ProofInsufficient,
     RetryRequested,
     ForceDiskFallback,
@@ -1468,27 +2926,39 @@ pub fn transition_transport_patch(
             TransportPatchPhase::Queued
             | TransportPatchPhase::InsufficientProof
             | TransportPatchPhase::Retrying => Some(TransportPatchPhase::Queued),
-            TransportPatchPhase::Acked | TransportPatchPhase::ForceDiskFallback => None,
+            TransportPatchPhase::Applied
+            | TransportPatchPhase::Rejected
+            | TransportPatchPhase::ForceDiskFallback => None,
         },
-        TransportPatchEvent::AckObserved => match current {
+        TransportPatchEvent::PatchApplied => match current {
             TransportPatchPhase::Queued
             | TransportPatchPhase::InsufficientProof
             | TransportPatchPhase::Retrying
-            | TransportPatchPhase::Acked => Some(TransportPatchPhase::Acked),
-            TransportPatchPhase::ForceDiskFallback => None,
+            | TransportPatchPhase::Applied => Some(TransportPatchPhase::Applied),
+            TransportPatchPhase::Rejected | TransportPatchPhase::ForceDiskFallback => None,
+        },
+        TransportPatchEvent::PatchRejected => match current {
+            TransportPatchPhase::Queued
+            | TransportPatchPhase::InsufficientProof
+            | TransportPatchPhase::Retrying
+            | TransportPatchPhase::Rejected => Some(TransportPatchPhase::Rejected),
+            TransportPatchPhase::Applied | TransportPatchPhase::ForceDiskFallback => None,
         },
         TransportPatchEvent::ProofInsufficient => match current {
             TransportPatchPhase::Queued
             | TransportPatchPhase::InsufficientProof
             | TransportPatchPhase::Retrying => Some(TransportPatchPhase::InsufficientProof),
-            TransportPatchPhase::Acked | TransportPatchPhase::ForceDiskFallback => None,
+            TransportPatchPhase::Applied
+            | TransportPatchPhase::Rejected
+            | TransportPatchPhase::ForceDiskFallback => None,
         },
         TransportPatchEvent::RetryRequested => match current {
             TransportPatchPhase::InsufficientProof | TransportPatchPhase::Retrying => {
                 Some(TransportPatchPhase::Retrying)
             }
             TransportPatchPhase::Queued
-            | TransportPatchPhase::Acked
+            | TransportPatchPhase::Applied
+            | TransportPatchPhase::Rejected
             | TransportPatchPhase::ForceDiskFallback => None,
         },
         TransportPatchEvent::ForceDiskFallback => match current {
@@ -1498,7 +2968,7 @@ pub fn transition_transport_patch(
             | TransportPatchPhase::ForceDiskFallback => {
                 Some(TransportPatchPhase::ForceDiskFallback)
             }
-            TransportPatchPhase::Acked => None,
+            TransportPatchPhase::Applied | TransportPatchPhase::Rejected => None,
         },
     }
 }
@@ -1825,7 +3295,87 @@ mod tests {
         StateEvent::new(event_id, fact)
     }
 
-    fn socket_ack_events(
+    fn authority_event(
+        event_id: &str,
+        document_hash: &str,
+        authority: DocumentAuthority,
+        authority_epoch: u64,
+    ) -> StateEvent {
+        state_event(
+            event_id,
+            StateFact::DocumentAuthorityObserved {
+                document_hash: document_hash.into(),
+                authority,
+                authority_epoch,
+                source: "test".into(),
+                reason: "test".into(),
+                content_hash: None,
+                editor_id: None,
+            },
+        )
+    }
+
+    #[test]
+    fn document_authority_rejects_late_disk_replica_after_active_editor() {
+        let mut ledger = EventLedger::new();
+        ledger.append(authority_event(
+            "e1",
+            "doc-authority",
+            DocumentAuthority::EditorRelay,
+            10,
+        ));
+        ledger.append(authority_event(
+            "e2",
+            "doc-authority",
+            DocumentAuthority::DiskReplica,
+            9,
+        ));
+
+        let projection = ledger
+            .project_document("doc-authority")
+            .expect("projection exists");
+        let authority = projection
+            .document
+            .latest_authority
+            .expect("authority projected");
+        assert_eq!(authority.authority, DocumentAuthority::EditorRelay);
+        assert_eq!(authority.authority_epoch, 10);
+        assert_eq!(projection.rejected_stale_events.len(), 1);
+        assert_eq!(
+            projection.rejected_stale_events[0].domain,
+            StateDomain::Document
+        );
+    }
+
+    #[test]
+    fn document_authority_allows_newer_disk_replica_after_detach() {
+        let mut ledger = EventLedger::new();
+        ledger.append(authority_event(
+            "e1",
+            "doc-authority-detach",
+            DocumentAuthority::EditorRelay,
+            10,
+        ));
+        ledger.append(authority_event(
+            "e2",
+            "doc-authority-detach",
+            DocumentAuthority::DiskReplica,
+            11,
+        ));
+
+        let projection = ledger
+            .project_document("doc-authority-detach")
+            .expect("projection exists");
+        let authority = projection
+            .document
+            .latest_authority
+            .expect("authority projected");
+        assert_eq!(authority.authority, DocumentAuthority::DiskReplica);
+        assert_eq!(authority.authority_epoch, 11);
+        assert!(projection.rejected_stale_events.is_empty());
+    }
+
+    fn socket_apply_events(
         prefix: &str,
         document_hash: &str,
         patch_id: &str,
@@ -1849,8 +3399,8 @@ mod tests {
                 },
             ),
             state_event(
-                format!("{prefix}:patch-acked"),
-                StateFact::EditorAckObserved {
+                format!("{prefix}:patch-applied"),
+                StateFact::EditorPatchApplied {
                     document_hash: document_hash.into(),
                     patch_id: patch_id.into(),
                     actor_generation: generation,
@@ -1859,7 +3409,7 @@ mod tests {
         ]
     }
 
-    fn file_retry_then_ack_events(
+    fn file_retry_then_apply_events(
         prefix: &str,
         document_hash: &str,
         patch_id: &str,
@@ -1918,8 +3468,8 @@ mod tests {
                 },
             ),
             state_event(
-                format!("{prefix}:patch-acked"),
-                StateFact::EditorAckObserved {
+                format!("{prefix}:patch-applied"),
+                StateFact::EditorPatchApplied {
                     document_hash: document_hash.into(),
                     patch_id: patch_id.into(),
                     actor_generation: generation + 1,
@@ -2031,6 +3581,50 @@ mod tests {
     }
 
     #[test]
+    fn pending_response_projection_is_state_backbone_authority() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "p1",
+            StateFact::PreflightStarted {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                session_id: Some("session-1".into()),
+            },
+        ));
+        ledger.append(state_event(
+            "p2",
+            StateFact::PendingResponseCaptured {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                capture_id: "capture-1".into(),
+                response_sha256: "sha-response".into(),
+                response_body: "### Re: topic — gpt-5\n\nDone.\n".into(),
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        let pending = projected.closeout.pending_response.unwrap();
+        assert_eq!(pending.cycle_id, "cycle-1");
+        assert_eq!(pending.capture_id, "capture-1");
+        assert_eq!(pending.response_body, "### Re: topic — gpt-5\n\nDone.\n");
+
+        ledger.append(state_event(
+            "p3",
+            StateFact::WriteApplied {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                patch_id: Some("patch-1".into()),
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(projected.closeout.pending_response, None);
+        assert_eq!(
+            projected.closeout.pending_response_clear_reason.as_deref(),
+            Some("write_applied")
+        );
+    }
+
+    #[test]
     fn replay_projection_reduces_events_idempotently() {
         let mut ledger = EventLedger::new();
         ledger.append(state_event(
@@ -2106,7 +3700,7 @@ mod tests {
         ));
         ledger.append(state_event(
             "e9",
-            StateFact::EditorAckObserved {
+            StateFact::EditorPatchApplied {
                 document_hash: "doc-a".into(),
                 patch_id: "patch-1".into(),
                 actor_generation: 7,
@@ -2160,7 +3754,7 @@ mod tests {
         );
         assert_eq!(
             doc.transport.patches["patch-1"].phase,
-            TransportPatchPhase::Acked
+            TransportPatchPhase::Applied
         );
     }
 
@@ -2199,7 +3793,7 @@ mod tests {
     #[test]
     fn cross_editor_live_ipc_projection_summaries_match_bridge_contract() {
         let mut events = Vec::new();
-        events.extend(socket_ack_events(
+        events.extend(socket_apply_events(
             "jb-socket",
             "doc-jb-socket",
             "jb-socket-patch",
@@ -2218,7 +3812,7 @@ mod tests {
             "jb-socket-dispatch",
         ));
 
-        events.extend(file_retry_then_ack_events(
+        events.extend(file_retry_then_apply_events(
             "jb-file",
             "doc-jb-file",
             "jb-file-patch",
@@ -2233,7 +3827,7 @@ mod tests {
             "route blocked before retry proof",
         ));
 
-        events.extend(file_retry_then_ack_events(
+        events.extend(file_retry_then_apply_events(
             "vscode-file",
             "doc-vscode-file",
             "vscode-file-patch",
@@ -2258,7 +3852,7 @@ mod tests {
         let jb_socket = projection.document("doc-jb-socket").unwrap();
         assert_eq!(
             jb_socket.transport.patches["jb-socket-patch"].phase,
-            TransportPatchPhase::Acked
+            TransportPatchPhase::Applied
         );
         assert_eq!(
             jb_socket.route.readiness,
@@ -2276,19 +3870,19 @@ mod tests {
                 "routeReadiness": "dispatch_proven",
                 "routePaneId": "%11",
                 "latestTransportPatchId": "jb-socket-patch",
-                "latestTransportPhase": "acked",
+                "latestTransportPhase": "applied",
                 "proofMarkers": 1,
             })
         );
         assert_eq!(
             jb_socket.projection_summary().compact(),
-            "route=dispatch_proven pane=%11 transport=jb-socket-patch:acked proof_markers=1"
+            "route=dispatch_proven pane=%11 transport=jb-socket-patch:applied proof_markers=1"
         );
 
         let jb_file = projection.document("doc-jb-file").unwrap();
         assert_eq!(
             jb_file.transport.patches["jb-file-patch"].phase,
-            TransportPatchPhase::Acked
+            TransportPatchPhase::Applied
         );
         assert_eq!(
             jb_file.transport.last_unproven_reason.as_deref(),
@@ -2305,13 +3899,13 @@ mod tests {
         );
         assert_eq!(
             jb_file.projection_summary().compact(),
-            "route=blocked pane=%12 transport=jb-file-patch:acked proof_markers=1"
+            "route=blocked pane=%12 transport=jb-file-patch:applied proof_markers=1"
         );
 
         let vscode_file = projection.document("doc-vscode-file").unwrap();
         assert_eq!(
             vscode_file.transport.patches["vscode-file-patch"].phase,
-            TransportPatchPhase::Acked
+            TransportPatchPhase::Applied
         );
         assert_eq!(
             vscode_file.transport.last_unproven_reason.as_deref(),
@@ -2329,7 +3923,7 @@ mod tests {
         );
         assert_eq!(
             vscode_file.projection_summary().compact(),
-            "route=dispatch_proven pane=%13 transport=vscode-file-patch:acked proof_markers=1"
+            "route=dispatch_proven pane=%13 transport=vscode-file-patch:applied proof_markers=1"
         );
     }
 
@@ -2559,6 +4153,500 @@ mod tests {
     }
 
     #[test]
+    fn visible_write_commit_candidate_requires_lazily_transport_event() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "editor-gen-7",
+            StateFact::OwnerGenerationChanged {
+                document_hash: "doc-a".into(),
+                owner: StateOwner::EditorIpcBridge,
+                generation: 7,
+            },
+        ));
+        ledger.append(state_event(
+            "patch-queued",
+            StateFact::EditorPatchQueued {
+                document_hash: "doc-a".into(),
+                patch_id: "patch-1".into(),
+                actor_generation: 7,
+            },
+        ));
+        ledger.append(state_event(
+            "candidate",
+            StateFact::VisibleWriteCommitCandidateObserved {
+                document_hash: "doc-a".into(),
+                patch_id: "patch-1".into(),
+                model_revision: 7,
+                editor_visible_hash: "candidate-a".into(),
+                commit_candidate_hash: "candidate-a".into(),
+                source: "test".into(),
+            },
+        ));
+        let doc = ledger.project_document("doc-a").unwrap();
+        assert!(doc.applied_visible_write_candidate("candidate-a").is_none());
+
+        ledger.append(state_event(
+            "patch-applied",
+            StateFact::EditorPatchApplied {
+                document_hash: "doc-a".into(),
+                patch_id: "patch-1".into(),
+                actor_generation: 7,
+            },
+        ));
+        let doc = ledger.project_document("doc-a").unwrap();
+        let candidate = doc
+            .applied_visible_write_candidate("candidate-a")
+            .expect("applied candidate");
+        assert_eq!(candidate.patch_id, "patch-1");
+        assert_eq!(candidate.model_revision, 7);
+        assert!(doc.applied_visible_write_candidate("candidate-b").is_none());
+    }
+
+    #[test]
+    fn visible_write_materialized_carry_forward_requires_all_hashes() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "carry-forward",
+            StateFact::VisibleWriteMaterializedCarryForwardObserved {
+                document_hash: "doc-a".into(),
+                model_revision: 3,
+                live_buffer_hash: "live-a".into(),
+                file_content_hash: "file-a".into(),
+                commit_candidate_hash: "candidate-a".into(),
+                source: "test".into(),
+            },
+        ));
+        let doc = ledger.project_document("doc-a").unwrap();
+        let proof = doc
+            .materialized_visible_write_carry_forward("candidate-a", "file-a", "live-a")
+            .expect("materialized carry-forward proof");
+        assert_eq!(proof.model_revision, 3);
+        assert!(
+            doc.materialized_visible_write_carry_forward("candidate-a", "file-b", "live-a")
+                .is_none(),
+            "file hash must match the proof"
+        );
+        assert!(
+            doc.materialized_visible_write_carry_forward("candidate-a", "file-a", "live-b")
+                .is_none(),
+            "live-buffer hash must match the proof"
+        );
+    }
+
+    #[test]
+    fn supervisor_recycle_projection_folds_started_and_settled() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "recycle-started-1",
+            StateFact::SupervisorRecycleStarted {
+                document_hash: PROJECT_SUPERVISOR_DOCUMENT_HASH.into(),
+                reason: "auto_install".into(),
+                recycle_epoch: 1,
+                marked_secs: 10,
+            },
+        ));
+        let started = ledger.project().project_supervisor_recycle();
+        assert_eq!(started.phase, SupervisorRecyclePhase::InFlight);
+        assert_eq!(started.reason.as_deref(), Some("auto_install"));
+        assert_eq!(started.recycle_epoch, 1);
+
+        ledger.append(state_event(
+            "recycle-settled-1",
+            StateFact::SupervisorRecycleSettled {
+                document_hash: PROJECT_SUPERVISOR_DOCUMENT_HASH.into(),
+                reason: "watch_loop_started".into(),
+                recycle_epoch: 1,
+                marked_secs: 11,
+            },
+        ));
+        let settled = ledger.project().project_supervisor_recycle();
+        assert_eq!(settled.phase, SupervisorRecyclePhase::Settled);
+        assert_eq!(settled.reason.as_deref(), Some("watch_loop_started"));
+        assert_eq!(settled.recycle_epoch, 1);
+
+        ledger.append(state_event(
+            "recycle-settled-0",
+            StateFact::SupervisorRecycleSettled {
+                document_hash: PROJECT_SUPERVISOR_DOCUMENT_HASH.into(),
+                reason: "stale".into(),
+                recycle_epoch: 0,
+                marked_secs: 12,
+            },
+        ));
+        let after_stale = ledger.project().project_supervisor_recycle();
+        assert_eq!(after_stale.phase, SupervisorRecyclePhase::Settled);
+        assert_eq!(after_stale.reason.as_deref(), Some("watch_loop_started"));
+    }
+
+    #[test]
+    fn route_submit_projection_folds_started_blocked_settled_and_freshness() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "route-submit-started",
+            StateFact::RouteSubmitStarted {
+                document_hash: "doc-a".into(),
+                pane_id: "%1".into(),
+                harness: "codex".into(),
+                reason: ROUTE_DISPATCH_ONLY_READY_PROBE_REASON.into(),
+                submit_epoch: 1,
+                marked_secs: 1_000,
+            },
+        ));
+
+        let projection = ledger.project();
+        let submit = &projection.document("doc-a").unwrap().route.submit;
+        assert_eq!(submit.phase, RouteSubmitPhase::InFlight);
+        assert_eq!(submit.ttl_secs(), ROUTE_SUBMIT_READY_PROBE_TTL_SECS);
+        assert!(submit.is_pending_at(1_000 + ROUTE_SUBMIT_IN_FLIGHT_TTL_SECS + 1));
+        assert!(!submit.is_pending_at(1_000 + ROUTE_SUBMIT_READY_PROBE_TTL_SECS + 1));
+
+        ledger.append(state_event(
+            "route-submit-blocked",
+            StateFact::RouteSubmitBlocked {
+                document_hash: "doc-a".into(),
+                pane_id: "%1".into(),
+                harness: "codex".into(),
+                reason: "accepted_without_dispatch_start_proof".into(),
+                submit_epoch: 2,
+                marked_secs: 2_000,
+            },
+        ));
+        let projection = ledger.project();
+        let submit = &projection.document("doc-a").unwrap().route.submit;
+        assert_eq!(submit.phase, RouteSubmitPhase::Blocked);
+        assert_eq!(submit.ttl_secs(), ROUTE_SUBMIT_BLOCKED_TTL_SECS);
+        assert!(submit.is_pending_at(2_000 + ROUTE_SUBMIT_BLOCKED_TTL_SECS));
+        assert!(!submit.is_pending_at(2_000 + ROUTE_SUBMIT_BLOCKED_TTL_SECS + 1));
+
+        ledger.append(state_event(
+            "route-submit-stale-settled",
+            StateFact::RouteSubmitSettled {
+                document_hash: "doc-a".into(),
+                pane_id: "%1".into(),
+                harness: "codex".into(),
+                reason: "stale_drop".into(),
+                submit_epoch: 1,
+                marked_secs: 2_001,
+            },
+        ));
+        let projection = ledger.project();
+        assert_eq!(
+            projection.document("doc-a").unwrap().route.submit.phase,
+            RouteSubmitPhase::Blocked
+        );
+
+        ledger.append(state_event(
+            "route-submit-settled",
+            StateFact::RouteSubmitSettled {
+                document_hash: "doc-a".into(),
+                pane_id: "%1".into(),
+                harness: "codex".into(),
+                reason: "guard_dropped".into(),
+                submit_epoch: 2,
+                marked_secs: 2_002,
+            },
+        ));
+        let projection = ledger.project();
+        assert_eq!(
+            projection.document("doc-a").unwrap().route.submit.phase,
+            RouteSubmitPhase::Idle
+        );
+    }
+
+    #[test]
+    fn queue_context_clear_projection_folds_started_settled_and_freshness() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "context-clear-started-1",
+            StateFact::QueueContextClearStarted {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%1".into(),
+                harness: "codex".into(),
+                command: "/clear".into(),
+                source: Some("operator_deferred_clear".into()),
+                head_sha256: Some("head-hash".into()),
+                head_bytes: Some(12),
+                clear_epoch: 1,
+                marked_secs: 1_000,
+            },
+        ));
+
+        let projection = ledger.project();
+        let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
+        assert_eq!(context_clear.phase, QueueContextClearPhase::InFlight);
+        assert_eq!(
+            context_clear.ttl_secs(),
+            QUEUE_CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS
+        );
+        assert!(context_clear.is_pending_at(1_000 + QUEUE_CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS));
+        assert!(!context_clear.is_pending_at(1_000 + QUEUE_CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS + 1));
+        assert_eq!(context_clear.head_sha256.as_deref(), Some("head-hash"));
+
+        ledger.append(state_event(
+            "context-clear-started-2",
+            StateFact::QueueContextClearStarted {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%1".into(),
+                harness: "codex".into(),
+                command: "/clear".into(),
+                source: Some("queue_slash_clear".into()),
+                head_sha256: Some("new-head".into()),
+                head_bytes: Some(24),
+                clear_epoch: 2,
+                marked_secs: 2_000,
+            },
+        ));
+        ledger.append(state_event(
+            "context-clear-stale-settled",
+            StateFact::QueueContextClearSettled {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%1".into(),
+                harness: "codex".into(),
+                command: "/clear".into(),
+                source: Some("stale".into()),
+                clear_epoch: 1,
+                marked_secs: 2_001,
+            },
+        ));
+        let projection = ledger.project();
+        let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
+        assert_eq!(context_clear.phase, QueueContextClearPhase::InFlight);
+        assert_eq!(context_clear.clear_epoch, 2);
+        assert_eq!(context_clear.head_sha256.as_deref(), Some("new-head"));
+
+        ledger.append(state_event(
+            "context-clear-settled",
+            StateFact::QueueContextClearSettled {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%1".into(),
+                harness: "codex".into(),
+                command: "/clear".into(),
+                source: Some("settled".into()),
+                clear_epoch: 2,
+                marked_secs: 2_002,
+            },
+        ));
+        let projection = ledger.project();
+        assert_eq!(
+            projection
+                .document("doc-a")
+                .unwrap()
+                .queue
+                .context_clear
+                .phase,
+            QueueContextClearPhase::Idle
+        );
+    }
+
+    #[test]
+    fn queue_context_clear_projection_tracks_deferred_operator_clear_without_ttl() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "context-clear-deferred",
+            StateFact::QueueContextClearDeferred {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%1".into(),
+                harness: "codex".into(),
+                command: "/clear".into(),
+                source: Some("operator_deferred_clear".into()),
+                head_sha256: Some("head-hash".into()),
+                head_bytes: Some(12),
+                clear_epoch: 1,
+                marked_secs: 1_000,
+            },
+        ));
+
+        let projection = ledger.project();
+        let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
+        assert_eq!(context_clear.phase, QueueContextClearPhase::Deferred);
+        assert!(context_clear.is_deferred_operator_clear());
+        assert!(!context_clear.is_pending_at(1_000));
+        assert!(!context_clear.is_pending_at(10_000));
+
+        ledger.append(state_event(
+            "context-clear-started",
+            StateFact::QueueContextClearStarted {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%1".into(),
+                harness: "codex".into(),
+                command: "/clear".into(),
+                source: Some("operator_deferred_clear".into()),
+                head_sha256: Some("head-hash".into()),
+                head_bytes: Some(12),
+                clear_epoch: 2,
+                marked_secs: 2_000,
+            },
+        ));
+        let projection = ledger.project();
+        assert_eq!(
+            projection
+                .document("doc-a")
+                .unwrap()
+                .queue
+                .context_clear
+                .phase,
+            QueueContextClearPhase::InFlight
+        );
+    }
+
+    #[test]
+    fn queue_context_clear_projection_tracks_manual_operator_cooldown_as_named_state() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "context-clear-manual-cooldown",
+            StateFact::QueueContextClearStarted {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%1".into(),
+                harness: "codex".into(),
+                command: "/clear".into(),
+                source: Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_MANUAL_COOLDOWN.into()),
+                head_sha256: None,
+                head_bytes: None,
+                clear_epoch: 1,
+                marked_secs: 1_000,
+            },
+        ));
+
+        let projection = ledger.project();
+        let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
+        assert_eq!(context_clear.phase, QueueContextClearPhase::InFlight);
+        assert!(context_clear.is_manual_operator_clear_cooldown());
+        assert!(context_clear.is_pending_at(1_000 + QUEUE_CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS));
+        assert!(!context_clear.is_pending_at(1_000 + QUEUE_CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS + 1));
+        assert!(
+            context_clear.is_manual_operator_clear_cooldown(),
+            "manual cooldown remains source-identifiable after freshness TTL for source-aware helpers"
+        );
+
+        ledger.append(state_event(
+            "context-clear-manual-cooldown-settled",
+            StateFact::QueueContextClearSettled {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%1".into(),
+                harness: "codex".into(),
+                command: "/clear".into(),
+                source: Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_MANUAL_COOLDOWN.into()),
+                clear_epoch: 1,
+                marked_secs: 1_100,
+            },
+        ));
+        let projection = ledger.project();
+        let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
+        assert_eq!(context_clear.phase, QueueContextClearPhase::Idle);
+        assert!(!context_clear.is_manual_operator_clear_cooldown());
+    }
+
+    #[test]
+    fn queue_drain_stall_projection_folds_recorded_cleared_and_rejects_stale_clear() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "drain-stall-recorded-1",
+            StateFact::QueueDrainStallContinuationRecorded {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                cycle_id: "cycle-1".into(),
+                stall_epoch: 1,
+                recorded_secs: 1_000,
+            },
+        ));
+
+        let projection = ledger.project();
+        let drain_stall = &projection.document("doc-a").unwrap().queue.drain_stall;
+        assert_eq!(drain_stall.phase, QueueDrainStallPhase::Pending);
+        assert!(drain_stall.is_pending());
+        assert_eq!(drain_stall.cycle_id, "cycle-1");
+
+        ledger.append(state_event(
+            "drain-stall-recorded-2",
+            StateFact::QueueDrainStallContinuationRecorded {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                cycle_id: "cycle-2".into(),
+                stall_epoch: 2,
+                recorded_secs: 2_000,
+            },
+        ));
+        ledger.append(state_event(
+            "drain-stall-stale-clear",
+            StateFact::QueueDrainStallContinuationCleared {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                stall_epoch: 1,
+                cleared_secs: 2_001,
+                reason: Some("stale".into()),
+            },
+        ));
+        let projection = ledger.project();
+        let drain_stall = &projection.document("doc-a").unwrap().queue.drain_stall;
+        assert_eq!(drain_stall.phase, QueueDrainStallPhase::Pending);
+        assert_eq!(drain_stall.stall_epoch, 2);
+        assert_eq!(drain_stall.cycle_id, "cycle-2");
+
+        ledger.append(state_event(
+            "drain-stall-clear",
+            StateFact::QueueDrainStallContinuationCleared {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                stall_epoch: 2,
+                cleared_secs: 2_002,
+                reason: Some("preflight_reconciled".into()),
+            },
+        ));
+        let projection = ledger.project();
+        let drain_stall = &projection.document("doc-a").unwrap().queue.drain_stall;
+        assert_eq!(drain_stall.phase, QueueDrainStallPhase::Idle);
+        assert!(!drain_stall.is_pending());
+        assert_eq!(
+            drain_stall.clear_reason.as_deref(),
+            Some("preflight_reconciled")
+        );
+    }
+
+    #[test]
+    fn transport_patch_terminals_are_lazily_receipts() {
+        let mut transport = TransportProjection {
+            editor_generation: Some(7),
+            ..TransportProjection::default()
+        };
+
+        assert!(
+            !transport.apply_patch_applied_receipt("patch-1", 6),
+            "stale receipt generations must not mutate transport state"
+        );
+        assert!(!transport.patches.contains_key("patch-1"));
+        assert!(transport.apply_patch_applied_receipt("patch-1", 7));
+        assert_eq!(
+            transport.patch_terminal_receipt_outcome("patch-1"),
+            Some(ReceiptOutcome::Applied)
+        );
+        assert!(
+            !transport.apply_patch_rejected_receipt("patch-1", 7, "late reject"),
+            "a conflicting terminal receipt must fail closed"
+        );
+        assert_eq!(
+            transport.patches["patch-1"].phase,
+            TransportPatchPhase::Applied
+        );
+
+        let serialized = serde_json::to_string(&transport).unwrap();
+        let restored: TransportProjection = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(transport, restored);
+        assert_eq!(
+            restored.patch_terminal_receipt_outcome("patch-1"),
+            Some(ReceiptOutcome::Applied),
+            "terminal receipt outcome is reconstructable from persisted phase"
+        );
+    }
+
+    #[test]
     fn local_state_machines_guard_closed_domains() {
         assert_eq!(
             QueueHeadMachine::transition(QueueHeadPhase::Completed, QueueHeadEvent::Selected),
@@ -2623,7 +4711,7 @@ mod tests {
         );
         assert_eq!(
             TransportPatchMachine::transition(
-                TransportPatchPhase::Acked,
+                TransportPatchPhase::Applied,
                 TransportPatchEvent::ForceDiskFallback,
             ),
             None

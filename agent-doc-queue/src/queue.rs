@@ -4,10 +4,7 @@
 //! trigger or context clear. They do not read documents, inspect panes, or
 //! submit commands; callers provide the observed executor/document facts.
 
-use serde::{Deserialize, Serialize};
-
 pub const CLEAR_COOLDOWN_RESUME_IDLE_TICKS: u32 = 4;
-pub const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdleQueueDrainDecision {
@@ -46,7 +43,7 @@ pub enum IdleQueueContextClearInFlightDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IdleQueueContextClearInFlightFacts {
-    pub marker_active: bool,
+    pub projection_active: bool,
     pub prompt_visible: bool,
     pub turn_active: bool,
     pub route_submit_in_flight: bool,
@@ -71,40 +68,6 @@ pub struct IdleQueueContextClearInFlightSettleFacts {
 pub struct IdleQueueContextClearInFlightSettle {
     pub settled_idle_ticks: u32,
     pub settled_now: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ContextClearInFlight {
-    pub file: String,
-    pub target: String,
-    pub harness: String,
-    pub command: String,
-    #[serde(default)]
-    pub source: Option<String>,
-    pub head_sha256: Option<String>,
-    pub head_bytes: Option<usize>,
-    pub written_at: u64,
-}
-
-pub fn context_clear_in_flight_marker(
-    file: String,
-    target: &str,
-    harness: &str,
-    command: &str,
-    source: &str,
-    active_head: Option<&str>,
-    written_at: u64,
-) -> ContextClearInFlight {
-    ContextClearInFlight {
-        file,
-        target: target.to_string(),
-        harness: harness.to_string(),
-        command: command.to_string(),
-        source: Some(source.to_string()),
-        head_sha256: active_head.map(agent_doc_hash::content_hash),
-        head_bytes: active_head.map(str::len),
-        written_at,
-    }
 }
 
 pub fn clean_session_head_forces_context_reset(
@@ -256,7 +219,7 @@ pub fn drain_blocked_awaiting_clear_settle(
 pub fn idle_queue_context_clear_in_flight_decision(
     facts: IdleQueueContextClearInFlightFacts,
 ) -> IdleQueueContextClearInFlightDecision {
-    if !facts.marker_active {
+    if !facts.projection_active {
         return IdleQueueContextClearInFlightDecision::Ignore;
     }
     if !facts.prompt_visible || facts.turn_active || facts.route_submit_in_flight {
@@ -274,14 +237,6 @@ pub fn idle_queue_context_clear_in_flight_decision(
     } else {
         IdleQueueContextClearInFlightDecision::AwaitSettle
     }
-}
-
-pub fn context_clear_in_flight_marker_active(
-    written_at: u64,
-    now_secs: u64,
-    ttl_secs: u64,
-) -> bool {
-    now_secs.saturating_sub(written_at) <= ttl_secs
 }
 
 pub fn idle_queue_context_clear_in_flight_settle_ticks(
@@ -513,7 +468,7 @@ mod tests {
         use IdleQueueContextClearInFlightDecision::*;
 
         let base = IdleQueueContextClearInFlightFacts {
-            marker_active: true,
+            projection_active: true,
             prompt_visible: true,
             turn_active: false,
             route_submit_in_flight: false,
@@ -541,49 +496,6 @@ mod tests {
             }),
             Settled
         );
-    }
-
-    #[test]
-    fn context_clear_in_flight_marker_freshness_uses_saturating_age() {
-        assert!(context_clear_in_flight_marker_active(
-            100,
-            100 + CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,
-            CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,
-        ));
-        assert!(!context_clear_in_flight_marker_active(
-            100,
-            100 + CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS + 1,
-            CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,
-        ));
-        assert!(
-            context_clear_in_flight_marker_active(200, 100, CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,),
-            "clock skew must not underflow into a stale marker"
-        );
-    }
-
-    #[test]
-    fn context_clear_in_flight_marker_records_head_hash_and_len() {
-        let marker = context_clear_in_flight_marker(
-            "plan.md".to_string(),
-            "%1",
-            "codex",
-            "/clear",
-            "queue_slash_command",
-            Some("do [#a]"),
-            42,
-        );
-
-        assert_eq!(marker.file, "plan.md");
-        assert_eq!(marker.target, "%1");
-        assert_eq!(marker.harness, "codex");
-        assert_eq!(marker.command, "/clear");
-        assert_eq!(marker.source.as_deref(), Some("queue_slash_command"));
-        assert_eq!(marker.head_bytes, Some("do [#a]".len()));
-        assert_eq!(
-            marker.head_sha256.as_deref(),
-            Some(agent_doc_hash::content_hash("do [#a]").as_str())
-        );
-        assert_eq!(marker.written_at, 42);
     }
 
     #[test]

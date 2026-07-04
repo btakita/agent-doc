@@ -8,11 +8,10 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use agent_doc_frontmatter::project_config::{
-    ComponentConfig, ProjectConfig, parse_legacy_components_toml, parse_project_toml,
+    ProjectConfig, parse_legacy_components_toml, parse_project_toml,
 };
 
 /// Load project config from `.agent-doc/config.toml` in CWD, or return defaults.
@@ -185,6 +184,7 @@ fn project_config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_frontmatter::project_config::ComponentConfig;
     use tempfile::TempDir;
 
     fn setup_project(dir: &Path) -> PathBuf {
@@ -289,10 +289,4 @@ mod tests {
         assert_eq!(cfg.components["status"].patch, "replace");
         assert!(!legacy.exists());
     }
-}
-
-/// Map a `BTreeMap` of components for callers that need it.
-#[allow(dead_code)]
-fn _unused_btreemap_marker() -> BTreeMap<String, ComponentConfig> {
-    BTreeMap::new()
 }

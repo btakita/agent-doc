@@ -30,8 +30,10 @@ class SyncLayoutAction : AnAction() {
         internal const val PRESERVED_LAYOUT_DEFERRED_WARNING =
             "Sync deferred: another visible agent-doc pane is mid-closeout, so the current tmux layout was preserved. Try again after that closeout finishes."
         internal const val SYNC_ALREADY_RUNNING_WARNING =
-            "Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly."
+            "Sync deferred: another tmux layout sync is already running; this sync will retry shortly."
         internal const val SYNC_PROCESS_TIMEOUT_MS = 30_000L
+        internal const val SYNC_DEFERRED_RETRY_MS = 500L
+        internal const val SYNC_DEFERRED_MAX_RETRIES = 80
 
         private val PROTECTED_PANES_PATTERN =
             Regex("""visible protected pane\(s\) (.+?) cannot be detached safely""")
@@ -251,6 +253,9 @@ class SyncLayoutAction : AnAction() {
             generationStillCurrent: Boolean,
         ): Boolean = heldGuard && !generationStillCurrent
 
+        internal fun deferredSyncRetryDelayMs(attempt: Int): Long? =
+            if (attempt < SYNC_DEFERRED_MAX_RETRIES) SYNC_DEFERRED_RETRY_MS else null
+
         internal fun buildFocusCommand(
             agentDoc: String,
             focusedFile: String,
@@ -265,6 +270,7 @@ class SyncLayoutAction : AnAction() {
             project: com.intellij.openapi.project.Project,
             notify: Boolean = true,
             noAutostart: Boolean = false,
+            deferredAttempt: Int = 0,
         ) {
             val manager = FileEditorManager.getInstance(project)
             val focusedVFile = manager.selectedTextEditor?.virtualFile
@@ -297,8 +303,34 @@ class SyncLayoutAction : AnAction() {
                 try {
                     if (lib != null) {
                         if (!lib.agent_doc_sync_try_lock()) {
-                            LOG.info("[sync] deferred manual sync (gen=$myGen): another sync is in flight; it will re-run with this layout on completion")
-                            if (notify) TerminalUtil.notifyWarning(project, SYNC_ALREADY_RUNNING_WARNING)
+                            val retryDelayMs = deferredSyncRetryDelayMs(deferredAttempt)
+                            LOG.info(
+                                "[sync] deferred sync (gen=$myGen attempt=$deferredAttempt): another sync is in flight; retryDelayMs=$retryDelayMs"
+                            )
+                            if (notify && deferredAttempt == 0) {
+                                TerminalUtil.notifyWarning(project, SYNC_ALREADY_RUNNING_WARNING)
+                            }
+                            if (retryDelayMs != null) {
+                                Thread {
+                                    Thread.sleep(retryDelayMs)
+                                    syncLayout(
+                                        project,
+                                        notify = false,
+                                        noAutostart = noAutostart,
+                                        deferredAttempt = deferredAttempt + 1,
+                                    )
+                                }.apply {
+                                    isDaemon = true
+                                    start()
+                                }
+                            } else if (notify) {
+                                TerminalUtil.notifyWarning(
+                                    project,
+                                    "Sync deferred: another tmux layout sync is still running after ${
+                                        SYNC_DEFERRED_MAX_RETRIES * SYNC_DEFERRED_RETRY_MS / 1000
+                                    }s.",
+                                )
+                            }
                             return@Thread
                         }
                         syncGuard = lib

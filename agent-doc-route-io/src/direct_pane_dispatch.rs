@@ -609,14 +609,16 @@ pub fn send_command_unchecked(
     if acceptance.status != CommandDispatchStatus::Accepted
         && recycle_interrupted_resubmit_should_wait(
             true,
-            agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(file_path),
+            agent_doc_controller_io::project_controller::supervisor_recycle_pending_for_file(
+                std::path::Path::new(file_path),
+            ),
         )
     {
-        let settled = agent_doc_supervisor_io::recycle_inflight::wait_for_recycle_settle(
-            file_path,
-            agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT,
-            agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL,
-        );
+        let settled =
+            agent_doc_controller_io::project_controller::wait_for_supervisor_recycle_settle_for_file(
+                std::path::Path::new(file_path),
+            )
+            .is_ok();
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

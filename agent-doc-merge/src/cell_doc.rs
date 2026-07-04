@@ -2000,10 +2000,9 @@ agent_doc_format: template
         assert_eq!(ctx.get(&len_view), 3);
     }
 
-    fn tree_snapshot(
-        ctx: &Context,
-        tree: &CellDocTree,
-    ) -> Vec<(String, usize, Vec<(String, String)>)> {
+    type TreeSnapshot = Vec<(String, usize, Vec<(String, String)>)>;
+
+    fn tree_snapshot(ctx: &Context, tree: &CellDocTree) -> TreeSnapshot {
         let mut occurrences: Vec<(String, usize)> = tree.occurrences.keys().cloned().collect();
         occurrences.sort();
         occurrences
@@ -3054,7 +3053,7 @@ working on it
         // Disjoint edits to DIFFERENT items: ours edits a, theirs edits c.
         let theirs = "<!-- agent:queue -->\n- do [#a] one\n- do [#b] two\n- do [#c] three EDITED-T\n<!-- /agent:queue -->\n";
         let ours2 = "<!-- agent:queue -->\n- do [#a] one EDITED-O\n- do [#b] two\n- do [#c] three\n<!-- /agent:queue -->\n";
-        let out2 = merge_with_markers(Some("1"), base, &ours2, theirs);
+        let out2 = merge_with_markers(Some("1"), base, ours2, theirs);
         assert!(!out2.fell_back);
         assert!(
             out2.conflicts.is_empty(),

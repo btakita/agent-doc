@@ -2000,14 +2000,14 @@ mod tests {
             panic!("frontmatter should serialize as a mapping");
         };
 
-        assert!(!map.contains_key(&serde_yaml::Value::String("agent".to_string())));
+        assert!(!map.contains_key(serde_yaml::Value::String("agent".to_string())));
         assert_eq!(
-            map.get(&serde_yaml::Value::String("agent_doc_session".to_string()))
+            map.get(serde_yaml::Value::String("agent_doc_session".to_string()))
                 .and_then(serde_yaml::Value::as_str),
             Some("sid")
         );
         assert_eq!(
-            map.get(&serde_yaml::Value::String("model".to_string()))
+            map.get(serde_yaml::Value::String("model".to_string()))
                 .and_then(serde_yaml::Value::as_str),
             Some("opus")
         );
@@ -2338,7 +2338,7 @@ mod tests {
         // not double-emit the deprecated line on re-serialize.
         let (fm, body) =
             parse("---\nagent_doc_format: template\nqueue: start\n---\n\nx\n").unwrap();
-        let out = write(&fm, &body).unwrap();
+        let out = write(&fm, body).unwrap();
         assert!(out.contains("queue: start"), "{out}");
         assert!(!out.contains("queue_active:"), "{out}");
 

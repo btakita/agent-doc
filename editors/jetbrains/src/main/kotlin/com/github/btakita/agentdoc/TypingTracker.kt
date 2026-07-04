@@ -32,6 +32,11 @@ internal data class PreparedEditorOp(
 )
 
 private const val OPERATOR_TEXT_AUTHORITY_CAPABILITY = "operator_text_authority_v1"
+private const val LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = "lazily_transport_receipts_v1"
+private val EDITOR_CAPABILITIES = listOf(
+    OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+    LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+).joinToString(",")
 
 // #stale-plugin-detect: report the real plugin version over FFI so the binary's
 // stale-plugin detection is not blind. The IntelliJ plugin descriptor (patched
@@ -341,7 +346,7 @@ object TypingTracker : DocumentListener {
                     EditorIdentity.id,
                     "jetbrains",
                     pluginVersion(),
-                    OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                    EDITOR_CAPABILITIES,
                     if (noUnsavedOperatorEdits) 1 else 0,
                 )
                 true
@@ -389,7 +394,7 @@ object TypingTracker : DocumentListener {
                 EditorIdentity.id,
                 "jetbrains",
                 pluginVersion(),
-                OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                EDITOR_CAPABILITIES,
             )
             true
         } catch (_: UnsatisfiedLinkError) {

@@ -3830,7 +3830,7 @@ Second answer line three.
         let base_state = CrdtDoc::from_text(&base).encode_state();
         // ours keeps both committed blocks; theirs is stale and dropped block 2.
         let ours = doc_with_exchange_queue(&format!("{r1}{r2}"), "- do [#a1]\n- do [#new]");
-        let theirs = doc_with_exchange_queue(&r1.to_string(), "- do [#a1]");
+        let theirs = doc_with_exchange_queue(r1, "- do [#a1]");
 
         let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
         assert!(

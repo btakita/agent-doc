@@ -1374,7 +1374,7 @@ mod tests {
     fn recovery_decision_maps_states_to_typed_outcomes() {
         use CloseoutRecoveryDecision::*;
         use CloseoutRecoveryState::*;
-        let command = Some("agent-doc recover tasks/doc.md");
+        let command = "agent-doc recover tasks/doc.md";
 
         let default_cases = [
             (Clean, "already_committed"),
@@ -1395,7 +1395,7 @@ mod tests {
             let decision = closeout_recovery_decision_from_state(
                 state,
                 CloseoutRecoveryDecisionInput::default(),
-                command,
+                Some(command),
             );
             assert_eq!(
                 decision.as_str(),
@@ -1415,7 +1415,7 @@ mod tests {
                 | ResetSidecarsFromVisible {
                     command: rendered, ..
                 } => {
-                    assert_eq!(rendered, command.unwrap());
+                    assert_eq!(rendered, command);
                 }
                 Blocked {
                     missing_proof,
@@ -1426,7 +1426,7 @@ mod tests {
                         !missing_proof.is_empty(),
                         "blocked decision should name missing proof for {state:?}"
                     );
-                    assert_eq!(recommended, command.unwrap());
+                    assert_eq!(recommended, command);
                 }
                 other => panic!("default path unexpectedly produced {other:?} for {state:?}"),
             }
@@ -1441,7 +1441,7 @@ mod tests {
                         blocker_reason: Some("active closeout"),
                         stale_capture_supersession_proof: Some("superseded"),
                     },
-                    command,
+                    Some(command),
                 ),
                 QueuePromptForAfterCloseout {
                     state,
@@ -1475,7 +1475,7 @@ mod tests {
                         stale_capture_supersession_proof: Some("heading already answered"),
                         ..CloseoutRecoveryDecisionInput::default()
                     },
-                    command,
+                    Some(command),
                 ),
                 RetireStaleCapture {
                     state,

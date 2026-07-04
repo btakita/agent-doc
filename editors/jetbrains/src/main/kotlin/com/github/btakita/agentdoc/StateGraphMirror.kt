@@ -26,6 +26,7 @@ internal object AgentDocNodeType {
     const val TRANSPORT_PATCH = "agent_doc.transport.patch"
     const val SUPERVISOR_OWNER = "agent_doc.supervisor.owner"
     const val DOCUMENT_BASELINE = "agent_doc.document.baseline"
+    const val DOCUMENT_AUTHORITY = "agent_doc.document.authority"
     const val PROOF_MARKER = "agent_doc.proof.marker"
 }
 

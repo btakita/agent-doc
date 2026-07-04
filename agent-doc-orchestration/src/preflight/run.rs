@@ -25,6 +25,25 @@ pub struct PreflightOptions {
     pub probe: bool,
 }
 
+fn closeout_cycle_is_open(file: &Path) -> Result<bool> {
+    let projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    if let Some(mut state) = agent_doc_cycle_state_io::load(file)? {
+        if let Some(projection) = projection.as_ref() {
+            if projection.matches_cycle(&state.cycle_id) {
+                agent_doc_cycle_state_io::apply_closeout_projection_to_cycle_state(
+                    &mut state, projection,
+                );
+            } else if projection.phase_is_open().unwrap_or(false) {
+                return Ok(true);
+            }
+        }
+        return Ok(state.is_open());
+    }
+    Ok(projection
+        .and_then(|projection| projection.phase_is_open())
+        .unwrap_or(false))
+}
+
 /// Run preflight with default (dispatch/response-bound) options.
 pub fn run(file: &Path) -> Result<()> {
     run_with_options(file, PreflightOptions::default())
@@ -50,16 +69,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let disk = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    // #rtwwire (rung 3): classify against the realtime document model — newest of
-    // disk vs the editor's unsaved buffer — so preflight never treats a buffer
-    // the user is actively editing as a "differs from disk" drift to block. The
-    // feed is staleness-gated (`#rtwfeed`): the buffer only supersedes disk when
-    // it provably holds unsaved edits ahead of disk, so a stale buffer or
-    // agent-doc's own just-written disk content can never override disk here.
-    // With no editor attached (the common/CI case) this returns disk unchanged.
-    let content = agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content;
+    // #rtwwire (rung 3): classify against the realtime document model. When an
+    // editor is active, the CRDT relay is the authority and disk is not read as
+    // a substitute; with no editor attached, disk is the fallback replica.
+    let content = agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
     let pre_mutation_unresolved_exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
     let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
@@ -135,9 +148,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // repair can normalize a dirty response body into prompt-looking lines.
     // Open cycles still go through repair first so interrupted write/commit
     // boundaries can recover normally.
-    let open_cycle = agent_doc_cycle_state_io::load(file)?
-        .map(|state| state.is_open())
-        .unwrap_or(false);
+    let open_cycle = closeout_cycle_is_open(file)?;
     if !options.probe
         && !open_cycle
         && agent_doc_session_check_io::detect_unstarted_prompt_bearing_diff(file)?.is_none()
@@ -902,10 +913,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         }
         _ => None,
     };
-    let active_scope_cycle_is_open = agent_doc_cycle_state_io::load(file)
-        .ok()
-        .flatten()
-        .is_some_and(|state| state.is_open());
+    let active_scope_cycle_is_open = closeout_cycle_is_open(file).unwrap_or(false);
     let active_turn_affectedness = match (
         active_scope_cycle_is_open,
         semantic_diff.as_ref(),
@@ -1279,7 +1287,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // `queue_continuation_required` so the loop ends its turn (the idle boundary
     // lets the `execve` recycle fire), and surface the recycle-yield guidance so
     // the agent understands the yield is intentional and resumes after recycle.
-    let recycle_yield_pending = agent_doc_supervisor_io::recycle_yield::recycle_yield_pending(file);
+    let recycle_yield_pending =
+        agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file(
+            file,
+        );
     let effective_queue_continuation_required =
         queue_state.queue_continuation_required && !exchange_prompt_preempts_queue;
     let effective_continuation = agent_doc_queue::queue_continuation::effective_continuation_output(
@@ -1290,21 +1301,25 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let queue_continuation_required = effective_continuation.required;
     let queue_continuation_guidance = effective_continuation.guidance;
 
-    // `#qstallguard` Layer B: reconcile the continuation-pending marker dropped by
+    // `#qstallguard` Layer B: reconcile the continuation-pending projection recorded by
     // the prior clean closeout (session-check). If drainable work remained, the
     // loop did not continue (no fresh drain-owner lease), and no valid stop reason
     // applies, the previous turn STALLED the queue — emit a hard diagnostic instead
-    // of letting the silent stall pass. The marker is one-shot: every branch clears
-    // it so the diagnostic fires once per stall, not every preflight.
+    // of letting the silent stall pass. The projection is one-shot: every branch
+    // clears it so the diagnostic fires once per stall, not every preflight.
     {
         let file_str = file.to_string_lossy().to_string();
-        if agent_doc_queue_io::drain_stall::read_continuation_pending(&file_str).is_some() {
+        if agent_doc_controller_io::project_controller::queue_drain_stall_continuation_pending_for_file(file)
+            .ok()
+            .flatten()
+            .is_some()
+        {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             let facts = StallFacts {
-                continuation_pending_marker: true,
+                continuation_pending_projection: true,
                 continuation_required_now: queue_continuation_required,
                 drainable_head_count: queue_state.queue_drainable_head_count,
                 user_prompt_preempts: !user_intent_prompt_changes.is_empty(),
@@ -1326,9 +1341,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                     active_harness: None,
                 });
             }
-            // One-shot: clear the marker on every reconciliation outcome.
+            // One-shot: clear the projection on every reconciliation outcome.
             if !options.probe {
-                agent_doc_queue_io::drain_stall::clear_continuation_pending(&file_str);
+                let _ = agent_doc_controller_io::project_controller::clear_queue_drain_stall_continuation_pending_for_file(
+                    file,
+                    "preflight_reconciled",
+                );
             }
         }
     }

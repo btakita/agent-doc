@@ -65,11 +65,11 @@ fn supervisor_background_context_clear_enabled() -> bool {
     false
 }
 
-fn context_clear_marker_source_allows_supervisor_action(
-    marker: &agent_doc_queue::queue::ContextClearInFlight,
+fn context_clear_projection_source_allows_supervisor_action(
+    projection: &agent_doc_state_backbone::QueueContextClearProjection,
 ) -> bool {
     matches!(
-        marker.source.as_deref(),
+        projection.source.as_deref(),
         Some(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED | CONTEXT_CLEAR_SOURCE_QUEUE_SLASH)
     )
 }
@@ -134,6 +134,61 @@ fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
         return false;
     }
     agent_doc_debounce::is_typing_via_file(&absolute.to_string_lossy(), debounce_ms)
+}
+
+fn checkpoint_crdt_before_supervisor_recycle(
+    file: &std::path::Path,
+    shared: &SupervisorShared,
+    session_log: &mut Option<std::fs::File>,
+    source: &str,
+) -> bool {
+    match agent_doc_crdt_relay_io::checkpoint_durable_projection_for_file(file, source) {
+        Ok(outcome) => {
+            let detail = match &outcome {
+                agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Detached => {
+                    "status=detached changed=false".to_string()
+                }
+                agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Checkpointed {
+                    bytes,
+                    changed,
+                    live_editors,
+                    text_len,
+                    text_hash,
+                } => format!(
+                    "status=checkpointed bytes={bytes} changed={changed} live_editors={live_editors} text_len={text_len} text_hash={text_hash}"
+                ),
+            };
+            log_event(
+                session_log,
+                &format!("supervisor_crdt_durable_checkpoint source={source} {detail}"),
+            );
+            true
+        }
+        Err(err) => {
+            let pane = shared.inject_pane.as_deref().unwrap_or("<pty>");
+            log_event(
+                session_log,
+                &format!(
+                    "supervisor_crdt_durable_checkpoint_blocked source={source} pane={pane} error={err:#}"
+                ),
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "supervisor_crdt_durable_checkpoint_blocked file={} pane={} source={} error={:?}",
+                    file.display(),
+                    pane,
+                    source,
+                    err.to_string(),
+                ),
+            );
+            eprintln!(
+                "[agent-doc] supervisor recycle deferred: CRDT durable checkpoint failed for {} before {source}: {err:#}",
+                file.display()
+            );
+            false
+        }
+    }
 }
 
 /// `#fbwire` / `#fullboundary` Phase 2 - the convergence gate could not be
@@ -301,7 +356,7 @@ fn forced_context_reset_reason_for_head(file: &Path, head: &str) -> Option<&'sta
     }
 }
 
-fn record_context_clear_in_flight_marker(
+fn record_context_clear_in_flight_projection(
     file: &Path,
     shared: &SupervisorShared,
     harness: &agent_doc_harness::HarnessConfig,
@@ -319,22 +374,24 @@ fn record_context_clear_in_flight_marker(
                 .map(|runtime| runtime.pane_id.as_str())
         })
         .unwrap_or("child_pty");
-    if let Err(err) = agent_doc_queue_io::context_clear_in_flight::record_context_clear_in_flight(
-        file,
-        target,
-        &harness.binary,
-        clear_cmd,
-        source,
-        active_head,
-    ) {
+    if let Err(err) =
+        agent_doc_controller_io::project_controller::queue_context_clear_started_for_file(
+            file,
+            target,
+            &harness.binary,
+            clear_cmd,
+            source,
+            active_head,
+        )
+    {
         eprintln!(
-            "[agent-doc] idle-queue watch: failed to record context-clear marker for {}: {err:#}",
+            "[agent-doc] idle-queue watch: failed to record context-clear projection for {}: {err:#}",
             file.display()
         );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "idle_queue_watch_context_clear_marker_failed file={} harness={} error={:?}",
+                "idle_queue_watch_context_clear_projection_failed file={} harness={} error={:?}",
                 file.display(),
                 harness.binary,
                 err.to_string()
@@ -464,11 +521,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
         .name("idle-queue-watch".into())
         .spawn(move || {
             let path = PathBuf::from(&file);
-            // `#jbdisprecycle`: a freshly-started (post-recycle) supervisor drops
-            // the recycle-in-flight marker so the `route` dispatch guard reopens.
-            // The marker's short TTL is the backstop if a recycler died before
-            // reaching here; clearing on startup makes the common path crisp.
-            agent_doc_supervisor_io::recycle_inflight::clear_recycle_inflight(&file);
+            // `#jbdisprecycle`: a freshly-started (post-recycle) supervisor
+            // publishes the PCP graph settle transition so route waiters reopen.
+            if let Err(err) =
+                agent_doc_controller_io::project_controller::supervisor_recycle_settled_for_file(
+                    &path,
+                    "watch_loop_started",
+                )
+            {
+                eprintln!(
+                    "[agent-doc] warning: failed to publish supervisor recycle settled: {err:#}"
+                );
+            }
             let mut last_dispatched: Option<String> = None;
             let mut last_context_reset_head: Option<String> = None;
             let mut last_context_clear_at: Option<u64> = None;
@@ -493,8 +557,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls. Without this
             // the trigger was injected into the still-in-flight `/clear` and the
             // harness saw one concatenated line (`/clear /agent-doc <FILE>`).
-            // Tracked in memory because the supervisor's own clears never write
-            // the manual cooldown marker.
+            // Tracked in memory because the supervisor's own clears never record
+            // the manual cooldown projection.
             let mut awaiting_clear_settle = false;
             let mut clear_settle_idle_ticks: u32 = 0;
             // `#fbwire` Phase 2: the instant the convergence gate FIRST deferred the
@@ -566,13 +630,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut reexec_escalation_attempts: u32 = 0;
             let mut reexec_escalation_exhausted_logged = false;
             // `#wd40` / `#staleloop-recycle-restart`: one-shot log latch for the
-            // stale-binary recycle-yield request. A continuously self-draining
+            // stale-binary recycle-yield projection. A continuously self-draining
             // `/loop` holds the harness `turn_active` back-to-back so this
             // supervisor never reaches its own recycle boundary; when it is stale
-            // AND that loop owns the drain we write a short-TTL recycle-yield
-            // request that the in-session loop reads at its next inter-item
+            // AND that loop owns the drain we publish a controller recycle-yield
+            // projection that the in-session loop reads at its next inter-item
             // boundary and yields, letting the `execve` recycle fire on its own.
-            // The request file is refreshed every tick while the condition holds;
+            // The projection is refreshed every tick while the condition holds;
             // the log line fires once so the watch loop stays quiet.
             let mut recycle_yield_requested_logged = false;
             // `#midturn-recycle-resume` Phase B: consecutive idle-watch boundary ticks
@@ -801,7 +865,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                 }
                 let route_submit_in_flight =
-                    match agent_doc_supervisor_io::route_submit_inflight::route_submit_in_flight(
+                    match agent_doc_controller_io::project_controller::route_submit_in_flight_for_file(
                         &path,
                     ) {
                         Ok(active) => active,
@@ -810,14 +874,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 log_event(
                                     &mut session_log,
                                     &format!(
-                                        "idle_queue_watch_skipped harness={} reason=route_submit_marker_error file={} error={:?}",
+                                        "idle_queue_watch_skipped harness={} reason=route_submit_projection_error file={} error={:?}",
                                         harness.binary,
                                         path.display(),
                                         err.to_string()
                                     ),
                                 );
                                 eprintln!(
-                                    "[agent-doc] idle-queue watch: failed to inspect route-submit marker for {}: {err:#}",
+                                    "[agent-doc] idle-queue watch: failed to inspect route-submit projection for {}: {err:#}",
                                     path.display()
                                 );
                                 route_submit_in_flight_logged = true;
@@ -873,72 +937,72 @@ pub(super) fn spawn_idle_queue_watch_thread(
             } else {
                 editor_typing_active_logged = false;
             }
-            let mut context_clear_marker =
-                match agent_doc_queue_io::context_clear_in_flight::context_clear_in_flight(&path) {
-                    Ok(marker) => marker,
+            let mut context_clear_projection =
+                match agent_doc_controller_io::project_controller::queue_context_clear_in_flight_for_file(&path) {
+                    Ok(projection) => projection,
                     Err(err) => {
                         log_event(
                             &mut session_log,
                             &format!(
-                                "idle_queue_watch_skipped harness={} reason=context_clear_marker_error file={} error={:?}",
+                                "idle_queue_watch_skipped harness={} reason=context_clear_projection_error file={} error={:?}",
                                 harness.binary,
                                 path.display(),
                                 err.to_string()
                             ),
                         );
                         eprintln!(
-                            "[agent-doc] idle-queue watch: failed to inspect context-clear marker for {}: {err:#}",
+                            "[agent-doc] idle-queue watch: failed to inspect context-clear projection for {}: {err:#}",
                             path.display()
                         );
                         None
                     }
             };
-    if let Some(marker) = context_clear_marker.as_ref()
+    if let Some(projection) = context_clear_projection.as_ref()
         && !supervisor_background_context_clear_enabled()
-        && !context_clear_marker_source_allows_supervisor_action(marker)
+        && !context_clear_projection_source_allows_supervisor_action(projection)
     {
-                let source = marker.source.as_deref().unwrap_or("legacy");
+                let source = projection.source.as_deref().unwrap_or("legacy");
                 log_event(
                     &mut session_log,
                     &format!(
-                        "idle_queue_watch_context_clear_marker_dropped harness={} reason=background_context_clear_disabled source={} target={} cmd=\"{}\"",
-                        harness.binary, source, marker.target, marker.command
+                        "idle_queue_watch_context_clear_projection_dropped harness={} reason=background_context_clear_disabled source={} target={} cmd=\"{}\"",
+                        harness.binary, source, projection.target, projection.command
                     ),
                 );
                 agent_doc_ops_log_io::log_op(
                     &path,
                     &format!(
-                        "idle_queue_watch_context_clear_marker_dropped file={} harness={} reason=background_context_clear_disabled source={} target={} cmd={:?}",
+                        "idle_queue_watch_context_clear_projection_dropped file={} harness={} reason=background_context_clear_disabled source={} target={} cmd={:?}",
                         path.display(),
                         harness.binary,
                         source,
-                        marker.target,
-                        marker.command
+                        projection.target,
+                        projection.command
                     ),
                 );
                 if let Err(err) =
-                    agent_doc_queue_io::context_clear_in_flight::clear_context_clear_in_flight(&path)
+                    agent_doc_controller_io::project_controller::clear_queue_context_clear_in_flight_for_file(&path)
                 {
                     eprintln!(
-                        "[agent-doc] idle-queue watch: failed to drop unsupported context-clear marker for {}: {err:#}",
+                        "[agent-doc] idle-queue watch: failed to drop unsupported context-clear projection for {}: {err:#}",
                         path.display()
                     );
                 }
-                context_clear_marker = None;
+                context_clear_projection = None;
             }
-            let context_clear_pending = context_clear_marker.as_ref().and_then(|marker| {
-                supervisor_pane_payload_already_pending(&shared, &marker.command, &harness)
+            let context_clear_pending = context_clear_projection.as_ref().and_then(|projection| {
+                supervisor_pane_payload_already_pending(&shared, &projection.command, &harness)
             });
-            if route_submit_in_flight && context_clear_marker.is_some() {
+            if route_submit_in_flight && context_clear_projection.is_some() {
                 if !context_clear_route_wait_logged {
-                    if let Some(marker) = context_clear_marker.as_ref() {
+                    if let Some(projection) = context_clear_projection.as_ref() {
                         log_event(
                             &mut session_log,
                             &format!(
-                                "idle_queue_watch_context_clear_marker_wait harness={} reason=route_submit_in_flight target={} cmd=\"{}\" prompt_visible={} turn_active={}",
+                                "idle_queue_watch_context_clear_projection_wait harness={} reason=route_submit_in_flight target={} cmd=\"{}\" prompt_visible={} turn_active={}",
                                 harness.binary,
-                                marker.target,
-                                marker.command,
+                                projection.target,
+                                projection.command,
                                 prompt_visible,
                                 turn_active
                             ),
@@ -946,11 +1010,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
-                                "idle_queue_watch_context_clear_marker_wait file={} harness={} reason=route_submit_in_flight target={} cmd={:?} prompt_visible={} turn_active={}",
+                                "idle_queue_watch_context_clear_projection_wait file={} harness={} reason=route_submit_in_flight target={} cmd={:?} prompt_visible={} turn_active={}",
                                 path.display(),
                                 harness.binary,
-                                marker.target,
-                                marker.command,
+                                projection.target,
+                                projection.command,
                                 prompt_visible,
                                 turn_active
                             ),
@@ -961,10 +1025,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
             } else {
                 context_clear_route_wait_logged = false;
             }
-            if let Some(marker) = context_clear_marker.as_ref() {
+            if let Some(projection) = context_clear_projection.as_ref() {
                 context_reset_in_flight = true;
                 awaiting_clear_settle = true;
-                last_context_clear_at = Some(marker.written_at);
+                last_context_clear_at = Some(projection.marked_secs);
             }
             // `#qflood2`: advance the post-`/clear` settle debounce. Require
             // consecutive fresh-idle polls (reset on any busy/non-idle tick)
@@ -983,15 +1047,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 },
             );
             clear_settle_idle_ticks = clear_settle.settled_idle_ticks;
-            if let Some(marker) = context_clear_marker.as_ref() {
-                let marker_key = marker
+            if let Some(projection) = context_clear_projection.as_ref() {
+                let projection_key = projection
                     .head_sha256
                     .clone()
-                    .unwrap_or_else(|| marker.written_at.to_string());
-                let resubmit_key = format!("context_clear_marker:{marker_key}");
+                    .unwrap_or_else(|| projection.marked_secs.to_string());
+                let resubmit_key = format!("context_clear_projection:{projection_key}");
                 match idle_queue_context_clear_in_flight_decision(
                     IdleQueueContextClearInFlightFacts {
-                        marker_active: true,
+                        projection_active: true,
                         prompt_visible,
                         turn_active,
                         route_submit_in_flight,
@@ -1005,7 +1069,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     IdleQueueContextClearInFlightDecision::ResubmitPendingClear => {
                         let head_label = active_head
                             .as_deref()
-                            .or(marker.head_sha256.as_deref())
+                            .or(projection.head_sha256.as_deref())
                             .unwrap_or("<unknown>");
                         match idle_queue_resubmit_pending_payload(
                             &path,
@@ -1013,7 +1077,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             &harness,
                             "context_clear",
                             head_label,
-                            &marker.command,
+                            &projection.command,
                         ) {
                             AutoTriggerOutcome::Sent => {
                                 last_pending_enter_resubmitted = Some(resubmit_key);
@@ -1023,8 +1087,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 log_event(
                                     &mut session_log,
                                     &format!(
-                                        "idle_queue_watch_context_clear_marker_resubmit harness={} reason=clear_already_pending target={} cmd=\"{}\"",
-                                        harness.binary, marker.target, marker.command
+                                        "idle_queue_watch_context_clear_projection_resubmit harness={} reason=clear_already_pending target={} cmd=\"{}\"",
+                                        harness.binary, projection.target, projection.command
                                     ),
                                 );
                                 continue;
@@ -1034,7 +1098,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 log_event(
                                     &mut session_log,
                                     &format!(
-                                        "idle_queue_watch_context_clear_marker_resubmit_failed harness={} outcome={}",
+                                        "idle_queue_watch_context_clear_projection_resubmit_failed harness={} outcome={}",
                                         harness.binary,
                                         outcome.as_str()
                                     ),
@@ -1048,16 +1112,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     | IdleQueueContextClearInFlightDecision::AwaitSettle => continue,
                     IdleQueueContextClearInFlightDecision::Settled => {
                         if let Err(err) =
-                            agent_doc_queue_io::context_clear_in_flight::clear_context_clear_in_flight(&path)
+                            agent_doc_controller_io::project_controller::clear_queue_context_clear_in_flight_for_file(&path)
                         {
                             eprintln!(
-                                "[agent-doc] idle-queue watch: failed to clear context-clear marker for {}: {err:#}",
+                                "[agent-doc] idle-queue watch: failed to clear context-clear projection for {}: {err:#}",
                                 path.display()
                             );
                             agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
-                                    "idle_queue_watch_context_clear_marker_clear_failed file={} error={:?}",
+                                    "idle_queue_watch_context_clear_projection_clear_failed file={} error={:?}",
                                     path.display(),
                                     err.to_string()
                                 ),
@@ -1066,7 +1130,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
-                                    "idle_queue_watch_context_clear_marker_cleared file={} harness={} after_ticks={}",
+                                    "idle_queue_watch_context_clear_projection_cleared file={} harness={} after_ticks={}",
                                     path.display(),
                                     harness.binary,
                                     CLEAR_COOLDOWN_RESUME_IDLE_TICKS
@@ -1089,7 +1153,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     );
                 }
 
-                // `#clearcontresume`: a lingering manual clear cooldown must not
+                // `#clearcontresume`: a lingering manual clear cooldown projection must not
                 // suppress an active go-mode queue drain forever. The cooldown's
                 // only job is to avoid dispatching into an in-flight `/clear`;
                 // once the cleared pane has settled to a fresh idle prompt for
@@ -1108,8 +1172,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     clear_cooldown_idle_ticks = 0;
                 }
                 let deferred_operator_clear_pending =
-                    agent_doc_queue_io::continuation_marker::read_deferred_operator_clear(&path)
-                        .unwrap_or(None)
+                    agent_doc_controller_io::project_controller::queue_context_clear_deferred_operator_for_file(&path)
+                        .ok()
+                        .flatten()
                         .is_some();
                 if clear_cooldown_resume_ready(
                     clear_cooldown_active,
@@ -1120,8 +1185,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     clear_cooldown_idle_ticks,
                     CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
                 ) {
-                    match agent_doc_queue_io::continuation_marker::clear_cooldown_marker(&path) {
-                        Ok(()) => {
+                    match agent_doc_controller_io::project_controller::clear_queue_context_clear_manual_cooldown_for_file(&path) {
+                        Ok(_) => {
                             clear_cooldown_idle_ticks = 0;
                             clear_cooldown_logged = false;
                             last_dispatched = None;
@@ -1153,7 +1218,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                         Err(err) => {
                             eprintln!(
-                                "[agent-doc] idle-queue watch: failed to drop clear cooldown marker for {}: {err:#}",
+                                "[agent-doc] idle-queue watch: failed to settle clear cooldown projection for {}: {err:#}",
                                 path.display()
                             );
                             agent_doc_ops_log_io::log_op(
@@ -1278,19 +1343,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                         if do_install {
                             install_stale_since = None;
-                            // `#jbdisprecycle`: mark the project mid-recycle BEFORE the
+                            // `#jbdisprecycle`: publish project mid-recycle BEFORE the
                             // rebuild+install (which takes seconds) and the `execve`
                             // that follows, so a concurrent `route` dispatch defers
                             // instead of typing a trigger that the recycle drops
                             // before submit. Refreshed at the reexec boundary; the
-                            // fresh supervisor clears it on watch-loop start.
+                            // fresh supervisor settles it on watch-loop start.
                             if let Err(err) =
-                                agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight(
-                                &file,
+                                agent_doc_controller_io::project_controller::supervisor_recycle_started_for_file(
+                                &path,
                                 agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
                             ) {
                                 eprintln!(
-                                    "[agent-doc] warning: failed to mark recycle-inflight before auto-install: {err:#}"
+                                    "[agent-doc] warning: failed to publish recycle-inflight before auto-install: {err:#}"
                                 );
                             }
                             log_event(
@@ -1573,16 +1638,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor restart: draining complete, hot-reloading onto freshly-installed agent-doc binary; preserving the live agent child via execve"
                         );
-                        // `#jbdisprecycle`: refresh the recycle-in-flight marker
+                        if !checkpoint_crdt_before_supervisor_recycle(
+                            &path,
+                            &shared,
+                            &mut session_log,
+                            "supervisor_restart_reexec",
+                        ) {
+                            continue;
+                        }
+                        // `#jbdisprecycle`: refresh the PCP recycle-in-flight graph
                         // immediately before the `execve` so a concurrent dispatch
                         // defers across the hot-reload boundary.
                         if let Err(err) =
-                            agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight(
-                            &file,
+                            agent_doc_controller_io::project_controller::supervisor_recycle_started_for_file(
+                            &path,
                             agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_RESTART,
                         ) {
                             eprintln!(
-                                "[agent-doc] warning: failed to mark recycle-inflight before restart reexec: {err:#}"
+                                "[agent-doc] warning: failed to publish recycle-inflight before restart reexec: {err:#}"
                             );
                         }
                         match supervisor_perform_reexec(&shared) {
@@ -1697,13 +1770,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // self-driving `/loop` holds a fresh drain-owner lease AND keeps
                 // the harness `turn_active` back-to-back, so the boundary is never
                 // reached. When this supervisor is stale, a loop owns the drain,
-                // and a recycle WOULD fire at a boundary, write a short-TTL
-                // recycle-yield request: the in-session loop reads it at its next
+                // and a recycle WOULD fire at a boundary, publish a controller
+                // recycle-yield projection: the in-session loop reads it at its next
                 // inter-item boundary (via `queue_continuation::detect` /
                 // `session-check` / preflight), yields one boundary instead of
                 // re-triggering, and the resulting idle turn lets the `execve`
                 // recycle fire on its own. After the recycle the fresh supervisor
-                // (no longer stale) clears the request and the drain resumes.
+                // (no longer stale) clears the projection and the drain resumes.
                 {
                     let drain_owner_active = agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(
                         &file,
@@ -1757,12 +1830,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STATE_FLUSH
                         };
                         if let Err(err) =
-                            agent_doc_supervisor_io::recycle_yield::request_recycle_yield(
-                            &file,
-                            yield_reason,
-                        ) {
+                            agent_doc_controller_io::project_controller::supervisor_recycle_yield_requested_for_file(
+                                &path,
+                                yield_reason,
+                            )
+                        {
                             eprintln!(
-                                "[agent-doc] idle-queue watch: failed to write recycle-yield request for {}: {err:#}",
+                                "[agent-doc] idle-queue watch: failed to publish recycle-yield request for {}: {err:#}",
                                 path.display()
                             );
                         } else if !recycle_yield_requested_logged {
@@ -1796,7 +1870,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // Post-recycle (or no longer stale): drop any leftover
                         // request so the loop resumes draining on the fresh binary.
                         // Reset the log latch so a later staleness can re-request.
-                        agent_doc_supervisor_io::recycle_yield::clear_recycle_yield(&file);
+                        if let Err(err) =
+                            agent_doc_controller_io::project_controller::clear_supervisor_recycle_yield_for_file(&path)
+                        {
+                            eprintln!(
+                                "[agent-doc] idle-queue watch: failed to clear recycle-yield request for {}: {err:#}",
+                                path.display()
+                            );
+                        }
                         recycle_yield_requested_logged = false;
                     }
                 }
@@ -1953,18 +2034,26 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary ({recycle_boundary}); preserving the live agent child via execve"
                         );
-                        // `#jbdisprecycle`: refresh the recycle-in-flight marker
+                        if !checkpoint_crdt_before_supervisor_recycle(
+                            &path,
+                            &shared,
+                            &mut session_log,
+                            "supervisor_self_recycle_reexec",
+                        ) {
+                            continue;
+                        }
+                        // `#jbdisprecycle`: refresh the PCP recycle-in-flight graph
                         // immediately before the `execve` so a concurrent dispatch
                         // defers across the hot-reload boundary (this is the path
                         // that emits the `(next_queue_item)`/`(idle)` hot-reload
                         // lines seen in the live repro).
                         if let Err(err) =
-                            agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight(
-                            &file,
+                            agent_doc_controller_io::project_controller::supervisor_recycle_started_for_file(
+                            &path,
                             agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
                         ) {
                             eprintln!(
-                                "[agent-doc] warning: failed to mark recycle-inflight before self-recycle reexec: {err:#}"
+                                "[agent-doc] warning: failed to publish recycle-inflight before self-recycle reexec: {err:#}"
                             );
                         }
                         // `#turnsaferecycle` Goal 1 — consume any install-fanout
@@ -2034,20 +2123,28 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor recycling onto freshly-installed agent-doc binary ({recycle_boundary}); the next launch uses the new build"
                         );
+                        if !checkpoint_crdt_before_supervisor_recycle(
+                            &path,
+                            &shared,
+                            &mut session_log,
+                            "supervisor_self_recycle_exit",
+                        ) {
+                            continue;
+                        }
                         std::process::exit(0);
                     }
                 }
 
                 // `#autoloop-command-preemption` Phase 2b: a non-interrupting
                 // `session clear` against this busy auto-loop deferred itself
-                // (paused the loop via the clear cooldown + recorded a
-                // deferred-clear marker). Deliver that clear here at the idle
-                // gap, then drop both markers to resume the loop. When no marker
-                // exists this is a complete no-op, so the existing drain path
-                // below is unchanged.
+                // (recorded a context-clear deferred projection). Deliver that
+                // clear here at the idle gap, then promote the projection to
+                // in-flight. When no projection exists this is a complete no-op, so
+                // the existing drain path below is unchanged.
                 let deferred_clear =
-                    agent_doc_queue_io::continuation_marker::read_deferred_operator_clear(&path)
-                        .unwrap_or(None);
+                    agent_doc_controller_io::project_controller::queue_context_clear_deferred_operator_for_file(&path)
+                        .ok()
+                        .flatten();
                 match agent_doc_queue::queue_preemption::plan_deferred_clear_step(
                     deferred_clear.is_some(),
                     prompt_visible && !turn_active,
@@ -2061,27 +2158,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     agent_doc_queue::queue_preemption::DeferredClearStep::Deliver => {
                         let clear_cmd = deferred_clear
                             .as_ref()
-                            .map(|d| d.clear_command.clone())
+                            .map(|d| d.command.clone())
                             .unwrap_or_default();
                         match auto_trigger_clear_command(&shared, &stop, &clear_cmd) {
                             AutoTriggerOutcome::Cancelled => return,
                             AutoTriggerOutcome::Sent => {
-                                // Resume: drop the deferred-clear record AND the
-                                // pause cooldown so the next tick drains normally.
-                                if let Err(err) =
-                                    agent_doc_queue_io::continuation_marker::clear_deferred_operator_clear_marker(&path)
-                                {
-                                    eprintln!(
-                                        "[agent-doc] idle-queue watch: failed to drop deferred-clear marker: {err:#}"
-                                    );
-                                }
-                                if let Err(err) =
-                                    agent_doc_queue_io::continuation_marker::clear_cooldown_marker(&path)
-                                {
-                                    eprintln!(
-                                        "[agent-doc] idle-queue watch: failed to clear cooldown after deferred clear: {err:#}"
-                                    );
-                                }
+                                // Resume: the started projection below supersedes
+                                // the deferred projection, so a later tick can
+                                // drain normally after the clear settles.
                                 last_dispatched = None;
                                 awaiting_clear_settle = true;
                                 context_reset_in_flight = true;
@@ -2096,14 +2180,32 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     &harness,
                                     &clear_cmd,
                                 );
-                                record_context_clear_in_flight_marker(
-                                    &path,
-                                    &shared,
-                                    &harness,
-                                    &clear_cmd,
-                                    CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED,
-                                    active_head.as_deref(),
-                                );
+                                if let Some(projection) = deferred_clear.as_ref() {
+                                    if let Err(err) = agent_doc_controller_io::project_controller::queue_context_clear_started_for_file(
+                                        &path,
+                                        &projection.target,
+                                        &projection.harness,
+                                        &projection.command,
+                                        projection
+                                            .source
+                                            .as_deref()
+                                            .unwrap_or(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED),
+                                        active_head.as_deref(),
+                                    ) {
+                                        eprintln!(
+                                            "[agent-doc] idle-queue watch: failed to promote deferred clear projection: {err:#}"
+                                        );
+                                    }
+                                } else {
+                                    record_context_clear_in_flight_projection(
+                                        &path,
+                                        &shared,
+                                        &harness,
+                                        &clear_cmd,
+                                        CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED,
+                                        active_head.as_deref(),
+                                    );
+                                }
                                 clear_cooldown_logged = false;
                                 log_event(
                                     &mut session_log,
@@ -2229,7 +2331,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     context_reset_in_flight = true;
                                     awaiting_clear_settle = true;
                                     clear_settle_idle_ticks = 0;
-                                    record_context_clear_in_flight_marker(
+                                    record_context_clear_in_flight_projection(
                                         &path,
                                         &shared,
                                         &harness,
@@ -2305,7 +2407,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     &harness,
                                     clear_cmd,
                                 );
-                                record_context_clear_in_flight_marker(
+                                record_context_clear_in_flight_projection(
                                     &path,
                                     &shared,
                                     &harness,
@@ -2418,7 +2520,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     context_reset_in_flight = true;
                                     awaiting_clear_settle = true;
                                     clear_settle_idle_ticks = 0;
-                                    record_context_clear_in_flight_marker(
+                                    record_context_clear_in_flight_projection(
                                         &path,
                                         &shared,
                                         &harness,
@@ -2537,12 +2639,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // `#qstallguard` Layer B/C interaction: the supervisor idle-watch
                         // is itself continuing the drain (whether the queue is paused —
                         // the Layer C single-owner failsafe — or normal go-mode). That is
-                        // NOT an in-session stall, so clear any continuation-pending marker
-                        // the prior in-session closeout dropped. Otherwise the next drained
-                        // agent's preflight would see the marker with no in-session drain
-                        // lease and false-fire `queue_stall_detected` for a drain the
-                        // supervisor is actively progressing.
-                        agent_doc_queue_io::drain_stall::clear_continuation_pending(&file);
+                        // NOT an in-session stall, so clear any continuation-pending
+                        // projection the prior in-session closeout recorded. Otherwise the
+                        // next drained agent's preflight would see the projection with no
+                        // in-session drain lease and false-fire `queue_stall_detected` for
+                        // a drain the supervisor is actively progressing.
+                        let _ = agent_doc_controller_io::project_controller::clear_queue_drain_stall_continuation_pending_for_file(
+                            Path::new(&file),
+                            "supervisor_drain_progressed",
+                        );
                         // `#qflood2`: hold the trigger until a just-sent `/clear`
                         // has settled, so it is never injected into the in-flight
                         // clear (the concatenated `/clear /agent-doc <FILE>`).
@@ -2716,7 +2821,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         .as_deref()
                                         .is_some_and(agent_doc_queue::queue_command::is_context_clear_command)
                                     {
-                                        record_context_clear_in_flight_marker(
+                                        record_context_clear_in_flight_projection(
                                             &path,
                                             &shared,
                                             &harness,
@@ -2831,7 +2936,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             &harness,
                                             command,
                                         );
-                                        record_context_clear_in_flight_marker(
+                                        record_context_clear_in_flight_projection(
                                             &path,
                                             &shared,
                                             &harness,
@@ -2918,10 +3023,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
 mod tests {
     use super::*;
 
-    fn context_clear_marker_with_source(
+    fn context_clear_projection_with_source(
         source: Option<&str>,
-    ) -> agent_doc_queue::queue::ContextClearInFlight {
-        agent_doc_queue::queue::ContextClearInFlight {
+    ) -> agent_doc_state_backbone::QueueContextClearProjection {
+        agent_doc_state_backbone::QueueContextClearProjection {
+            phase: agent_doc_state_backbone::QueueContextClearPhase::InFlight,
             file: "plan.md".to_string(),
             target: "%1".to_string(),
             harness: "codex".to_string(),
@@ -2929,23 +3035,24 @@ mod tests {
             source: source.map(str::to_string),
             head_sha256: None,
             head_bytes: None,
-            written_at: 42,
+            clear_epoch: 1,
+            marked_secs: 42,
         }
     }
 
     #[test]
-    fn context_clear_marker_source_allows_only_operator_and_queue_actions() {
-        assert!(context_clear_marker_source_allows_supervisor_action(
-            &context_clear_marker_with_source(Some(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED))
+    fn context_clear_projection_source_allows_only_operator_and_queue_actions() {
+        assert!(context_clear_projection_source_allows_supervisor_action(
+            &context_clear_projection_with_source(Some(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED))
         ));
-        assert!(context_clear_marker_source_allows_supervisor_action(
-            &context_clear_marker_with_source(Some(CONTEXT_CLEAR_SOURCE_QUEUE_SLASH))
+        assert!(context_clear_projection_source_allows_supervisor_action(
+            &context_clear_projection_with_source(Some(CONTEXT_CLEAR_SOURCE_QUEUE_SLASH))
         ));
-        assert!(!context_clear_marker_source_allows_supervisor_action(
-            &context_clear_marker_with_source(Some(CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET))
+        assert!(!context_clear_projection_source_allows_supervisor_action(
+            &context_clear_projection_with_source(Some(CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET))
         ));
-        assert!(!context_clear_marker_source_allows_supervisor_action(
-            &context_clear_marker_with_source(None)
+        assert!(!context_clear_projection_source_allows_supervisor_action(
+            &context_clear_projection_with_source(None)
         ));
         assert!(!supervisor_background_context_clear_enabled());
     }

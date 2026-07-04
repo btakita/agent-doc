@@ -162,12 +162,12 @@ pub fn dispatch_only_send_reopen(
             &harness.binary,
         );
     let mut pre_dispatch_route_guard = Some(
-        agent_doc_supervisor_io::route_submit_inflight::begin_route_submit_with_reason(
+        agent_doc_controller_io::project_controller::begin_route_submit_with_reason(
             file,
             &dispatch_pane,
             &harness.binary,
             if requires_ready_probe {
-                "dispatch_only_ready_probe"
+                agent_doc_state_backbone::ROUTE_DISPATCH_ONLY_READY_PROBE_REASON
             } else {
                 "dispatch_only_pre_dispatch"
             },

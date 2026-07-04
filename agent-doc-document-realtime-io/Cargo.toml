@@ -11,6 +11,8 @@ name = "agent_doc_document_realtime_io"
 
 [dependencies]
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.67" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
@@ -23,6 +25,7 @@ agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.6
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
 anyhow = "1"
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

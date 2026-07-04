@@ -748,6 +748,25 @@ fn passive_autostart_skip_reason(
     )
 }
 
+fn block_unresolved_safe_passive_managed_files(
+    managed_files: &HashSet<PathBuf>,
+    resolved_files: &HashSet<PathBuf>,
+    blocked_files: &RefCell<HashSet<PathBuf>>,
+) -> Vec<PathBuf> {
+    let mut newly_blocked = Vec::new();
+    let mut blocked = blocked_files.borrow_mut();
+    for file_path in managed_files {
+        if resolved_files.contains(file_path) {
+            continue;
+        }
+        if blocked.insert(file_path.clone()) {
+            newly_blocked.push(file_path.clone());
+        }
+    }
+    newly_blocked.sort();
+    newly_blocked
+}
+
 fn open_session_log_owner_fail_closed_diagnostic(
     file: &Path,
     session_id: &str,
@@ -1990,6 +2009,8 @@ fn run_with_options_internal(
     // Track session_id → file path for post-sync claim updates
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
     let blocked_unresolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
+    let safe_passive_managed_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
+    let safe_passive_resolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
 
     let resolve_file = |path: &Path| -> Option<FileResolution> {
         // Step 1: Auto-scaffold empty .md files BEFORE ensure_initialized().
@@ -2160,6 +2181,11 @@ fn run_with_options_internal(
                 Some(ref id) => id.clone(),
                 None => continue,
             };
+            if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+                safe_passive_managed_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
+            }
 
             let authoritative_actor_pane = project_authoritative_actor_binding(
                 tmux,
@@ -2195,10 +2221,29 @@ fn run_with_options_internal(
                     supersession.latest_start_timestamp
                 ));
             }
-            let unresolved_startup_miss =
+            let mut unresolved_startup_miss =
                 agent_doc_supervisor_io::startup_miss::load_startup_miss(file_path)
                     .ok()
                     .flatten();
+            if let Some(miss) = unresolved_startup_miss.as_ref()
+                && !tmux.pane_alive(&miss.pane_id)
+            {
+                let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
+                eprintln!(
+                    "[sync] clearing stale startup-miss on dead pane {} from {} for {}",
+                    miss.pane_id,
+                    miss_ts,
+                    file_path.display()
+                );
+                sync_log(&format!(
+                    "startup_miss_cleared_dead_pane file={} pane={} miss_timestamp={}",
+                    file_path.display(),
+                    miss.pane_id,
+                    miss_ts
+                ));
+                agent_doc_supervisor_io::startup_miss::clear_startup_miss(file_path)?;
+                unresolved_startup_miss = None;
+            }
 
             // Files with session UUIDs but no registry entry are auto-started.
             // The registry was likely pruned when the pane died. The user's intent
@@ -2247,6 +2292,9 @@ fn run_with_options_internal(
                     file_path.display(),
                     pane_id
                 ));
+                safe_passive_resolved_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
                 reserve_sync_pane(&claimed_sync_panes, pane_id, file_path);
                 continue;
             }
@@ -2388,6 +2436,11 @@ fn run_with_options_internal(
                 if let Some(ref pane) = registered_pane {
                     reserve_sync_pane(&claimed_sync_panes, pane, file_path);
                 }
+                if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+                    safe_passive_resolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                }
                 // Pane is alive — check if the file was renamed (registered path
                 // no longer exists but the session ID matches). If so, update the
                 // registry to the new path and reuse the existing pane.
@@ -2517,6 +2570,9 @@ fn run_with_options_internal(
                             file_path.display()
                         ));
                         reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
+                        safe_passive_resolved_files
+                            .borrow_mut()
+                            .insert(file_path.to_path_buf());
                         auto_started_panes.push((pane_id, file_str.clone()));
                     }
                     Err(e) => {
@@ -2805,6 +2861,11 @@ fn run_with_options_internal(
                         file_path.display()
                     ));
                     reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
+                    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+                        safe_passive_resolved_files
+                            .borrow_mut()
+                            .insert(file_path.to_path_buf());
+                    }
                     auto_started_panes.push((pane_id, file_str.clone()));
                 }
                 Err(e) => {
@@ -2817,6 +2878,24 @@ fn run_with_options_internal(
                         .borrow_mut()
                         .insert(file_path.to_path_buf());
                 }
+            }
+        }
+
+        if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+            let newly_blocked = block_unresolved_safe_passive_managed_files(
+                &safe_passive_managed_files.borrow(),
+                &safe_passive_resolved_files.borrow(),
+                &blocked_unresolved_files,
+            );
+            for file_path in newly_blocked {
+                eprintln!(
+                    "[sync] safe passive sync is preserving layout for {} because no live owner pane was proven or freshly provisioned; refusing to borrow a visible pane",
+                    file_path.display()
+                );
+                sync_log(&format!(
+                    "safe_passive_unresolved_owner_blocked file={} reason=no_proven_or_provisioned_owner",
+                    file_path.display()
+                ));
             }
         }
 
@@ -4772,6 +4851,44 @@ mod tests {
             "guard must not reject a candidate it cannot prove owns another document"
         );
     }
+
+    #[test]
+    fn safe_passive_unresolved_managed_files_are_blocked_from_spare_pane_assignment() {
+        let managed_files: HashSet<PathBuf> = [
+            PathBuf::from("tasks/agent-doc/agent-doc-bugs2.md"),
+            PathBuf::from("tasks/software/tsift.md"),
+        ]
+        .into_iter()
+        .collect();
+        let resolved_files: HashSet<PathBuf> = [PathBuf::from("tasks/software/tsift.md")]
+            .into_iter()
+            .collect();
+        let blocked_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
+
+        let newly_blocked = block_unresolved_safe_passive_managed_files(
+            &managed_files,
+            &resolved_files,
+            &blocked_files,
+        );
+
+        assert_eq!(
+            newly_blocked,
+            vec![PathBuf::from("tasks/agent-doc/agent-doc-bugs2.md")]
+        );
+        assert!(
+            blocked_files
+                .borrow()
+                .contains(Path::new("tasks/agent-doc/agent-doc-bugs2.md")),
+            "safe passive sync must prevent tmux-router from borrowing a visible spare pane for an unresolved managed document"
+        );
+        assert!(
+            !blocked_files
+                .borrow()
+                .contains(Path::new("tasks/software/tsift.md")),
+            "files with a proven or freshly provisioned owner remain eligible for reconcile"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_allows_cleanly_closed_latest_session() {
@@ -5267,7 +5384,7 @@ mod tests {
         let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash-2", "-d"]);
 
         run_with_options_internal(
-            &[doc_str.clone()],
+            std::slice::from_ref(&doc_str),
             None,
             Some(doc_str.as_str()),
             AutoStartMode::Full,
@@ -5341,7 +5458,7 @@ mod tests {
         let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash", "-d"]);
 
         run_with_options_internal(
-            &[doc_str.clone()],
+            std::slice::from_ref(&doc_str),
             Some("test:0"),
             Some(doc_str.as_str()),
             AutoStartMode::Full,

@@ -9,7 +9,7 @@ import * as stateMirror from './stateMirror';
 import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
 import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement, isPureRepositionSignal } from './patchPlan';
 import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
-import { parseSaveDocumentSignal, ackContentSidecarPath } from './saveSignal';
+import { parseSaveDocumentSignal } from './saveSignal';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
     buildBusySessionRestartBlockedMessage,
@@ -1757,8 +1757,9 @@ async function popupMenuAction(): Promise<void> {
  * 1. `agent-doc write --ipc` writes `<hash>.json` to `.agent-doc/patches/`
  * 2. FileSystemWatcher detects the new file
  * 3. Reads JSON, finds/opens the target document, applies patches
- * 4. Writes ack-content and deletes the JSON file (ACK)
- * 5. agent-doc polls for deletion and updates the snapshot
+ * 4. Writes the content projection, records lazily receipt state, and deletes
+ *    the JSON file
+ * 5. agent-doc observes the receipt/deletion and updates the snapshot
  */
 
 interface IpcComponentPatch {
@@ -2055,7 +2056,7 @@ class PatchWatcher implements vscode.Disposable {
      * Handle `save-document.signal` from the binary. This is the VS Code file
      * signal equivalent of the JetBrains socket `save_document` message: flush
      * the already-open editor buffer through VS Code's save API, then publish the
-     * saved text as ack-content for the binary to verify.
+     * saved text as an editor-owned content projection for the binary to verify.
      */
     private async processSaveDocumentSignal(patchesDir: string): Promise<void> {
         const signalFile = path.join(patchesDir, 'save-document.signal');
@@ -2093,7 +2094,7 @@ class PatchWatcher implements vscode.Disposable {
             return;
         }
         const content = document.getText();
-        if (!this.writeAckContent(signal.patchId, content, patchesDir)) {
+        if (!this.writeEditorContentProjection(signal.patchId, signal.file, content, patchesDir)) {
             return;
         }
         this.publishLiveBufferNow(document, projectRoot);
@@ -2142,26 +2143,24 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     /**
-     * Write proven editor-apply content to the ack-content sidecar
-     * (`.agent-doc/ack-content/<patch_id>.md`). No-op without a patch_id.
+     * Record proven editor-apply content through the native lazily receipt bridge.
+     * No-op without a patch_id.
      */
-    private writeAckContent(
+    private writeEditorContentProjection(
         patchId: string | undefined,
+        filePath: string,
         content: string,
         patchesDir: string,
     ): boolean {
         if (!patchId) {
             return true;
         }
-        const sidecar = ackContentSidecarPath(patchesDir, patchId);
-        try {
-            fs.mkdirSync(path.dirname(sidecar), { recursive: true });
-            fs.writeFileSync(sidecar, content);
-            return true;
-        } catch (e) {
-            this.outputChannel.appendLine(`save_document: ack-content write failed: ${e}`);
+        const projectRoot = path.dirname(path.dirname(patchesDir));
+        if (!native.recordEditorContentApplied(projectRoot, patchId, filePath, content, EDITOR_ID)) {
+            this.outputChannel.appendLine(`PatchWatcher: lazily content receipt failed for ${patchId}`);
             return false;
         }
+        return true;
     }
 
     private processPendingPatches(dir: string): void {
@@ -2283,8 +2282,8 @@ class PatchWatcher implements vscode.Disposable {
             const applied = await this.applyPatch(patch, uri.fsPath);
 
             if (applied) {
-                native.recordEditorAckObserved(patch.file, patch.patch_id, stateGeneration, projectRoot);
-                // ACK: delete the patch file
+                native.recordEditorPatchApplied(patch.file, patch.patch_id, stateGeneration, projectRoot);
+                // Applied: delete the patch file
                 try {
                     fs.unlinkSync(uri.fsPath);
                 } catch (e: any) {
@@ -2320,7 +2319,7 @@ class PatchWatcher implements vscode.Disposable {
     /**
      * Reposition boundary marker with typing debounce.
      * Waits until the user stops typing (500ms idle) before applying,
-     * up to a 5s timeout. ACKs the patch file after applying.
+     * up to a 5s timeout. Deletes the patch file after applying.
      *
      * Uses FFI `agent_doc_reposition_boundary_to_end` when available,
      * falls back to TS implementation.
@@ -2377,11 +2376,11 @@ class PatchWatcher implements vscode.Disposable {
                 }
                 await this.applyMinimalTextEdit(document, repositioned);
             }
-            // ACK: delete the patch file
+            // Delete the reposition patch file after the editor mutation succeeds.
             try { fs.unlinkSync(patchFilePath); } catch { /* already consumed */ }
         }).then(undefined, (err: any) => {
             this.outputChannel.appendLine(`PatchWatcher: reposition failed: ${err.message}`);
-            try { fs.unlinkSync(patchFilePath); } catch { /* best effort ACK */ }
+            try { fs.unlinkSync(patchFilePath); } catch { /* best effort cleanup */ }
         });
     }
 
@@ -2514,10 +2513,10 @@ class PatchWatcher implements vscode.Disposable {
 
         const patchesDir = patchFilePath ? path.dirname(patchFilePath) : this.patchesDir;
         if (!patchesDir) {
-            this.outputChannel.appendLine(`PatchWatcher: no patches dir for ack-content ${patch.file}`);
+            this.outputChannel.appendLine(`PatchWatcher: no patches dir for content projection ${patch.file}`);
             return false;
         }
-        return this.writeAckContent(patch.patch_id, document.getText(), patchesDir);
+        return this.writeEditorContentProjection(patch.patch_id, patch.file, document.getText(), patchesDir);
     }
 
     private async applyMinimalTextEdit(document: vscode.TextDocument, targetContent: string): Promise<boolean> {

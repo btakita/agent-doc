@@ -29,13 +29,20 @@ be load-bearing for deciding what operator-visible state should survive.
 
 ## Source Of Truth
 
-When a live editor owner or live-buffer sidecar owns the document, the live
-editor buffer is the source of truth for operator changes. Disk is only a
-projection of that buffer. If disk and editor state disagree, the binary must
-converge through the editor, wait for proven delivery, or fail closed. It must
-not use a direct disk write as an automatic recovery behind the editor.
+When a live editor owner owns the document, the CRDT relay/editor buffer is the
+source of truth for operator changes. Disk is only a projection of that buffer.
+If disk and editor state disagree, the binary must converge through the editor,
+wait for proven relay delivery, or fail closed. It must not use a direct disk
+write as an automatic recovery behind the editor. The legacy live-buffer sidecar
+is compatibility/diagnostic state only; it must not decide document authority.
+If a hot-path read observes an editor owner but no usable CRDT relay model, the
+binary must first attempt a bounded document-model ensure through read-only
+editor publish/re-registration before returning an error. A failed ensure is a
+named startup/reconciliation failure; it must not be collapsed into the raw
+missing-replica observation, and it must not use disk as a successful
+editor-authoritative value.
 
-When no live editor owner or sidecar owns the document, the current visible file
+When no live editor owner owns the document, the current visible file
 is the source of truth. A stored snapshot may seed a merge candidate, but merge
 still applies an agent delta onto the current file and rechecks that the file
 still matches that merge input before writing. Snapshot text must not replace

@@ -156,7 +156,7 @@ pub fn dispatch_via_supervisor_ipc_with_mode(
 
     let tracker =
         build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
-    let _route_submit_guard = agent_doc_supervisor_io::route_submit_inflight::begin_route_submit(
+    let _route_submit_guard = agent_doc_controller_io::project_controller::begin_route_submit(
         file,
         pane,
         &harness.binary,
@@ -435,7 +435,7 @@ pub fn dispatch_routed_reopen_with_mode(
     let effects = options.effects;
     let tracker =
         build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
-    let _route_submit_guard = agent_doc_supervisor_io::route_submit_inflight::begin_route_submit(
+    let _route_submit_guard = agent_doc_controller_io::project_controller::begin_route_submit(
         file,
         pane,
         &harness.binary,

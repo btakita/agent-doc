@@ -26,7 +26,7 @@ import java.util.Base64
  * | `cycle_phase` | `preflight_started` | `committed` |
  * | `queue_head_phase` | `selected` | `completed` |
  * | `epoch` | 3 | 6 |
- * | transport patch phase | (absent) | `acked` |
+ * | transport patch phase | (absent) | `applied` |
  *
  * The fixtures use the lazily-spec *generic graph* wire shape
  * (`node` / `state.Payload` byte arrays / adjacently-tagged `{ "CellSet": … }`).
@@ -155,11 +155,11 @@ class StateGraphMirrorConformanceTest {
         assertEquals("committed", phaseOf(mirror, AgentDocNodeType.CLOSEOUT_CYCLE))
         assertEquals("completed", phaseOf(mirror, AgentDocNodeType.QUEUE_HEAD))
 
-        // Transport patch added mid-cycle, phase acked — readable via the
+        // Transport patch added mid-cycle, phase applied — readable via the
         // reactive summary the editor consumes (route/transport/proof slice).
         val summary = MirrorProjectionSummary.fromMirror(mirror)
         assertNotNull(summary)
-        assertEquals("acked", summary.latestTransportPhase)
+        assertEquals("applied", summary.latestTransportPhase)
         assertEquals(
             1,
             mirror.nodesOfType(AgentDocNodeType.TRANSPORT_PATCH).size,

@@ -48,7 +48,7 @@ class StateProjectionBridgeTest {
             {
               "document_hash":"doc-a",
               "route":{"generation":3,"pane_id":"%2","readiness":"dispatch_proven","dispatch_proofs":["p1"]},
-              "transport":{"patches":{"patch-1":{"phase":"queued"},"patch-2":{"phase":"acked"}}},
+              "transport":{"patches":{"patch-1":{"phase":"queued"},"patch-2":{"phase":"applied"}}},
               "proof":{"markers":{"dispatch_start":{"phase":"observed","sources":["route"]}}},
               "document":{},
               "queue":{},
@@ -62,10 +62,10 @@ class StateProjectionBridgeTest {
         assertEquals("dispatch_proven", summary!!.routeReadiness)
         assertEquals("%2", summary.routePaneId)
         assertEquals("patch-2", summary.latestTransportPatchId)
-        assertEquals("acked", summary.latestTransportPhase)
+        assertEquals("applied", summary.latestTransportPhase)
         assertEquals(1, summary.proofMarkers)
         assertEquals(
-            "route=dispatch_proven pane=%2 transport=patch-2:acked proof_markers=1",
+            "route=dispatch_proven pane=%2 transport=patch-2:applied proof_markers=1",
             summary.compact(),
         )
     }
@@ -143,7 +143,7 @@ class StateProjectionBridgeTest {
                 epoch = 4,
                 routePayload = b64("""{"readiness":"dispatch_proven","pane_id":"%2"}"""),
                 transportPatches = listOf(
-                    40L to b64("""{"phase":"acked","actor_generation":1}"""),
+                    40L to b64("""{"phase":"applied","actor_generation":1}"""),
                     41L to b64("""{"phase":"queued","actor_generation":1}"""),
                 ),
                 proofMarkers = listOf(50L),
@@ -215,7 +215,7 @@ class StateProjectionBridgeTest {
                 snapshotJson(
                     epoch = 5,
                     routePayload = b64("""{"readiness":"dispatch_proven","pane_id":"%3"}"""),
-                    transportPatches = listOf(60L to b64("""{"phase":"acked","actor_generation":2}""")),
+                    transportPatches = listOf(60L to b64("""{"phase":"applied","actor_generation":2}""")),
                     proofMarkers = listOf(70L),
                 ),
             )
@@ -226,7 +226,7 @@ class StateProjectionBridgeTest {
             assertNotNull(summary)
             assertEquals("dispatch_proven", summary!!.routeReadiness)
             assertEquals("%3", summary.routePaneId)
-            assertEquals("acked", summary.latestTransportPhase)
+            assertEquals("applied", summary.latestTransportPhase)
             assertEquals(1, summary.proofMarkers)
             // FFI unavailable in tests → no cold-pull transport-id backfill.
             assertNull(summary.latestTransportPatchId)

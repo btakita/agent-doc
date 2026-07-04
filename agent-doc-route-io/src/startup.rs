@@ -41,6 +41,31 @@ pub struct RouteStartupEffects {
 /// not-yet-submit-ready composer.
 const AUTO_START_DISPATCH_READY_REVERIFY_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingStartupRegistrationDecision<'a> {
+    Reuse(&'a str),
+    IgnoreStale(&'a str),
+    None,
+}
+
+fn decide_existing_startup_registration<'a>(
+    existing_pane: Option<&'a str>,
+    existing_alive: bool,
+    live_owner: Option<&str>,
+) -> ExistingStartupRegistrationDecision<'a> {
+    let Some(existing_pane) = existing_pane else {
+        return ExistingStartupRegistrationDecision::None;
+    };
+    if !existing_alive {
+        return ExistingStartupRegistrationDecision::None;
+    }
+    if live_owner == Some(existing_pane) {
+        ExistingStartupRegistrationDecision::Reuse(existing_pane)
+    } else {
+        ExistingStartupRegistrationDecision::IgnoreStale(existing_pane)
+    }
+}
+
 /// Fresh-route agent dispatch-ready wait budget (`#waitmachine2`). Historically
 /// 30s; routed through the unified wait-machinery ceiling so the operator's
 /// "never hang > 10s" bound is enforced in one place: the 30s request is clamped
@@ -263,14 +288,41 @@ pub fn auto_start_in_session_with_lock_mode(
             return Ok(None);
         }
     };
-    if let Some(existing) = agent_doc_session_registry_io::lookup(session_id)?
-        && tmux.pane_alive(&existing)
-    {
-        eprintln!(
-            "[route] startup already provisioned pane {} for {} while waiting on locks",
-            existing, file_path
-        );
-        return Ok(Some(existing));
+    let existing_registration = agent_doc_session_registry_io::lookup(session_id)?;
+    let existing_alive = existing_registration
+        .as_deref()
+        .is_some_and(|existing| tmux.pane_alive(existing));
+    let live_owner = if existing_alive {
+        agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
+    } else {
+        None
+    };
+    match decide_existing_startup_registration(
+        existing_registration.as_deref(),
+        existing_alive,
+        live_owner.as_deref(),
+    ) {
+        ExistingStartupRegistrationDecision::Reuse(existing) => {
+            eprintln!(
+                "[route] startup already provisioned live owner pane {} for {} while waiting on locks",
+                existing, file_path
+            );
+            return Ok(Some(existing.to_string()));
+        }
+        ExistingStartupRegistrationDecision::IgnoreStale(existing) => {
+            eprintln!(
+                "[route] ignoring alive registry pane {} for {} during startup because it is not a proven live owner; creating a fresh pane",
+                existing, file_path
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_startup_ignoring_unowned_registry_pane file={} pane={}",
+                    file_path, existing
+                ),
+            );
+        }
+        ExistingStartupRegistrationDecision::None => {}
     }
 
     // Use the document's own submodule root as the pane cwd when applicable,
@@ -659,4 +711,41 @@ pub fn auto_start_in_session_with_lock_mode(
     };
     let _ = file; // suppress unused warning
     Ok(Some(final_pane))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_registration_decision_reuses_matching_live_owner() {
+        assert_eq!(
+            decide_existing_startup_registration(Some("%7"), true, Some("%7")),
+            ExistingStartupRegistrationDecision::Reuse("%7")
+        );
+    }
+
+    #[test]
+    fn startup_registration_decision_ignores_alive_unowned_registry_pane() {
+        assert_eq!(
+            decide_existing_startup_registration(Some("%7"), true, None),
+            ExistingStartupRegistrationDecision::IgnoreStale("%7")
+        );
+        assert_eq!(
+            decide_existing_startup_registration(Some("%7"), true, Some("%9")),
+            ExistingStartupRegistrationDecision::IgnoreStale("%7")
+        );
+    }
+
+    #[test]
+    fn startup_registration_decision_ignores_missing_or_dead_registration() {
+        assert_eq!(
+            decide_existing_startup_registration(None, false, None),
+            ExistingStartupRegistrationDecision::None
+        );
+        assert_eq!(
+            decide_existing_startup_registration(Some("%7"), false, Some("%7")),
+            ExistingStartupRegistrationDecision::None
+        );
+    }
 }

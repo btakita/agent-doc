@@ -3,7 +3,9 @@
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use agent_doc_document::model_projection::{
     ModelBaselineSource, overlay_state_from_markdown, project_overlay_roundtrip,
@@ -464,7 +466,17 @@ pub fn delete_pre_response(doc: &Path) -> Result<()> {
 
 /// Run `action` while holding the document's CRDT advisory lock.
 pub fn with_crdt_lock<T>(doc: &Path, action: impl FnOnce() -> Result<T>) -> Result<T> {
-    let _lock = acquire_crdt_lock(doc)?;
+    with_crdt_lock_labeled(doc, "crdt", action)
+}
+
+/// Run `action` while holding the document's CRDT advisory lock, reporting
+/// visible wait diagnostics when another writer holds the lock.
+pub fn with_crdt_lock_labeled<T>(
+    doc: &Path,
+    label: &str,
+    action: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let _lock = acquire_crdt_lock(doc, label)?;
     action()
 }
 
@@ -625,6 +637,24 @@ pub fn write_crdt_state_file(path: &Path, state: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Atomically write CRDT state bytes only when the target content changes.
+pub fn write_crdt_state_file_if_changed(path: &Path, state: &[u8]) -> Result<bool> {
+    if path.exists() {
+        let current = std::fs::read(path)
+            .with_context(|| format!("failed to read CRDT state {}", path.display()))?;
+        if current == state {
+            return Ok(false);
+        }
+    }
+    write_crdt_state_file(path, state)?;
+    Ok(true)
+}
+
+/// Encode markdown as structured markdown-overlay CRDT bytes without writing.
+pub fn overlay_crdt_state_from_markdown(markdown: &str) -> Vec<u8> {
+    overlay_state_from_markdown(markdown)
+}
+
 /// Encode markdown and write it to an already-resolved overlay CRDT sidecar.
 pub fn write_overlay_crdt_state_file_from_markdown(path: &Path, markdown: &str) -> Result<usize> {
     let overlay_state = overlay_state_from_markdown(markdown);
@@ -657,7 +687,7 @@ fn save_unlocked(doc: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
-fn acquire_crdt_lock(doc: &Path) -> Result<File> {
+fn acquire_crdt_lock(doc: &Path, label: &str) -> Result<File> {
     let lock_path = agent_doc_fs::crdt_flock_path_for(doc)?;
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -674,8 +704,47 @@ fn acquire_crdt_lock(doc: &Path) -> Result<File> {
         .truncate(false)
         .open(&lock_path)
         .with_context(|| format!("failed to open CRDT lock {}", lock_path.display()))?;
-    file.lock_exclusive()
-        .with_context(|| format!("failed to acquire CRDT lock on {}", lock_path.display()))?;
+    let started = Instant::now();
+    let mut next_log = Duration::from_secs(1);
+    loop {
+        match file.try_lock_exclusive() {
+            Ok(()) => {
+                let waited = started.elapsed();
+                if waited >= Duration::from_millis(250) {
+                    eprintln!(
+                        "[crdt] lock acquired label={} file={} wait_ms={} lock={}",
+                        label,
+                        doc.display(),
+                        waited.as_millis(),
+                        lock_path.display()
+                    );
+                }
+                break;
+            }
+            Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                let waited = started.elapsed();
+                if waited >= next_log {
+                    eprintln!(
+                        "[crdt] waiting for sidecar lock label={} file={} wait_ms={} lock={}",
+                        label,
+                        doc.display(),
+                        waited.as_millis(),
+                        lock_path.display()
+                    );
+                    next_log += Duration::from_secs(5);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "failed to acquire CRDT lock on {} for {label}",
+                        lock_path.display()
+                    )
+                });
+            }
+        }
+    }
     Ok(file)
 }
 

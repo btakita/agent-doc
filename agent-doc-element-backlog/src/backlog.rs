@@ -3131,9 +3131,26 @@ pub fn op_add_at_with_outcome(
         });
     }
 
-    // Dedup: reject if an item with identical text already exists.
+    // Dedup: adding the same active item is idempotent. This matters for
+    // closeout repair: a prior attempt may have captured the backlog item but
+    // failed before committing the response, and the retry should satisfy the
+    // capture guard without creating a duplicate row.
+    if let Some(existing) = items
+        .iter()
+        .find(|i| i.state != PendingState::Done && i.text == text)
+    {
+        return Ok(PendingAddOutcome {
+            body: body.to_string(),
+            id: existing.id.clone(),
+            inserted: false,
+            deduped_key: None,
+        });
+    }
     if items.iter().any(|i| i.text == text) {
-        bail!("pending add: duplicate item text already exists: {}", text);
+        bail!(
+            "pending add: duplicate completed item text already exists: {}",
+            text
+        );
     }
 
     let mut taken: HashSet<String> = items
@@ -4669,6 +4686,17 @@ mod tests {
     }
 
     #[test]
+    fn op_add_identical_active_item_is_idempotent() {
+        let body = "- [ ] [#a1b2] deploy\n";
+        let outcome = op_add_with_outcome(body, "deploy", DOC_ID, false).unwrap();
+
+        assert_eq!(outcome.body, body);
+        assert_eq!(outcome.id, "a1b2");
+        assert!(!outcome.inserted);
+        assert!(outcome.deduped_key.is_none());
+    }
+
+    #[test]
     fn op_add_at_after_inserts_immediately_after_anchor() {
         // #ah0s: --pending-add-after lands directly below the anchor.
         let body = "- [ ] [#a1b2] first\n- [ ] [#c3d4] third\n";
@@ -4914,15 +4942,14 @@ mod tests {
     }
 
     #[test]
-    fn op_add_rejects_duplicate_text() {
-        let (body, _id1) = op_add("", "Wire Sift into corky", DOC_ID, false).unwrap();
-        let err = op_add(&body, "Wire Sift into corky", DOC_ID, false).unwrap_err();
-        let msg = format!("{}", err);
-        assert!(
-            msg.contains("duplicate"),
-            "expected duplicate error, got: {}",
-            msg
-        );
+    fn op_add_duplicate_text_is_idempotent() {
+        let (body, id) = op_add("", "Wire Sift into corky", DOC_ID, false).unwrap();
+        let outcome = op_add_with_outcome(&body, "Wire Sift into corky", DOC_ID, false).unwrap();
+
+        assert_eq!(outcome.body, body);
+        assert_eq!(outcome.id, id);
+        assert!(!outcome.inserted);
+        assert!(outcome.deduped_key.is_none());
     }
 
     #[test]
@@ -5142,10 +5169,15 @@ mod tests {
 
     #[test]
     fn op_add_dedup_across_states() {
-        // Item exists as gated — adding same text as open should still dedup
-        let (body, _) = op_add("", "deploy to prod", DOC_ID, true).unwrap();
-        let err = op_add(&body, "deploy to prod", DOC_ID, false).unwrap_err();
-        assert!(format!("{}", err).contains("duplicate"));
+        // Item exists as gated; adding same text as open is still an active
+        // duplicate and should return the existing row idempotently.
+        let (body, id) = op_add("", "deploy to prod", DOC_ID, true).unwrap();
+        let outcome = op_add_with_outcome(&body, "deploy to prod", DOC_ID, false).unwrap();
+
+        assert_eq!(outcome.body, body);
+        assert_eq!(outcome.id, id);
+        assert!(!outcome.inserted);
+        assert!(outcome.deduped_key.is_none());
     }
 
     #[test]
@@ -5210,12 +5242,12 @@ mod tests {
     #[test]
     fn op_add_inline_tag_dedup_uses_cleaned_text() {
         let (body, _) = op_add("", "fix [#mybug] the thing", DOC_ID, false).unwrap();
-        let err = op_add(&body, "fix [#mybug] the thing", DOC_ID, false).unwrap_err();
-        assert!(
-            format!("{}", err).contains("duplicate"),
-            "expected duplicate error, got: {}",
-            err
-        );
+        let outcome = op_add_with_outcome(&body, "fix [#mybug] the thing", DOC_ID, false).unwrap();
+
+        assert_eq!(outcome.body, body);
+        assert_eq!(outcome.id, "mybug");
+        assert!(!outcome.inserted);
+        assert!(outcome.deduped_key.is_none());
     }
 
     #[test]

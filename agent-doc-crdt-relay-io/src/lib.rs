@@ -71,6 +71,8 @@ use agent_doc_plugin_owner::crdt_authority::authority_for_file;
 const CANONICAL_CLIENT_ID: u64 = 1;
 const EDITOR_SYNC_SETTLE_MS: u64 = 75;
 const EDITOR_SYNC_TIMEOUT_MS: u64 = 150;
+const DOCUMENT_MODEL_ENSURE_POLL_MS: u64 = 25;
+const DOCUMENT_MODEL_ENSURE_TIMEOUT_MS: u64 = 150;
 
 /// Process-global per-document relay-hub registry, keyed by document hash.
 ///
@@ -98,6 +100,18 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
         .entry(hash)
         .or_insert_with(|| RelayHub::new(CANONICAL_CLIENT_ID));
     Ok(f(hub))
+}
+
+/// Run `f` against an already-allocated per-document hub. Unlike
+/// [`with_hub_seeded_from_file`], this never creates a hub from disk: callers use
+/// it when disk is a recovery projection and an absent hub means the live model is
+/// not available.
+fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<Option<T>> {
+    let hash = agent_doc_fs::document_state_hash(file)?;
+    let mut registry = hub_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    Ok(registry.get_mut(&hash).map(f))
 }
 
 /// [`with_hub`] for live file-backed authority paths. A newly allocated hub must
@@ -131,6 +145,244 @@ pub fn hub_is_allocated_for_test(doc_hash: &str) -> bool {
         .lock()
         .map(|registry| registry.contains_key(doc_hash))
         .unwrap_or(false)
+}
+
+/// Live document text resolved from the CRDT relay authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CurrentText {
+    /// No live editor owns the document; callers may use git/disk authority.
+    Detached,
+    /// A live editor owns the document, but no relay replica has registered.
+    EditorAttachedMissingReplica,
+    /// The relay has live replicas, but could not reach a consistent canonical
+    /// cut. Callers must retry instead of reading disk as a substitute.
+    EditorSyncPending,
+    /// The relay canonical text after flushing hub-side live replicas.
+    Current {
+        text: String,
+        live_editors: usize,
+        delivery_converged: bool,
+    },
+}
+
+/// Return the current operator-visible document text from the live CRDT relay.
+///
+/// This is the replacement read authority for the old live-buffer sidecar hot
+/// path: when an editor is attached, disk is only a recovery projection and the
+/// caller must either use the relay canonical text or retry when the relay has
+/// not registered/converged yet.
+pub fn current_text_for_file(file: &Path) -> Result<CurrentText> {
+    let authority = authority_for_file(&file.display().to_string());
+    current_text_for_file_with_authority(file, authority)
+}
+
+/// [`current_text_for_file`] with an explicitly-resolved authority for tests and
+/// callers that already hold the authority lease state.
+pub fn current_text_for_file_with_authority(
+    file: &Path,
+    authority: CrdtAuthority,
+) -> Result<CurrentText> {
+    if !authority.editor_attached() {
+        return Ok(CurrentText::Detached);
+    }
+
+    let hash = agent_doc_fs::document_state_hash(file)?;
+    let mut registry = hub_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    let Some(hub) = registry.get_mut(&hash) else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_current_text_unavailable file={} authority=multi_replica reason=missing_replica",
+                file.display(),
+            ),
+        );
+        return Ok(CurrentText::EditorAttachedMissingReplica);
+    };
+
+    let ready = hub.commit_barrier_under_authority(authority)?;
+    let delivery_converged = hub.delivery_converged();
+    if !ready {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_current_text_unavailable file={} authority=multi_replica reason=sync_pending live_editors={} delivery_converged={}",
+                file.display(),
+                hub.live_count(),
+                delivery_converged,
+            ),
+        );
+        return Ok(CurrentText::EditorSyncPending);
+    }
+
+    let text = hub.canonical_text();
+    let live_editors = hub.live_count();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={}",
+            file.display(),
+            text.len(),
+            agent_doc_hash::content_hash(&text),
+            live_editors,
+            delivery_converged,
+        ),
+    );
+    Ok(CurrentText::Current {
+        text,
+        live_editors,
+        delivery_converged,
+    })
+}
+
+/// Ensure the live document model is usable before a hot-path read gives up on
+/// editor authority.
+///
+/// This is intentionally narrower than the commit barrier: it does not treat
+/// disk as authoritative and it does not seed a relay hub from disk just to make
+/// the read succeed. When the editor owns the document but the relay is missing
+/// or not converged, it asks the editor to republish/register its live buffer via
+/// the read-only `publish_live_buffer` IPC path, waits for a bounded interval,
+/// and returns the refreshed relay state. Callers should surface this failure
+/// instead of the raw "missing replica" state so startup/reconcile is the final
+/// contract, not the pre-recovery observation.
+pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
+    let authority = authority_for_file(&file.display().to_string());
+    let first = current_text_for_file_with_authority(file, authority)?;
+    match first {
+        CurrentText::Detached | CurrentText::Current { .. } => return Ok(first),
+        CurrentText::EditorAttachedMissingReplica | CurrentText::EditorSyncPending => {}
+    }
+
+    let first_label = current_text_label(&first);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "document_model_ensure_start file={} source={} initial_state={}",
+            file.display(),
+            source,
+            first_label,
+        ),
+    );
+    request_document_model_live_buffer_publish(file, source)?;
+
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_millis(DOCUMENT_MODEL_ENSURE_TIMEOUT_MS);
+    let mut last_label = first_label;
+    loop {
+        if std::time::Instant::now() >= deadline {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_model_ensure_failed file={} source={} initial_state={} final_state={} timeout_ms={} recovery=retry_without_disk_write",
+                    file.display(),
+                    source,
+                    first_label,
+                    last_label,
+                    DOCUMENT_MODEL_ENSURE_TIMEOUT_MS,
+                ),
+            );
+            anyhow::bail!(
+                "document model startup/reconciliation failed for {}: editor authority stayed in {last_label} after a bounded publish-live-buffer request; disk remained non-authoritative and was not read as a fallback; recovery=retry_without_disk_write; reload or save the editor buffer, then retry",
+                file.display()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(
+            DOCUMENT_MODEL_ENSURE_POLL_MS,
+        ));
+        let current = current_text_for_file_with_authority(file, authority)?;
+        match current {
+            CurrentText::Detached | CurrentText::Current { .. } => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "document_model_ensure_ready file={} source={} initial_state={} final_state={}",
+                        file.display(),
+                        source,
+                        first_label,
+                        current_text_label(&current),
+                    ),
+                );
+                return Ok(current);
+            }
+            CurrentText::EditorAttachedMissingReplica | CurrentText::EditorSyncPending => {
+                last_label = current_text_label(&current);
+            }
+        }
+    }
+}
+
+fn current_text_label(current: &CurrentText) -> &'static str {
+    match current {
+        CurrentText::Detached => "detached",
+        CurrentText::EditorAttachedMissingReplica => "editor_attached_model_missing",
+        CurrentText::EditorSyncPending => "editor_sync_pending",
+        CurrentText::Current { .. } => "current",
+    }
+}
+
+fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Result<()> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let path_str = canonical.to_string_lossy().to_string();
+    let listener_active = agent_doc_ipc_io::is_listener_active(&project_root);
+    let (transport, publish_result) = if listener_active {
+        (
+            "editor_ipc",
+            agent_doc_ipc_io::send_publish_live_buffer(&project_root, &path_str),
+        )
+    } else {
+        (
+            "file_signal",
+            agent_doc_ipc_io::send_publish_live_buffer_file_signal(&project_root, &path_str),
+        )
+    };
+    match publish_result {
+        Ok(true) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_model_ensure_publish_requested file={} source={} transport={}",
+                    file.display(),
+                    source,
+                    transport,
+                ),
+            );
+            Ok(())
+        }
+        Ok(false) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_model_ensure_publish_unavailable file={} source={} transport={}",
+                    file.display(),
+                    source,
+                    transport,
+                ),
+            );
+            anyhow::bail!(
+                "document model startup/reconciliation failed for {}: publish-live-buffer request was not accepted over {transport}; disk remained non-authoritative and was not read as a fallback",
+                file.display()
+            )
+        }
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_model_ensure_publish_error file={} source={} transport={} error={}",
+                    file.display(),
+                    source,
+                    transport,
+                    e,
+                ),
+            );
+            anyhow::bail!(
+                "document model startup/reconciliation failed for {}: publish-live-buffer request over {transport} failed: {e}; disk remained non-authoritative and was not read as a fallback",
+                file.display()
+            )
+        }
+    }
 }
 
 /// The outcome of a live editor-replica IPC delta relayed through the
@@ -422,6 +674,146 @@ pub fn recover_hub_from_disk(file: &Path, projection: &[u8]) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Result of refreshing the durable CRDT recovery projection before a process
+/// recycle/reload boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DurableProjectionCheckpoint {
+    /// No live editor owns the document. Git/disk authority is already durable and
+    /// the relay projection is intentionally untouched.
+    Detached,
+    /// A live editor relay was flushed to `.agent-doc/crdt/<hash>.yrs`.
+    Checkpointed {
+        bytes: usize,
+        changed: bool,
+        live_editors: usize,
+        text_len: usize,
+        text_hash: String,
+    },
+}
+
+/// Flush the live relay's canonical replica to the durable `.yrs` recovery
+/// projection before a recycle/reload tears down the process that owns the hub.
+///
+/// This is **not** the closeout hot path and the sidecar is not authority. It is
+/// a bounded pre-recycle checkpoint: under detached/headless authority it skips
+/// without allocating a hub; under editor authority it requires a live, converged
+/// document model and writes the recovery projection from the in-memory canonical
+/// replica in one serialized sidecar-projection instruction.
+pub fn checkpoint_durable_projection_for_file(
+    file: &Path,
+    source: &str,
+) -> Result<DurableProjectionCheckpoint> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_durable_checkpoint_skipped file={} source={} authority=git reason=detached",
+                file.display(),
+                source,
+            ),
+        );
+        return Ok(DurableProjectionCheckpoint::Detached);
+    }
+
+    let current = ensure_document_model(file, source)?;
+    let (live_editors, delivery_converged) = match current {
+        CurrentText::Detached => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_durable_checkpoint_skipped file={} source={} authority=git reason=authority_flipped_detached",
+                    file.display(),
+                    source,
+                ),
+            );
+            return Ok(DurableProjectionCheckpoint::Detached);
+        }
+        CurrentText::Current {
+            live_editors,
+            delivery_converged,
+            ..
+        } => (live_editors, delivery_converged),
+        CurrentText::EditorAttachedMissingReplica | CurrentText::EditorSyncPending => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_durable_checkpoint_blocked file={} source={} reason={}",
+                    file.display(),
+                    source,
+                    current_text_label(&current),
+                ),
+            );
+            anyhow::bail!(
+                "CRDT durable checkpoint blocked for {} before {source}: {}",
+                file.display(),
+                current_text_label(&current)
+            );
+        }
+    };
+    if !delivery_converged {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_durable_checkpoint_blocked file={} source={} reason=delivery_not_converged live_editors={}",
+                file.display(),
+                source,
+                live_editors,
+            ),
+        );
+        anyhow::bail!(
+            "CRDT durable checkpoint blocked for {} before {source}: delivery not converged",
+            file.display()
+        );
+    }
+
+    let Some((projection, canonical_text)) =
+        with_existing_hub(file, |hub| (hub.projection_bytes(), hub.canonical_text()))?
+    else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_durable_checkpoint_blocked file={} source={} reason=missing_hub_after_ensure",
+                file.display(),
+                source,
+            ),
+        );
+        anyhow::bail!(
+            "CRDT durable checkpoint blocked for {} before {source}: live hub missing after document-model ensure",
+            file.display()
+        );
+    };
+    let path = agent_doc_fs::crdt_path_for(file)?;
+    let changed =
+        agent_doc_snapshot_io::with_crdt_lock_labeled(file, "durable_recycle_checkpoint", || {
+            agent_doc_snapshot_io::write_crdt_state_file_if_changed(&path, &projection)
+        })?;
+    let text_len = canonical_text.len();
+    let text_hash = agent_doc_hash::content_hash(&canonical_text);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_durable_checkpoint file={} source={} authority=multi_replica bytes={} changed={} live_editors={} delivery_converged={} text_len={} text_hash={} path={}",
+            file.display(),
+            source,
+            projection.len(),
+            changed,
+            live_editors,
+            delivery_converged,
+            text_len,
+            text_hash,
+            path.display(),
+        ),
+    );
+    Ok(DurableProjectionCheckpoint::Checkpointed {
+        bytes: projection.len(),
+        changed,
+        live_editors,
+        text_len,
+        text_hash,
+    })
 }
 
 /// The **authority-gated commit barrier** at the live finalize commit point
@@ -1043,6 +1435,127 @@ mod tests {
     }
 
     #[test]
+    fn detached_durable_checkpoint_skips_without_allocating_hub() {
+        let (_dir, doc) = temp_doc("detached-checkpoint.md");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+
+        let outcome = checkpoint_durable_projection_for_file(&doc, "test_detached").unwrap();
+
+        assert_eq!(outcome, DurableProjectionCheckpoint::Detached);
+        assert!(
+            !hub_registry().lock().unwrap().contains_key(&hash),
+            "detached checkpoint must not create a relay hub"
+        );
+        assert!(
+            agent_doc_snapshot_io::load_crdt(&doc).unwrap().is_none(),
+            "detached checkpoint must not materialize a CRDT sidecar"
+        );
+    }
+
+    #[test]
+    fn detached_current_text_is_a_noop_and_allocates_no_hub() {
+        let (_dir, doc) = temp_doc("detached-current.md");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let current = current_text_for_file_with_authority(&doc, CrdtAuthority::GitAuthoritative)
+            .expect("detached current text should not fail");
+        assert_eq!(current, CurrentText::Detached);
+        assert!(
+            !hub_is_allocated_for_test(&hash),
+            "detached current-text reads must not seed a relay hub from disk"
+        );
+    }
+
+    #[test]
+    fn editor_attached_current_text_reads_relay_canonical_after_flush() {
+        let (_dir, doc) = temp_doc("attached-current.md");
+        let editor = mint_client_id("intellij:attached-current");
+        with_hub(&doc, |hub| {
+            hub.register(editor).unwrap();
+            hub.local_edit(editor, 0, 0, "LIVE ").unwrap();
+            assert!(
+                !hub.canonical_text().starts_with("LIVE "),
+                "the local editor op starts outside canonical"
+            );
+        })
+        .unwrap();
+
+        let current = current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica)
+            .expect("attached current text should read relay canonical");
+        match current {
+            CurrentText::Current {
+                text, live_editors, ..
+            } => {
+                assert!(text.starts_with("LIVE "), "relay current text: {text:?}");
+                assert_eq!(live_editors, 1);
+            }
+            other => panic!("expected relay current text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn editor_attached_current_text_without_replica_does_not_read_disk() {
+        let (_dir, doc) = temp_doc("attached-missing-current.md");
+        let current = current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica)
+            .expect("missing replica is a legal relay state");
+        assert_eq!(current, CurrentText::EditorAttachedMissingReplica);
+    }
+
+    #[test]
+    fn ensure_document_model_recovers_after_delayed_replica_registration() {
+        let (_dir, doc) = temp_doc("ensure-model-register.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        let doc_for_register = doc.clone();
+        let register = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            register_replica_for_file(&doc_for_register, "intellij:ensure-model")
+                .expect("delayed register should not fail")
+                .expect("editor-attached register should allocate model")
+        });
+
+        let current = ensure_document_model(&doc, "test_ensure_model")
+            .expect("ensure should observe the delayed registered model");
+        let (client_id, _bootstrap) = register.join().unwrap();
+        match current {
+            CurrentText::Current {
+                text, live_editors, ..
+            } => {
+                assert!(text.contains("ensure-model-register.md"));
+                assert_eq!(live_editors, 1);
+                with_hub(&doc, |hub| {
+                    assert_eq!(hub.live_count(), 1);
+                    assert!(hub.is_registered(client_id));
+                })
+                .unwrap();
+            }
+            other => panic!("expected current model after ensure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ensure_document_model_failure_is_bounded_and_names_reconciliation() {
+        let (_dir, doc) = temp_doc("ensure-model-missing.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+
+        let err = ensure_document_model(&doc, "test_ensure_model_missing")
+            .expect_err("no editor consumer registered a model")
+            .to_string();
+        assert!(
+            err.contains("document model startup/reconciliation failed"),
+            "error should name the recovery contract: {err}"
+        );
+        assert!(
+            err.contains("disk remained non-authoritative and was not read as a fallback"),
+            "error should preserve disk authority safety: {err}"
+        );
+        assert!(
+            !err.contains("CRDT relay has no registered replica yet"),
+            "raw missing-replica text should not be the final contract: {err}"
+        );
+    }
+
+    #[test]
     fn editor_attached_commit_barrier_defers_in_flight_editor_epoch() {
         let (_dir, doc) = temp_doc("epoch-defers.md");
         let file_str = doc.display().to_string();
@@ -1230,6 +1743,38 @@ mod tests {
             );
         })
         .unwrap();
+    }
+
+    #[test]
+    fn editor_attached_durable_checkpoint_writes_recovery_projection() {
+        let (_dir, doc) = temp_doc("attached-checkpoint.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        let editor = mint_client_id("intellij:durable-checkpoint");
+        with_hub(&doc, |hub| {
+            hub.register(editor).unwrap();
+            hub.local_edit(editor, 0, 0, "checkpointed").unwrap();
+        })
+        .unwrap();
+
+        let outcome = checkpoint_durable_projection_for_file(&doc, "test_recycle").unwrap();
+
+        match outcome {
+            DurableProjectionCheckpoint::Checkpointed {
+                changed: true,
+                live_editors: 1,
+                ..
+            } => {}
+            other => panic!("expected changed checkpoint, got {other:?}"),
+        }
+        let projection = agent_doc_snapshot_io::load_crdt(&doc)
+            .unwrap()
+            .expect("checkpoint writes durable recovery projection");
+        let recovered = RelayHub::recover_from_projection(1, &projection).unwrap();
+        assert!(
+            recovered.canonical_text().contains("checkpointed"),
+            "checkpoint projection must recover the live editor text"
+        );
     }
 
     #[test]

@@ -216,6 +216,7 @@ const TYPING_DIR: &str = ".agent-doc/typing";
 const LIVE_BUFFER_DIR: &str = ".agent-doc/live-buffer";
 const WRITE_PROVENANCE_DIR: &str = ".agent-doc/write-provenance";
 pub const OPERATOR_TEXT_AUTHORITY_CAPABILITY: &str = "operator_text_authority_v1";
+pub const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY: &str = "lazily_transport_receipts_v1";
 
 /// Latest editor-visible buffer digest for a document.
 ///

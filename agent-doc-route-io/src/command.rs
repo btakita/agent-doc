@@ -58,15 +58,17 @@ pub fn run_with_tmux_with_options(
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
-    if let Err(err) = agent_doc_queue_io::continuation_marker::clear_cooldown_marker(file) {
+    if let Err(err) =
+        agent_doc_controller_io::project_controller::clear_queue_context_clear_manual_cooldown_for_file(file)
+    {
         eprintln!(
-            "[route] warning: failed to clear queue cooldown marker for {}: {err:#}",
+            "[route] warning: failed to clear queue clear-cooldown projection for {}: {err:#}",
             file.display()
         );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_clear_queue_cooldown_failed file={} error={:?}",
+                "route_clear_queue_cooldown_failed file={} authority=projection error={:?}",
                 file.display(),
                 err.to_string()
             ),

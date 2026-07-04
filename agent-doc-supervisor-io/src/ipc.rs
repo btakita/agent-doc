@@ -209,6 +209,7 @@ pub trait SupervisorIpcHandlerState: SupervisorIpcSnapshotState {
         identity: &str,
         awareness_b64: &str,
     ) -> IpcResponse;
+    fn handle_crdt_checkpoint(&self, file: &str, source: &str) -> IpcResponse;
 }
 
 pub trait SupervisorInjectDeliveryState {
@@ -411,6 +412,7 @@ where
             identity,
             awareness_b64,
         } => state.handle_replica_awareness(&file, &identity, &awareness_b64),
+        IpcMethod::CrdtCheckpoint { file, source } => state.handle_crdt_checkpoint(&file, &source),
     }
 }
 
@@ -763,7 +765,8 @@ mod tests {
             | IpcMethod::ReplicaUpdate { .. }
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
-            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::ReplicaAwareness { .. }
+            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
         })
         .expect("start test handler")
     }

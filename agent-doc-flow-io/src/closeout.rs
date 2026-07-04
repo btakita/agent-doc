@@ -78,7 +78,7 @@ pub fn complete_required_closeout(file: &Path, effects: &dyn CloseoutEffects) ->
             CloseoutGuardReason::ReplicaDeliveryPending,
         );
         anyhow::bail!(
-            "live editor replica delivery is still pending for {}; retry closeout after the editor applies and ACKs queued CRDT updates",
+            "editor is the current authority for {}, but CRDT relay convergence is still pending; disk is a non-authoritative replica and was not used as commit authority",
             file.display()
         );
     }

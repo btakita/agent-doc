@@ -823,11 +823,10 @@ mod tests {
     #[test]
     fn blocking_non_exchange_component_drift_blocks_when_node_differ_cannot_explain_change() {
         let snapshot = drift_gate_doc("- do [#driver]\n", "- [ ] [#b1] task\n");
-        let file = format!(
-            "---\nagent_doc_format: template\n---\n\n\
-             <!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n\n\
-             <!-- agent:queue -->\n- do [#driver]\n<!-- /agent:queue -->\n"
-        );
+        let file = "---\nagent_doc_format: template\n---\n\n\
+                    <!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n\n\
+                    <!-- agent:queue -->\n- do [#driver]\n<!-- /agent:queue -->\n"
+            .to_string();
         let scope = drift_gate_scope(&snapshot, "driver");
 
         assert!(has_blocking_non_exchange_component_drift(

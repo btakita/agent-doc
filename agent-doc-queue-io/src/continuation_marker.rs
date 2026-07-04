@@ -1,4 +1,4 @@
-//! Durable queue-continuation and clear/cooldown marker storage.
+//! Durable queue-continuation marker storage.
 //!
 //! This module owns queue sidecar paths, serialization, and idempotent marker
 //! cleanup. Callers own continuation detection, actor-ownership gates, and any
@@ -9,16 +9,10 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_queue::queue_continuation::QueueContinuation;
-use agent_doc_queue::queue_preemption::{
-    DeferredOperatorClear, deferred_operator_clear_marker, deferred_operator_clear_marker_json,
-    parse_deferred_operator_clear_marker_json,
-};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 const QUEUE_CONTINUATIONS_DIR: &str = ".agent-doc/queue-continuations";
-const QUEUE_COOLDOWNS_DIR: &str = ".agent-doc/queue-cooldowns";
-const DEFERRED_CLEARS_DIR: &str = ".agent-doc/deferred-clears";
 
 /// Durable on-disk proof that a closed-out document still owes an auto-queue
 /// continuation. Survives missing Codex hook session state.
@@ -68,14 +62,6 @@ fn sidecar_path(file: &Path, dir: &str) -> Result<Option<PathBuf>> {
 
 pub fn continuation_marker_path(file: &Path) -> Result<Option<PathBuf>> {
     sidecar_path(file, QUEUE_CONTINUATIONS_DIR)
-}
-
-fn cooldown_marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    sidecar_path(file, QUEUE_COOLDOWNS_DIR)
-}
-
-fn deferred_clear_marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    sidecar_path(file, DEFERRED_CLEARS_DIR)
 }
 
 pub fn write_continuation_marker(
@@ -188,83 +174,6 @@ pub fn record_continuation_requested_head(file: &Path, head_prompt: &str) -> Res
     let json = serde_json::to_string_pretty(&marker).context("serialize continuation marker")?;
     std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
     Ok(())
-}
-
-pub fn write_clear_cooldown(file: &Path) -> Result<()> {
-    let Some(path) = cooldown_marker_path(file)? else {
-        return Ok(());
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    let payload = serde_json::json!({
-        "file": file.to_string_lossy(),
-        "written_at": now_secs(),
-    });
-    let json = serde_json::to_string_pretty(&payload).context("serialize cooldown marker")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-pub fn clear_cooldown_marker(file: &Path) -> Result<()> {
-    let Some(path) = cooldown_marker_path(file)? else {
-        return Ok(());
-    };
-    remove_marker_file(&path)
-}
-
-pub fn clear_cooldown_active(file: &Path) -> Result<bool> {
-    let Some(path) = cooldown_marker_path(file)? else {
-        return Ok(false);
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(_) => Ok(true),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
-    }
-}
-
-/// Record that a non-interrupting operator clear was deferred while the pane was
-/// busy under an active auto-loop. Paired with [`write_clear_cooldown`] (which
-/// pauses the loop); the watch delivers `clear_command` once the pane is idle,
-/// then clears both markers to resume.
-pub fn write_deferred_operator_clear(file: &Path, clear_command: &str) -> Result<()> {
-    let Some(path) = deferred_clear_marker_path(file)? else {
-        return Ok(());
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    let payload = deferred_operator_clear_marker(
-        file.to_string_lossy().into_owned(),
-        clear_command,
-        now_secs(),
-    );
-    let json =
-        deferred_operator_clear_marker_json(&payload).context("serialize deferred clear marker")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-/// Read the pending deferred operator clear for `file`, if any.
-pub fn read_deferred_operator_clear(file: &Path) -> Result<Option<DeferredOperatorClear>> {
-    let Some(path) = deferred_clear_marker_path(file)? else {
-        return Ok(None);
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(content) => Ok(parse_deferred_operator_clear_marker_json(&content)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
-    }
-}
-
-/// Remove the deferred-clear marker after the watch delivers the clear or an
-/// explicit interrupt-clear supersedes it.
-pub fn clear_deferred_operator_clear_marker(file: &Path) -> Result<()> {
-    let Some(path) = deferred_clear_marker_path(file)? else {
-        return Ok(());
-    };
-    remove_marker_file(&path)
 }
 
 fn remove_marker_file(path: &Path) -> Result<()> {
@@ -401,32 +310,5 @@ mod tests {
 
         assert!(found.is_none());
         assert!(!marker_path.exists());
-    }
-
-    #[test]
-    fn cooldown_marker_roundtrips_and_clears() {
-        let dir = tempfile::tempdir().unwrap();
-        let doc = write_doc(dir.path());
-
-        assert!(!clear_cooldown_active(&doc).unwrap());
-        write_clear_cooldown(&doc).unwrap();
-        assert!(clear_cooldown_active(&doc).unwrap());
-        clear_cooldown_marker(&doc).unwrap();
-        assert!(!clear_cooldown_active(&doc).unwrap());
-    }
-
-    #[test]
-    fn deferred_operator_clear_marker_roundtrips_and_clears() {
-        let dir = tempfile::tempdir().unwrap();
-        let doc = write_doc(dir.path());
-
-        assert!(read_deferred_operator_clear(&doc).unwrap().is_none());
-        write_deferred_operator_clear(&doc, "/clear").unwrap();
-        let marker = read_deferred_operator_clear(&doc).unwrap().unwrap();
-        assert_eq!(marker.clear_command, "/clear");
-        assert!(marker.file.contains("task.md"));
-
-        clear_deferred_operator_clear_marker(&doc).unwrap();
-        assert!(read_deferred_operator_clear(&doc).unwrap().is_none());
     }
 }

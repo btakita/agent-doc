@@ -1,6 +1,6 @@
 //! Write-time pending capture/done closeout guards.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::Path;
 
 use crate::{
@@ -706,8 +706,8 @@ pub fn auto_apply_pending_done_if_enabled(
     })?;
     agent_doc_cycle_state_io::record_pending_done_ids(file, &missing)?;
     agent_doc_cycle_state_io::mark_pending_mutations(file)?;
-    *current_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {} after auto_done", file.display()))?;
+    *current_content =
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
     eprintln!(
         "[finalize] auto_done: recorded {}",
         missing

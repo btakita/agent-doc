@@ -192,7 +192,6 @@ mod core_tests {
     ) -> std::thread::JoinHandle<()> {
         let listener_root = project_root.to_path_buf();
         std::thread::spawn(move || {
-            let root_clone = listener_root.clone();
             let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let msg_type = v.get("type").and_then(|value| value.as_str()).unwrap_or("");
@@ -210,10 +209,14 @@ mod core_tests {
                 };
                 if let Some(file_path) = v.get("file").and_then(|value| value.as_str()) {
                     let _ = std::fs::write(file_path, &content);
+                    let _ =
+                        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+                            Path::new(file_path),
+                            patch_id,
+                            &content,
+                            "test_visible_write_listener",
+                        );
                 }
-                let ack_dir = root_clone.join(".agent-doc/ack-content");
-                let _ = std::fs::create_dir_all(&ack_dir);
-                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
         })
@@ -441,7 +444,6 @@ mod core_tests {
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let watcher_dir = agent_doc_dir.join("patches");
-        let watcher_ack_dir = agent_doc_dir.join("ack-content");
         let watcher_doc = doc.clone();
         let watcher_doc_str = doc_str.clone();
         let watcher_target = target.clone();
@@ -473,9 +475,11 @@ mod core_tests {
                         &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
                     )
                     .unwrap();
-                    fs::write(
-                        watcher_ack_dir.join(format!("{patch_id}.md")),
+                    agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+                        &watcher_doc,
+                        &patch_id,
                         &watcher_target,
+                        "test_file_ipc_watcher",
                     )
                     .unwrap();
                     fs::remove_file(path).unwrap();

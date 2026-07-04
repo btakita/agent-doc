@@ -28,7 +28,7 @@
  * unchanged (`#qdedupsync` property).
  */
 
-/** The eight agent-doc state node `type_tag`s (cross-language vocabulary). */
+/** The agent-doc state node `type_tag`s (cross-language vocabulary). */
 export const AgentDocNodeType = {
     ROUTE: 'agent_doc.route',
     QUEUE: 'agent_doc.queue',
@@ -37,6 +37,7 @@ export const AgentDocNodeType = {
     TRANSPORT_PATCH: 'agent_doc.transport.patch',
     SUPERVISOR_OWNER: 'agent_doc.supervisor.owner',
     DOCUMENT_BASELINE: 'agent_doc.document.baseline',
+    DOCUMENT_AUTHORITY: 'agent_doc.document.authority',
     PROOF_MARKER: 'agent_doc.proof.marker',
 } as const;
 

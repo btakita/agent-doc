@@ -1957,8 +1957,10 @@ printf '%s\n' '{{"type":"message","text":"{}\n"}}'
         let mut env = std::collections::HashMap::new();
         let old_path = std::env::var("PATH").unwrap_or_default();
         env.insert("PATH".to_string(), format!("{path_dir}:{old_path}"));
-        let mut fm = Frontmatter::default();
-        fm.required_ssh_targets = vec!["sampleorders-server".to_string()];
+        let fm = Frontmatter {
+            required_ssh_targets: vec!["sampleorders-server".to_string()],
+            ..Default::default()
+        };
 
         let event = prove_managed_session_capabilities(
             &opencode,

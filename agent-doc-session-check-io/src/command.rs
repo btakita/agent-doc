@@ -1,12 +1,13 @@
 //! # Module: session_check
 //!
 //! ## Spec
-//! - `run(file)` inspects the persisted per-document cycle state in
-//!   `.agent-doc/state/cycles/<hash>.json` and exits nonzero when the most
+//! - `run(file)` inspects the state-backbone closeout projection first, then the
+//!   persisted per-document cycle-state compatibility JSON in
+//!   `.agent-doc/state/cycles/<hash>.json`, and exits nonzero when the most
 //!   recent cycle is still open (`preflight_started`, `response_captured`, or
 //!   `write_applied`).
-//! - Falls back to the last `ops.log` event only when no cycle-state file
-//!   exists yet, preserving compatibility for older repos.
+//! - Falls back to the JSON sidecar and then the last `ops.log` event when no
+//!   closeout projection exists yet, preserving compatibility for older repos.
 //! - Distinguishes "cycle started but no write/commit followed" from
 //!   "response write landed but no commit followed" in both cycle-state and
 //!   ops-log fallback paths.
@@ -66,6 +67,7 @@
 //! - `session_check_snapshot_committed_guard_fails_when_snapshot_differs`
 //! - `session_check_snapshot_committed_guard_passes_when_committed`
 
+use agent_doc_turn::CyclePhase;
 use agent_doc_turn::op_log::{
     PREFLIGHT_START_EVENT, event_name, is_write_completed_commit_missing_event,
 };
@@ -211,7 +213,7 @@ pub fn run_with_options(
             // a stall) so the loop ends its turn cleanly; the idle boundary lets the
             // `execve` recycle fire and the drain resumes on the fresh binary. Never
             // force the Codex final-gate here — yielding is the desired outcome.
-            if agent_doc_supervisor_io::recycle_yield::recycle_yield_pending(file) {
+            if agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file(file) {
                 let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
                     agent_doc_flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
                 )
@@ -294,8 +296,8 @@ pub fn run_with_options(
                     );
                 }
                 // #qstallguard Layer B: this is a clean closeout that STILL requires
-                // continuation. Drop a one-shot continuation-pending marker so the
-                // next preflight can emit `queue_stall_detected` if the loop neither
+                // continuation. Record a one-shot continuation-pending projection so
+                // the next preflight can emit `queue_stall_detected` if the loop neither
                 // continued nor recorded a valid stop reason (the prose no-stall
                 // guidance is advisory; this makes the violation a hard signal).
                 let stall_cycle_id = agent_doc_cycle_state_io::load(file)
@@ -303,12 +305,12 @@ pub fn run_with_options(
                     .flatten()
                     .map(|s| s.cycle_id)
                     .unwrap_or_default();
-                if let Err(err) = agent_doc_queue_io::drain_stall::mark_continuation_pending(
-                    &file.to_string_lossy(),
+                if let Err(err) = agent_doc_controller_io::project_controller::record_queue_drain_stall_continuation_pending_for_file(
+                    file,
                     &stall_cycle_id,
                 ) {
                     eprintln!(
-                        "[session-check] warning: failed to record continuation marker: {err}"
+                        "[session-check] warning: failed to record continuation projection: {err}"
                     );
                 }
                 if codex_final_gate {
@@ -481,18 +483,11 @@ pub fn inspect_with_warnings(
         // independently re-reading + re-parsing the file (previously ~20 reads
         // and ~10 parses per `inspect` call).
         let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
-        // #rtwwire (rung 3): seed the guard-sweep cache from the realtime document
-        // model (newest of disk vs the editor's unsaved buffer) so every guard
-        // reasons about what the user actually sees, not a staler disk view. This
-        // is what removes the "buffer differs from disk" false INTERRUPTED whack-a-
-        // mole: a queue/exchange edit that lives only in the unsaved buffer is now
-        // visible to the dropped-prompt / contamination guards instead of looking
-        // dropped. Staleness-gated (`#rtwfeed`) — the buffer only wins when it
-        // provably holds unsaved edits ahead of disk; no editor attached returns
-        // disk unchanged.
-        let disk = std::fs::read_to_string(file)?;
+        // #rtwwire (rung 3): seed the guard-sweep cache from the authoritative
+        // current document. Active editors resolve through the CRDT relay; disk
+        // is consulted only when no editor is attached.
         rc.set_doc_content(
-            agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content,
+            agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content,
         );
         match crate::check_dropped_exchange_prompt_guard(file, &rc)? {
             GuardResult::None => {}
@@ -789,6 +784,90 @@ pub fn detect_uncommitted_closeout_drift_with_context(
     }
 }
 
+fn closeout_projection_event_label(
+    projection: &agent_doc_cycle_state_io::ProjectedCloseoutState,
+    phase: CyclePhase,
+) -> String {
+    match phase {
+        CyclePhase::PreflightStarted => "state_backbone_preflight_started".to_string(),
+        CyclePhase::ResponseCaptured => projection
+            .capture_id
+            .as_deref()
+            .map(|capture_id| format!("state_backbone_response_captured capture_id={capture_id}"))
+            .unwrap_or_else(|| "state_backbone_response_captured".to_string()),
+        CyclePhase::WriteApplied => projection
+            .patch_id
+            .as_deref()
+            .map(|patch_id| format!("state_backbone_write_applied patch_id={patch_id}"))
+            .unwrap_or_else(|| "state_backbone_write_applied".to_string()),
+        CyclePhase::Committed => projection
+            .commit
+            .as_deref()
+            .map(|commit| format!("state_backbone_commit_observed commit={commit}"))
+            .unwrap_or_else(|| "state_backbone_commit_observed".to_string()),
+        CyclePhase::Abandoned => projection
+            .abandoned_reason
+            .as_deref()
+            .map(|reason| format!("state_backbone_cycle_abandoned reason={reason}"))
+            .unwrap_or_else(|| "state_backbone_cycle_abandoned".to_string()),
+    }
+}
+
+fn apply_closeout_projection_to_cycle_state(
+    file: &Path,
+    state: &mut agent_doc_cycle_state_io::CycleState,
+    projection: Option<&agent_doc_cycle_state_io::ProjectedCloseoutState>,
+) {
+    let Some(projection) = projection else {
+        return;
+    };
+    let Some(projected_phase) = projection.phase else {
+        return;
+    };
+    if state.phase != projected_phase {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "session_check_closeout_projection_preferred file={} cycle_id={} json_phase={} projected_phase={}",
+                file.display(),
+                state.cycle_id,
+                state.phase.as_str(),
+                projected_phase.as_str()
+            ),
+        );
+    }
+    state.phase = projected_phase;
+    state.last_event = closeout_projection_event_label(projection, projected_phase);
+    if state.capture_id.is_none() {
+        state.capture_id = projection.capture_id.clone();
+    }
+    if state.response_sha256.is_none() {
+        state.response_sha256 = projection.response_sha256.clone();
+    }
+}
+
+fn projected_open_closeout_message(
+    file: &Path,
+    projection: &agent_doc_cycle_state_io::ProjectedCloseoutState,
+    phase: CyclePhase,
+) -> String {
+    let cycle_id = projection.cycle_id.as_deref().unwrap_or("unknown");
+    let detail = match phase {
+        CyclePhase::PreflightStarted => "cycle started but no write/commit followed",
+        CyclePhase::ResponseCaptured => "response captured but no write/commit followed",
+        CyclePhase::WriteApplied => "response write landed but no commit followed",
+        CyclePhase::Committed | CyclePhase::Abandoned => "cycle is terminal",
+    };
+    format!(
+        "[session-check] INTERRUPTED: state-backbone closeout projection cycle `{}` is `{}` — {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle.",
+        cycle_id,
+        phase.as_str(),
+        detail,
+        file.display(),
+        file.display()
+    )
+}
+
 fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<SessionCheckStatus> {
     if let Some(replay) = detect_jb_cache_conflict_accept_duplicate_replay(file)? {
         return Ok(SessionCheckStatus::Interrupted(format!(
@@ -826,7 +905,13 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
         )));
     }
 
-    if let Some(state) = agent_doc_cycle_state_io::load(file)? {
+    let closeout_projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+
+    if let Some(mut state) = agent_doc_cycle_state_io::load(file)? {
+        let projected_same_cycle = closeout_projection
+            .as_ref()
+            .filter(|projection| projection.matches_cycle(&state.cycle_id));
+        apply_closeout_projection_to_cycle_state(file, &mut state, projected_same_cycle);
         if state.is_open() {
             if let Some(blocked) = state.blocked_closeout.as_ref() {
                 return Ok(SessionCheckStatus::Interrupted(blocked_closeout_message(
@@ -872,7 +957,7 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
         if matches!(state.phase, agent_doc_turn::CyclePhase::Abandoned)
             && state
                 .last_event
-                .starts_with("recursive_direct_invocation_blocked")
+                .contains("recursive_direct_invocation_blocked")
             && let Some(unresolved) = crate::unresolved_exchange_prompt(file)?
         {
             let excerpt: String = unresolved
@@ -1026,6 +1111,15 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
             state.phase.as_str(),
             state.last_event
         )));
+    }
+
+    if let Some(projection) = closeout_projection.as_ref()
+        && let Some(phase) = projection.phase
+        && phase.is_open()
+    {
+        return Ok(SessionCheckStatus::Interrupted(
+            projected_open_closeout_message(file, projection, phase),
+        ));
     }
 
     match agent_doc_ops_log_io::last_ops_event(file)? {

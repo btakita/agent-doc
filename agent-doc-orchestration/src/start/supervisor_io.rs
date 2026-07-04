@@ -198,6 +198,10 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShare
     ) -> IpcResponse {
         agent_doc_supervisor_crdt_io::handle_replica_awareness(file, identity, awareness_b64)
     }
+
+    fn handle_crdt_checkpoint(&self, file: &str, source: &str) -> IpcResponse {
+        agent_doc_supervisor_crdt_io::handle_crdt_checkpoint(file, source)
+    }
 }
 
 #[cfg(test)]

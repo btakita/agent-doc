@@ -305,9 +305,15 @@ mod tests {
     fn append_is_idempotent_for_repeated_op() {
         let dir = project_with_agent_doc();
         let same = op("plan.md", "queue:0:a:0", "insert", "- do [#a]");
-        assert_eq!(append_ops(dir.path(), &[same.clone()]).unwrap(), 1);
+        assert_eq!(
+            append_ops(dir.path(), std::slice::from_ref(&same)).unwrap(),
+            1
+        );
         // Re-observe the identical node mutation: no new row, clock unchanged.
-        assert_eq!(append_ops(dir.path(), &[same.clone()]).unwrap(), 0);
+        assert_eq!(
+            append_ops(dir.path(), std::slice::from_ref(&same)).unwrap(),
+            0
+        );
         let ops = read_ops(dir.path(), "plan.md", 0).unwrap();
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].clock.lamport, 1);

@@ -479,12 +479,15 @@ distinct from the one-shot restart auto-trigger:
   `[focused-cycle]`, and accretion/threshold reset reasons drain in pane instead
   of causing the supervisor to submit `/clear` or `/new`. Only explicit operator
   clears and explicit queued slash-command heads may create a context-clear
-  in-flight marker. For those explicit sources, the marker survives supervisor
-  recycle/restart so the replacement watcher blocks drains until the clear
-  settles, or presses the shared submit key once when the clear command is still
-  visible in the composer. Legacy or background-sourced markers are dropped
-  rather than submitted. Once the pane settles for
-  `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls the marker is cleared. A
+  projection. Busy-loop operator clears first record `QueueContextClearDeferred`;
+  the idle-watch promotes that projection to `QueueContextClearStarted` only
+  after it submits the deferred clear. For explicit in-flight sources, the
+  projection survives supervisor recycle/restart so the replacement watcher
+  blocks drains until the clear settles, or presses the shared submit key once
+  when the clear command is still visible in the composer. Legacy or
+  background-sourced projections are settled rather than submitted. Once the pane
+  settles for `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls the projection
+  records `QueueContextClearSettled`. A
   manual clear cooldown remains authoritative for a plain operator clear with no
   active queue (it suppresses passive dispatch until cleared by the existing
   operator route path) and for an operator-deferred clear that explicitly paused
@@ -494,13 +497,14 @@ distinct from the one-shot restart auto-trigger:
   settles to a fresh idle prompt for `CLEAR_COOLDOWN_RESUME_IDLE_TICKS`
   consecutive polls AND a `queue_active: true`
   head is waiting AND no operator-deferred clear is still pending delivery, the
-  watch auto-expires the cooldown marker and resumes the drain. The recycle +
+  watch settles the cooldown projection and resumes the drain. The recycle +
   clear is then a continuation *step*, not a stall. The decision is the pure,
   unit-tested `decisions::clear_cooldown_resume_ready`. The full operator recycle
   + clear pipeline — `admin recycle` (mark recycle at the next idle boundary) →
-  in-place `execve` recycle preserving the live pane → `session clear` (write the
-  cooldown) → settle → cooldown auto-expiry → go-mode drain resume — is also
-  driven end-to-end by the deterministic SimWorld engine
+  in-place `execve` recycle preserving the live pane → `session clear` (record
+  the clear-cooldown/deferred-clear projection) → submit/settle → cooldown
+  auto-expiry → go-mode drain resume — is also driven end-to-end by the
+  deterministic SimWorld engine
   (`SimCommand::SupervisorIdleQueueTick`), which calls the SAME production
   predicates (`supervisor_recycle_action`, `clear_cooldown_resume_ready`,
   `idle_queue_drain_decision`) the live idle-queue watch uses rather than
@@ -515,10 +519,13 @@ distinct from the one-shot restart auto-trigger:
   therefore returns `RecycleImmediate` for `explicit_admin` on a fresh binary
   (previously a silent no-op that left the operator unable to clear the lagging
   projection); a bare wedge on a fresh binary still stays a no-op. When a
-  self-driving `/loop` holds the drain `turn_active`, the idle-watch writes a
-  `state_flush_drain` recycle-yield request (mirroring the `stale_binary_drain`
-  path) so the loop yields one inter-item boundary and the process restart fires.
-  It still respects `turn_boundary` — a fresh-binary flush never drops a live turn.
+  self-driving `/loop` holds the drain `turn_active`, the idle-watch records a
+  `state_flush_drain` recycle-yield reason in the lazily-backed supervisor
+  recycle projection (mirroring the `stale_binary_drain` path) so the loop
+  yields one inter-item boundary and the process restart fires. Preflight,
+  session-check, and queue continuation detection observe the projection through
+  controller RPC instead of a `.agent-doc/recycle-yield` marker. It still respects
+  `turn_boundary` — a fresh-binary flush never drops a live turn.
 - `#recycleforce` operator override: `agent-doc admin recycle --force` is a real
   flag (no `-- ` separator needed) and composes with `--all-projects` and the
   single-project form. `--force` overrides the controller-side in-flight-dispatch

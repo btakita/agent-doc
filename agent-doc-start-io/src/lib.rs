@@ -678,7 +678,6 @@ fn start_controller_session(
         window_id: pane_window.to_string(),
         generation: start_generation,
     };
-    let file_path_str = file.to_string_lossy().to_string();
     let mut attempts_used = 0usize;
     const MAX_START_SESSION_RECYCLE_RETRIES: usize = 2;
     loop {
@@ -688,10 +687,15 @@ fn start_controller_session(
         ) {
             Ok(record) => break Ok(record),
             Err(err) => {
-                let recycle_pending =
-                    agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(
-                        &file_path_str,
-                    );
+                let recycle_status =
+                    agent_doc_controller_io::project_controller::supervisor_recycle_status_for_file(
+                        file,
+                    )
+                    .unwrap_or_default();
+                let recycle_pending = matches!(
+                    recycle_status.phase,
+                    agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+                );
                 if !start_session_retryable_during_recycle(
                     recycle_pending,
                     attempts_used,
@@ -700,11 +704,9 @@ fn start_controller_session(
                     break Err(err);
                 }
                 attempts_used += 1;
-                let reason = agent_doc_supervisor_io::recycle_inflight::read_recycle_inflight(
-                    &file_path_str,
-                )
-                .map(|m| m.reason)
-                .unwrap_or_else(|| "unknown".to_string());
+                let reason = recycle_status
+                    .reason
+                    .unwrap_or_else(|| "unknown".to_string());
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -720,11 +722,16 @@ fn start_controller_session(
                     session_log,
                     &format!("start_session_recycle_retry attempt={attempts_used} reason={reason}"),
                 );
-                if !agent_doc_supervisor_io::recycle_inflight::wait_for_recycle_settle(
-                    &file_path_str,
-                    agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT,
-                    agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL,
-                ) {
+                let settled = agent_doc_controller_io::project_controller::
+                    wait_for_supervisor_recycle_settle_for_file(file)
+                        .map(|projection| {
+                            matches!(
+                                projection.phase,
+                                agent_doc_state_backbone::SupervisorRecyclePhase::Settled
+                            )
+                        })
+                        .unwrap_or(false);
+                if !settled {
                     break Err(err);
                 }
                 agent_doc_controller_io::project_controller::ensure_controller_running(

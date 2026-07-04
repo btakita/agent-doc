@@ -40,40 +40,43 @@ pub fn existing_session_pane_action(
 }
 
 pub fn format_existing_pane_conflict_error(facts: &ExistingPaneConflictFacts<'_>) -> String {
-    format!(
-        "refusing to start {} in pane {} because pane {} is already bound to this document.\n\
-\n\
-Existing owner:\n\
-  pane={} session={} window={}\n\
-\n\
-Current launcher pane:\n\
-  pane={} session={} window={}\n\
-\n\
-Inspect the conflicting panes first:\n\
-  tmux list-panes -a -F '#{{session_name}} #{{window_name}} #{{pane_id}} #{{pane_current_command}} #{{pane_current_path}}'\n\
-  tmux capture-pane -pt {} | tail -n 80\n\
-  tmux capture-pane -pt {} | tail -n 80\n\
-\n\
-If you want to keep the existing owner, kill this launcher pane yourself and rerun from the owner pane:\n\
-  tmux kill-pane -t {}\n\
-\n\
-If you want to replace the existing owner, kill it yourself first and then rerun `agent-doc start` from pane {}:\n\
-  tmux kill-pane -t {}",
-        facts.document,
-        facts.current_pane,
-        facts.conflicting_pane,
-        facts.conflicting_pane,
-        facts.conflict_session,
-        facts.conflict_window,
-        facts.current_pane,
-        facts.current_session,
-        facts.current_window,
-        facts.conflicting_pane,
-        facts.current_pane,
-        facts.current_pane,
-        facts.current_pane,
-        facts.conflicting_pane
-    )
+    terminal_error_lines([
+        format!("refusing to start {}", facts.document),
+        format!(
+            "reason: pane {} already owns this document; current launcher is pane {}.",
+            facts.conflicting_pane, facts.current_pane
+        ),
+        String::new(),
+        "Existing owner:".to_string(),
+        format!(
+            "  pane={} session={} window={}",
+            facts.conflicting_pane, facts.conflict_session, facts.conflict_window
+        ),
+        "Current launcher:".to_string(),
+        format!(
+            "  pane={} session={} window={}",
+            facts.current_pane, facts.current_session, facts.current_window
+        ),
+        String::new(),
+        "Inspect:".to_string(),
+        "  tmux list-panes -a -F '#{pane_id} #{session_name}:#{window_name} #{pane_current_command}'"
+            .to_string(),
+        format!("  tmux capture-pane -pt {} | tail -n 80", facts.conflicting_pane),
+        format!("  tmux capture-pane -pt {} | tail -n 80", facts.current_pane),
+        String::new(),
+        "Keep the existing owner:".to_string(),
+        format!("  tmux kill-pane -t {}", facts.current_pane),
+        String::new(),
+        "Replace the existing owner:".to_string(),
+        format!("  tmux kill-pane -t {}", facts.conflicting_pane),
+        format!("  agent-doc start --force {}", facts.document),
+    ])
+}
+
+fn terminal_error_lines(lines: impl IntoIterator<Item = String>) -> String {
+    let mut rendered = lines.into_iter().collect::<Vec<_>>().join("\r\n");
+    rendered.push('\r');
+    rendered
 }
 
 #[cfg(test)]
@@ -124,9 +127,10 @@ mod tests {
             current_window: "@8",
         });
 
+        assert!(rendered.contains("refusing to start /repo/tasks/doc.md"));
         assert!(
             rendered.contains(
-                "refusing to start /repo/tasks/doc.md in pane %42 because pane %41 is already bound to this document"
+                "reason: pane %41 already owns this document; current launcher is pane %42"
             )
         );
         assert!(rendered.contains("pane=%41 session=owner-session window=@7"));
@@ -136,5 +140,18 @@ mod tests {
         assert!(rendered.contains("tmux capture-pane -pt %42 | tail -n 80"));
         assert!(rendered.contains("tmux kill-pane -t %42"));
         assert!(rendered.contains("tmux kill-pane -t %41"));
+        assert!(rendered.contains("agent-doc start --force /repo/tasks/doc.md"));
+        assert!(
+            rendered.contains("\r\nExisting owner:\r\n"),
+            "multi-line terminal diagnostics should carry CRLF newlines: {rendered:?}"
+        );
+        assert!(
+            rendered.ends_with('\r'),
+            "final CLI newline should return to column 0 even when ONLCR is disabled"
+        );
+        assert!(
+            rendered.lines().all(|line| line.len() <= 110),
+            "diagnostic should avoid hard-to-read long terminal lines: {rendered}"
+        );
     }
 }

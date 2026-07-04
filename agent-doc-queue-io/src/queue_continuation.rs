@@ -22,7 +22,7 @@
 //! Coarse extraction note: this module intentionally moved as one queue I/O
 //! graph from `agent-doc-orchestration`. Follow-up seams are the pure queue
 //! policy regression tests (belong in `agent-doc-queue`) and the snapshot /
-//! recycle-yield host adapter around [`detect`].
+//! controller recycle-yield projection adapter around [`detect`].
 
 use crate::continuation_marker::{
     ContinuationMarker, ContinuationMarkerScanAction, clear_continuation_marker,
@@ -65,7 +65,7 @@ pub fn detect(file: &Path) -> Result<Option<queue_policy::QueueContinuation>> {
     crate::continuation_detect::detect_required_continuation_with(
         file,
         agent_doc_snapshot_io::load,
-        agent_doc_supervisor_io::recycle_yield::recycle_yield_pending,
+        agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file,
     )
 }
 
@@ -786,10 +786,9 @@ mod tests {
     fn detect_yields_when_supervisor_requests_recycle_yield() {
         // `#wd40` / `#staleloop-recycle-restart`: a stale supervisor that can never
         // reach its own recycle boundary during a continuously self-draining session
-        // writes a recycle-yield request; while it is live the in-session loop must
+        // publishes a recycle-yield projection; while it is live the in-session loop must
         // see NO continuation (so it ends its turn and the execve recycle fires),
-        // even though the active queue still has drainable heads. Clearing the
-        // request restores normal continuation so the drain resumes post-recycle.
+        // even though the active queue still has drainable heads.
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
             dir.path(),
@@ -797,27 +796,18 @@ mod tests {
             true,
             true,
         );
-        let doc_str = doc.to_string_lossy().to_string();
-
         // Baseline: continuation is owed.
         assert!(detect(&doc).unwrap().is_some());
 
-        // A live recycle-yield request suppresses continuation entirely.
-        agent_doc_supervisor_io::recycle_yield::request_recycle_yield(
-            &doc_str,
-            agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY,
+        let continuation = crate::continuation_detect::detect_required_continuation_with(
+            &doc,
+            agent_doc_snapshot_io::load,
+            |_| true,
         )
         .unwrap();
         assert!(
-            detect(&doc).unwrap().is_none(),
+            continuation.is_none(),
             "a pending recycle-yield must make the in-session loop yield"
-        );
-
-        // Clearing the request hands the drain back so the loop resumes.
-        agent_doc_supervisor_io::recycle_yield::clear_recycle_yield(&doc_str);
-        assert!(
-            detect(&doc).unwrap().is_some(),
-            "clearing the recycle-yield must restore normal continuation"
         );
     }
 

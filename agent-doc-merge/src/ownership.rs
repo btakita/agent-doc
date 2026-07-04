@@ -15,7 +15,8 @@ pub enum MergeOwnershipPhase {
     Attached,
     EditorOwnsBuffer,
     BinaryWriteRequested,
-    IpcAckProven,
+    #[serde(rename = "lazily_patch_applied_proven", alias = "ipc_ack_proven")]
+    LazilyPatchAppliedProven,
     Committed,
 }
 
@@ -33,7 +34,7 @@ pub enum MergeOwnershipEvent {
     EditorDetached,
     HeartbeatStale,
     BinaryWriteRequested,
-    PatchAckObserved,
+    LazilyPatchAppliedObserved,
     Committed,
 }
 
@@ -71,11 +72,11 @@ impl MergeOwnershipMachine {
 }
 
 /// Safety invariant: a disk write is permitted only when no live editor owns the
-/// buffer or after the editor applied and ACKed the patch.
+/// buffer or after the editor has published the lazily patch-applied event.
 pub fn disk_write_permitted(phase: MergeOwnershipPhase) -> bool {
     matches!(
         phase,
-        MergeOwnershipPhase::Detached | MergeOwnershipPhase::IpcAckProven
+        MergeOwnershipPhase::Detached | MergeOwnershipPhase::LazilyPatchAppliedProven
     )
 }
 
@@ -90,7 +91,7 @@ pub fn transition_merge_ownership(
             | MergeOwnershipPhase::Attached
             | MergeOwnershipPhase::EditorOwnsBuffer => Some(MergeOwnershipPhase::Attached),
             MergeOwnershipPhase::BinaryWriteRequested
-            | MergeOwnershipPhase::IpcAckProven
+            | MergeOwnershipPhase::LazilyPatchAppliedProven
             | MergeOwnershipPhase::Committed => None,
         },
         MergeOwnershipEvent::EditorBufferObserved => match current {
@@ -98,7 +99,7 @@ pub fn transition_merge_ownership(
             | MergeOwnershipPhase::Attached
             | MergeOwnershipPhase::EditorOwnsBuffer => Some(MergeOwnershipPhase::EditorOwnsBuffer),
             MergeOwnershipPhase::BinaryWriteRequested
-            | MergeOwnershipPhase::IpcAckProven
+            | MergeOwnershipPhase::LazilyPatchAppliedProven
             | MergeOwnershipPhase::Committed => None,
         },
         MergeOwnershipEvent::EditorDetached => match current {
@@ -106,7 +107,7 @@ pub fn transition_merge_ownership(
             | MergeOwnershipPhase::Attached
             | MergeOwnershipPhase::EditorOwnsBuffer => Some(MergeOwnershipPhase::Detached),
             MergeOwnershipPhase::BinaryWriteRequested
-            | MergeOwnershipPhase::IpcAckProven
+            | MergeOwnershipPhase::LazilyPatchAppliedProven
             | MergeOwnershipPhase::Committed => None,
         },
         MergeOwnershipEvent::HeartbeatStale => match current {
@@ -114,7 +115,7 @@ pub fn transition_merge_ownership(
             MergeOwnershipPhase::Detached
             | MergeOwnershipPhase::EditorOwnsBuffer
             | MergeOwnershipPhase::BinaryWriteRequested
-            | MergeOwnershipPhase::IpcAckProven
+            | MergeOwnershipPhase::LazilyPatchAppliedProven
             | MergeOwnershipPhase::Committed => None,
         },
         MergeOwnershipEvent::BinaryWriteRequested => match current {
@@ -123,12 +124,13 @@ pub fn transition_merge_ownership(
             }
             MergeOwnershipPhase::Detached
             | MergeOwnershipPhase::Attached
-            | MergeOwnershipPhase::IpcAckProven
+            | MergeOwnershipPhase::LazilyPatchAppliedProven
             | MergeOwnershipPhase::Committed => None,
         },
-        MergeOwnershipEvent::PatchAckObserved => match current {
-            MergeOwnershipPhase::BinaryWriteRequested | MergeOwnershipPhase::IpcAckProven => {
-                Some(MergeOwnershipPhase::IpcAckProven)
+        MergeOwnershipEvent::LazilyPatchAppliedObserved => match current {
+            MergeOwnershipPhase::BinaryWriteRequested
+            | MergeOwnershipPhase::LazilyPatchAppliedProven => {
+                Some(MergeOwnershipPhase::LazilyPatchAppliedProven)
             }
             MergeOwnershipPhase::Detached
             | MergeOwnershipPhase::Attached
@@ -137,7 +139,7 @@ pub fn transition_merge_ownership(
         },
         MergeOwnershipEvent::Committed => match current {
             MergeOwnershipPhase::Detached
-            | MergeOwnershipPhase::IpcAckProven
+            | MergeOwnershipPhase::LazilyPatchAppliedProven
             | MergeOwnershipPhase::Committed => Some(MergeOwnershipPhase::Committed),
             MergeOwnershipPhase::Attached
             | MergeOwnershipPhase::EditorOwnsBuffer
@@ -182,7 +184,7 @@ mod tests {
         MergeOwnershipPhase::Attached,
         MergeOwnershipPhase::EditorOwnsBuffer,
         MergeOwnershipPhase::BinaryWriteRequested,
-        MergeOwnershipPhase::IpcAckProven,
+        MergeOwnershipPhase::LazilyPatchAppliedProven,
         MergeOwnershipPhase::Committed,
     ];
 
@@ -192,7 +194,7 @@ mod tests {
         MergeOwnershipEvent::EditorDetached,
         MergeOwnershipEvent::HeartbeatStale,
         MergeOwnershipEvent::BinaryWriteRequested,
-        MergeOwnershipEvent::PatchAckObserved,
+        MergeOwnershipEvent::LazilyPatchAppliedObserved,
         MergeOwnershipEvent::Committed,
     ];
 
@@ -206,8 +208,11 @@ mod tests {
         assert_eq!(machine.state(), MergeOwnershipPhase::EditorOwnsBuffer);
         assert!(machine.send(MergeOwnershipEvent::BinaryWriteRequested));
         assert_eq!(machine.state(), MergeOwnershipPhase::BinaryWriteRequested);
-        assert!(machine.send(MergeOwnershipEvent::PatchAckObserved));
-        assert_eq!(machine.state(), MergeOwnershipPhase::IpcAckProven);
+        assert!(machine.send(MergeOwnershipEvent::LazilyPatchAppliedObserved));
+        assert_eq!(
+            machine.state(),
+            MergeOwnershipPhase::LazilyPatchAppliedProven
+        );
         assert!(machine.send(MergeOwnershipEvent::Committed));
         assert_eq!(machine.state(), MergeOwnershipPhase::Committed);
     }
@@ -256,11 +261,11 @@ mod tests {
     }
 
     #[test]
-    fn disk_write_permitted_only_for_detached_or_ack_proven() {
+    fn disk_write_permitted_only_for_detached_or_patch_applied_event_proven() {
         for phase in ALL_PHASES {
             let permitted = disk_write_permitted(phase);
             match phase {
-                MergeOwnershipPhase::Detached | MergeOwnershipPhase::IpcAckProven => {
+                MergeOwnershipPhase::Detached | MergeOwnershipPhase::LazilyPatchAppliedProven => {
                     assert!(permitted, "{phase:?} must permit disk write");
                 }
                 _ => assert!(!permitted, "{phase:?} must not permit disk write"),
@@ -289,7 +294,7 @@ mod tests {
         );
         assert_eq!(
             MergeOwnershipMachine::transition(
-                MergeOwnershipPhase::IpcAckProven,
+                MergeOwnershipPhase::LazilyPatchAppliedProven,
                 MergeOwnershipEvent::Committed,
             ),
             Some(MergeOwnershipPhase::Committed)
@@ -306,7 +311,7 @@ mod tests {
         ] {
             for phase in [
                 MergeOwnershipPhase::BinaryWriteRequested,
-                MergeOwnershipPhase::IpcAckProven,
+                MergeOwnershipPhase::LazilyPatchAppliedProven,
             ] {
                 assert_eq!(MergeOwnershipMachine::transition(phase, churn), None);
             }
@@ -328,30 +333,33 @@ mod tests {
     }
 
     #[test]
-    fn patch_ack_requires_pending_binary_write_request() {
+    fn lazily_patch_applied_requires_pending_binary_write_request() {
         for phase in [
             MergeOwnershipPhase::Detached,
             MergeOwnershipPhase::Attached,
             MergeOwnershipPhase::EditorOwnsBuffer,
         ] {
             assert_eq!(
-                MergeOwnershipMachine::transition(phase, MergeOwnershipEvent::PatchAckObserved),
+                MergeOwnershipMachine::transition(
+                    phase,
+                    MergeOwnershipEvent::LazilyPatchAppliedObserved
+                ),
                 None
             );
         }
         assert_eq!(
             MergeOwnershipMachine::transition(
                 MergeOwnershipPhase::BinaryWriteRequested,
-                MergeOwnershipEvent::PatchAckObserved,
+                MergeOwnershipEvent::LazilyPatchAppliedObserved,
             ),
-            Some(MergeOwnershipPhase::IpcAckProven)
+            Some(MergeOwnershipPhase::LazilyPatchAppliedProven)
         );
         assert_eq!(
             MergeOwnershipMachine::transition(
-                MergeOwnershipPhase::IpcAckProven,
-                MergeOwnershipEvent::PatchAckObserved,
+                MergeOwnershipPhase::LazilyPatchAppliedProven,
+                MergeOwnershipEvent::LazilyPatchAppliedObserved,
             ),
-            Some(MergeOwnershipPhase::IpcAckProven)
+            Some(MergeOwnershipPhase::LazilyPatchAppliedProven)
         );
     }
 
@@ -455,8 +463,11 @@ mod tests {
         assert_eq!(machine.state(), MergeOwnershipPhase::BinaryWriteRequested);
         assert!(!disk_write_permitted(machine.state()));
 
-        assert!(machine.send(MergeOwnershipEvent::PatchAckObserved));
-        assert_eq!(machine.state(), MergeOwnershipPhase::IpcAckProven);
+        assert!(machine.send(MergeOwnershipEvent::LazilyPatchAppliedObserved));
+        assert_eq!(
+            machine.state(),
+            MergeOwnershipPhase::LazilyPatchAppliedProven
+        );
         assert!(disk_write_permitted(machine.state()));
 
         assert!(machine.send(MergeOwnershipEvent::Committed));
@@ -464,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_listener_wedge_repro_routes_to_disk_instead_of_no_ack() {
+    fn stale_listener_wedge_repro_routes_to_disk_instead_of_missing_lazily_event() {
         let machine = MergeOwnershipMachine::new(MergeOwnershipPhase::Detached);
 
         assert!(machine.send(MergeOwnershipEvent::EditorAttached));

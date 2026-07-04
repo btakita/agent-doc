@@ -232,6 +232,31 @@ pub(crate) fn run_paths(
 /// successful cdylib install. Best-effort — logs on failure, never returns an
 /// error to the install path.
 fn broadcast_reload_after_install(target_dir: &Path, version: &str, installed: &Path) {
+    match agent_doc_controller_io::project_controller::checkpoint_supervisors_all_projects(
+        "lib_install_reload_broadcast",
+    ) {
+        Ok(summary) if summary.all_clear() => {
+            if summary.total() > 0 {
+                eprintln!(
+                    "[lib-install] CRDT durable checkpoint before plugin reload: {} checkpointed, {} detached, {} skipped",
+                    summary.checkpointed, summary.detached, summary.skipped
+                );
+            }
+        }
+        Ok(summary) => {
+            eprintln!(
+                "[lib-install] warning: skipped cdylib reload broadcast because CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped)",
+                summary.failed, summary.checkpointed, summary.detached, summary.skipped
+            );
+            return;
+        }
+        Err(e) => {
+            eprintln!(
+                "[lib-install] warning: skipped cdylib reload broadcast because CRDT durable checkpoint discovery failed ({e:#})"
+            );
+            return;
+        }
+    }
     let broadcast = ReloadBroadcast {
         lib_version: version.to_string(),
         mtime_ms: mtime_epoch_ms(installed).unwrap_or(0),
@@ -273,6 +298,19 @@ pub fn reload_lib(now_epoch_ms: u128) -> Result<ReloadLibReport> {
         .parent()
         .context("cannot determine binary directory for reload broadcast")?;
     let installed = dir.join(platform_lib_name());
+    let checkpoint =
+        agent_doc_controller_io::project_controller::checkpoint_supervisors_all_projects(
+            "admin_reload_lib",
+        )?;
+    if !checkpoint.all_clear() {
+        anyhow::bail!(
+            "refusing to announce plugin reload: CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped)",
+            checkpoint.failed,
+            checkpoint.checkpointed,
+            checkpoint.detached,
+            checkpoint.skipped,
+        );
+    }
     let broadcast = ReloadBroadcast {
         lib_version: version.to_string(),
         mtime_ms: mtime_epoch_ms(&installed).unwrap_or(0),
@@ -317,7 +355,9 @@ const REQUIRED_EDITOR_ABI_SYMBOLS: &[&str] = &[
     "agent_doc_document_changed_digest_content_for_editor_v2",
     "agent_doc_document_changed_digest_content_for_editor_v3",
     "agent_doc_document_synced_digest_content_for_editor_v2",
-    "agent_doc_write_ack_content_for_editor_v2",
+    "agent_doc_editor_content_applied_for_editor_v1",
+    "agent_doc_editor_patch_applied",
+    "agent_doc_editor_patch_rejected",
     "agent_doc_document_closed_for_editor",
 ];
 

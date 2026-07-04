@@ -1,37 +1,19 @@
 //! Binary-detected queue-stall policy (`#qstallguard` Layer B).
 //!
 //! This is the pure classifier for a clean closeout that required continuation
-//! but did not continue on the next turn boundary. Orchestration owns the
-//! one-shot sidecar IO; this module owns the turn lifecycle decision.
-
-use serde::{Deserialize, Serialize};
+//! but did not continue on the next turn boundary. The project controller owns
+//! the one-shot continuation-pending projection; this module owns the turn
+//! lifecycle decision.
 
 /// The canonical `ops.log` / preflight-warning marker emitted on a detected stall.
 pub const QUEUE_STALL_DETECTED: &str =
     "queue_stall_detected reason=no_valid_stop_with_continuation_required";
 
-/// Persisted continuation-pending marker body. Written at a clean closeout that
-/// required continuation; reconciled and cleared at the next preflight.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ContinuationPending {
-    /// The cycle id that committed with continuation still required.
-    pub cycle_id: String,
-    /// Unix seconds the marker was written.
-    pub recorded_secs: u64,
-}
-
-pub fn continuation_pending_marker(cycle_id: &str, recorded_secs: u64) -> ContinuationPending {
-    ContinuationPending {
-        cycle_id: cycle_id.to_string(),
-        recorded_secs,
-    }
-}
-
 /// Facts the stall classifier reasons over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StallFacts {
-    /// A continuation-pending marker from the prior clean closeout is present.
-    pub continuation_pending_marker: bool,
+    /// A continuation-pending projection from the prior clean closeout is present.
+    pub continuation_pending_projection: bool,
     /// This preflight still computes `queue_continuation_required=true`.
     pub continuation_required_now: bool,
     /// Loop-scope drainable head count this preflight.
@@ -44,13 +26,13 @@ pub struct StallFacts {
     pub loop_is_continuing: bool,
 }
 
-/// Outcome of reconciling the continuation-pending marker against the current
-/// preflight facts. Every non-`NoMarker` outcome means the caller clears the
-/// one-shot marker.
+/// Outcome of reconciling the continuation-pending projection against the
+/// current preflight facts. Every non-`NoProjection` outcome means the caller
+/// clears the one-shot projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StallVerdict {
-    /// No prior continuation marker.
-    NoMarker,
+    /// No prior continuation projection.
+    NoProjection,
     /// The loop continued.
     LoopContinued,
     /// A legitimate stop: user preemption, queue stopped, or nothing drainable.
@@ -66,8 +48,8 @@ pub enum StallVerdict {
 /// supervisor, high accretion, or a `semantic_completion_match` warning are not
 /// valid stop reasons and intentionally do not suppress the diagnostic.
 pub fn classify_stall(facts: &StallFacts) -> StallVerdict {
-    if !facts.continuation_pending_marker {
-        return StallVerdict::NoMarker;
+    if !facts.continuation_pending_projection {
+        return StallVerdict::NoProjection;
     }
     if facts.loop_is_continuing {
         return StallVerdict::LoopContinued;
@@ -94,7 +76,7 @@ mod tests {
 
     fn base() -> StallFacts {
         StallFacts {
-            continuation_pending_marker: true,
+            continuation_pending_projection: true,
             continuation_required_now: true,
             drainable_head_count: 1,
             user_prompt_preempts: false,
@@ -115,19 +97,12 @@ mod tests {
     }
 
     #[test]
-    fn no_marker_is_inert() {
+    fn no_projection_is_inert() {
         let facts = StallFacts {
-            continuation_pending_marker: false,
+            continuation_pending_projection: false,
             ..base()
         };
-        assert_eq!(classify_stall(&facts), StallVerdict::NoMarker);
-    }
-
-    #[test]
-    fn continuation_pending_marker_records_cycle_and_timestamp() {
-        let marker = continuation_pending_marker("cycle-123", 42);
-        assert_eq!(marker.cycle_id, "cycle-123");
-        assert_eq!(marker.recorded_secs, 42);
+        assert_eq!(classify_stall(&facts), StallVerdict::NoProjection);
     }
 
     #[test]

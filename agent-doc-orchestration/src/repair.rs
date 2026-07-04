@@ -129,19 +129,6 @@ pub(crate) fn run_with_queue_completion_ids(
     )
 }
 
-pub(crate) fn run_with_queue_completion_ids_and_force_disk(
-    file: &Path,
-    queue_completion_ids: &[String],
-    force_disk_override: Option<bool>,
-) -> Result<RepairOutcome> {
-    agent_doc_repair_io::run_with_queue_completion_ids_and_force_disk(
-        repair_coordinator_effects(),
-        file,
-        queue_completion_ids,
-        force_disk_override,
-    )
-}
-
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
     agent_doc_repair_io::repair(repair_coordinator_effects(), file)
 }

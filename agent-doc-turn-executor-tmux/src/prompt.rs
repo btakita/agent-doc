@@ -371,7 +371,10 @@ pub fn codex_idle_placeholder_prompt(trimmed: &str) -> Option<String> {
     }
 
     let normalized = body.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized == "Ask Codex to do anything" || normalized == "Explain this codebase" {
+    if matches!(
+        normalized.as_str(),
+        "Ask Codex to do anything" | "Explain this codebase" | "Implement {feature}"
+    ) {
         return Some(format!("› {}", normalized));
     }
 
@@ -861,6 +864,21 @@ in @filename
             codex_idle_placeholder_candidate("› investigate this issue"),
             None
         );
+    }
+
+    #[test]
+    fn codex_idle_placeholder_accepts_startup_feature_hint() {
+        assert_eq!(
+            codex_idle_placeholder_prompt("› Implement {feature}").as_deref(),
+            Some("› Implement {feature}")
+        );
+        assert_eq!(
+        codex_idle_placeholder_candidate(
+            "╭──────────────────╮\n│ >_ OpenAI Codex │\n╰──────────────────╯\n\n› Implement {feature}\n\ngpt-5.5 xhigh · ~/work/sample · Context 0% used\n"
+        )
+        .as_deref(),
+        Some("› Implement {feature}")
+    );
     }
 
     #[test]

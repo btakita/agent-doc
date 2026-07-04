@@ -31,8 +31,9 @@ import java.security.MessageDigest
  * 1. `agent-doc write --ipc` writes `<hash>.json` to `.agent-doc/patches/`
  * 2. This watcher detects the new file via NIO WatchService
  * 3. Reads the JSON, finds the target document, applies patches
- * 4. Writes ack-content and deletes the JSON file (ACK)
- * 5. agent-doc polls for deletion and updates the snapshot
+ * 4. Writes the content projection, records lazily receipt state, and deletes
+ *    the JSON file
+ * 5. agent-doc observes the receipt/deletion and updates the snapshot
  *
  * **Multi-root:** a single watcher tracks every nested `.agent-doc/` project
  * under `project.basePath` (scanned at startup) plus any additional roots
@@ -44,6 +45,11 @@ import java.security.MessageDigest
  */
 class PatchWatcher(private val project: Project) : Disposable {
     private val operatorTextAuthorityCapability = "operator_text_authority_v1"
+    private val lazilyTransportReceiptsCapability = "lazily_transport_receipts_v1"
+    private val editorCapabilities = listOf(
+        operatorTextAuthorityCapability,
+        lazilyTransportReceiptsCapability,
+    ).joinToString(",")
 
     private data class RootState(
         val root: String,
@@ -117,14 +123,14 @@ class PatchWatcher(private val project: Project) : Disposable {
         return true
     }
 
-    private fun currentContentForAck(filePath: String): String? {
+    private fun currentContentForProjection(filePath: String): String? {
         var targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
         if (targetFile == null) {
             LocalFileSystem.getInstance().refresh(false)
             targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
         }
         if (targetFile == null) {
-            LOG.warn("[ack-content] already_applied target file not found: $filePath")
+            LOG.warn("[content-projection] already_applied target file not found: $filePath")
             return null
         }
         val document = FileDocumentManager.getInstance().getDocument(targetFile)
@@ -134,21 +140,21 @@ class PatchWatcher(private val project: Project) : Disposable {
         return try {
             String(targetFile.contentsToByteArray(), targetFile.charset)
         } catch (e: Exception) {
-            LOG.warn("[ack-content] failed to read already_applied VFS content for $filePath", e)
+            LOG.warn("[content-projection] failed to read already_applied VFS content for $filePath", e)
             null
         }
     }
 
-    private fun writeAlreadyAppliedAckContent(patch: IpcPatch, source: String): Boolean {
-        val content = currentContentForAck(patch.file) ?: return false
-        val ok = writeAckContent(patch.patchId, content, patch.file)
+    private fun writeAlreadyAppliedContentProjection(patch: IpcPatch, source: String): Boolean {
+        val content = currentContentForProjection(patch.file) ?: return false
+        val ok = writeEditorContentProjection(patch.patchId, content, patch.file)
         if (ok) {
-            LOG.info("[ack-content] already_applied source=$source patch_id ${patch.patchId} content_len=${content.length}")
+            LOG.info("[content-projection] already_applied source=$source patch_id ${patch.patchId} content_len=${content.length}")
         }
         return ok
     }
 
-    private fun reportAckContentSynced(filePath: String, content: String, source: String) {
+    private fun reportContentProjectionSynced(filePath: String, content: String, source: String) {
         val lib = AgentDocLib.get() ?: return
         try {
             lib.agent_doc_document_synced_digest_content_for_editor_v2(
@@ -159,13 +165,13 @@ class PatchWatcher(private val project: Project) : Disposable {
                 patchWatcherPluginVersion(),
                 operatorTextAuthorityCapability,
             )
-            LOG.debug("[ack-content] synced live-buffer source=$source file=$filePath content_len=${content.length}")
+            LOG.debug("[content-projection] synced live-buffer source=$source file=$filePath content_len=${content.length}")
         } catch (_: UnsatisfiedLinkError) {
-            LOG.debug("[ack-content] synced live-buffer FFI unavailable for $filePath")
+            LOG.debug("[content-projection] synced live-buffer FFI unavailable for $filePath")
         } catch (_: NoSuchMethodError) {
-            LOG.debug("[ack-content] synced live-buffer FFI missing for $filePath")
+            LOG.debug("[content-projection] synced live-buffer FFI missing for $filePath")
         } catch (e: Throwable) {
-            LOG.debug("[ack-content] synced live-buffer report failed for $filePath: ${e.message}")
+            LOG.debug("[content-projection] synced live-buffer report failed for $filePath: ${e.message}")
         }
     }
 
@@ -480,15 +486,15 @@ class PatchWatcher(private val project: Project) : Disposable {
                 }
                 if (isClaimedByForceDisk(patch.patchId, patch.file)) {
                     LOG.info("[socket] dedup: sentinel exists for patch_id ${patch.patchId} — emitting already_applied")
-                    return if (writeAlreadyAppliedAckContent(patch, "socket_force_disk_claim")) APPLY_ALREADY_APPLIED else APPLY_FAILED
+                    return if (writeAlreadyAppliedContentProjection(patch, "socket_force_disk_claim")) APPLY_ALREADY_APPLIED else APPLY_FAILED
                 }
                 if (isAlreadyApplied(patch.patchId)) {
                     LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — emitting already_applied")
-                    return if (writeAlreadyAppliedAckContent(patch, "socket_precheck")) APPLY_ALREADY_APPLIED else APPLY_FAILED
+                    return if (writeAlreadyAppliedContentProjection(patch, "socket_precheck")) APPLY_ALREADY_APPLIED else APPLY_FAILED
                 }
                 // #8bfz / #fcconeowner: socket IPC is also an editor apply path, so
                 // it must publish the same live-owner lease as file IPC before it
-                // can ACK. Without this, Rust sees ACK-content from an open editor
+                // can record a receipt. Without this, Rust sees content projection from an open editor
                 // but no plugin-owner sidecar and misclassifies the editor endpoint
                 // as absent during closeout recovery.
                 if (!ownsDocument(patch.file)) {
@@ -521,7 +527,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     // Re-check under EDT to avoid TOCTOU race with file watcher
                     if (isAlreadyApplied(patch.patchId)) {
                         LOG.info("[socket] dedup (EDT): patch_id ${patch.patchId} already applied — emitting already_applied")
-                        wasNoOp = writeAlreadyAppliedAckContent(patch, "socket_edt_recheck")
+                        wasNoOp = writeAlreadyAppliedContentProjection(patch, "socket_edt_recheck")
                         return@invokeAndWait
                     }
                     lastApplyWasNoOp = false
@@ -538,7 +544,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     }
                 }
                 if (applied || wasNoOp) {
-                    StateProjectionBridge.recordEditorAckObserved(
+                    StateProjectionBridge.recordEditorPatchApplied(
                         patch.file,
                         patch.patchId,
                         stateGeneration,
@@ -641,7 +647,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /**
      * Flush the editor-owned markdown buffer to disk and publish the exact saved
-     * content as ack-content. This is intentionally not a full-content apply:
+     * content as an editor-owned content projection. This is intentionally not a full-content apply:
      * the plugin does not replace the buffer, it only asks the editor platform to
      * save the open document that already owns the user's visible text.
      */
@@ -678,7 +684,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
 
         val content = savedContent ?: return false
-        return writeAckContent(patchId, content, filePath)
+        return writeEditorContentProjection(patchId, content, filePath)
     }
 
     /**
@@ -842,7 +848,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /**
      * #8bfz / #fcconeowner: returns true if THIS instance holds (or just won)
-     * the single-owner lease for [filePath] and should apply/ACK the patch.
+     * the single-owner lease for [filePath] and should apply/receipt the patch.
      * Fails open (returns true) when the FFI is unavailable or the
      * symbol is missing on an older binary, so single-instance setups never
      * regress below the pre-lease behavior. Tracks won docs in [ownedDocs] so
@@ -901,10 +907,10 @@ class PatchWatcher(private val project: Project) : Disposable {
             // patch_id dedup: if socket IPC already applied this logical write, skip.
             if (isAlreadyApplied(patch.patchId)) {
                 LOG.info("[patch-watcher] dedup: patch_id ${patch.patchId} already applied via socket — deleting: ${patchFile.name}")
-                if (writeAlreadyAppliedAckContent(patch, "file_precheck")) {
+                if (writeAlreadyAppliedContentProjection(patch, "file_precheck")) {
                     patchFile.delete()
                 } else {
-                    schedulePatchRetry(patchFile, "already_applied ack-content failed")
+                    schedulePatchRetry(patchFile, "already_applied content projection failed")
                 }
                 return
             }
@@ -927,7 +933,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
             // #8bfz / #fcconeowner: single live-owner election for untargeted
             // (broadcast) patches. When N windows have the project open they all
-            // watch .agent-doc/patches/ and could each apply/ACK this untargeted
+            // watch .agent-doc/patches/ and could each apply/receipt this untargeted
             // patch, racing the live buffer. Editor-TARGETED
             // patches already have a unique consumer (the binary picked the
             // editor_id), so they bypass this gate. Non-owners leave the file for
@@ -964,10 +970,10 @@ class PatchWatcher(private val project: Project) : Disposable {
                 // Re-check patch_id dedup under EDT (socket handler may have applied between queue and EDT dispatch)
                 if (isAlreadyApplied(patch.patchId)) {
                     LOG.info("[patch-watcher] dedup (EDT): patch_id ${patch.patchId} already applied — deleting: ${patchFile.name}")
-                    if (writeAlreadyAppliedAckContent(patch, "file_edt_recheck")) {
+                    if (writeAlreadyAppliedContentProjection(patch, "file_edt_recheck")) {
                         patchFile.delete()
                     } else {
-                        schedulePatchRetry(patchFile, "already_applied ack-content failed")
+                        schedulePatchRetry(patchFile, "already_applied content projection failed")
                     }
                     return@invokeLater
                 }
@@ -982,7 +988,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 if (applyMs > 50) LOG.info("[perf] applyPatch: ${applyMs}ms ${patch.file}")
                 if (applied) {
                     recordApplied(patch.patchId)
-                    StateProjectionBridge.recordEditorAckObserved(
+                    StateProjectionBridge.recordEditorPatchApplied(
                         patch.file,
                         patch.patchId,
                         stateGeneration,
@@ -1023,21 +1029,21 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     /**
-     * Write the final document content to the ack-content sidecar file via FFI.
-     * Called after every successful apply so the CLI binary can use it as the
-     * snapshot source instead of the 200ms sleep + re-read heuristic.
+     * Write the final document content to the derived content projection via FFI.
+     * Called after every successful apply so the CLI binary can pair the
+     * projection with lazily receipt state instead of a timing heuristic.
      * Keyed by patch_id (not file path) — all path logic lives in Rust.
      */
-    private fun writeAckContent(patchId: String?, content: String, filePath: String? = null): Boolean {
+    private fun writeEditorContentProjection(patchId: String?, content: String, filePath: String? = null): Boolean {
         if (patchId == null) return true
         val root = filePath?.let { resolveRootFor(it) } ?: project.basePath ?: return false
         val lib = AgentDocLib.get() ?: run {
-            LOG.warn("[ack-content] FFI unavailable, cannot write ack-content for patch_id $patchId")
+            LOG.warn("[content-projection] FFI unavailable, cannot write content projection for patch_id $patchId")
             return false
         }
         if (filePath != null) {
             try {
-                if (lib.agent_doc_write_ack_content_for_editor_v2(
+                if (lib.agent_doc_editor_content_applied_for_editor_v1(
                     root,
                     patchId,
                     filePath,
@@ -1045,31 +1051,26 @@ class PatchWatcher(private val project: Project) : Disposable {
                     EditorIdentity.id,
                     "jetbrains",
                     patchWatcherPluginVersion(),
-                    operatorTextAuthorityCapability,
+                    editorCapabilities,
                 )) {
-                    recordEditorSurfaceOps(filePath, "ack_content", "write_ack_content_for_editor_v2", "write_finalize_ipc", patchId, "ok")
+                    recordEditorSurfaceOps(filePath, "content_projection", "editor_content_applied_for_editor_v1", "write_finalize_ipc", patchId, "ok")
                     return true
                 }
-                LOG.warn("[ack-content] FFI write_ack_content_for_editor_v2 returned false for patch_id $patchId")
-                recordEditorSurfaceOps(filePath, "ack_content", "write_ack_content_for_editor_v2", "write_finalize_ipc", patchId, "failed")
+                LOG.warn("[content-projection] FFI editor_content_applied_for_editor_v1 returned false for patch_id $patchId")
+                recordEditorSurfaceOps(filePath, "content_projection", "editor_content_applied_for_editor_v1", "write_finalize_ipc", patchId, "failed")
                 return false
             } catch (_: UnsatisfiedLinkError) {
-                LOG.warn("[ack-content] FFI write_ack_content_for_editor_v2 unavailable, falling back for patch_id $patchId")
+                LOG.warn("[content-projection] incompatible agent-doc native library: missing agent_doc_editor_content_applied_for_editor_v1; reinstall the plugin/native library")
+                recordEditorSurfaceOps(filePath, "content_projection", "editor_content_applied_for_editor_v1", "write_finalize_ipc", patchId, "missing_symbol")
+                return false
             } catch (_: NoSuchMethodError) {
-                LOG.warn("[ack-content] FFI write_ack_content_for_editor_v2 missing, falling back for patch_id $patchId")
+                LOG.warn("[content-projection] incompatible agent-doc native library: missing agent_doc_editor_content_applied_for_editor_v1; reinstall the plugin/native library")
+                recordEditorSurfaceOps(filePath, "content_projection", "editor_content_applied_for_editor_v1", "write_finalize_ipc", patchId, "missing_symbol")
+                return false
             }
         }
-        if (!lib.agent_doc_write_ack_content(root, patchId, content)) {
-            LOG.warn("[ack-content] FFI write_ack_content returned false for patch_id $patchId")
-            filePath?.let {
-                recordEditorSurfaceOps(it, "ack_content", "write_ack_content", "write_finalize_ipc", patchId, "failed")
-            }
-            return false
-        }
-        filePath?.let {
-            recordEditorSurfaceOps(it, "ack_content", "write_ack_content", "write_finalize_ipc", patchId, "ok")
-        }
-        return true
+        LOG.warn("[content-projection] file path is required for lazily receipt-capable content publication")
+        return false
     }
 
     private fun awaitIdleBeforeDocumentMutation(filePath: String, operation: String): Boolean {
@@ -1258,7 +1259,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
         ) {
             LOG.info("[patch-watcher] dedup: response patch_id ${patch.patchId} already present in live disk/committed content — skipping stale replay")
-            if (!writeAckContent(patch.patchId, diskContent ?: content, patch.file)) {
+            if (!writeEditorContentProjection(patch.patchId, diskContent ?: content, patch.file)) {
                 return false
             }
             lastApplyWasNoOp = true
@@ -1334,7 +1335,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         if (result == content) {
             LOG.warn("Patch produced no changes for ${patch.file}")
-            if (!writeAckContent(patch.patchId, document.text, patch.file)) {
+            if (!writeEditorContentProjection(patch.patchId, document.text, patch.file)) {
                 return false
             }
             lastApplyWasNoOp = true
@@ -1373,7 +1374,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             return false
         }
 
-        if (!writeAckContent(patch.patchId, document.text, patch.file)) {
+        if (!writeEditorContentProjection(patch.patchId, document.text, patch.file)) {
             return false
         }
         // Note: do NOT call agent_doc_commit here. The plugin committing within the IPC
@@ -1553,7 +1554,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /**
      * Closed-file VFS patch handling is read-only during realtime cutover.
-     * It may ACK a stale replay already present on disk/HEAD, but it must not
+     * It may accept a stale replay already present on disk/HEAD, but it must not
      * synthesize and write a whole-buffer replacement outside editor convergence.
      */
     private fun applyPatchViaVfs(targetFile: com.intellij.openapi.vfs.VirtualFile, patch: IpcPatch): Boolean {
@@ -1571,7 +1572,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
             ) {
                 LOG.info("[patch-watcher] dedup: VFS response patch_id ${patch.patchId} already present in disk/committed content — skipping stale replay")
-                if (!writeAckContent(patch.patchId, content, patch.file)) {
+                if (!writeEditorContentProjection(patch.patchId, content, patch.file)) {
                     return false
                 }
                 lastApplyWasNoOp = true
@@ -2191,7 +2192,7 @@ data class IpcPatch(
     val preserveHead: Boolean = false,
     /** Lines whose plain text should be prefixed with `❯ ` in the exchange component. */
     val normalizePrefixLines: List<String> = emptyList(),
-    /** UUID identifying this patch — used for ack-content sidecar and claimed-patches sentinel. */
+    /** UUID identifying this patch — used for content projection sidecar and claimed-patches sentinel. */
     val patchId: String? = null,
     /** Historical source-buffer proof for disabled fullContent payloads. */
     val expectedContentHash: String? = null,

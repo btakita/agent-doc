@@ -180,6 +180,9 @@ function resetBindings(): void {
     _state_projection = null;
     _state_subscribe = null;
     _record_state_event = null;
+    _editor_content_applied_for_editor_v1 = null;
+    _editor_patch_applied = null;
+    _editor_patch_rejected = null;
     _record_editor_op = null;
     _document_base_hash = null;
     _replica_open = null;
@@ -194,6 +197,11 @@ const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagen
 const EDITOR_PLUGIN_KIND = 'vscode';
 const EDITOR_PLUGIN_VERSION = '0.2.40';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
+const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
+const EDITOR_CAPABILITIES = [
+    OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+    LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+].join(',');
 
 function findLibrary(projectRoot?: string): string | null {
     // 1. Explicit env var
@@ -354,6 +362,9 @@ let _state_projection: any = null;
 let _turn_projection: any = null;
 let _state_subscribe: any = null;
 let _record_state_event: any = null;
+let _editor_content_applied_for_editor_v1: any = null;
+let _editor_patch_applied: any = null;
+let _editor_patch_rejected: any = null;
 let _reconnect_buffer_decision: any = null;
 let _record_editor_op: any = null;
 let _document_base_hash: any = null;
@@ -510,10 +521,20 @@ function bindFunctions(): void {
     try {
         _state_projection = lib.func('agent_doc_state_projection', 'char*', ['str']);
         _record_state_event = lib.func('agent_doc_record_state_event', 'int32', ['str', 'str']);
+        _editor_content_applied_for_editor_v1 = lib.func(
+            'agent_doc_editor_content_applied_for_editor_v1',
+            'int32',
+            ['str', 'str', 'str', 'str', 'str', 'str', 'str', 'str'],
+        );
+        _editor_patch_applied = lib.func('agent_doc_editor_patch_applied', 'int32', ['str', 'str', 'uint64']);
+        _editor_patch_rejected = lib.func('agent_doc_editor_patch_rejected', 'int32', ['str', 'str', 'uint64', 'str']);
     } catch (e: any) {
         console.log(`[agent-doc/native] state projection ABI unavailable: ${e.message}`);
         _state_projection = null;
         _record_state_event = null;
+        _editor_content_applied_for_editor_v1 = null;
+        _editor_patch_applied = null;
+        _editor_patch_rejected = null;
     }
     try {
         // CPC→plugin turn-state projection (Shared-Foundation parity with the JB
@@ -1163,20 +1184,66 @@ export function recordEditorPatchQueued(filePath: string, patchId?: string, proj
     return generation;
 }
 
-export function recordEditorAckObserved(
+export function recordEditorPatchApplied(
     filePath: string,
     patchId: string | undefined,
     generation: number | null,
     projectRoot?: string,
 ): void {
     if (!patchId || generation == null) return;
-    recordFactForFile(
-        filePath,
-        'editor_ack_observed',
-        { patch_id: patchId, actor_generation: generation },
-        `editor-ack-${patchId}-${generation}`,
-        projectRoot,
-    );
+    if (!ensureLoaded(projectRoot)) return;
+    bindFunctions();
+    if (!_editor_patch_applied) {
+        console.warn('[agent-doc/native] incompatible agent-doc native library: missing agent_doc_editor_patch_applied; reinstall the plugin/native library');
+        return;
+    }
+    try {
+        const ok = _editor_patch_applied(filePath, patchId, generation) === 1;
+        if (!ok) {
+            console.warn(`[agent-doc/native] editor_patch_applied receipt rejected for ${patchId}`);
+        }
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] editor_patch_applied ABI error: ${e.message}`);
+    }
+}
+
+export function recordEditorContentApplied(
+    projectRoot: string | undefined,
+    patchId: string | undefined,
+    filePath: string,
+    content: string,
+    editorId: string,
+): boolean {
+    if (!patchId) return true;
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    if (!_editor_content_applied_for_editor_v1) {
+        console.warn('[agent-doc/native] incompatible agent-doc native library: missing agent_doc_editor_content_applied_for_editor_v1; reinstall the plugin/native library');
+        return false;
+    }
+    if (!projectRoot) {
+        console.warn('[agent-doc/native] project root is required for editor content receipts');
+        return false;
+    }
+    try {
+        const ok = _editor_content_applied_for_editor_v1(
+            projectRoot,
+            patchId,
+            filePath,
+            content,
+            editorId,
+            EDITOR_PLUGIN_KIND,
+            EDITOR_PLUGIN_VERSION,
+            EDITOR_CAPABILITIES,
+        ) === 1;
+        if (!ok) {
+            console.warn(`[agent-doc/native] editor content receipt rejected for ${patchId}`);
+        }
+        return ok;
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] editor content receipt ABI error: ${e.message}`);
+        return false;
+    }
 }
 
 export function recordEditorRetryRequested(
@@ -1625,7 +1692,7 @@ export function documentChangedDigestContent(
             editorId,
             EDITOR_PLUGIN_KIND,
             EDITOR_PLUGIN_VERSION,
-            OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            EDITOR_CAPABILITIES,
             noUnsavedOperatorEdits ? 1 : 0,
         );
     } else if (editorId && _document_changed_digest_content_for_editor_v2) {
@@ -1635,7 +1702,7 @@ export function documentChangedDigestContent(
             editorId,
             EDITOR_PLUGIN_KIND,
             EDITOR_PLUGIN_VERSION,
-            OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            EDITOR_CAPABILITIES,
         );
     } else if (editorId && _document_changed_digest_content_for_editor) {
         _document_changed_digest_content_for_editor(filePath, content, editorId);

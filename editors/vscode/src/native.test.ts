@@ -127,7 +127,7 @@ describe('state projection bridge (#lzstatewire1)', () => {
     const summary = projectionSummary({
       document_hash: 'doc-a',
       route: { generation: 3, pane_id: '%2', readiness: 'dispatch_proven' },
-      transport: { patches: { 'patch-1': { phase: 'queued' }, 'patch-2': { phase: 'acked' } } },
+      transport: { patches: { 'patch-1': { phase: 'queued' }, 'patch-2': { phase: 'applied' } } },
       proof: { markers: { dispatch_start: { phase: 'observed', sources: ['route'] } } },
     });
 
@@ -135,12 +135,12 @@ describe('state projection bridge (#lzstatewire1)', () => {
       routeReadiness: 'dispatch_proven',
       routePaneId: '%2',
       latestTransportPatchId: 'patch-2',
-      latestTransportPhase: 'acked',
+      latestTransportPhase: 'applied',
       proofMarkers: 1,
     });
     assert.strictEqual(
       compactProjectionSummary(summary!),
-      'route=dispatch_proven pane=%2 transport=patch-2:acked proof_markers=1',
+      'route=dispatch_proven pane=%2 transport=patch-2:applied proof_markers=1',
     );
   });
 
@@ -173,7 +173,7 @@ describe('state projection bridge (#lzstatewire1)', () => {
     const projection = {
       document_hash: 'doc-a',
       route: { generation: 3, pane_id: '%2', readiness: 'dispatch_proven' },
-      transport: { patches: { 'patch-1': { phase: 'queued' }, 'patch-2': { phase: 'acked' } } },
+      transport: { patches: { 'patch-1': { phase: 'queued' }, 'patch-2': { phase: 'applied' } } },
       proof: { markers: { dispatch_start: { phase: 'observed', sources: ['route'] } } },
     };
     const summary = projectionSummary(projection)!;

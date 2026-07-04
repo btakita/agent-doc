@@ -16,13 +16,13 @@ use agent_doc_write_converge_io::{
     ack_content_disk_write_proof, guard_ipc_snapshot_adoption_against_live_prompt_drift,
     ipc_repair_decision_from_sidecar, log_ipc_snapshot_adoption_allowed,
     log_ipcfullprompt_corruption_if_any, materialize_missing_response_for_socket_ack_drift,
-    poll_ack_content_sidecar, reconcile_ack_snapshot_to_newer_operator_buffer,
+    poll_ack_content_lazily_event, reconcile_ack_snapshot_to_newer_operator_buffer,
 };
 #[cfg(test)]
 use agent_doc_write_converge_io::{
     guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning,
     guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning, ipc_direct_disk_degraded,
-    read_ack_content_sidecar, record_ipc_socket_ack_timeout, try_semantic_merge_convergence,
+    record_ipc_socket_ack_timeout, try_semantic_merge_convergence,
 };
 
 #[cfg(test)]
@@ -184,20 +184,42 @@ mod ack_content_snapshot_tests {
         panic!("typing indicator did not become active for {file}");
     }
 
+    fn record_lazily_visible_write_candidate(file: &Path, patch_id: &str, content: &str) {
+        std::fs::write(file, content).unwrap();
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            file,
+            patch_id,
+            content,
+            "unit_test",
+        )
+        .unwrap();
+    }
+
     #[test]
-    fn test_ack_content_sidecar_read() {
+    fn test_lazily_visible_write_event_read() {
         let tmp = TempDir::new().unwrap();
         let project_root = tmp.path().to_path_buf();
         let patch_id = "test-patch-abc123";
 
-        let ack_dir = project_root.join(".agent-doc/ack-content");
-        std::fs::create_dir_all(&ack_dir).unwrap();
-        let sidecar = ack_dir.join(format!("{patch_id}.md"));
-        std::fs::write(&sidecar, "applied content from plugin").unwrap();
+        std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
+        let doc = project_root.join("session.md");
+        record_lazily_visible_write_candidate(&doc, patch_id, "applied content from plugin");
 
-        let result = read_ack_content_sidecar(&project_root, patch_id).unwrap();
+        let result = poll_ack_content_lazily_event(
+            &doc,
+            patch_id,
+            std::time::Duration::from_millis(100),
+            std::time::Duration::from_millis(10),
+        )
+        .unwrap();
         assert_eq!(result, Some("applied content from plugin".to_string()));
-        assert!(!sidecar.exists(), "sidecar should be deleted after read");
+        assert!(
+            agent_doc_controller_io::project_controller::visible_write_commit_candidate_for_patch_file(
+                &doc, patch_id
+            )
+            .is_some(),
+            "lazily visible-write proof should remain durable"
+        );
     }
 
     #[test]
@@ -1129,17 +1151,17 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn test_poll_sidecar_present_immediately() {
+    fn test_poll_lazily_event_present_immediately() {
         let tmp = TempDir::new().unwrap();
         let project_root = tmp.path().to_path_buf();
         let patch_id = "poll-immediate";
 
-        let ack_dir = project_root.join(".agent-doc/ack-content");
-        std::fs::create_dir_all(&ack_dir).unwrap();
-        std::fs::write(ack_dir.join(format!("{patch_id}.md")), "immediate content").unwrap();
+        std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
+        let doc = project_root.join("session.md");
+        record_lazily_visible_write_candidate(&doc, patch_id, "immediate content");
 
-        let result = poll_ack_content_sidecar(
-            &project_root,
+        let result = poll_ack_content_lazily_event(
+            &doc,
             patch_id,
             std::time::Duration::from_millis(100),
             std::time::Duration::from_millis(10),
@@ -1149,26 +1171,23 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn test_poll_sidecar_appears_after_delay() {
+    fn test_poll_lazily_event_appears_after_delay() {
         let tmp = TempDir::new().unwrap();
         let project_root = tmp.path().to_path_buf();
         let patch_id = "poll-delayed";
 
-        let ack_dir = project_root.join(".agent-doc/ack-content");
-        std::fs::create_dir_all(&ack_dir).unwrap();
+        std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
+        let doc = project_root.join("session.md");
 
-        // Spawn a thread that writes the sidecar after 50ms using atomic
-        // rename to avoid the poll reading a partially-written file.
-        let sidecar_path = ack_dir.join(format!("{patch_id}.md"));
-        let tmp_path = ack_dir.join(format!("{patch_id}.md.tmp"));
+        // Spawn a thread that records the durable lazily proof after 50ms.
+        let doc_for_thread = doc.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(50));
-            std::fs::write(&tmp_path, "delayed content").unwrap();
-            std::fs::rename(&tmp_path, &sidecar_path).unwrap();
+            record_lazily_visible_write_candidate(&doc_for_thread, patch_id, "delayed content");
         });
 
-        let result = poll_ack_content_sidecar(
-            &project_root,
+        let result = poll_ack_content_lazily_event(
+            &doc,
             patch_id,
             std::time::Duration::from_millis(500),
             std::time::Duration::from_millis(10),
@@ -1178,17 +1197,19 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn test_poll_sidecar_timeout() {
+    fn test_poll_lazily_event_timeout() {
         let tmp = TempDir::new().unwrap();
         let project_root = tmp.path().to_path_buf();
         let patch_id = "poll-timeout";
 
-        // Don't create the sidecar — poll should timeout
-        std::fs::create_dir_all(project_root.join(".agent-doc/ack-content")).unwrap();
+        // Don't record the lazily event — poll should timeout.
+        std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
+        let doc = project_root.join("session.md");
+        std::fs::write(&doc, "unproven content").unwrap();
 
         let start = std::time::Instant::now();
-        let result = poll_ack_content_sidecar(
-            &project_root,
+        let result = poll_ack_content_lazily_event(
+            &doc,
             patch_id,
             std::time::Duration::from_millis(100),
             std::time::Duration::from_millis(25),

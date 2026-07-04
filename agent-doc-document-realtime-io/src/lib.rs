@@ -2,43 +2,26 @@
 //!
 //! ## Spec (`#rtwatch` — realtime editor-buffer ↔ disk read authority)
 //! The agent-doc cycle (`preflight` / `write` / `finalize` / `session-check`)
-//! currently sources "current document" by reading the **disk file** (and a
-//! preflight snapshot/baseline). When an editor (IDEA / VS Code) holds **unsaved
-//! edits**, its live buffer is *newer than disk* and is already treated as
-//! `content_ours`-authoritative over the socket IPC apply path — so the cycle
-//! reasons about a **staler** document than the one the user is editing, and an
-//! agent write can clobber legitimate user queue/exchange content that only
-//! exists in the buffer (the `#queue-user-edit-overwrite` / `test test` clobber
-//! / `#ipcdrift` family).
+//! resolves the "current document" through the active editor authority first.
+//! When an editor (IDEA / VS Code) owns the document, the CRDT relay canonical
+//! text is authoritative and disk is only a non-authoritative replica. Disk is
+//! read as the fallback replica only after the relay reports that no editor is
+//! attached.
 //!
-//! The deterministic read-authority decision lives in
-//! `agent-doc-document-realtime`: given the on-disk content and an optional live
-//! editor-buffer snapshot, decide which is authoritative for the agent to read,
-//! following the operator's stated model — *"the editor buffer is the source of
-//! truth for the document state when the editor is running... falling back to the
-//! file on disk."* The authority rule keys off the buffer's **dirty** flag
-//! (unsaved edits not yet flushed to disk) rather than comparing cross-source
-//! timestamps, so it is unambiguous and deterministically testable without a live
-//! editor:
-//!
-//! - editor buffer absent (no editor / closed) → **disk** wins;
-//! - buffer content equals disk (saved, in sync) → **disk** wins (canonical);
-//! - buffer is dirty / unsaved (content differs from disk) → **editor buffer**
-//!   wins (it holds edits newer than disk);
-//! - buffer is clean (matches its last save) but disk content differs → **disk**
-//!   wins and the result is flagged `diverged` (disk was changed after the
-//!   editor's last save — a drift signal the caller logs).
-//!
-//! Per the Shared Foundation pattern (`CLAUDE.md` — FFI-first for editor
-//! integration; all deterministic behavior in the binary), this crate owns the
-//! durable editor-buffer feed and ops-log/IPC side-effect adapter. Cycle read
-//! sites (`preflight.rs` / `write.rs` / `session_check.rs`) source current-doc
-//! through [`resolve_current_doc`], which delegates to the focused pure policy.
+//! `agent-doc-document-realtime` still owns the deterministic pure policy for
+//! reconciling a trusted editor buffer against disk. This crate owns the live
+//! relay/disk adapter, legacy sidecar compatibility, and ops-log/IPC side
+//! effects. Cycle read sites (`preflight.rs` / `write.rs` /
+//! `session_check.rs`) source current-doc through
+//! [`try_resolve_current_doc_from_file`].
 //!
 //! ## Evals
 //! - `durable_buffer_state_none_when_buffer_in_sync_with_disk`
 //! - `durable_buffer_state_wins_when_unsaved_buffer_ahead_of_disk`
 //! - `durable_buffer_state_none_when_no_editor_feed`
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 
@@ -49,6 +32,8 @@ use agent_doc_document_realtime::{
     reconcile_current_doc,
     write_policy::{self, VisibleWriteReconcile},
 };
+
+static DOCUMENT_AUTHORITY_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 // ── Rung 2 (`#rtwfeed`): durable, staleness-gated editor-buffer feed ──
 //
@@ -88,6 +73,159 @@ fn buffer_state_from_divergence(
         true,
         snapshot.timestamp_ms as u64,
     ))
+}
+
+fn next_document_authority_epoch() -> u64 {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_micros().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0);
+    loop {
+        let current = DOCUMENT_AUTHORITY_EPOCH.load(Ordering::Relaxed);
+        let next = now.max(current.saturating_add(1));
+        match DOCUMENT_AUTHORITY_EPOCH.compare_exchange(
+            current,
+            next,
+            Ordering::SeqCst,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return next,
+            Err(_) => continue,
+        }
+    }
+}
+
+fn record_document_authority(
+    file: &std::path::Path,
+    source: &str,
+    authority: agent_doc_state_backbone::DocumentAuthority,
+    reason: &str,
+    content_hash: Option<String>,
+    editor_id: Option<String>,
+) {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "document_authority_state_event_skipped file={} source={} reason=no_project_root",
+                file.display(),
+                source,
+            ),
+        );
+        return;
+    };
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let authority_epoch = next_document_authority_epoch();
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!("document-authority-{document_hash}-{authority_epoch}-{source}"),
+        agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+            document_hash,
+            authority,
+            authority_epoch,
+            source: source.to_string(),
+            reason: reason.to_string(),
+            content_hash,
+            editor_id,
+        },
+    );
+    if let Err(e) =
+        agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "document_authority_state_event_error file={} source={} error={}",
+                file.display(),
+                source,
+                e,
+            ),
+        );
+    }
+}
+
+/// Record that disk is the current document replica because no live editor owns
+/// the document.
+pub fn record_disk_replica_authority(file: &std::path::Path, source: &str, disk: &str) {
+    record_document_authority(
+        file,
+        source,
+        agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+        "editor_detached",
+        Some(agent_doc_hash::content_hash(disk)),
+        None,
+    );
+}
+
+/// Resolve the live editor relay state and persist the authority decision in
+/// the state backbone. Detached callers should record disk authority after they
+/// choose to use disk.
+pub fn observe_live_editor_authority(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    let current = agent_doc_crdt_relay_io::current_text_for_file(file)?;
+    record_current_text_authority(file, source, &current);
+    Ok(current)
+}
+
+/// Resolve live editor authority, attempting bounded document-model
+/// startup/reconciliation before returning a missing-model state to callers.
+pub fn observe_live_editor_authority_after_model_ensure(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    let current = observe_live_editor_authority(file, source)?;
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            let ensured = agent_doc_crdt_relay_io::ensure_document_model(file, source)?;
+            record_current_text_authority(file, source, &ensured);
+            Ok(ensured)
+        }
+        agent_doc_crdt_relay_io::CurrentText::Detached
+        | agent_doc_crdt_relay_io::CurrentText::Current { .. } => Ok(current),
+    }
+}
+
+fn record_current_text_authority(
+    file: &std::path::Path,
+    source: &str,
+    current: &agent_doc_crdt_relay_io::CurrentText,
+) {
+    match &current {
+        agent_doc_crdt_relay_io::CurrentText::Detached => {}
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            record_document_authority(
+                file,
+                source,
+                agent_doc_state_backbone::DocumentAuthority::EditorAttachedMissingReplica,
+                "missing_replica",
+                None,
+                None,
+            );
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            record_document_authority(
+                file,
+                source,
+                agent_doc_state_backbone::DocumentAuthority::EditorSyncPending,
+                "sync_pending",
+                None,
+                None,
+            );
+        }
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
+            record_document_authority(
+                file,
+                source,
+                agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+                "crdt_relay_current",
+                Some(agent_doc_hash::content_hash(text)),
+                None,
+            );
+        }
+    }
 }
 
 /// Canonical path string used to key the editor-buffer sidecar lookup. Mirrors
@@ -202,10 +340,13 @@ pub fn guard_visible_write_idle_current_or_target(
 }
 
 /// Like [`guard_visible_write_idle_and_current`] but, instead of failing closed
-/// when the on-disk file drifted *after* the merge was computed, reports the
-/// fresh disk content so a CRDT-merge caller can re-merge the captured response
-/// and retry. A genuine live editor-buffer divergence (pending user edit) still
-/// fails closed — only a clean foreign disk write is reported as reconcilable.
+/// when the current document changed *after* the merge was computed, reports the
+/// fresh authoritative content so a CRDT-merge caller can re-merge the captured
+/// response and retry.
+///
+/// When an active editor owns the document, the CRDT relay canonical text is the
+/// authoritative current document. Disk is only the fallback authority when the
+/// relay reports the document is detached.
 pub fn guard_visible_write_reconcile_with_target(
     file: &std::path::Path,
     source: &str,
@@ -213,9 +354,116 @@ pub fn guard_visible_write_reconcile_with_target(
     target_content: Option<&str>,
 ) -> Result<VisibleWriteReconcile> {
     guard_visible_write_idle(file, source)?;
+    match observe_live_editor_authority(file, source) {
+        Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+            text: relay_text,
+            live_editors,
+            delivery_converged,
+        }) => {
+            let relay_hash = agent_doc_hash::content_hash(&relay_text);
+            if target_content
+                .is_some_and(|target| visible_write_content_matches(&relay_text, target))
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "visible_write_crdt_current_matches_target file={} source={} target_len={} target_hash={} live_editors={} delivery_converged={}",
+                        file.display(),
+                        source,
+                        relay_text.len(),
+                        relay_hash,
+                        live_editors,
+                        delivery_converged,
+                    ),
+                );
+                return Ok(VisibleWriteReconcile::Clean);
+            }
+            if visible_write_content_matches(&relay_text, expected_current) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "visible_write_crdt_current_clean file={} source={} expected_len={} expected_hash={} live_editors={} delivery_converged={}",
+                        file.display(),
+                        source,
+                        expected_current.len(),
+                        agent_doc_hash::content_hash(expected_current),
+                        live_editors,
+                        delivery_converged,
+                    ),
+                );
+                return Ok(VisibleWriteReconcile::Clean);
+            }
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "visible_write_crdt_current_drift file={} source={} expected_len={} expected_hash={} current_len={} current_hash={} live_editors={} delivery_converged={}",
+                    file.display(),
+                    source,
+                    expected_current.len(),
+                    agent_doc_hash::content_hash(expected_current),
+                    relay_text.len(),
+                    relay_hash,
+                    live_editors,
+                    delivery_converged,
+                ),
+            );
+            return Ok(VisibleWriteReconcile::DiskDrifted {
+                fresh_current: relay_text,
+            });
+        }
+        Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {}
+        Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "visible_write_editor_authority_unavailable file={} source={} reason=missing_replica",
+                    file.display(),
+                    source,
+                ),
+            );
+            anyhow::bail!(
+                "editor is the current authority for {}; editor authority unavailable: editor_attached_model_missing; disk is a non-authoritative replica and was not read",
+                file.display()
+            );
+        }
+        Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "visible_write_editor_authority_unavailable file={} source={} reason=sync_pending",
+                    file.display(),
+                    source,
+                ),
+            );
+            anyhow::bail!(
+                "editor is the current authority for {}; editor authority unavailable: editor_sync_pending; disk is a non-authoritative replica and was not read",
+                file.display()
+            );
+        }
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "visible_write_crdt_current_error file={} source={} error={}",
+                    file.display(),
+                    source,
+                    e,
+                ),
+            );
+            anyhow::bail!(
+                "failed to resolve editor authority for {}; disk is not consulted until the editor is detached or the relay is current: {e}",
+                file.display()
+            );
+        }
+    }
     let indicator_path = indicator_path(file);
-    let actual_current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {}", file.display()))?;
+    let actual_current = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to read detached-editor disk fallback for {}",
+            file.display()
+        )
+    })?;
+    record_disk_replica_authority(file, source, &actual_current);
     if let Some(live) =
         agent_doc_debounce::live_buffer_diverges_from_content(&indicator_path, expected_current)
     {
@@ -246,89 +494,28 @@ pub fn guard_visible_write_reconcile_with_target(
                     live.timestamp_ms
                 ),
             );
-        } else if live
-            .content
-            .as_deref()
-            .is_some_and(|content| content_matches_recent_committed_blob(file, content, 15))
-        {
-            // A buffer that byte-matches a recent committed blob is stale recovery
-            // evidence, not new unsaved operator text. Let the caller reconcile
-            // from disk/current instead of failing closed on an editor sidecar
-            // that is merely behind the committed document.
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "visible_write_live_buffer_committed_blob_reconcile file={} source={} expected_len={} expected_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
-                    file.display(),
-                    source,
-                    expected_current.len(),
-                    agent_doc_hash::content_hash(expected_current),
-                    actual_current.len(),
-                    disk_hash,
-                    live.len,
-                    live.hash,
-                    live.timestamp_ms
-                ),
-            );
-        } else if let Some(target) = target_content
-            && actual_current == expected_current
-            && live_buffer_snapshot_matches_content(&live, target)
+        } else if let Some((patch_id, model_revision, commit_candidate_hash)) =
+            applied_visible_write_commit_candidate(file, target_content.unwrap_or(&actual_current))
         {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "visible_write_live_buffer_matches_target file={} source={} expected_len={} expected_hash={} target_len={} target_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
+                    "visible_write_commit_candidate_applied_reconcile file={} source={} patch_id={} model_revision={} candidate_hash={} live_len={} live_hash={} live_ts={}",
                     file.display(),
                     source,
-                    expected_current.len(),
-                    agent_doc_hash::content_hash(expected_current),
-                    target.len(),
-                    agent_doc_hash::content_hash(target),
-                    actual_current.len(),
-                    disk_hash,
-                    live.len,
-                    live.hash,
-                    live.timestamp_ms
-                ),
-            );
-        } else if live.no_unsaved_operator_edits {
-            // #falsetyping-guard: the editor-visible buffer diverges from both the
-            // expected merge baseline and current disk, but the reporting editor
-            // has proven the divergence is replica-driven — a `remoteCrdtApply`
-            // (CRDT-replica churn) moved the buffer and there are NO unsaved local
-            // operator edits ahead of disk. This is the false-positive the old
-            // guard failed closed on ("buffer differs; save or discard"), wedging
-            // finalize/write while the realtime replica kept reconciling. Route to
-            // the reconcile path instead of bailing: fall through to the
-            // disk-vs-expected decision below (Clean when disk still matches the
-            // baseline, or DiskDrifted so the caller re-merges the captured
-            // response against fresh disk). Genuine unsaved operator edits carry
-            // `no_unsaved_operator_edits == false` and still fail closed above.
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "visible_write_replica_churn_reconcile file={} source={} expected_len={} expected_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
-                    file.display(),
-                    source,
-                    expected_current.len(),
-                    agent_doc_hash::content_hash(expected_current),
-                    actual_current.len(),
-                    disk_hash,
+                    patch_id,
+                    model_revision,
+                    commit_candidate_hash,
                     live.len,
                     live.hash,
                     live.timestamp_ms
                 ),
             );
         } else {
-            agent_doc_flow_io::log_flow_event(
-                file,
-                write_policy::visible_write_current_changed_event(source),
-                agent_doc_ops_log_io::log_op,
-            );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "visible_write_deferred_live_buffer_changed file={} source={} expected_len={} expected_hash={} live_len={} live_hash={} live_ts={}",
+                    "visible_write_legacy_live_buffer_ignored file={} source={} expected_len={} expected_hash={} live_len={} live_hash={} live_ts={} reason=sidecar_not_authority",
                     file.display(),
                     source,
                     expected_current.len(),
@@ -337,10 +524,6 @@ pub fn guard_visible_write_reconcile_with_target(
                     live.hash,
                     live.timestamp_ms
                 ),
-            );
-            anyhow::bail!(
-                "visible editor buffer for {} differs from the expected disk state; save or discard the editor buffer, then retry",
-                file.display()
             );
         }
     }
@@ -382,6 +565,46 @@ fn live_buffer_snapshot_matches_content(
         agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(editor_text)
             == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content)
     })
+}
+
+fn visible_write_content_matches(left: &str, right: &str) -> bool {
+    left == right
+        || agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(left)
+            == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(right)
+}
+
+fn applied_visible_write_commit_candidate(
+    file: &std::path::Path,
+    candidate_content: &str,
+) -> Option<(String, u64, String)> {
+    let commit_candidate_hash = agent_doc_hash::content_hash(
+        &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            candidate_content,
+        ),
+    );
+    let proof =
+        agent_doc_controller_io::project_controller::visible_write_commit_candidate_applied_for_file(
+            file,
+            &commit_candidate_hash,
+        );
+    let facts = write_policy::VisibleWriteCommitCandidateFacts {
+        commit_candidate_hash,
+        applied_commit_candidate_hash: proof
+            .as_ref()
+            .map(|candidate| candidate.commit_candidate_hash.clone()),
+        model_revision: proof.as_ref().map(|candidate| candidate.model_revision),
+        editor_applied_observed: proof.is_some(),
+    };
+    match write_policy::decide_visible_write_commit_candidate(&facts) {
+        write_policy::VisibleWriteCommitCandidateDecision::Proven => proof.map(|proof| {
+            (
+                proof.patch_id,
+                proof.model_revision,
+                proof.commit_candidate_hash,
+            )
+        }),
+        write_policy::VisibleWriteCommitCandidateDecision::MissingProof => None,
+    }
 }
 
 /// Source the durable editor-buffer feed for `file`, gated by the existing
@@ -477,14 +700,135 @@ pub fn content_matches_recent_committed_blob(
     false
 }
 
-/// Resolve the authoritative "current document" for a cycle read: reconcile the
-/// on-disk `disk` content against the durable editor-buffer feed for `file`.
+/// Resolve the authoritative "current document" for a cycle read.
 ///
-/// This is the single entry point rung 3 (`#rtwwire`) wires into the cycle read
-/// sites (`preflight` / `write` / `session-check`) so the agent reads
-/// newest-of(disk, editor buffer) instead of bare disk. Emits a grep-able
-/// `realtime_doc_resolve` ops.log marker so a live edit-during-finalize run can
-/// prove which source won.
+/// Active editor ownership is resolved through the CRDT relay. When the editor
+/// is active but the relay is missing or not converged, disk is not a fallback:
+/// it is a non-authoritative replica, so callers get a retryable error. Here,
+/// "disk replica" means the real session document file on disk, not the legacy
+/// `.agent-doc/live-buffer` sidecar. Disk is used only after the relay reports
+/// the editor is detached.
+pub fn try_resolve_current_doc_from_file(file: &std::path::Path) -> Result<Reconciliation> {
+    try_resolve_current_doc_with_disk(file, None)
+}
+
+/// Resolve the authoritative current document when the caller already has a
+/// detached-disk fallback snapshot from the real document file. Prefer
+/// [`try_resolve_current_doc_from_file`] in production hot paths so disk is not
+/// read before active editor authority is checked. The legacy live-buffer
+/// sidecar is compatibility/diagnostic state only and is not a disk replica.
+pub fn try_resolve_current_doc(file: &std::path::Path, disk: &str) -> Result<Reconciliation> {
+    try_resolve_current_doc_with_disk(file, Some(disk))
+}
+
+fn try_resolve_current_doc_with_disk(
+    file: &std::path::Path,
+    disk: Option<&str>,
+) -> Result<Reconciliation> {
+    match observe_live_editor_authority_after_model_ensure(file, "resolve_current_doc") {
+        Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors,
+            delivery_converged,
+        }) => {
+            let reconciliation = Reconciliation {
+                authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
+                content: text,
+                diverged: false,
+                reason: "crdt_relay_current",
+            };
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "realtime_doc_resolve authority={} reason={} diverged={} file={} source=crdt_relay live_editors={} delivery_converged={}",
+                    reconciliation.authority.as_str(),
+                    reconciliation.reason,
+                    reconciliation.diverged,
+                    file.display(),
+                    live_editors,
+                    delivery_converged,
+                ),
+            );
+            Ok(reconciliation)
+        }
+        Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {
+            let disk = match disk {
+                Some(disk) => disk.to_string(),
+                None => std::fs::read_to_string(file).with_context(|| {
+                    format!(
+                        "editor is detached for {}; failed to read disk fallback replica",
+                        file.display()
+                    )
+                })?,
+            };
+            record_disk_replica_authority(file, "resolve_current_doc", &disk);
+            Ok(resolve_detached_current_doc(file, &disk))
+        }
+        Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "realtime_doc_resolve_deferred file={} source=crdt_relay reason=missing_replica",
+                    file.display(),
+                ),
+            );
+            anyhow::bail!(
+                "document model startup/reconciliation for {} returned editor_attached_model_missing; disk is a non-authoritative replica and was not read",
+                file.display()
+            );
+        }
+        Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "realtime_doc_resolve_deferred file={} source=crdt_relay reason=sync_pending",
+                    file.display(),
+                ),
+            );
+            anyhow::bail!(
+                "document model startup/reconciliation for {} returned editor_sync_pending; disk is a non-authoritative replica and was not read",
+                file.display()
+            );
+        }
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "realtime_doc_resolve_crdt_error file={} error={}",
+                    file.display(),
+                    e,
+                ),
+            );
+            anyhow::bail!(
+                "failed to resolve editor authority for {}; disk is not consulted until the editor is detached or the relay is current: {e}",
+                file.display()
+            );
+        }
+    }
+}
+
+/// Compatibility wrapper for tests and legacy callers that cannot yet surface a
+/// resolver error. Production cycle reads should call
+/// [`try_resolve_current_doc_from_file`] so active-editor relay gaps are not
+/// masked by disk fallback.
+pub fn resolve_current_doc(file: &std::path::Path, disk: &str) -> Reconciliation {
+    match try_resolve_current_doc(file, disk) {
+        Ok(reconciliation) => reconciliation,
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "realtime_doc_resolve_legacy_fallback file={} error={}",
+                    file.display(),
+                    e,
+                ),
+            );
+            resolve_detached_current_doc(file, disk)
+        }
+    }
+}
+
+/// Resolve the detached-editor fallback path.
 ///
 /// Before the normal promote path, a provably **stale-behind committed** buffer
 /// (see [`stale_behind_committed_buffer`]) is treated as disk-authoritative and
@@ -493,7 +837,7 @@ pub fn content_matches_recent_committed_blob(
 /// `--force-disk` commit whose stale sidecar re-emitted with a fresh timestamp,
 /// defeating `#pcp2`) no longer wrongly promotes into the guards and no manual
 /// "Reload from Disk" is needed.
-pub fn resolve_current_doc(file: &std::path::Path, disk: &str) -> Reconciliation {
+fn resolve_detached_current_doc(file: &std::path::Path, disk: &str) -> Reconciliation {
     if let Some(stale) = stale_behind_committed_buffer(file, disk) {
         // Best-effort auto-heal: push disk content to the editor, keyed on the
         // STALE buffer hash/len as the precondition proof (mirrors the
@@ -850,6 +1194,49 @@ mod tests {
         (dir, file, canonical)
     }
 
+    fn seed_visible_write_commit_candidate_proof(
+        file: &std::path::Path,
+        patch_id: &str,
+        candidate_content: &str,
+        source: &str,
+    ) {
+        let project_root = agent_doc_project_root_io::project_root_containing(file)
+            .expect("test document should live under .agent-doc project root");
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let candidate_hash = agent_doc_hash::content_hash(
+            &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                candidate_content,
+            ),
+        );
+        let model_revision = 1;
+        for (event_id, fact) in [
+            (
+                format!("test-visible-write-applied-{patch_id}-{candidate_hash}"),
+                agent_doc_state_backbone::StateFact::EditorPatchApplied {
+                    document_hash: document_hash.clone(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: model_revision,
+                },
+            ),
+            (
+                format!("test-visible-write-candidate-{patch_id}-{candidate_hash}"),
+                agent_doc_state_backbone::StateFact::VisibleWriteCommitCandidateObserved {
+                    document_hash: document_hash.clone(),
+                    patch_id: patch_id.to_string(),
+                    model_revision,
+                    editor_visible_hash: candidate_hash.clone(),
+                    commit_candidate_hash: candidate_hash.clone(),
+                    source: source.to_string(),
+                },
+            ),
+        ] {
+            let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
+            agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
+                .expect("append visible-write proof event");
+        }
+    }
+
     #[test]
     fn durable_buffer_state_none_when_buffer_in_sync_with_disk() {
         let disk = "## Queue\n- do [#a]\n";
@@ -891,6 +1278,41 @@ mod tests {
         assert_eq!(
             resolve_current_doc(&file, disk).authority,
             agent_doc_document_realtime::DocAuthority::Disk
+        );
+    }
+
+    #[test]
+    fn current_resolve_attempts_model_ensure_before_reporting_editor_authority_failure() {
+        let disk = "plain disk body\n";
+        let (_dir, file, _canonical) = temp_doc(disk);
+        let file_str = file.display().to_string();
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(
+                &file_str,
+                "test-editor-authority-message",
+                std::process::id(),
+            ),
+            "test setup should acquire a live plugin-owner lease"
+        );
+
+        let err = try_resolve_current_doc_from_file(&file)
+            .expect_err("active editor without usable document model should fail closed")
+            .to_string();
+        assert!(
+            err.contains("document model startup/reconciliation failed"),
+            "error should name the bounded recovery contract: {err}"
+        );
+        assert!(
+            err.contains("disk remained non-authoritative and was not read as a fallback"),
+            "error should preserve disk authority safety: {err}"
+        );
+        assert!(
+            !err.contains("CRDT relay has no registered replica yet"),
+            "raw missing-replica text should not be the final contract: {err}"
+        );
+        assert!(
+            !err.contains("failed to read") && !err.contains("re-read"),
+            "active-editor error must not look like a disk read failure: {err}"
         );
     }
 
@@ -955,7 +1377,7 @@ scratch
     }
 
     #[test]
-    fn visible_write_guard_blocks_when_idle_editor_buffer_differs_from_disk() {
+    fn visible_write_guard_ignores_legacy_digest_when_disk_matches_expected() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -978,18 +1400,13 @@ scratch
         )
         .unwrap();
 
-        let err = guard_visible_write_idle_and_current(&doc, "test_live_buffer_changed", expected)
-            .unwrap_err();
-
-        assert!(
-            err.to_string().contains("visible editor buffer"),
-            "expected live-buffer guard error: {err}"
-        );
+        guard_visible_write_idle_and_current(&doc, "test_live_buffer_changed", expected)
+            .expect("legacy live-buffer digest must not block when disk matches expected");
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), expected);
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("flow=document_mutation"));
-        assert!(log.contains("reason=visible_write_current_changed:test_live_buffer_changed"));
-        assert!(log.contains("visible_write_deferred_live_buffer_changed"));
+        assert!(log.contains("visible_write_legacy_live_buffer_ignored"));
+        assert!(log.contains("source=test_live_buffer_changed"));
+        assert!(!log.contains("visible_write_deferred_live_buffer_changed"));
     }
 
     #[test]
@@ -1154,7 +1571,7 @@ scratch
     }
 
     #[test]
-    fn visible_write_reconcile_accepts_live_buffer_matching_target() {
+    fn visible_write_reconcile_accepts_proven_commit_candidate() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -1170,12 +1587,21 @@ scratch
         );
         std::fs::write(&doc, expected).unwrap();
         let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest(
+        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
             &doc_str,
-            target.len(),
-            &agent_doc_hash::content_hash(&target),
+            &target,
+            "jetbrains-proof-target",
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
+        seed_visible_write_commit_candidate_proof(
+            &doc,
+            "patch-target-proof",
+            &target,
+            "test_live_buffer_matches_target",
+        );
 
         let outcome = guard_visible_write_reconcile_with_target(
             &doc,
@@ -1193,13 +1619,13 @@ scratch
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_live_buffer_matches_target")
+            log.contains("visible_write_commit_candidate_applied_reconcile")
                 && log.contains("source=test_live_buffer_matches_target"),
-            "target-matching live-buffer proof should be logged:\n{log}"
+            "applied commit-candidate proof should be logged:\n{log}"
         );
         assert!(
             !log.contains("visible_write_deferred_live_buffer_changed"),
-            "a target-matching live buffer must not trip the drift guard:\n{log}"
+            "a proven commit candidate must not trip the drift guard:\n{log}"
         );
     }
 
@@ -1232,14 +1658,10 @@ scratch
     }
 
     #[test]
-    fn visible_write_reconcile_replica_churn_does_not_fail_closed() {
-        // #falsetyping-guard: the editor buffer diverges from both `expected` and
-        // the on-disk content because a `remoteCrdtApply` (CRDT-replica churn)
-        // moved the buffer — NOT because the operator has unsaved edits. The plugin
-        // stamps `no_unsaved_operator_edits = true`. Disk still equals the merge
-        // baseline, so the guard must NOT fail closed with "buffer differs; save or
-        // discard"; it routes to the reconcile path (Clean here) so the response
-        // lands instead of wedging finalize/write.
+    fn visible_write_reconcile_ignores_legacy_replica_churn_sidecar() {
+        // Legacy live-buffer sidecars are no longer commit authority. A stale or
+        // replica-churn sidecar may differ from disk, but without a live CRDT
+        // relay it must not fail closed.
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -1271,31 +1693,30 @@ scratch
 
         let outcome =
             guard_visible_write_reconcile_with_target(&doc, "test_replica_churn", expected, None)
-                .expect("replica churn must not fail closed");
+                .expect("legacy sidecar divergence must not fail closed");
         assert!(
             matches!(outcome, VisibleWriteReconcile::Clean),
-            "disk matches the merge baseline, so replica churn reconciles Clean"
+            "disk matches the expected current document"
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_replica_churn_reconcile"),
-            "expected replica-churn reconcile marker: {log}"
+            log.contains("visible_write_legacy_live_buffer_ignored"),
+            "legacy sidecar divergence should be logged but ignored: {log}"
         );
         assert!(
             log.contains("source=test_replica_churn"),
             "marker must identify the write source: {log}"
         );
         assert!(
-            !log.contains("visible_write_deferred_live_buffer_changed"),
-            "replica churn must not trip the fail-closed live-buffer block: {log}"
+            !log.contains("visible_write_commit_candidate_applied_reconcile"),
+            "unproven replica churn must not be treated as candidate proof: {log}"
         );
     }
 
     #[test]
-    fn visible_write_reconcile_committed_blob_buffer_does_not_fail_closed() {
-        // A live editor buffer that equals a recent committed blob is stale
-        // recovery/editor state, not new unsaved operator text. The write guard
-        // should reconcile from disk/current instead of halting the hot path.
+    fn visible_write_reconcile_ignores_legacy_committed_blob_sidecar() {
+        // A legacy live-buffer sidecar that equals a recent committed blob is not
+        // document authority. Disk/relay decides the hot path.
         let old = concat!(
             "# Doc\n\n",
             "<!-- agent:exchange patch=append -->\n",
@@ -1322,29 +1743,27 @@ scratch
 
         let outcome =
             guard_visible_write_reconcile_with_target(&doc, "test_committed_blob", new, None)
-                .expect("committed-blob live buffer must not fail closed");
+                .expect("legacy committed-blob sidecar must not fail closed");
         assert!(
             matches!(outcome, VisibleWriteReconcile::Clean),
-            "disk still matches the expected current document"
+            "disk matches the expected current document"
         );
         let log =
             std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_live_buffer_committed_blob_reconcile"),
-            "committed-blob reconcile marker should be logged: {log}"
+            log.contains("visible_write_legacy_live_buffer_ignored"),
+            "legacy committed-blob sidecar should be logged but ignored: {log}"
         );
         assert!(
-            !log.contains("visible_write_deferred_live_buffer_changed"),
-            "committed stale buffer must not trip the fail-closed block: {log}"
+            !log.contains("visible_write_commit_candidate_applied_reconcile"),
+            "legacy sidecar must not be treated as candidate proof: {log}"
         );
     }
 
     #[test]
-    fn visible_write_reconcile_replica_churn_with_disk_drift_remerges() {
-        // #falsetyping-guard: replica churn AND a foreign disk append at the same
-        // time. Provenance proves no unsaved operator edits, so instead of failing
-        // closed the guard reports the reconcilable DiskDrifted case (re-merge the
-        // response against fresh disk).
+    fn visible_write_reconcile_ignores_legacy_sidecar_and_reports_disk_drift() {
+        // Disk drift remains reconcilable. A legacy sidecar cannot turn that
+        // legal state into a fail-closed editor-buffer mismatch.
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -1381,7 +1800,7 @@ scratch
             expected,
             None,
         )
-        .expect("replica churn with disk drift must not fail closed");
+        .expect("legacy sidecar divergence with disk drift must not fail closed");
         match outcome {
             VisibleWriteReconcile::DiskDrifted { fresh_current } => {
                 assert_eq!(fresh_current, drifted);
@@ -1389,15 +1808,14 @@ scratch
             VisibleWriteReconcile::Clean => panic!("expected DiskDrifted, got Clean"),
         }
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("visible_write_replica_churn_reconcile"));
+        assert!(log.contains("visible_write_legacy_live_buffer_ignored"));
+        assert!(log.contains("visible_write_disk_drift_reconcilable"));
     }
 
     #[test]
-    fn visible_write_reconcile_genuine_operator_edit_still_fails_closed() {
-        // #falsetyping-guard invariant: a genuine unsaved operator edit
-        // (`no_unsaved_operator_edits = false`, the conservative default) must
-        // STILL fail closed. Operator text is authoritative and must never be
-        // dropped by a stale-merge write.
+    fn visible_write_reconcile_ignores_legacy_operator_edit_sidecar() {
+        // The sidecar can be stale even when it looks like unsaved operator text.
+        // It is no longer the authority source; live CRDT relay state is.
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -1424,21 +1842,70 @@ scratch
         )
         .unwrap();
 
-        let err =
+        let outcome =
             guard_visible_write_reconcile_with_target(&doc, "test_operator_edit", expected, None)
-                .expect_err("a genuine unsaved operator edit must fail closed");
+                .expect("legacy operator-edit sidecar must not fail closed");
         assert!(
-            err.to_string().contains("visible editor buffer"),
-            "expected fail-closed live-buffer guard error: {err}"
+            matches!(outcome, VisibleWriteReconcile::Clean),
+            "disk matches the expected current document"
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_deferred_live_buffer_changed"),
-            "operator-edit divergence must record the fail-closed block: {log}"
+            log.contains("visible_write_legacy_live_buffer_ignored"),
+            "legacy operator-edit sidecar should be logged but ignored: {log}"
         );
         assert!(
-            !log.contains("visible_write_replica_churn_reconcile"),
-            "operator-edit divergence must NOT be treated as replica churn: {log}"
+            !log.contains("visible_write_commit_candidate_applied_reconcile"),
+            "legacy operator-edit sidecar must NOT be treated as commit-candidate proof: {log}"
+        );
+    }
+
+    #[test]
+    fn visible_write_reconcile_uses_crdt_relay_current_text() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+### Re: x
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, expected).unwrap();
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(
+                &doc_str,
+                "test-crdt-relay-current",
+                std::process::id(),
+            ),
+            "test setup should acquire a live plugin-owner lease"
+        );
+        let editor =
+            agent_doc_document_realtime::crdt_relay::mint_client_id("test-crdt-relay-current");
+        agent_doc_crdt_relay_io::with_hub(&doc, |hub| {
+            hub.register(editor).unwrap();
+            hub.local_edit(editor, 0, 0, "operator relay text\n")
+                .unwrap();
+        })
+        .unwrap();
+
+        let outcome =
+            guard_visible_write_reconcile_with_target(&doc, "test_crdt_relay", expected, None)
+                .expect("relay current text should be authoritative");
+        match outcome {
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                assert!(fresh_current.starts_with("operator relay text\n"));
+            }
+            VisibleWriteReconcile::Clean => panic!("expected CRDT relay drift, got Clean"),
+        }
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_crdt_current_drift"),
+            "relay-current authority should be logged: {log}"
+        );
+        assert!(
+            !log.contains("visible_write_legacy_live_buffer_ignored"),
+            "relay authority should run before legacy sidecar fallback: {log}"
         );
     }
 

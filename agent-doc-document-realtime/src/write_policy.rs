@@ -21,6 +21,7 @@ use agent_doc_queue::queue_prompt_drift::queue_prompt_deletions_between;
 use agent_doc_turn::closeout_signal::line_is_carry_forward_signal;
 use agent_doc_turn::response_replay::response_materialized_in_content;
 use anyhow::Result;
+use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
@@ -61,6 +62,272 @@ pub fn decide_visible_write_after_typing(facts: VisibleWriteTypingFacts) -> Visi
         VisibleWriteDecision::Apply
     } else {
         VisibleWriteDecision::DeferActiveTyping
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleWriteCommitCandidateFacts {
+    pub commit_candidate_hash: String,
+    pub applied_commit_candidate_hash: Option<String>,
+    pub model_revision: Option<u64>,
+    pub editor_applied_observed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibleWriteCommitCandidateDecision {
+    Proven,
+    MissingProof,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibleWriteCommitCandidateState {
+    AwaitingProof,
+    ModelRevisionObserved,
+    EditorAppliedObserved,
+    ModelRevisionAndAppliedObserved,
+    Proven,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibleWriteCommitCandidateEvent {
+    ModelRevisionSeen,
+    EditorAppliedSeen,
+    CommitCandidateHashMatched,
+}
+
+pub struct VisibleWriteCommitCandidateMachine {
+    ctx: ThreadSafeContext,
+    machine:
+        ThreadSafeStateMachine<VisibleWriteCommitCandidateState, VisibleWriteCommitCandidateEvent>,
+}
+
+impl VisibleWriteCommitCandidateMachine {
+    pub fn new(initial: VisibleWriteCommitCandidateState) -> Self {
+        let ctx = ThreadSafeContext::new();
+        let machine =
+            ThreadSafeStateMachine::new(&ctx, initial, transition_visible_write_commit_candidate);
+        Self { ctx, machine }
+    }
+
+    pub fn send(&self, event: VisibleWriteCommitCandidateEvent) -> bool {
+        self.machine.send(&self.ctx, event)
+    }
+
+    pub fn state(&self) -> VisibleWriteCommitCandidateState {
+        self.machine.state(&self.ctx)
+    }
+
+    pub fn transition(
+        initial: VisibleWriteCommitCandidateState,
+        event: VisibleWriteCommitCandidateEvent,
+    ) -> Option<VisibleWriteCommitCandidateState> {
+        let machine = Self::new(initial);
+        machine.send(event).then(|| machine.state())
+    }
+}
+
+pub fn transition_visible_write_commit_candidate(
+    current: &VisibleWriteCommitCandidateState,
+    event: &VisibleWriteCommitCandidateEvent,
+) -> Option<VisibleWriteCommitCandidateState> {
+    use VisibleWriteCommitCandidateEvent::*;
+    use VisibleWriteCommitCandidateState::*;
+
+    match (*current, *event) {
+        (AwaitingProof, ModelRevisionSeen) => Some(ModelRevisionObserved),
+        (AwaitingProof, EditorAppliedSeen) => Some(EditorAppliedObserved),
+        (ModelRevisionObserved, EditorAppliedSeen) => Some(ModelRevisionAndAppliedObserved),
+        (EditorAppliedObserved, ModelRevisionSeen) => Some(ModelRevisionAndAppliedObserved),
+        (ModelRevisionAndAppliedObserved, CommitCandidateHashMatched) => Some(Proven),
+        (Proven, ModelRevisionSeen | EditorAppliedSeen | CommitCandidateHashMatched) => {
+            Some(Proven)
+        }
+        _ => None,
+    }
+}
+
+pub fn visible_write_commit_candidate_state(
+    facts: &VisibleWriteCommitCandidateFacts,
+) -> VisibleWriteCommitCandidateState {
+    let machine =
+        VisibleWriteCommitCandidateMachine::new(VisibleWriteCommitCandidateState::AwaitingProof);
+    if facts.model_revision.is_some_and(|revision| revision > 0) {
+        machine.send(VisibleWriteCommitCandidateEvent::ModelRevisionSeen);
+    }
+    if facts.editor_applied_observed {
+        machine.send(VisibleWriteCommitCandidateEvent::EditorAppliedSeen);
+    }
+    if !facts.commit_candidate_hash.trim().is_empty()
+        && facts
+            .applied_commit_candidate_hash
+            .as_deref()
+            .is_some_and(|applied_hash| {
+                applied_hash.eq_ignore_ascii_case(&facts.commit_candidate_hash)
+            })
+    {
+        machine.send(VisibleWriteCommitCandidateEvent::CommitCandidateHashMatched);
+    }
+    machine.state()
+}
+
+pub fn decide_visible_write_commit_candidate(
+    facts: &VisibleWriteCommitCandidateFacts,
+) -> VisibleWriteCommitCandidateDecision {
+    match visible_write_commit_candidate_state(facts) {
+        VisibleWriteCommitCandidateState::Proven => VisibleWriteCommitCandidateDecision::Proven,
+        VisibleWriteCommitCandidateState::AwaitingProof
+        | VisibleWriteCommitCandidateState::ModelRevisionObserved
+        | VisibleWriteCommitCandidateState::EditorAppliedObserved
+        | VisibleWriteCommitCandidateState::ModelRevisionAndAppliedObserved => {
+            VisibleWriteCommitCandidateDecision::MissingProof
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleWriteMaterializedCarryForwardFacts {
+    pub commit_candidate_hash: String,
+    pub proven_commit_candidate_hash: Option<String>,
+    pub file_content_hash: String,
+    pub proven_file_content_hash: Option<String>,
+    pub live_buffer_hash: String,
+    pub proven_live_buffer_hash: Option<String>,
+    pub model_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibleWriteMaterializedCarryForwardDecision {
+    Proven,
+    MissingProof,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibleWriteMaterializedCarryForwardState {
+    AwaitingProof,
+    ModelRevisionObserved,
+    LiveBufferMatched,
+    FileContentMatched,
+    CandidateMatched,
+    Proven,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibleWriteMaterializedCarryForwardEvent {
+    ModelRevisionSeen,
+    LiveBufferHashMatched,
+    FileContentHashMatched,
+    CommitCandidateHashMatched,
+}
+
+pub struct VisibleWriteMaterializedCarryForwardMachine {
+    ctx: ThreadSafeContext,
+    machine: ThreadSafeStateMachine<
+        VisibleWriteMaterializedCarryForwardState,
+        VisibleWriteMaterializedCarryForwardEvent,
+    >,
+}
+
+impl VisibleWriteMaterializedCarryForwardMachine {
+    pub fn new(initial: VisibleWriteMaterializedCarryForwardState) -> Self {
+        let ctx = ThreadSafeContext::new();
+        let machine = ThreadSafeStateMachine::new(
+            &ctx,
+            initial,
+            transition_visible_write_materialized_carry_forward,
+        );
+        Self { ctx, machine }
+    }
+
+    pub fn send(&self, event: VisibleWriteMaterializedCarryForwardEvent) -> bool {
+        self.machine.send(&self.ctx, event)
+    }
+
+    pub fn state(&self) -> VisibleWriteMaterializedCarryForwardState {
+        self.machine.state(&self.ctx)
+    }
+
+    pub fn transition(
+        initial: VisibleWriteMaterializedCarryForwardState,
+        event: VisibleWriteMaterializedCarryForwardEvent,
+    ) -> Option<VisibleWriteMaterializedCarryForwardState> {
+        let machine = Self::new(initial);
+        machine.send(event).then(|| machine.state())
+    }
+}
+
+pub fn transition_visible_write_materialized_carry_forward(
+    current: &VisibleWriteMaterializedCarryForwardState,
+    event: &VisibleWriteMaterializedCarryForwardEvent,
+) -> Option<VisibleWriteMaterializedCarryForwardState> {
+    use VisibleWriteMaterializedCarryForwardEvent::*;
+    use VisibleWriteMaterializedCarryForwardState::*;
+
+    match (*current, *event) {
+        (AwaitingProof, ModelRevisionSeen) => Some(ModelRevisionObserved),
+        (ModelRevisionObserved, LiveBufferHashMatched) => Some(LiveBufferMatched),
+        (LiveBufferMatched, FileContentHashMatched) => Some(FileContentMatched),
+        (FileContentMatched, CommitCandidateHashMatched) => Some(Proven),
+        (
+            Proven,
+            ModelRevisionSeen
+            | LiveBufferHashMatched
+            | FileContentHashMatched
+            | CommitCandidateHashMatched,
+        ) => Some(Proven),
+        _ => None,
+    }
+}
+
+pub fn visible_write_materialized_carry_forward_state(
+    facts: &VisibleWriteMaterializedCarryForwardFacts,
+) -> VisibleWriteMaterializedCarryForwardState {
+    let machine = VisibleWriteMaterializedCarryForwardMachine::new(
+        VisibleWriteMaterializedCarryForwardState::AwaitingProof,
+    );
+    if facts.model_revision.is_some_and(|revision| revision > 0) {
+        machine.send(VisibleWriteMaterializedCarryForwardEvent::ModelRevisionSeen);
+    }
+    if !facts.live_buffer_hash.trim().is_empty()
+        && facts
+            .proven_live_buffer_hash
+            .as_deref()
+            .is_some_and(|hash| hash.eq_ignore_ascii_case(&facts.live_buffer_hash))
+    {
+        machine.send(VisibleWriteMaterializedCarryForwardEvent::LiveBufferHashMatched);
+    }
+    if !facts.file_content_hash.trim().is_empty()
+        && facts
+            .proven_file_content_hash
+            .as_deref()
+            .is_some_and(|hash| hash.eq_ignore_ascii_case(&facts.file_content_hash))
+    {
+        machine.send(VisibleWriteMaterializedCarryForwardEvent::FileContentHashMatched);
+    }
+    if !facts.commit_candidate_hash.trim().is_empty()
+        && facts
+            .proven_commit_candidate_hash
+            .as_deref()
+            .is_some_and(|hash| hash.eq_ignore_ascii_case(&facts.commit_candidate_hash))
+    {
+        machine.send(VisibleWriteMaterializedCarryForwardEvent::CommitCandidateHashMatched);
+    }
+    machine.state()
+}
+
+pub fn decide_visible_write_materialized_carry_forward(
+    facts: &VisibleWriteMaterializedCarryForwardFacts,
+) -> VisibleWriteMaterializedCarryForwardDecision {
+    match visible_write_materialized_carry_forward_state(facts) {
+        VisibleWriteMaterializedCarryForwardState::Proven => {
+            VisibleWriteMaterializedCarryForwardDecision::Proven
+        }
+        VisibleWriteMaterializedCarryForwardState::AwaitingProof
+        | VisibleWriteMaterializedCarryForwardState::ModelRevisionObserved
+        | VisibleWriteMaterializedCarryForwardState::LiveBufferMatched
+        | VisibleWriteMaterializedCarryForwardState::FileContentMatched
+        | VisibleWriteMaterializedCarryForwardState::CandidateMatched => {
+            VisibleWriteMaterializedCarryForwardDecision::MissingProof
+        }
     }
 }
 
@@ -140,16 +407,16 @@ pub fn reconcile_visible_write<C: ?Sized, T>(
 /// Decide whether a direct disk fallback must be refused after an editor IPC
 /// delivery attempt already failed.
 ///
-/// A capable live-buffer sidecar is authoritative on its own because it may hold
-/// unsaved operator text. A plugin-owner lease is authoritative only when the IPC
-/// listener answers; stale lease pid state on a dead socket must not wedge the
-/// write forever.
+/// An active editor authority means the editor buffer, not the disk replica, owns
+/// the current document text. A plugin-owner lease is authoritative only when the
+/// IPC listener answers; stale lease pid state on a dead socket must not wedge
+/// the write forever.
 pub fn should_refuse_disk_fallback(
-    sidecar_live: bool,
+    editor_authority_active: bool,
     owner_holds: bool,
     listener_answering: bool,
 ) -> bool {
-    sidecar_live || (owner_holds && listener_answering)
+    editor_authority_active || (owner_holds && listener_answering)
 }
 
 /// Apply `❯ ` prefix to lines in `content` that appear in `prefix_lines`.
@@ -2933,6 +3200,133 @@ Working.
         });
 
         assert_eq!(decision, VisibleWriteDecision::Apply);
+    }
+
+    #[test]
+    fn visible_write_commit_candidate_requires_revision_applied_and_matching_hash() {
+        let proven = VisibleWriteCommitCandidateFacts {
+            commit_candidate_hash: "abc".into(),
+            applied_commit_candidate_hash: Some("ABC".into()),
+            model_revision: Some(7),
+            editor_applied_observed: true,
+        };
+        assert_eq!(
+            visible_write_commit_candidate_state(&proven),
+            VisibleWriteCommitCandidateState::Proven
+        );
+        assert_eq!(
+            decide_visible_write_commit_candidate(&proven),
+            VisibleWriteCommitCandidateDecision::Proven
+        );
+
+        for facts in [
+            VisibleWriteCommitCandidateFacts {
+                commit_candidate_hash: "abc".into(),
+                applied_commit_candidate_hash: None,
+                model_revision: Some(7),
+                editor_applied_observed: true,
+            },
+            VisibleWriteCommitCandidateFacts {
+                commit_candidate_hash: "abc".into(),
+                applied_commit_candidate_hash: Some("abc".into()),
+                model_revision: Some(0),
+                editor_applied_observed: true,
+            },
+            VisibleWriteCommitCandidateFacts {
+                commit_candidate_hash: "abc".into(),
+                applied_commit_candidate_hash: Some("def".into()),
+                model_revision: Some(7),
+                editor_applied_observed: true,
+            },
+            VisibleWriteCommitCandidateFacts {
+                commit_candidate_hash: "abc".into(),
+                applied_commit_candidate_hash: Some("abc".into()),
+                model_revision: Some(7),
+                editor_applied_observed: false,
+            },
+        ] {
+            assert_eq!(
+                decide_visible_write_commit_candidate(&facts),
+                VisibleWriteCommitCandidateDecision::MissingProof
+            );
+        }
+    }
+
+    #[test]
+    fn visible_write_commit_candidate_chart_requires_ordered_proof_facts() {
+        assert_eq!(
+            VisibleWriteCommitCandidateMachine::transition(
+                VisibleWriteCommitCandidateState::AwaitingProof,
+                VisibleWriteCommitCandidateEvent::CommitCandidateHashMatched,
+            ),
+            None
+        );
+        assert_eq!(
+            VisibleWriteCommitCandidateMachine::transition(
+                VisibleWriteCommitCandidateState::AwaitingProof,
+                VisibleWriteCommitCandidateEvent::ModelRevisionSeen,
+            ),
+            Some(VisibleWriteCommitCandidateState::ModelRevisionObserved)
+        );
+        assert_eq!(
+            VisibleWriteCommitCandidateMachine::transition(
+                VisibleWriteCommitCandidateState::ModelRevisionObserved,
+                VisibleWriteCommitCandidateEvent::EditorAppliedSeen,
+            ),
+            Some(VisibleWriteCommitCandidateState::ModelRevisionAndAppliedObserved)
+        );
+        assert_eq!(
+            VisibleWriteCommitCandidateMachine::transition(
+                VisibleWriteCommitCandidateState::ModelRevisionAndAppliedObserved,
+                VisibleWriteCommitCandidateEvent::CommitCandidateHashMatched,
+            ),
+            Some(VisibleWriteCommitCandidateState::Proven)
+        );
+    }
+
+    #[test]
+    fn visible_write_materialized_carry_forward_requires_revision_and_matching_hashes() {
+        let proven = VisibleWriteMaterializedCarryForwardFacts {
+            commit_candidate_hash: "candidate".into(),
+            proven_commit_candidate_hash: Some("CANDIDATE".into()),
+            file_content_hash: "file".into(),
+            proven_file_content_hash: Some("FILE".into()),
+            live_buffer_hash: "live".into(),
+            proven_live_buffer_hash: Some("LIVE".into()),
+            model_revision: Some(3),
+        };
+        assert_eq!(
+            visible_write_materialized_carry_forward_state(&proven),
+            VisibleWriteMaterializedCarryForwardState::Proven
+        );
+        assert_eq!(
+            decide_visible_write_materialized_carry_forward(&proven),
+            VisibleWriteMaterializedCarryForwardDecision::Proven
+        );
+
+        for facts in [
+            VisibleWriteMaterializedCarryForwardFacts {
+                model_revision: Some(0),
+                ..proven.clone()
+            },
+            VisibleWriteMaterializedCarryForwardFacts {
+                proven_commit_candidate_hash: Some("other".into()),
+                ..proven.clone()
+            },
+            VisibleWriteMaterializedCarryForwardFacts {
+                proven_file_content_hash: Some("other".into()),
+                ..proven.clone()
+            },
+            VisibleWriteMaterializedCarryForwardFacts {
+                proven_live_buffer_hash: Some("other".into()),
+                ..proven.clone()
+            },
+        ] {
+            assert_eq!(
+                decide_visible_write_materialized_carry_forward(&facts),
+                VisibleWriteMaterializedCarryForwardDecision::MissingProof
+            );
+        }
     }
 
     #[test]

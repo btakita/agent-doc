@@ -611,7 +611,7 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
         "## Exchange\n\n",
         "<!-- agent:exchange patch=append -->\n",
         "❯ Existing prompt\n",
-        "<!-- agent:boundary:base1234 -->\n",
+        "<!-- agent:boundary:ba5e1234 -->\n",
         "<!-- /agent:exchange -->\n\n",
         "## Backlog\n\n",
         "<!-- agent:backlog -->\n",
@@ -619,8 +619,8 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
         "<!-- /agent:backlog -->\n",
     );
     let current = base.replace(
-        "<!-- agent:boundary:base1234 -->",
-        "while typing note\n<!-- agent:boundary:base1234 -->",
+        "<!-- agent:boundary:ba5e1234 -->",
+        "while typing note\n<!-- agent:boundary:ba5e1234 -->",
     );
     let stale = concat!(
         "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
@@ -722,7 +722,7 @@ fn ipc_timeout_editorless_session_fails_closed_without_disk_fallback() {
         "## Exchange\n\n",
         "<!-- agent:exchange patch=append -->\n",
         "❯ Existing prompt\n",
-        "<!-- agent:boundary:base1234 -->\n",
+        "<!-- agent:boundary:ba5e1234 -->\n",
         "<!-- /agent:exchange -->\n\n",
         "## Backlog\n\n",
         "<!-- agent:backlog -->\n",
@@ -798,7 +798,7 @@ fn malformed_patchback_is_rejected_instead_of_appended_as_unmatched() {
         "## Exchange\n\n",
         "<!-- agent:exchange patch=append -->\n",
         "❯ Please reply\n",
-        "<!-- agent:boundary:base1234 -->\n",
+        "<!-- agent:boundary:ba5e1234 -->\n",
         "<!-- /agent:exchange -->\n",
     );
     fs::write(&doc, content).unwrap();
@@ -847,14 +847,14 @@ fn template_flag_on_crdt_doc_routes_to_stream_merge_instead_of_diff3() {
         "## Exchange\n\n",
         "<!-- agent:exchange patch=append -->\n",
         "❯ Please reply\n",
-        "<!-- agent:boundary:base1234 -->\n",
+        "<!-- agent:boundary:ba5e1234 -->\n",
         "<!-- /agent:exchange -->\n\n",
         "<!-- agent:backlog -->\n",
         "<!-- /agent:backlog -->\n",
     );
     let current = base.replace(
-        "<!-- agent:boundary:base1234 -->",
-        "while I was typing the next queue item\n<!-- agent:boundary:base1234 -->",
+        "<!-- agent:boundary:ba5e1234 -->",
+        "while I was typing the next queue item\n<!-- agent:boundary:ba5e1234 -->",
     );
     fs::write(&doc, base).unwrap();
     init_git_repo(tmp.path(), &doc);

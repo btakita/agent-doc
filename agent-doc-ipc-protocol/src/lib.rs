@@ -174,6 +174,7 @@ pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IpcSnapshotSource {
     AckContentSidecar,
+    LazilyVisibleWriteEvent,
     ContentOurs,
     FileRead,
 }
@@ -182,13 +183,17 @@ impl IpcSnapshotSource {
     pub const fn label(self) -> &'static str {
         match self {
             Self::AckContentSidecar => "ack_content_sidecar",
+            Self::LazilyVisibleWriteEvent => "lazily_visible_write_event",
             Self::ContentOurs => "content_ours",
             Self::FileRead => "file_read",
         }
     }
 
     pub const fn is_ack_content_proven(self) -> bool {
-        matches!(self, Self::AckContentSidecar)
+        matches!(
+            self,
+            Self::AckContentSidecar | Self::LazilyVisibleWriteEvent
+        )
     }
 }
 

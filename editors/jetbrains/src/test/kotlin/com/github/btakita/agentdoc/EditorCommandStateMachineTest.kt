@@ -167,9 +167,9 @@ class EditorCommandStateMachineTest {
                 path,
                 """{"type":"delta","base_epoch":1,"epoch":2,"document_hash":"doc-a",""" +
                     """"ops":[{"op":"node_add","slot_id":40,"type_tag":"${AgentDocNodeType.TRANSPORT_PATCH}",""" +
-                    """"payload":"${b64("""{"phase":"acked","actor_generation":1}""")}"}]}""",
+                    """"payload":"${b64("""{"phase":"applied","actor_generation":1}""")}"}]}""",
             )
-            assertEquals("acked", StateProjectionBridge.reactiveSummaryForFile(path)?.latestTransportPhase)
+            assertEquals("applied", StateProjectionBridge.reactiveSummaryForFile(path)?.latestTransportPhase)
 
             val (next, decision) = EditorCommandStateMachine.onRequest(
                 active,

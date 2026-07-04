@@ -26,14 +26,18 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
     pane: &str,
     harness_binary: &str,
 ) -> Result<()> {
-    if !agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(file_path) {
+    let status = agent_doc_controller_io::project_controller::supervisor_recycle_status_for_file(
+        Path::new(file_path),
+    )?;
+    if !matches!(
+        status.phase,
+        agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+    ) {
         return Ok(());
     }
 
     let started = std::time::Instant::now();
-    let reason = agent_doc_supervisor_io::recycle_inflight::read_recycle_inflight(file_path)
-        .map(|m| m.reason)
-        .unwrap_or_else(|| "unknown".to_string());
+    let reason = status.reason.unwrap_or_else(|| "unknown".to_string());
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -44,34 +48,36 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
             reason
         ),
     );
-    while agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(file_path) {
-        if started.elapsed() >= agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_dispatch_only_recycle_inflight_unsettled file={} pane={} harness={} reason={} waited_ms={}",
-                    file.display(),
-                    pane,
-                    harness_binary,
-                    reason,
-                    started.elapsed().as_millis()
-                ),
-            );
-            let file_display = file.display().to_string();
-            let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
-                "wait_for_supervisor_recycle_settle",
-            );
-            anyhow::bail!(dispatch_only_recycle_inflight_message(
-                DispatchOnlyRecycleInflightMessageFacts {
-                    harness_binary,
-                    pane,
-                    file_display: &file_display,
-                    reason: &reason,
-                    outcome_fields: &outcome_fields,
-                },
-            ));
-        }
-        std::thread::sleep(agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL);
+    if let Err(err) =
+        agent_doc_controller_io::project_controller::wait_for_supervisor_recycle_settle_for_file(
+            Path::new(file_path),
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_recycle_inflight_unsettled file={} pane={} harness={} reason={} waited_ms={} error={:?}",
+                file.display(),
+                pane,
+                harness_binary,
+                reason,
+                started.elapsed().as_millis(),
+                err.to_string()
+            ),
+        );
+        let file_display = file.display().to_string();
+        let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+            "wait_for_supervisor_recycle_settle",
+        );
+        anyhow::bail!(dispatch_only_recycle_inflight_message(
+            DispatchOnlyRecycleInflightMessageFacts {
+                harness_binary,
+                pane,
+                file_display: &file_display,
+                reason: &reason,
+                outcome_fields: &outcome_fields,
+            },
+        ));
     }
     agent_doc_ops_log_io::log_op(
         file,
@@ -130,7 +136,7 @@ pub fn require_dispatch_only_dispatch_start_proof(
         dispatch_proof_failed_event(RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof),
         agent_doc_ops_log_io::log_op,
     );
-    if let Err(err) = agent_doc_supervisor_io::route_submit_inflight::mark_route_submit_blocked(
+    if let Err(err) = agent_doc_controller_io::project_controller::mark_route_submit_blocked(
         file,
         pane,
         &harness.binary,

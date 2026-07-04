@@ -32,6 +32,20 @@ larger state machine. Today it records `preflight_started`,
 must stay below the lifecycle boundary: they aid restart/replay, but they do not
 replace realtime source authority.
 
+During the lazily state-backbone migration, each accepted cycle-state
+transition also appends the matching closeout fact to the durable backbone:
+`PreflightStarted`, `ResponseCaptured`, `WriteApplied`, `CommitObserved`, or
+`CycleAbandoned`. Stable event ids make retry re-entry idempotent, and transition
+success requires the fact append to succeed. `session-check` and preflight now
+prefer the closeout projection for open/terminal phase authority, overriding a
+stale JSON cycle sidecar for the same cycle and failing closed on projection-only
+or mismatched-stale open projections. The JSON sidecar remains compatibility
+recovery evidence for guard/recovery payloads that have not moved into the
+backbone yet. Git closeout
+appends a later `CommitObserved` carrying the exact `HEAD` SHA for real and
+already-current closeouts, so the closeout projection's commit identity comes
+from git proof when available.
+
 ## Turn States
 
 | State | Owner | Meaning | Exit requirement |
@@ -121,7 +135,7 @@ flowchart LR
 | Final response captured | `AgentRunning` | `ResponseCaptured` | Durable capture file stores response body, response hash, cycle id, and baseline facts. |
 | Operation set built | `ResponseCaptured` | `RealtimeApplyPending` | Response placement, tracked-work mutations, queue consumption, compact exchange, and done/review changes are bounded to lifecycle-owned intent. |
 | Realtime apply verified | `RealtimeApplyPending` | `RealtimeApplyVerified` | Realtime state machine returns latest source-of-truth text plus proof that operator-visible edits and agent-owned deltas are present. |
-| Realtime conflict or unproven delivery | `RealtimeApplyPending` | `InterruptedBlocked` | Typed reason records conflict, stale ACK, missing editor convergence, send failure, or source mismatch. |
+| Realtime conflict or unproven delivery | `RealtimeApplyPending` | `InterruptedBlocked` | Typed reason records conflict, stale lazily receipt, missing editor convergence, send failure, or source mismatch. |
 | Commit policy selected | `RealtimeApplyVerified` | `CommitPending` | The turn policy requires a commit and the latest verified source text is still current. |
 | No-commit policy selected | `RealtimeApplyVerified` | `NoCommitComplete` | The turn policy explicitly leaves the verified document uncommitted. |
 | Commit succeeds or no-op commit is proven | `CommitPending` | `Committed` | `HEAD`, source-of-truth document, lifecycle state, and backup/audit state satisfy closeout verification. |
@@ -141,9 +155,13 @@ Forbidden transitions:
   operator-visible text;
 - `InterruptedBlocked -> Committed` without revalidating the durable capture and
   current source-of-truth document;
-- any lifecycle state adopting a snapshot, CRDT sidecar, ACK-content sidecar, or
+- any lifecycle state adopting a snapshot, CRDT sidecar, legacy editor-content sidecar, or
   `content_ours` image as the committed document without first merging against
   realtime authority.
+- a response-visible lazily receipt turning legacy editor-content sidecar data
+  into snapshot authority when the candidate also carries user-owned drift absent
+  from the agent-owned response image. Such receipts prove delivery only; durable
+  closeout authority comes from the lazily transport projection or a proven merge.
 
 ## Realtime Handoff
 
@@ -153,7 +171,7 @@ has a bounded operation set. Realtime returns one of:
 - `verified`: latest source-of-truth text, patch id if any, preserved operator
   proof, and applied agent-owned operation ids;
 - `conflict`: typed same-node or ambiguous-placement conflict;
-- `unproven`: delivery failure, stale ACK, stale editor generation, out-of-band
+- `unproven`: delivery failure, stale lazily receipt, stale editor generation, out-of-band
   disk/editor split, or missing owner lease.
 
 Only `verified` may move the turn to `RealtimeApplyVerified`. Even then, the
@@ -295,6 +313,9 @@ as hot-path authority:
 - terminal `Committed`, `NoCommitComplete`, and `Abandoned` states are
   idempotent: later bookkeeping may observe them but must not reopen or rewrite
   the same lifecycle without a new admitted prompt.
+- retrying an already-recorded cycle transition must append or observe the same
+  backbone event id instead of creating a second lifecycle fact with different
+  semantics.
 
 Preflight repair is not normal parse recovery. The lifecycle may run narrow
 repair only as a crash/retry backstop for durable captured state that already

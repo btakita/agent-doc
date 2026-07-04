@@ -674,14 +674,13 @@ impl RouteModel {
 /// `supervisor_recycle_action` in `agent_doc_supervisor::lifecycle` —
 /// instead of reimplementing the policy in the test harness. The operator's
 /// pipeline is `admin recycle --all-projects` (mark recycle at next idle
-/// boundary) → `session clear` (write the manual clear cooldown) → the cleared
+/// boundary) → `session clear` (record the manual clear-cooldown projection) → the cleared
 /// pane settles to a fresh idle prompt → the cooldown auto-expires and the
 /// go-mode queue drain resumes as a continuation *step* (not a stall).
 #[derive(Debug, Clone, Default)]
 struct RecycleClearModel {
     /// Manual clear cooldown is active: an operator `session clear` /
-    /// JB `Clear Exchange` / delivered deferred clear wrote the marker
-    /// (`queue_continuation::write_clear_cooldown`).
+    /// JB `Clear Exchange` recorded the clear-cooldown projection.
     clear_cooldown_active: bool,
     /// Consecutive idle-prompt polls observed since the clear settled, mirroring
     /// `idle_watch.rs`'s `clear_cooldown_idle_ticks` debounce counter.
@@ -4168,8 +4167,8 @@ fn non_dogfood_document_auto_recycles_and_drains_from_opt_in_alone() {
         "no head was waiting at the recycle boundary"
     );
 
-    // A go-mode head is now waiting; the operator `session clear` (or the watch's
-    // deferred clear) writes the manual clear cooldown before any idle poll observes it.
+    // A go-mode head is now waiting; the operator `session clear` records the
+    // manual clear-cooldown projection before any idle poll observes it.
     world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
     world.apply(SimCommand::SessionClear).unwrap();
     assert!(world.recycle_clear.clear_cooldown_active);
@@ -4288,7 +4287,7 @@ fn qflood2_drain_holds_trigger_until_own_clear_settles() {
     world.apply(SimCommand::SupervisorReady).unwrap();
     world.apply(SimCommand::ActivateGoModeQueueHead).unwrap();
 
-    // The watch sends its own `/clear` (no manual cooldown marker written).
+    // The watch sends its own `/clear` (no manual cooldown projection recorded).
     world
         .apply(SimCommand::SupervisorContextResetClear)
         .unwrap();
@@ -4618,7 +4617,7 @@ fn deferred_operator_clear_settles_before_resuming_drain() {
     );
     assert!(
         !world.recycle_clear.clear_cooldown_active,
-        "delivery drops the manual cooldown marker"
+        "delivery clears the deferred clear pause signal"
     );
     assert!(
         world.recycle_clear.awaiting_clear_settle,
@@ -4751,7 +4750,7 @@ fn route_sim_protected_prompt_refusal_has_no_dispatch_churn() {
     assert!(
         ops_log.contains("route_dispatch_direct_pane_blocked")
             && ops_log.contains("protected_input=drafted prompt input")
-            && ops_log.contains("draft_preview=\"› Implement {feature}\""),
+            && ops_log.contains("draft_preview=\"› implement the feature\""),
         "protected-prompt refusal must be actionable without dispatch churn:\n{ops_log}"
     );
 }
@@ -6748,14 +6747,10 @@ impl SimEditor {
     }
 
     /// Resolve "current document" through the *production* realtime model
-    /// (`resolve_current_doc`), the exact seam `preflight` / `write` /
+    /// (`try_resolve_current_doc_from_file`), the exact seam `preflight` / `write` /
     /// `session-check` source the current doc through.
     fn resolve(&self) -> Result<Reconciliation> {
-        let disk = std::fs::read_to_string(&self.path)
-            .map_err(|err| anyhow!("SimEditor resolve read {}: {err}", self.path.display()))?;
-        Ok(agent_doc_document_realtime_io::resolve_current_doc(
-            &self.path, &disk,
-        ))
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(&self.path)
     }
 
     fn record_buffer(&self) -> Result<()> {
@@ -6907,7 +6902,7 @@ fn simeditor_save_then_close_falls_back_to_disk_authority() {
     assert_eq!(editor.resolve().unwrap().authority, DocAuthority::Disk);
 
     editor.close().unwrap();
-    let closed = agent_doc_document_realtime_io::resolve_current_doc(&doc, &disk_now);
+    let closed = agent_doc_document_realtime_io::try_resolve_current_doc_from_file(&doc).unwrap();
     assert_eq!(closed.authority, DocAuthority::Disk);
     assert_eq!(
         closed.reason, "editor_absent",
@@ -7561,7 +7556,7 @@ mod crdt_authority_sim {
             ));
         }
 
-        /// The live editor queues + ACKs a patch under the current generation
+        /// The live editor queues + applies a patch under the current generation
         /// (normal multi-replica coordination, proving the editor replica is the
         /// live medium).
         fn editor_synced_patch(&mut self, document_hash: &str, patch_id: &str) {
@@ -7575,10 +7570,10 @@ mod crdt_authority_sim {
                     actor_generation: generation,
                 },
             ));
-            let acked = self.event_id("acked");
+            let applied = self.event_id("applied");
             self.ledger.append(StateEvent::new(
-                acked,
-                StateFact::EditorAckObserved {
+                applied,
+                StateFact::EditorPatchApplied {
                     document_hash: document_hash.to_string(),
                     patch_id: patch_id.to_string(),
                     actor_generation: generation,

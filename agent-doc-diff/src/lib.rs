@@ -370,7 +370,8 @@ pub fn post_exchange_ordinary_html_comments(content: &str) -> Vec<String> {
         };
         let absolute_open = tail_start + open;
         let inner = after_open[..close].trim();
-        if !element::is_agent_marker(inner)
+        if !inner.is_empty()
+            && !element::is_agent_marker(inner)
             && !components.iter().any(|component| {
                 absolute_open >= component.open_start && absolute_open < component.close_end
             })

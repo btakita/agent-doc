@@ -30,6 +30,7 @@ agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version =
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.67" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.67" }
 agent-doc-supervisor-process-io = { path = "../agent-doc-supervisor-process-io", version = "0.34.67" }

@@ -1205,7 +1205,8 @@ mod tests {
             | IpcMethod::ReplicaUpdate { .. }
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
-            | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::ReplicaAwareness { .. }
+            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 

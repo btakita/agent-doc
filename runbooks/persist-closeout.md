@@ -21,14 +21,24 @@ project verification suite explicitly after edits and before `finalize` /
 `write --commit`. Do not rely on a pre-commit hook. Do not waive red suites as
 "unrelated" or "flaky".
 
+## Minimal-blocker closeout
+
+Close the turn once the requested work is implemented, local verification is
+sufficient for the risk, and the required persistence/session-check boundary has
+passed. Do not keep the turn open for queued/in-progress CI, manual review, live
+editor/pane confirmation, or another external async signal unless that signal is
+required proof for this turn or the user explicitly asks you to wait. Record
+pending or external status in closeout instead of turning it into a blocker.
+
 ## Tmux CI review for test-bearing turns
 
 When the cycle runs tests or changes test, build, or instruction surfaces,
 inspect the latest CI tmux-test result for this repo with
 `gh run list --workflow CI --limit 1`. If the tmux leg is already red after
-runner startup, run `make tmux-ci` locally, fix the failure, and add or update
-deterministic SimWorld coverage for the regression class when the behavior can
-be modeled without live tmux. If the latest run is queued or in progress, record
+runner startup and the failure belongs to this change, run `make tmux-ci`
+locally, fix the failure, and add or update deterministic SimWorld coverage for
+the regression class when the behavior can be modeled without live tmux. If the
+latest run is queued, in progress, unrelated red, or externally blocked, record
 that status and continue from local verification evidence instead of waiting for
 CI to finish; do not use `gh run watch` as a closeout gate unless the user
 explicitly asks. If GitHub reports an empty-step job with no logs because the job

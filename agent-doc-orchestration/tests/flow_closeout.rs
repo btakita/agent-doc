@@ -304,7 +304,7 @@ mod tests {
         let err = complete_required_closeout(&doc).unwrap_err();
         assert!(
             err.to_string()
-                .contains("live editor replica delivery is still pending"),
+                .contains("CRDT relay convergence is still pending"),
             "closeout must wait for target ACK before commit: {err}"
         );
 

@@ -504,7 +504,7 @@ proptest! {
 }
 
 #[test]
-fn file_ipc_bad_ack_content_fails_closed_before_commit() {
+fn file_ipc_missing_lazily_receipt_fails_closed_before_commit() {
     let (tmp, doc, baseline, original) = setup_project(true);
     let root = tmp.path();
     let agent_doc_dir = root.join(".agent-doc");
@@ -547,34 +547,35 @@ fn file_ipc_bad_ack_content_fails_closed_before_commit() {
     let visible = fs::read_to_string(&doc).unwrap();
     assert_eq!(
         original, visible,
-        "bad ack-content must not be repaired through a direct document write"
+        "legacy ack-content must not be repaired through a direct document write"
     );
     let head = head_blob(root);
     assert_eq!(
         initial_head, head,
-        "bad ack-content must fail before committing any response"
+        "missing lazily receipt must fail before committing any response"
     );
     assert!(
         !head.contains(corrupt_marker),
-        "bad ack-content sidecar must not become the committed document:\n{head}"
+        "legacy ack-content sidecar must not become the committed document:\n{head}"
     );
     let snapshot = fs::read_to_string(snapshot_path(root, &doc)).unwrap();
     assert!(
         !snapshot.contains(&response_body("bad ack")),
-        "bad ack-content retry must not save the fallback response snapshot:\n{snapshot}"
+        "missing lazily receipt retry must not save the fallback response snapshot:\n{snapshot}"
     );
     assert!(
         !snapshot.contains(corrupt_marker),
-        "bad ack-content sidecar must not become the saved snapshot:\n{snapshot}"
+        "legacy ack-content sidecar must not become the saved snapshot:\n{snapshot}"
     );
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("ipc_materialization_missing_response"),
-        "bad ACK should fail before snapshot/commit with a materialization diagnostic:\n{ops_log}"
+        ops_log.contains("ipc_proof_insufficient")
+            && ops_log.contains("invariant=no_lazily_visible_write_receipt"),
+        "missing lazily receipt should fail before snapshot/commit with a proof diagnostic:\n{ops_log}"
     );
     assert!(
         ops_log.contains("recovery=retry_without_disk_write"),
-        "bad ACK should request an editor retry without a direct disk write:\n{ops_log}"
+        "missing lazily receipt should request an editor retry without a direct disk write:\n{ops_log}"
     );
 }
 

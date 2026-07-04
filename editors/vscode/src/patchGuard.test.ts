@@ -98,12 +98,12 @@ describe('patchGuard', () => {
         assert.ok(fileApplyFailedIdx >= 0, 'failed apply must be handed back to binary retry accounting');
     });
 
-    it('requires ack-content proof before file patch apply can delete the patch file', () => {
+    it('requires lazily content receipt before file patch apply can delete the patch file', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const applyIdx = source.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
         const deleteIdx = source.indexOf('fs.unlinkSync(uri.fsPath)', source.indexOf('if (applied) {'));
         const minimalApplyIdx = source.indexOf('const ok = await this.applyMinimalTextEdit(document, content);');
-        const ackIdx = source.indexOf('return this.writeAckContent(patch.patch_id, document.getText(), patchesDir);');
+        const ackIdx = source.indexOf('return this.writeEditorContentProjection(patch.patch_id, patch.file, document.getText(), patchesDir);');
         const applyPatchStart = source.indexOf('private async applyPatch(');
         const applyPatchEnd = source.indexOf('private async applyMinimalTextEdit(', applyPatchStart);
         const applyPatchBody = source.slice(applyPatchStart, applyPatchEnd);
@@ -113,13 +113,14 @@ describe('patchGuard', () => {
         assert.ok(minimalApplyIdx >= 0);
         assert.ok(ackIdx > minimalApplyIdx);
         assert.strictEqual(applyPatchBody.includes('document.save()'), false);
-        assert.ok(source.includes('private writeAckContent('));
+        assert.ok(source.includes('private writeEditorContentProjection('));
         assert.ok(source.includes('): boolean {'));
-        assert.ok(source.includes('return this.writeAckContent(patch.patch_id, document.getText(), patchesDir);'));
-        assert.ok(source.includes('ackContentSidecarPath(patchesDir, patchId)'));
+        assert.ok(source.includes('return this.writeEditorContentProjection(patch.patch_id, patch.file, document.getText(), patchesDir);'));
+        assert.ok(source.includes('native.recordEditorContentApplied(projectRoot, patchId, filePath, content, EDITOR_ID)'));
+        assert.strictEqual(source.includes('ackContentSidecarPath(patchesDir, patchId)'), false);
     });
 
-    it('publishes plugin owner before VS Code patch ack', () => {
+    it('publishes plugin owner before VS Code patch receipt', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const nativeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'native.ts'), 'utf-8');
         const branch = source.slice(
@@ -130,11 +131,11 @@ describe('patchGuard', () => {
         const ownerIdx = branch.indexOf('this.ownsDocument(patch.file, projectRoot)');
         const queuedIdx = branch.indexOf('native.recordEditorPatchQueued');
         const applyIdx = branch.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
-        const ackIdx = branch.indexOf('native.recordEditorAckObserved');
+        const ackIdx = branch.indexOf('native.recordEditorPatchApplied');
 
         assert.ok(ownerIdx >= 0 && ownerIdx < queuedIdx, 'VS Code must acquire/publish plugin-owner proof before queueing');
         assert.ok(ownerIdx >= 0 && ownerIdx < applyIdx, 'VS Code must acquire/publish plugin-owner proof before applying');
-        assert.ok(ownerIdx >= 0 && ownerIdx < ackIdx, 'VS Code must acquire/publish plugin-owner proof before ACKing');
+        assert.ok(ownerIdx >= 0 && ownerIdx < ackIdx, 'VS Code must acquire/publish plugin-owner proof before recording receipt');
         assert.ok(source.includes('private ownsDocument('));
         assert.ok(source.includes('native.pluginOwnerTryAcquire(filePath, EDITOR_ID, process.pid, projectRoot)'));
         assert.ok(source.includes('native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot())'));
@@ -178,7 +179,7 @@ describe('patchGuard', () => {
         assert.ok(source.includes('reread_disk repair is disabled'));
         assert.ok(saveSignalBody.includes("this.awaitIdleBeforeDocumentMutation(signal.file, 'save_document')"));
         assert.ok(saveSignalBody.includes('await document.save()'));
-        assert.ok(saveSignalBody.includes('this.writeAckContent(signal.patchId, content, patchesDir)'));
+        assert.ok(saveSignalBody.includes('this.writeEditorContentProjection(signal.patchId, signal.file, content, patchesDir)'));
         assert.strictEqual(source.includes('saveDocumentToDisk'), false);
         assert.strictEqual(source.includes('applyReconnectReread'), false);
         assert.strictEqual(source.includes('reread disk into stale buffer'), false);
@@ -238,7 +239,7 @@ describe('patchGuard', () => {
         assert.strictEqual(source.includes('document.lineCount'), false);
     });
 
-    it('ACKs visible editor edits only after the post-apply buffer matches the target', () => {
+    it('records visible editor receipts only after the post-apply buffer matches the target', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const applyStart = source.indexOf('private async applyMinimalTextEdit(');
         const applyEnd = source.indexOf('private async applyCrdtReplicaText(', applyStart);
@@ -250,7 +251,7 @@ describe('patchGuard', () => {
         assert.ok(applyEditIdx >= 0, 'minimal edit helper must observe WorkspaceEdit result');
         assert.ok(
             postApplyProofIdx > applyEditIdx,
-            'minimal edit helper must verify the post-apply buffer before ACKing',
+            'minimal edit helper must verify the post-apply buffer before recording receipt',
         );
     });
 
@@ -302,6 +303,8 @@ describe('patchGuard', () => {
         assert.ok(nativeSource.includes('agent_doc_document_changed_digest_content_for_editor_v3'));
         assert.ok(source.includes('unsyncedLocalEditDocs'));
         assert.ok(nativeSource.includes('operator_text_authority_v1'));
+        assert.ok(nativeSource.includes('lazily_transport_receipts_v1'));
+        assert.ok(nativeSource.includes('agent_doc_editor_content_applied_for_editor_v1'));
         assert.ok(nativeSource.includes('agent_doc_document_closed_for_editor'));
     });
 

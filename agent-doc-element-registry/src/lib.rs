@@ -4,7 +4,23 @@
 //! loading belongs in a runtime crate; plugins should register additional
 //! `ElementRegistration` values against this shape.
 
-use agent_doc_element::{ElementDescriptor, ElementRegistration};
+use agent_doc_element::{
+    ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
+    ElementRegistration, ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+};
+
+pub const NOTES_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
+    name: "notes",
+    aliases: &[],
+    source: ElementSource::BuiltIn,
+    shape: ElementShape::Component,
+    authority: ElementAuthority::SharedOperatorAuthoritative,
+    write_policy: ElementWritePolicy::MergeOnly,
+    scheduling_role: ElementSchedulingRole::None,
+    realtime_model: ElementRealtimeModel::None,
+    composition_role: ElementCompositionRole::LocalOnly,
+    realtime: true,
+};
 
 pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_exchange::DESCRIPTOR,
@@ -16,6 +32,7 @@ pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_done::DESCRIPTOR,
     agent_doc_element_status::DESCRIPTOR,
     agent_doc_element_signals::DESCRIPTOR,
+    NOTES_DESCRIPTOR,
 ];
 
 pub fn built_in_elements() -> &'static [ElementDescriptor] {
@@ -55,6 +72,7 @@ mod tests {
         assert_eq!(find_built_in("pending").unwrap().name, "backlog");
         assert_eq!(find_built_in("signals").unwrap().name, "signals");
         assert_eq!(find_built_in("boundary").unwrap().name, "boundary");
+        assert_eq!(find_built_in("notes").unwrap().name, "notes");
         assert_eq!(find_built_in("unknown"), None);
     }
 
@@ -89,6 +107,19 @@ mod tests {
             ElementSchedulingRole::ParkedWorkSource
         );
         assert_eq!(icebox.composition_role, ElementCompositionRole::LocalOnly);
+    }
+
+    #[test]
+    fn notes_is_operator_owned_freeform_metadata() {
+        let notes = find_built_in("notes").unwrap();
+        assert_eq!(
+            notes.authority,
+            ElementAuthority::SharedOperatorAuthoritative
+        );
+        assert_eq!(notes.write_policy, ElementWritePolicy::MergeOnly);
+        assert_eq!(notes.scheduling_role, ElementSchedulingRole::None);
+        assert_eq!(notes.realtime_model, ElementRealtimeModel::None);
+        assert_eq!(notes.composition_role, ElementCompositionRole::LocalOnly);
     }
 
     #[test]

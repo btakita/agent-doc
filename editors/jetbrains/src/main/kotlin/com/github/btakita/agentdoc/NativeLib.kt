@@ -334,7 +334,7 @@ interface AgentDocLib : Library {
     /**
      * #8bfz / #fcconeowner: elect a single live plugin consumer per document.
      * Returns true if THIS consumer (consumer_id, pid) owns the document and
-     * should apply/ACK the patch; false if a live owner already holds
+     * should apply/record the patch receipt; false if a live owner already holds
      * it and this instance must defer. Cross-process safe + self-healing; fails
      * open (returns true) on any IO error so single-instance setups are never
      * worse off than before the lease.
@@ -389,24 +389,11 @@ interface AgentDocLib : Library {
     fun agent_doc_stop_ipc_listener(project_root: String)
 
     /**
-     * Write the final applied document content to the ack-content sidecar file.
-     * Sidecar path: `<project_root>/.agent-doc/ack-content/<patch_id>.md`
-     * Call this after applying a patch so the CLI binary can use it as snapshot
-     * content without the 200ms sleep + re-read heuristic.
-     *
-     * @param project_root  path to the project root containing `.agent-doc/`
-     * @param patch_id      UUID from the patch payload (identifies the sidecar file)
-     * @param content       the final document content after all patches applied
-     * @return true if written successfully, false on error
+     * Capability-bearing editor content endpoint for a successfully applied
+     * patch. It requires lazily receipt support and writes the derived content
+     * projection plus the matching synced live-buffer proof in one ABI call.
      */
-    fun agent_doc_write_ack_content(project_root: String, patch_id: String, content: String): Boolean
-
-    /**
-     * Preferred ACK-content endpoint when the content came from this editor's
-     * live document. It writes the ack-content sidecar and the matching synced
-     * live-buffer proof in one ABI call so the two facts cannot be reordered.
-     */
-    fun agent_doc_write_ack_content_for_editor_v2(
+    fun agent_doc_editor_content_applied_for_editor_v1(
         project_root: String,
         patch_id: String,
         file_path: String,
@@ -510,6 +497,17 @@ interface AgentDocLib : Library {
      * Record a typed state-backbone event. Returns 1 on success, 0 on any error.
      */
     fun agent_doc_record_state_event(documentHash: String, eventJson: String): Int
+
+    /** Record a lazily transport receipt for a successfully applied editor patch. */
+    fun agent_doc_editor_patch_applied(filePath: String, patchId: String, actorGeneration: Long): Int
+
+    /** Record a lazily transport receipt for a rejected editor patch. */
+    fun agent_doc_editor_patch_rejected(
+        filePath: String,
+        patchId: String,
+        actorGeneration: Long,
+        reason: String,
+    ): Int
 
     /**
      * Resolve a file's agent-doc project root and relative path.

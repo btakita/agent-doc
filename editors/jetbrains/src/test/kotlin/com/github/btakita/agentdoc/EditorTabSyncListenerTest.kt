@@ -152,7 +152,7 @@ class EditorTabSyncListenerTest {
         assertEquals(
             true,
             EditorTabSyncListener.AutomaticCommandPlanner.shouldReconcileFocusedFile(
-                focusedFilePath = "/repo/tasks/professional/equityfundingsource.md",
+                focusedFilePath = "/repo/tasks/professional/sampleportal.md",
                 isMarkdown = true,
                 lastFocusRequestedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
             ),

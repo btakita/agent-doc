@@ -85,7 +85,7 @@ impl CrdtAuthority {
 /// ([`Attached`](MergeOwnershipPhase::Attached),
 /// [`EditorOwnsBuffer`](MergeOwnershipPhase::EditorOwnsBuffer),
 /// [`BinaryWriteRequested`](MergeOwnershipPhase::BinaryWriteRequested),
-/// [`IpcAckProven`](MergeOwnershipPhase::IpcAckProven)) is
+/// [`LazilyPatchAppliedProven`](MergeOwnershipPhase::LazilyPatchAppliedProven)) is
 /// [`MultiReplica`](CrdtAuthority::MultiReplica); the no-editor phases
 /// ([`Detached`](MergeOwnershipPhase::Detached),
 /// [`Committed`](MergeOwnershipPhase::Committed)) are
@@ -105,7 +105,7 @@ pub fn authority_for(phase: MergeOwnershipPhase) -> CrdtAuthority {
         MergeOwnershipPhase::Attached
         | MergeOwnershipPhase::EditorOwnsBuffer
         | MergeOwnershipPhase::BinaryWriteRequested
-        | MergeOwnershipPhase::IpcAckProven => CrdtAuthority::MultiReplica,
+        | MergeOwnershipPhase::LazilyPatchAppliedProven => CrdtAuthority::MultiReplica,
     }
 }
 
@@ -229,7 +229,7 @@ mod tests {
         MergeOwnershipPhase::Attached,
         MergeOwnershipPhase::EditorOwnsBuffer,
         MergeOwnershipPhase::BinaryWriteRequested,
-        MergeOwnershipPhase::IpcAckProven,
+        MergeOwnershipPhase::LazilyPatchAppliedProven,
         MergeOwnershipPhase::Committed,
     ];
 
@@ -259,7 +259,7 @@ mod tests {
             MergeOwnershipPhase::Attached,
             MergeOwnershipPhase::EditorOwnsBuffer,
             MergeOwnershipPhase::BinaryWriteRequested,
-            MergeOwnershipPhase::IpcAckProven,
+            MergeOwnershipPhase::LazilyPatchAppliedProven,
         ] {
             let authority = authority_for(phase);
             assert_eq!(authority, CrdtAuthority::MultiReplica, "{phase:?}");
@@ -335,10 +335,10 @@ mod tests {
         // both permits a direct disk write AND is git-authoritative is Detached.
         //
         // - Detached: permits disk write AND GitAuthoritative (the headless path).
-        // - IpcAckProven: permits a disk write too, but it is a *post-ack editor*
-        //   phase (the disk sync lands behind the editor's apply), so it stays
-        //   MultiReplica — disk-write-permitted is NOT a sufficient condition for
-        //   GitAuthoritative.
+        // - LazilyPatchAppliedProven: permits a disk write too, but it is a
+        //   post-lazily-event editor phase (the disk sync lands behind the editor's
+        //   apply), so it stays MultiReplica — disk-write-permitted is NOT a
+        //   sufficient condition for GitAuthoritative.
         // - Committed: GitAuthoritative but terminal (no write), so it does not
         //   permit a write — GitAuthoritative is NOT a sufficient condition for
         //   disk-write-permitted either.
@@ -351,11 +351,13 @@ mod tests {
             "the headless direct-disk path is git-authoritative"
         );
 
-        assert!(disk_write_permitted(MergeOwnershipPhase::IpcAckProven));
+        assert!(disk_write_permitted(
+            MergeOwnershipPhase::LazilyPatchAppliedProven
+        ));
         assert_eq!(
-            authority_for(MergeOwnershipPhase::IpcAckProven),
+            authority_for(MergeOwnershipPhase::LazilyPatchAppliedProven),
             CrdtAuthority::MultiReplica,
-            "a post-ack editor write still rides the multi-replica authority"
+            "a post-lazily-event editor write still rides the multi-replica authority"
         );
 
         assert_eq!(

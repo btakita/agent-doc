@@ -1095,7 +1095,9 @@ mod tests {
 
     #[test]
     fn disk_projection_is_recovery_only_in_memory_wins() {
-        assert!(DISK_IS_RECOVERY_PROJECTION_ONLY);
+        const {
+            assert!(DISK_IS_RECOVERY_PROJECTION_ONLY);
+        }
 
         let mut hub = RelayHub::new(1);
         hub.register(2).unwrap();

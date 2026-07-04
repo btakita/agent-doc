@@ -385,7 +385,7 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
     let file = required_path_arg(args, "file")?;
     let admit = agent_doc_cycle_state_io::admit_with_current_resolver(
         &file,
-        |file, disk| agent_doc_document_realtime_io::resolve_current_doc(file, disk).content,
+        |file| Ok(agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content),
         agent_doc_snapshot_io::load,
         agent_doc_ops_log_io::log_op,
     )?;
@@ -655,8 +655,7 @@ fn set_mcp_binary_stale_for_test(stale: bool) {
 }
 
 fn read_document(file: &Path, component: Option<&str>) -> Result<String> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
     let Some(component) = component else {
         return Ok(content);
     };

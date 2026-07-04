@@ -139,10 +139,6 @@ impl ReplayProject {
         self.agent_doc_dir().join("patches")
     }
 
-    fn ack_dir(&self) -> PathBuf {
-        self.agent_doc_dir().join("ack-content")
-    }
-
     fn snapshot(&self) -> String {
         fs::read_to_string(
             self.agent_doc_dir()
@@ -178,7 +174,6 @@ fn setup_replay_project(with_patches_dir: bool) -> ReplayProject {
     let tmp = TempDir::new().unwrap();
     let agent_doc_dir = tmp.path().join(".agent-doc");
     for subdir in [
-        "ack-content",
         "claimed-patches",
         "crdt",
         "logs",
@@ -334,7 +329,7 @@ fn assert_live_prompt_visible_and_committed(project: &ReplayProject, topic: &str
     assert_eq!(
         head.matches(LIVE_TYPING_PROMPT).count(),
         1,
-        "ACK-proven live prompt should be committed exactly once:\n{head}"
+        "lazily-proven live prompt should be committed exactly once:\n{head}"
     );
 
     let snapshot = project.snapshot();
@@ -345,7 +340,7 @@ fn assert_live_prompt_visible_and_committed(project: &ReplayProject, topic: &str
     assert_eq!(
         snapshot.matches(LIVE_TYPING_PROMPT).count(),
         1,
-        "ACK-proven snapshot should preserve the live prompt exactly once:\n{snapshot}"
+        "lazily-proven snapshot should preserve the live prompt exactly once:\n{snapshot}"
     );
 }
 
@@ -412,7 +407,6 @@ fn socket_ipc_replays_live_typing_during_finalize() {
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let listener_root = project.root().to_path_buf();
     let doc_for_listener = project.doc.clone();
-    let ack_dir = project.ack_dir();
     let seen_for_listener = seen_payload.clone();
     let server = std::thread::spawn(move || {
         agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
@@ -422,7 +416,13 @@ fn socket_ipc_replays_live_typing_during_finalize() {
             };
             let after_apply = apply_payload_to_file(&payload, &doc_for_listener)?;
             record_operator_buffer(&doc_for_listener, &after_apply);
-            fs::write(ack_dir.join(format!("{id}.md")), &after_apply).ok()?;
+            agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+                &doc_for_listener,
+                &id,
+                &after_apply,
+                "socket_ipc_test",
+            )
+            .ok()?;
             *seen_for_listener.lock().ok()? = Some(payload);
             Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
         })
@@ -458,15 +458,14 @@ fn socket_ipc_replays_live_typing_during_finalize() {
 }
 
 #[test]
-fn file_ipc_ack_sidecar_replays_live_typing_during_finalize() {
+fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
     project.type_live_prompt_after_preflight();
 
     let patches_dir = project.patches_dir();
-    let ack_dir = project.ack_dir();
     let doc_for_watcher = project.doc.clone();
-    let seen_ack = Arc::new(Mutex::new(None::<String>));
-    let seen_ack_for_watcher = seen_ack.clone();
+    let seen_receipt = Arc::new(Mutex::new(None::<String>));
+    let seen_receipt_for_watcher = seen_receipt.clone();
     let watcher = std::thread::spawn(move || {
         let started = Instant::now();
         while started.elapsed() < Duration::from_secs(3) {
@@ -486,8 +485,14 @@ fn file_ipc_ack_sidecar_replays_live_typing_during_finalize() {
                 };
                 let after_apply = apply_payload_to_file(&payload, &doc_for_watcher).unwrap();
                 record_operator_buffer(&doc_for_watcher, &after_apply);
-                fs::write(ack_dir.join(format!("{id}.md")), &after_apply).unwrap();
-                *seen_ack_for_watcher.lock().unwrap() = Some(after_apply);
+                agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+                    &doc_for_watcher,
+                    &id,
+                    &after_apply,
+                    "file_ipc_test",
+                )
+                .unwrap();
+                *seen_receipt_for_watcher.lock().unwrap() = Some(after_apply);
                 fs::remove_file(path).unwrap();
                 return true;
             }
@@ -499,14 +504,14 @@ fn file_ipc_ack_sidecar_replays_live_typing_during_finalize() {
     run_finalize(&project, "file IPC live typing replay", 0, &[]);
     assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
 
-    let ack_content = seen_ack
+    let receipt_content = seen_receipt
         .lock()
         .unwrap()
         .clone()
-        .expect("watcher should capture ACK sidecar content");
+        .expect("watcher should capture lazily receipt content");
     assert!(
-        ack_content.contains(LIVE_TYPING_PROMPT),
-        "ACK sidecar should model the editor-visible buffer with live typing:\n{ack_content}"
+        receipt_content.contains(LIVE_TYPING_PROMPT),
+        "lazily receipt should model the editor-visible buffer with live typing:\n{receipt_content}"
     );
     assert_live_prompt_visible_and_committed(&project, "file IPC live typing replay");
 }

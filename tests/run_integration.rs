@@ -9,8 +9,8 @@ use predicates::prelude::*;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command as ProcessCommand};
-use std::time::{Duration, Instant};
+use std::process::Command as ProcessCommand;
+use std::time::Duration;
 use tempfile::TempDir;
 
 fn agent_doc() -> Command {
@@ -289,23 +289,6 @@ fn read_cycle_state(file: &Path) -> cycle_state::CycleState {
     cycle_state::load(file)
         .unwrap()
         .expect("expected cycle state file")
-}
-
-fn wait_for_child_wait_heartbeat(child: &mut Child, doc: &Path, timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Ok(Some(state)) = cycle_state::load(doc)
-            && state
-                .last_event
-                .contains("run_heartbeat phase=child_agent_wait")
-        {
-            return true;
-        }
-        if child.try_wait().unwrap().is_some() || Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
 }
 
 fn assert_terminal_closeout_proof(root: &Path, doc: &Path) {
@@ -795,8 +778,16 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
         .spawn()
         .unwrap();
 
-    let saw_persisted_heartbeat =
-        wait_for_child_wait_heartbeat(&mut child, &doc, Duration::from_secs(15));
+    let mut saw_persisted_heartbeat = false;
+    // Under full nextest load, startup/preflight can consume most of a short
+    // polling window before the child-agent wait phase begins.
+    for _ in 0..150 {
+        std::thread::sleep(Duration::from_millis(100));
+        if run_heartbeat_persisted(tmp.path(), &doc, session_id) {
+            saw_persisted_heartbeat = true;
+            break;
+        }
+    }
 
     let status = child.wait().unwrap();
     assert!(status.success());
@@ -826,7 +817,7 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
     let config_root = write_config(tmp.path(), &script);
     let bin = std::env::var("CARGO_BIN_EXE_agent-doc").unwrap();
 
-    let mut child = ProcessCommand::new(bin)
+    let child = ProcessCommand::new(bin)
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
         .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "10")
@@ -845,8 +836,16 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
         .spawn()
         .unwrap();
 
-    let saw_persisted_heartbeat =
-        wait_for_child_wait_heartbeat(&mut child, &doc, Duration::from_secs(15));
+    let mut saw_persisted_heartbeat = false;
+    // Under full nextest load, startup/preflight can consume most of a short
+    // polling window before the child-agent wait phase begins.
+    for _ in 0..150 {
+        std::thread::sleep(Duration::from_millis(100));
+        if run_heartbeat_persisted(tmp.path(), &doc, session_id) {
+            saw_persisted_heartbeat = true;
+            break;
+        }
+    }
 
     let output = child.wait_with_output().unwrap();
     assert!(

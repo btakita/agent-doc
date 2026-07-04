@@ -156,3 +156,29 @@ pub fn handle_replica_awareness(file: &str, identity: &str, awareness_b64: &str)
         Err(e) => IpcResponse::err(format!("crdt awareness failed: {e}")),
     }
 }
+
+pub fn handle_crdt_checkpoint(file: &str, source: &str) -> IpcResponse {
+    match agent_doc_crdt_relay_io::checkpoint_durable_projection_for_file(Path::new(file), source) {
+        Ok(agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Detached) => {
+            IpcResponse::ok(serde_json::json!({
+                "status": "detached",
+                "changed": false,
+            }))
+        }
+        Ok(agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Checkpointed {
+            bytes,
+            changed,
+            live_editors,
+            text_len,
+            text_hash,
+        }) => IpcResponse::ok(serde_json::json!({
+            "status": "checkpointed",
+            "bytes": bytes,
+            "changed": changed,
+            "live_editors": live_editors,
+            "text_len": text_len,
+            "text_hash": text_hash,
+        })),
+        Err(e) => IpcResponse::err(format!("crdt durable checkpoint failed: {e}")),
+    }
+}

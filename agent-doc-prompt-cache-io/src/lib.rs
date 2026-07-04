@@ -83,8 +83,7 @@ mod tests {
             "stable",
             "resume:codex-session",
             "agent=codex;model=gpt-5;mode=template",
-            Some(120_000),
-            Some(1_000),
+            (Some(120_000), Some(1_000)),
         )
         .observed_at_unix_ms(1_700_000_001);
         let claude_anthropic = effectiveness_sample(
@@ -94,8 +93,7 @@ mod tests {
             "stable",
             "resume:claude-session",
             "agent=claude;model=opus;mode=template",
-            Some(90_000),
-            Some(2_000),
+            (Some(90_000), Some(2_000)),
         )
         .observed_at_unix_ms(1_700_000_002);
 
@@ -118,9 +116,9 @@ mod tests {
         stable_prefix_sha256: &str,
         adapter_state: &str,
         routing_affinity: &str,
-        cached_input_tokens: Option<u64>,
-        creation_tokens: Option<u64>,
+        cache_tokens: (Option<u64>, Option<u64>),
     ) -> PromptCacheEffectivenessSample {
+        let (cached_input_tokens, creation_tokens) = cache_tokens;
         PromptCacheEffectivenessSample::new(
             provider,
             harness,

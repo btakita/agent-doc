@@ -84,6 +84,7 @@ mod tests {
         assert!(model.find_known("icebox").is_some());
         assert!(model.find_known("signals").is_some());
         assert!(model.find_known("boundary").is_some());
+        assert!(model.find_known("notes").is_some());
     }
 
     #[test]

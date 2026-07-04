@@ -91,17 +91,20 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     }
     content_ours.push_str("\n## User\n\n");
 
-    // Re-read file to check for user edits since lock acquisition. #rtwwire rung
-    // 3b: source the merge "theirs" from the realtime model (newest of disk vs the
-    // editor's unsaved buffer) so the 3-way merge incorporates a queue/exchange
-    // edit that lives only in the unsaved buffer instead of clobbering it
-    // (#queue-user-edit-overwrite). Staleness-gated (`#rtwfeed`) — the buffer wins
-    // only when it provably holds unsaved edits ahead of disk; no editor attached
-    // returns disk unchanged.
-    let disk_current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {}", file.display()))?;
-    let content_current =
-        agent_doc_document_realtime_io::resolve_current_doc(file, &disk_current).content;
+    // Resolve the authoritative current document through the realtime model. If
+    // an editor is active, the CRDT relay owns the current text and disk is not
+    // used as a substitute.
+    let force_disk_editor_attached = flags.force_disk && editor_crdt_authority_attached(file);
+    let content_current = if force_disk_editor_attached {
+        std::fs::read_to_string(file).with_context(|| {
+            format!(
+                "force-disk editor-attached write failed to read current file {}",
+                file.display()
+            )
+        })?
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content
+    };
 
     let final_content = if content_current == base {
         // No edits — use our version directly
@@ -165,12 +168,14 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         &[],
         "",
     );
-    guard_visible_write_idle_current_or_target(
-        file,
-        "write_inline",
-        &content_current,
-        Some(&final_content),
-    )?;
+    if !force_disk_editor_attached {
+        guard_visible_write_idle_current_or_target(
+            file,
+            "write_inline",
+            &content_current,
+            Some(&final_content),
+        )?;
+    }
     agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
 
     atomic_write(file, &final_content)?;
@@ -343,9 +348,22 @@ pub fn run_template(
     let content_ours =
         normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
-    // Re-read file to check for user edits since lock acquisition
-    let content_current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {}", file.display()))?;
+    let force_disk_editor_attached = flags.force_disk && editor_crdt_authority_attached(file);
+    // Resolve the authoritative document to check for user edits since lock
+    // acquisition. Active editors resolve through the CRDT relay; detached docs
+    // use disk as the fallback replica. An explicit force-disk write against an
+    // attached editor is the deliberate recovery bypass and reads the visible file
+    // instead of asking the relay to prove the editor model first.
+    let content_current = if force_disk_editor_attached {
+        std::fs::read_to_string(file).with_context(|| {
+            format!(
+                "force-disk editor-attached write failed to read current file {}",
+                file.display()
+            )
+        })?
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content
+    };
 
     // Recompute the merged + normalized content for a given on-disk `current`.
     // Factored so the reconcile loop below can re-merge against a fresh disk
@@ -400,29 +418,33 @@ pub fn run_template(
     // against the fresh disk state and retry instead of failing closed and
     // stranding the response outside HEAD (#ipc-drift-visbuf-reconcile).
     let (content_current, (final_content, cleaned_resolved_backlog_prompts_applied)) =
-        reconcile_visible_write(
-            file,
-            content_current,
-            initial_payload,
-            VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
-            |f, expected, payload| {
-                guard_visible_write_reconcile_with_target(
-                    f,
-                    "run_template",
-                    expected,
-                    Some(&payload.0),
-                )
-            },
-            recompute_final,
-            |f, current, payload| {
-                guard_visible_write_idle_current_or_target(
-                    f,
-                    "run_template",
-                    current,
-                    Some(&payload.0),
-                )
-            },
-        )?;
+        if force_disk_editor_attached {
+            (content_current, initial_payload)
+        } else {
+            reconcile_visible_write(
+                file,
+                content_current,
+                initial_payload,
+                VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
+                |f, expected, payload| {
+                    guard_visible_write_reconcile_with_target(
+                        f,
+                        "run_template",
+                        expected,
+                        Some(&payload.0),
+                    )
+                },
+                recompute_final,
+                |f, current, payload| {
+                    guard_visible_write_idle_current_or_target(
+                        f,
+                        "run_template",
+                        current,
+                        Some(&payload.0),
+                    )
+                },
+            )?
+        };
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -1007,9 +1029,21 @@ pub fn run_stream(
         agent_doc_ops_log_io::log_op,
     )?;
 
-    // Re-read file to check for user edits since lock acquisition
-    let content_current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {}", file.display()))?;
+    // Resolve the authoritative document to check for user edits since lock
+    // acquisition. Active editors resolve through the CRDT relay; detached docs
+    // use disk as the fallback replica. An explicit force-disk write against an
+    // attached editor is the deliberate recovery bypass and reads the visible file
+    // instead of asking the relay to prove the editor model first.
+    let content_current = if force_disk_editor_attached {
+        std::fs::read_to_string(file).with_context(|| {
+            format!(
+                "force-disk editor-attached write failed to read current file {}",
+                file.display()
+            )
+        })?
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content
+    };
 
     // Recompute the CRDT-merged + normalized content (and its encoded state)
     // for a given on-disk `current`. Factored so the reconcile loop below can
@@ -1071,46 +1105,12 @@ pub fn run_stream(
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&patched_current);
             (patched_current, doc.encode_state(), true)
         } else {
-            eprintln!("[write] File was modified during response generation. CRDT merging...");
-            // Use baseline as CRDT base instead of stored state from previous cycle.
-            // The baseline is the exact content both sides (ours and theirs) diverged
-            // from, giving clean diffs. Using a stale stored state causes character-level
-            // interleaving when the agent replaces component content while the user
-            // appends within the same region (lazily-rs.md corruption bug).
-            let base_state = crdt_merge_base_state_for_write(
-                file,
-                base,
-                force_disk,
-                "run_stream",
-                agent_doc_op_capture_io::has_pending_editor_ops,
-                agent_doc_ops_log_io::log_op,
-            )?;
-            // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
-            // Prefer the editor's real captured ops over the diff-guess when aligned
-            // (#qnodemerge4wire); inert (byte-identical) until the editor reporters land.
-            let (merged_content, merged_state) =
-                match agent_doc_merge_io::merge_contents_crdt_with_ops(
-                    file,
-                    Some(&base_state),
-                    &content_ours,
-                    content_current,
-                    agent_doc_ops_log_io::log_op,
-                ) {
-                    Ok(merged) => merged,
-                    Err(e) => {
-                        eprintln!(
-                            "[write] WARNING: CRDT merge failed in stream write, falling back to splice: {}",
-                            e
-                        );
-                        let spliced = splice_pending_component(&content_ours, content_current);
-                        if let Some(warning) = spliced.warning.as_ref() {
-                            log_splice_pending_component_warning(warning);
-                        }
-                        let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&spliced.content);
-                        (spliced.content, doc.encode_state())
-                    }
-                };
-            (merged_content, merged_state, false)
+            eprintln!(
+                "[write] File was modified during response generation. Document-model merging..."
+            );
+            let merged = merge_template_document_model(file, base, &content_ours, content_current)?;
+            let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&merged);
+            (merged, doc.encode_state(), false)
         };
         let mut final_content = if skip_final_normalize {
             final_content
@@ -1149,29 +1149,33 @@ pub fn run_stream(
     // was computed instead of failing closed and stranding the response
     // outside HEAD (#ipc-drift-visbuf-reconcile).
     let (content_current, (final_content, _crdt_state, cleaned_resolved_backlog_prompts_applied)) =
-        reconcile_visible_write(
-            file,
-            content_current,
-            initial_payload,
-            VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
-            |f, expected, payload| {
-                guard_visible_write_reconcile_with_target(
-                    f,
-                    "run_stream",
-                    expected,
-                    Some(&payload.0),
-                )
-            },
-            recompute_final,
-            |f, current, payload| {
-                guard_visible_write_idle_current_or_target(
-                    f,
-                    "run_stream",
-                    current,
-                    Some(&payload.0),
-                )
-            },
-        )?;
+        if force_disk_editor_attached {
+            (content_current, initial_payload)
+        } else {
+            reconcile_visible_write(
+                file,
+                content_current,
+                initial_payload,
+                VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
+                |f, expected, payload| {
+                    guard_visible_write_reconcile_with_target(
+                        f,
+                        "run_stream",
+                        expected,
+                        Some(&payload.0),
+                    )
+                },
+                recompute_final,
+                |f, current, payload| {
+                    guard_visible_write_idle_current_or_target(
+                        f,
+                        "run_stream",
+                        current,
+                        Some(&payload.0),
+                    )
+                },
+            )?
+        };
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -1269,6 +1273,26 @@ pub fn run_stream(
     }
 
     atomic_write(file, &final_content)?;
+    if force_disk && snapshot_content != final_content {
+        match
+            agent_doc_controller_io::project_controller::record_visible_write_materialized_carry_forward_for_file(
+                file,
+                &content_current,
+                &final_content,
+                &snapshot_content,
+                "run_stream_force_disk",
+            ) {
+            Ok(_) => {}
+            Err(err) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_visible_write_materialized_carry_forward_proof_failed file={} error={}",
+                    file.display(),
+                    err
+                ),
+            ),
+        }
+    }
     if let Some(plan) = integrated_queue_plan.as_ref() {
         queue_consume::record_queue_consumption_proofs(
             file,
@@ -1342,7 +1366,7 @@ pub fn run_stream(
     }
 
     eprintln!(
-        "[write] Stream patches applied to {} ({} components patched, CRDT)",
+        "[write] Stream patches applied to {} ({} components patched, document model)",
         file.display(),
         patches.len()
     );
@@ -1370,18 +1394,34 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
-    // #rtwwire rung 3b: the IPC write path normalizes/parses its patches against
-    // the "current document". Source it from the realtime model — newest of disk
-    // vs the editor's unsaved buffer — so a component patch (e.g. the queue) is
-    // computed against the buffer the user actually sees, not stale disk, and the
-    // resulting patchback cannot drop a queue/exchange item that exists only in
-    // the unsaved buffer (#queue-user-edit-overwrite). Staleness-gated (`#rtwfeed`):
-    // the buffer wins only when it provably holds unsaved edits ahead of disk, so
-    // agent-doc's own just-written disk content can never be overridden. No editor
-    // attached returns disk unchanged.
-    let disk = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    let current_content = agent_doc_document_realtime_io::resolve_current_doc(file, &disk).content;
+    // #rtwwire rung 3b: the IPC write path normalizes/parses patches against the
+    // authoritative current document. If an editor is active, source it from the
+    // CRDT relay; if no editor is active, use disk as the fallback replica.
+    let current_content = match agent_doc_document_realtime_io::try_resolve_current_doc_from_file(
+        file,
+    ) {
+        Ok(current) => current.content,
+        Err(resolve_err) => {
+            if let Err(retain_err) =
+                retain_ipc_patch_for_editor_authority_retry(file, baseline, &response)
+            {
+                eprintln!(
+                    "[write] warning: failed to retain IPC retry patch for {}: {}",
+                    file.display(),
+                    retain_err
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "run_ipc_authority_retry_patch_retention_failed file={} error={} recovery=retry_without_disk_write",
+                        file.display(),
+                        retain_err
+                    ),
+                );
+            }
+            return Err(resolve_err);
+        }
+    };
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     guard_stale_snapshot_recovery_only(
         file,
@@ -1673,34 +1713,130 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     );
 }
 
-fn crdt_merge_base_state_for_write(
+fn retain_ipc_patch_for_editor_authority_retry(
     file: &Path,
-    fallback_markdown: &str,
-    force_disk: bool,
-    source: &str,
-    has_pending_editor_ops: impl FnOnce(&Path) -> bool,
-    mut logger: impl FnMut(&Path, &str),
-) -> Result<Vec<u8>> {
-    if force_disk && editor_crdt_authority_attached(file) {
-        logger(
-            file,
-            &format!(
-                "crdt_merge_base_force_disk_fallback file={} source={} len={} reason=force_disk_skip_sidecar_lock",
-                file.display(),
-                source,
-                fallback_markdown.len()
-            ),
-        );
-        return Ok(agent_doc_merge::crdt::CrdtDoc::from_text(fallback_markdown).encode_state());
+    baseline: Option<&str>,
+    response: &str,
+) -> Result<()> {
+    let mut retained_response = response.to_string();
+    sanitize_template_patchback_response(&mut retained_response)?;
+    let parsed = agent_doc_template_io::parse_template_patchback(
+        file,
+        &retained_response,
+        "run_ipc_authority_retry",
+        agent_doc_ops_log_io::log_op,
+    )?;
+    let mut patches = parsed.patches;
+    let mut unmatched = parsed.unmatched;
+    template::sanitize::sanitize_patches(&mut patches);
+    template::sanitize::sanitize_unmatched(&mut unmatched);
+    if patches.is_empty() && unmatched.trim().is_empty() {
+        anyhow::bail!("no patch blocks or content found in response");
     }
 
-    Ok(agent_doc_snapshot_io::crdt_merge_base_state_with(
+    agent_doc_repair_io::pending::save_pending(file, &retained_response)?;
+
+    let canonical = file.canonicalize()?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let patches_dir = project_root.join(".agent-doc/patches");
+    std::fs::create_dir_all(&patches_dir)?;
+    let patch_file = patches_dir.join(format!("{}.json", hash));
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let ipc_patches = build_ipc_patches_json(file, &patches, &unmatched, None, Some(&patch_id))?;
+    let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
+        ""
+    } else {
+        unmatched.trim()
+    };
+    let disk_reference = std::fs::read_to_string(file).unwrap_or_default();
+    let mut payload = serde_json::json!({
+        "file": canonical.to_string_lossy(),
+        "patches": ipc_patches,
+        "node_patches": [],
+        "unmatched": effective_unmatched,
+        "baseline": baseline.unwrap_or(""),
+    });
+    payload["baseline_hash"] =
+        serde_json::Value::String(agent_doc_hash::content_hash(&disk_reference));
+    payload["baseline_normalized_hash"] = serde_json::Value::String(agent_doc_hash::content_hash(
+        &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            &disk_reference,
+        ),
+    ));
+    payload["patch_id"] = serde_json::Value::String(patch_id.clone());
+    payload["recovery"] = serde_json::Value::String("retry_without_disk_write".to_string());
+    if let Ok(Some(ref cs)) = agent_doc_cycle_state_io::load(file) {
+        payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
+    }
+
+    atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
+    eprintln!(
+        "[write] IPC patch retained for editor-authority retry at {}",
+        patch_file.display()
+    );
+    agent_doc_ops_log_io::log_op(
         file,
-        fallback_markdown,
-        has_pending_editor_ops,
-        logger,
-    )?
-    .state)
+        &format!(
+            "run_ipc_authority_retry_patch_retained file={} patch_id={} patches={} recovery=retry_without_disk_write",
+            file.display(),
+            patch_id,
+            patches.len()
+        ),
+    );
+    Ok(())
+}
+
+fn merge_template_document_model(
+    file: &Path,
+    base: &str,
+    content_ours: &str,
+    content_current: &str,
+) -> Result<String> {
+    let cell_plan = agent_doc_merge::merge(agent_doc_merge::MergeRequest::cell(
+        base,
+        content_ours,
+        content_current,
+    ));
+    if !cell_plan.fell_back {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "template_document_model_merge file={} engine=cell conflicts={}",
+                file.display(),
+                cell_plan.conflicts.len()
+            ),
+        );
+        return Ok(cell_plan.merged_doc);
+    }
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "template_document_model_merge_cell_fallback file={} conflicts={}",
+            file.display(),
+            cell_plan.conflicts.len()
+        ),
+    );
+    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
+    let (merged_doc, _merged_state) = agent_doc_merge_io::merge_contents_crdt_with_ops(
+        file,
+        Some(&base_state),
+        content_ours,
+        content_current,
+        agent_doc_ops_log_io::log_op,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "template_document_model_merge file={} engine=crdt_op_capture base_len={} ours_len={} current_len={}",
+            file.display(),
+            base.len(),
+            content_ours.len(),
+            content_current.len()
+        ),
+    );
+    Ok(merged_doc)
 }
 
 fn editor_crdt_authority_attached(file: &Path) -> bool {
@@ -1714,39 +1850,24 @@ fn merge_recovery_content(
     content_ours: &str,
     content_current: &str,
     source: &str,
-    force_disk: bool,
+    _force_disk: bool,
 ) -> Result<String> {
     if content_current == base {
         return Ok(content_ours.to_string());
     }
 
     if content_uses_crdt_write(base) {
-        eprintln!("[write] File was modified during response recovery. CRDT merging...");
+        eprintln!("[write] File was modified during response recovery. Document-model merging...");
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "recovery_crdt_merge file={} source={} recovery=retry_crdt_instead",
+                "recovery_document_model_merge file={} source={} recovery=reconcile_document_model",
                 file.display(),
                 source
             ),
         );
-        let base_state = crdt_merge_base_state_for_write(
-            file,
-            base,
-            force_disk,
-            source,
-            agent_doc_op_capture_io::has_pending_editor_ops,
-            agent_doc_ops_log_io::log_op,
-        )?;
-        let (merged, _) = agent_doc_merge_io::merge_contents_crdt_with_ops(
-            file,
-            Some(&base_state),
-            content_ours,
-            content_current,
-            agent_doc_ops_log_io::log_op,
-        )
-        .with_context(|| format!("CRDT merge failed during {source}"))?;
-        Ok(merged)
+        merge_template_document_model(file, base, content_ours, content_current)
+            .with_context(|| format!("document-model merge failed during {source}"))
     } else {
         agent_doc_merge_io::merge_contents(base, content_ours, content_current)
     }
@@ -1866,8 +1987,8 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
 
     let doc_lock = acquire_doc_lock(file)?;
 
-    let content_current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {}", file.display()))?;
+    let content_current =
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
 
     let final_content = merge_recovery_content(
         file,
@@ -1954,8 +2075,8 @@ pub fn apply_template_from_string_with_options(
 
     let doc_lock = acquire_doc_lock(file)?;
 
-    let content_current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {}", file.display()))?;
+    let content_current =
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
 
     let final_content = if let Some(repaired_current) = adopt_current_response_without_duplication(
         file,
@@ -2033,6 +2154,76 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn stream_model_merge_preserves_response_and_operator_components() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("efs.md");
+        let base = concat!(
+            "<!-- agent:status -->\n",
+            "complete\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior response.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let ours = concat!(
+            "<!-- agent:status -->\n",
+            "complete\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior response.\n",
+            "\n",
+            "### Re: route-owned start recovery — gpt-5\n\n",
+            "Recovered through the document model.\n",
+            "<!-- agent:boundary:ours -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:status -->\n",
+            "route checked\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Prior response.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- [#sy71]\n",
+            "- [#7jj2]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#sy71] lender modal state\n",
+            "- [ ] [#7jj2] deploy\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let merged = merge_template_document_model(&doc, base, ours, current).unwrap();
+
+        assert!(merged.contains("### Re: route-owned start recovery — gpt-5"));
+        assert!(merged.contains("Recovered through the document model."));
+        assert!(merged.contains("- [#sy71]"));
+        assert!(merged.contains("- [#7jj2]"));
+        assert!(merged.contains("- [ ] [#sy71] lender modal state"));
+        assert!(merged.contains("- [ ] [#7jj2] deploy"));
+        assert!(merged.contains("route checked"));
+        assert!(
+            !merged.contains("cell-merge-conflict"),
+            "disjoint component edits should not require conflict markers:\n{merged}"
+        );
+    }
 
     #[test]
     fn apply_template_from_string_compact_exchange_replaces_exchange_body() {
@@ -2123,7 +2314,7 @@ mod tests {
     }
 
     #[test]
-    fn recovery_merge_uses_crdt_for_crdt_documents_without_diff3_markers() {
+    fn recovery_merge_uses_document_model_for_crdt_documents_without_diff3_markers() {
         let dir = TempDir::new().unwrap();
         for subdir in ["crdt", "logs", "snapshots"] {
             fs::create_dir_all(dir.path().join(".agent-doc").join(subdir)).unwrap();
@@ -2133,16 +2324,16 @@ mod tests {
             "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "Please reply\n",
-            "<!-- agent:boundary:base1234 -->\n",
+            "<!-- agent:boundary:ba5e1234 -->\n",
             "<!-- /agent:exchange -->\n",
         );
         let content_ours = base.replace(
-            "<!-- agent:boundary:base1234 -->",
-            "### Re: recovery crdt - gpt-5\n\nDone.\n<!-- agent:boundary:base1234 -->",
+            "<!-- agent:boundary:ba5e1234 -->",
+            "### Re: recovery crdt - gpt-5\n\nDone.\n<!-- agent:boundary:ba5e1234 -->",
         );
         let content_current = base.replace(
-            "<!-- agent:boundary:base1234 -->",
-            "while I was typing\n<!-- agent:boundary:base1234 -->",
+            "<!-- agent:boundary:ba5e1234 -->",
+            "while I was typing\n<!-- agent:boundary:ba5e1234 -->",
         );
         fs::write(&doc, content_current.as_str()).unwrap();
 
@@ -2160,11 +2351,11 @@ mod tests {
         assert!(merged.contains("while I was typing"));
         assert!(
             !merged.contains("<<<<<<<") && !merged.contains(">>>>>>>"),
-            "CRDT recovery merge must not emit diff3 markers:\n{merged}"
+            "document-model recovery merge must not emit diff3 markers:\n{merged}"
         );
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops.contains("recovery_crdt_merge"));
-        assert!(ops.contains("recovery=retry_crdt_instead"));
+        assert!(ops.contains("recovery_document_model_merge"));
+        assert!(ops.contains("recovery=reconcile_document_model"));
     }
 
     #[test]

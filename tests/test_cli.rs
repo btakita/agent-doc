@@ -1657,10 +1657,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // test call, not a production guard boundary.
         // 17 -> 21 (#live-drift-visible-repair): +4 test-only guard substrings
         // from `guard_live_prompt_drift_requires_visible_repair`,
-        // `guard_live_prompt_drift_accepts_ack_visible_union`, and their direct
+        // `guard_live_prompt_drift_uses_content_ours_snapshot_when_ack_union_carries_unowned_drift`,
+        // and their direct
         // calls to the existing live-prompt-drift IPC adoption guard. These prove
         // content_ours adoption after a live editor ACK requires visible response
-        // proof unless the ACK already contains the response union.
+        // proof; a response-bearing ACK union suppresses redelivery but does not
+        // make the ACK sidecar snapshot authority when it carries unowned drift.
         ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 21,
         // 17 -> 18 (#smconv): +1 production `reason=node_keyed_semantic_merge` on
         // the new `live_prompt_drift_semantic_merged` ops_log — the node-keyed
@@ -3926,9 +3928,10 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     assert!(
         queue_io_host.contains("crate::continuation_detect::detect_required_continuation_with")
             && queue_io_host.contains("agent_doc_snapshot_io::load")
-            && queue_io_host
-                .contains("agent_doc_supervisor_io::recycle_yield::recycle_yield_pending"),
-        "queue-io continuation host should inject snapshot/recycle effects into the focused detector"
+            && queue_io_host.contains(
+                "agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file"
+            ),
+        "queue-io continuation host should inject snapshot/controller-projection recycle effects into the focused detector"
     );
     for relative in [
         "agent-doc-orchestration/tests/session_check.rs",
@@ -6893,47 +6896,65 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
         "queue-stall turn policy should live in the focused turn crate"
     );
     assert!(
-        members
-            .iter()
-            .any(|member| member.as_str() == Some("agent-doc-queue-io")),
-        "agent-doc-queue-io must stay a first-class workspace crate for queue marker IO"
-    );
-    assert!(
-        manifest_dir
-            .join("agent-doc-queue-io/src/drain_stall.rs")
-            .exists(),
-        "queue-stall marker IO should live in the focused queue IO crate"
-    );
-
-    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/drain_stall.rs")
             .exists(),
         "orchestration must not keep a drain_stall marker-IO facade"
     );
-    let queue_io_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/drain_stall.rs")).unwrap();
-    for forbidden_snippet in [
-        "pub use agent_doc_turn::drain_stall",
-        "pub fn classify_stall",
-        "pub struct StallFacts",
-        "pub enum StallVerdict",
-        "pub const QUEUE_STALL_DETECTED",
+    let queue_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/lib.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-queue-io/src/drain_stall.rs")
+            .exists()
+            && !queue_io_lib.contains("pub mod drain_stall;"),
+        "agent-doc-queue-io must not keep the queue drain-stall marker sidecar module"
+    );
+
+    let state_backbone =
+        fs::read_to_string(manifest_dir.join("agent-doc-state-backbone/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "QueueDrainStallContinuationRecorded",
+        "QueueDrainStallContinuationCleared",
+        "QueueDrainStallProjection",
+        "QueueDrainStallPhase",
+        "QueueDrainStallEvent",
+        "QueueDrainStallMachine",
+        "transition_queue_drain_stall",
+        "is_pending",
     ] {
         assert!(
-            !queue_io_source.contains(forbidden_snippet),
-            "queue IO must not re-export or re-own pure drain-stall policy: {forbidden_snippet}"
+            state_backbone.contains(required_snippet),
+            "agent-doc-state-backbone must own queue drain-stall projection policy: {required_snippet}"
         );
     }
+
+    let controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
     for required_snippet in [
-        "pub fn mark_continuation_pending(",
-        "pub fn read_continuation_pending(",
-        "pub fn clear_continuation_pending(",
-        "agent_doc_turn::drain_stall::",
+        "pub fn record_queue_drain_stall_continuation_pending_for_file(",
+        "pub fn queue_drain_stall_status_for_file(",
+        "pub fn queue_drain_stall_continuation_pending_for_file(",
+        "pub fn clear_queue_drain_stall_continuation_pending_for_file(",
+        "\"queue_drain_stall_continuation_recorded\"",
+        "\"queue_drain_stall_continuation_cleared\"",
+        "\"queue_drain_stall_status\"",
+        "handle_queue_drain_stall_continuation_recorded",
+        "handle_queue_drain_stall_continuation_cleared",
+        "handle_queue_drain_stall_status",
     ] {
         assert!(
-            queue_io_source.contains(required_snippet),
-            "agent-doc-queue-io must own drain-stall marker IO and call turn policy: {required_snippet}"
+            controller_rpc.contains(required_snippet),
+            "project controller must own queue drain-stall projection helper/RPC: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [".agent-doc/drain-stall", "mark_continuation_pending("] {
+        assert!(
+            !state_backbone.contains(forbidden_snippet)
+                && !controller_rpc.contains(forbidden_snippet),
+            "queue drain-stall projection owners must not preserve marker storage authority: {forbidden_snippet}"
         );
     }
 
@@ -6945,10 +6966,12 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
         "preflight must consume focused drain-stall policy directly"
     );
     assert!(
-        preflight_source.contains("agent_doc_queue_io::drain_stall::read_continuation_pending")
-            && preflight_source
-                .contains("agent_doc_queue_io::drain_stall::clear_continuation_pending"),
-        "preflight must consume focused drain-stall marker IO directly"
+        preflight_source.contains(
+            "agent_doc_controller_io::project_controller::queue_drain_stall_continuation_pending_for_file"
+        ) && preflight_source.contains(
+            "agent_doc_controller_io::project_controller::clear_queue_drain_stall_continuation_pending_for_file"
+        ) && !preflight_source.contains("agent_doc_queue_io::drain_stall::"),
+        "preflight must consume drain-stall projection helpers directly"
     );
     let session_check_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
@@ -6956,17 +6979,21 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
             .unwrap();
     assert!(
-        session_check_source
-            .contains("agent_doc_queue_io::drain_stall::mark_continuation_pending",)
-            && idle_watch_source
-                .contains("agent_doc_queue_io::drain_stall::clear_continuation_pending"),
-        "session-check command IO must call focused drain-stall marker IO directly"
+        session_check_source.contains(
+            "agent_doc_controller_io::project_controller::record_queue_drain_stall_continuation_pending_for_file"
+        ) && idle_watch_source.contains(
+            "agent_doc_controller_io::project_controller::clear_queue_drain_stall_continuation_pending_for_file"
+        ) && !session_check_source.contains("agent_doc_queue_io::drain_stall::")
+            && !idle_watch_source.contains("agent_doc_queue_io::drain_stall::"),
+        "session-check and idle-watch must call controller drain-stall projection helpers directly"
     );
     let turn_drain_stall =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/drain_stall.rs")).unwrap();
     assert!(
-        turn_drain_stall.contains("pub fn continuation_pending_marker("),
-        "agent-doc-turn must own continuation-pending marker construction"
+        turn_drain_stall.contains("continuation_pending_projection: bool")
+            && !turn_drain_stall.contains("pub struct ContinuationPending")
+            && !turn_drain_stall.contains("pub fn continuation_pending_marker("),
+        "agent-doc-turn must keep only pure drain-stall classification policy"
     );
 
     let turn_manifest = fs::read_to_string(manifest_dir.join("agent-doc-turn/Cargo.toml")).unwrap();
@@ -8573,18 +8600,6 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             "agent-doc-queue/src/queue_edit_owner.rs",
             "pub fn queue_edit_owner_lease_is_fresh(",
         ),
-        (
-            "agent-doc-supervisor/src/recycle_yield.rs",
-            "pub fn recycle_yield_is_fresh(",
-        ),
-        (
-            "agent-doc-supervisor/src/recycle_inflight.rs",
-            "pub fn recycle_inflight_is_fresh(",
-        ),
-        (
-            "agent-doc-supervisor/src/route_submit_inflight.rs",
-            "pub fn route_submit_lease_is_fresh(",
-        ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -9124,7 +9139,7 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
 }
 
 #[test]
-fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
+fn test_agent_doc_supervisor_recycle_uses_pcp_graph_for_inflight() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
@@ -9140,58 +9155,68 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
     assert!(supervisor_lib.contains("pub mod recycle_yield;"));
     assert!(supervisor_lib.contains("pub mod recycle_inflight;"));
-
-    let supervisor_yield =
-        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/recycle_yield.rs")).unwrap();
-    for required in [
-        "pub const RECYCLE_YIELD_DIR",
-        "pub const DEFAULT_RECYCLE_YIELD_TTL_SECS",
-        "pub const RECYCLE_YIELD_TTL_SECS_ENV",
-        "pub const RECYCLE_YIELD_STALE_BINARY",
-        "pub const RECYCLE_YIELD_STATE_FLUSH",
-        "pub struct RecycleYieldRequest",
-        "pub fn recycle_yield_request(",
-        "pub fn recycle_yield_ttl(",
-        "pub fn recycle_yield_request_is_fresh(",
-        "agent_doc_lease::timestamp_is_fresh",
-    ] {
-        assert!(
-            supervisor_yield.contains(required),
-            "agent-doc-supervisor must own recycle-yield marker policy: {required}"
-        );
-    }
-
     let supervisor_inflight =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/recycle_inflight.rs"))
             .unwrap();
     for required in [
-        "pub const RECYCLE_INFLIGHT_DIR",
-        "pub const RECYCLE_INFLIGHT_FILE",
-        "pub const DEFAULT_RECYCLE_INFLIGHT_TTL_SECS",
-        "pub const RECYCLE_INFLIGHT_TTL_SECS_ENV",
-        "pub const RECYCLE_INFLIGHT_AUTO_INSTALL",
-        "pub const RECYCLE_INFLIGHT_RESTART",
-        "pub const RECYCLE_SETTLE_WAIT",
-        "pub const RECYCLE_SETTLE_POLL",
-        "pub struct RecycleInflightMarker",
-        "pub fn recycle_inflight_marker(",
-        "pub fn recycle_inflight_ttl(",
-        "pub fn recycle_inflight_marker_is_fresh(",
-        "agent_doc_lease::timestamp_is_fresh",
+        "Reason labels for the PCP-backed supervisor recycle projection",
+        "RECYCLE_INFLIGHT_AUTO_INSTALL",
+        "RECYCLE_INFLIGHT_RESTART",
     ] {
         assert!(
             supervisor_inflight.contains(required),
-            "agent-doc-supervisor must own recycle-inflight marker policy: {required}"
+            "agent-doc-supervisor recycle_inflight must stay a pure backbone reason-label module: {required}"
+        );
+    }
+    for forbidden in [
+        "RECYCLE_INFLIGHT_DIR",
+        "RECYCLE_INFLIGHT_FILE",
+        "RecycleInflightMarker",
+        "recycle_inflight_marker(",
+        "recycle_inflight_marker_is_fresh(",
+        "agent_doc_lease::timestamp_is_fresh",
+    ] {
+        assert!(
+            !supervisor_inflight.contains(forbidden),
+            "recycle-in-flight file sidecar policy must not return to agent-doc-supervisor: {forbidden}"
+        );
+    }
+
+    let supervisor_yield =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/recycle_yield.rs")).unwrap();
+    for required in [
+        "Reason labels for recycle-yield requests carried by the PCP recycle graph",
+        "pub const RECYCLE_YIELD_STALE_BINARY",
+        "pub const RECYCLE_YIELD_STATE_FLUSH",
+    ] {
+        assert!(
+            supervisor_yield.contains(required),
+            "agent-doc-supervisor must own recycle-yield backbone reason labels: {required}"
+        );
+    }
+    for forbidden in [
+        "RECYCLE_YIELD_DIR",
+        "DEFAULT_RECYCLE_YIELD_TTL_SECS",
+        "RecycleYieldRequest",
+        "recycle_yield_request(",
+        "recycle_yield_request_is_fresh(",
+        "agent_doc_lease::timestamp_is_fresh",
+    ] {
+        assert!(
+            !supervisor_yield.contains(forbidden),
+            "recycle-yield file sidecar policy must not return to agent-doc-supervisor: {forbidden}"
         );
     }
 
     for removed in [
         "agent-doc-orchestration/src/recycle_yield.rs",
         "agent-doc-orchestration/src/recycle_inflight.rs",
+        "agent-doc-supervisor-io/src/recycle_yield.rs",
+        "agent-doc-supervisor-io/src/recycle_inflight.rs",
     ] {
         assert!(
             !manifest_dir.join(removed).exists(),
-            "orchestration must not own supervisor marker storage IO: {removed}"
+            "orchestration must not own supervisor recycle storage IO: {removed}"
         );
     }
     let orchestration_lib =
@@ -9206,27 +9231,47 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
     ] {
         assert!(
             !orchestration_lib.contains(forbidden),
-            "orchestration must not expose a supervisor marker facade: {forbidden}"
+            "orchestration must not expose a supervisor recycle facade: {forbidden}"
+        );
+    }
+
+    let state_backbone =
+        fs::read_to_string(manifest_dir.join("agent-doc-state-backbone/src/lib.rs")).unwrap();
+    for required in [
+        "SupervisorRecycleStarted",
+        "SupervisorRecycleSettled",
+        "pub struct SupervisorRecycleProjection",
+        "pub enum SupervisorRecyclePhase",
+        "pub struct SupervisorRecycleMachine",
+        "pub fn project_supervisor_recycle(",
+    ] {
+        assert!(
+            state_backbone.contains(required),
+            "state backbone must own project supervisor recycle graph state: {required}"
         );
     }
 
     for (relative, forbidden) in [(
         "agent-doc-route-io/src/dispatch_only/proof.rs",
-        vec!["const RECYCLE_SETTLE_WAIT", "const RECYCLE_SETTLE_POLL"],
+        vec![
+            "const RECYCLE_SETTLE_WAIT",
+            "const RECYCLE_SETTLE_POLL",
+            "agent_doc_supervisor_io::recycle_inflight",
+        ],
     )] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in forbidden {
             assert!(
                 !source.contains(forbidden),
-                "{relative} must not re-own or facade supervisor recycle marker policy: {forbidden}"
+                "{relative} must not re-own or poll supervisor recycle marker policy: {forbidden}"
             );
         }
     }
 
     let supervisor_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/lib.rs")).unwrap();
-    assert!(supervisor_io_lib.contains("pub mod recycle_yield;"));
-    assert!(supervisor_io_lib.contains("pub mod recycle_inflight;"));
+    assert!(!supervisor_io_lib.contains("pub mod recycle_yield;"));
+    assert!(!supervisor_io_lib.contains("pub mod recycle_inflight;"));
     let recycle_request =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/recycle_request.rs"))
             .unwrap();
@@ -9239,93 +9284,122 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
     )
     .unwrap();
     assert!(
-        project_controller_rpc
-            .contains("agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(")
+        project_controller_rpc.contains("pub fn supervisor_recycle_started(")
+            && project_controller_rpc.contains("pub fn supervisor_recycle_settled(")
+            && project_controller_rpc.contains("pub fn supervisor_recycle_status(")
+            && project_controller_rpc.contains("pub fn wait_for_supervisor_recycle_settle(")
+            && project_controller_rpc
+                .contains("pub fn supervisor_recycle_yield_requested_for_file(")
+            && project_controller_rpc.contains("pub fn supervisor_recycle_yield_pending_for_file(")
+            && project_controller_rpc.contains("pub fn clear_supervisor_recycle_yield_for_file(")
+            && project_controller_rpc.contains("handle_supervisor_recycle_started")
+            && project_controller_rpc.contains("handle_supervisor_recycle_settled")
+            && project_controller_rpc
+                .contains("agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(")
             && !project_controller_rpc.contains("pub fn schedule_supervisor_recycle_for_doc("),
-        "project_controller::rpc must call focused supervisor recycle-request IO directly"
-    );
-    let recycle_yield =
-        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/recycle_yield.rs"))
-            .unwrap();
-    assert!(
-        recycle_yield.contains("use agent_doc_supervisor::recycle_yield::{")
-            && recycle_yield.contains("recycle_yield_request_is_fresh"),
-        "recycle_yield IO should import focused supervisor marker policy directly"
-    );
-    let recycle_inflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/recycle_inflight.rs"))
-            .unwrap();
-    assert!(
-        recycle_inflight.contains("use agent_doc_supervisor::recycle_inflight::{")
-            && recycle_inflight.contains("recycle_inflight_marker_is_fresh"),
-        "recycle_inflight IO should import focused supervisor marker policy directly"
+        "project_controller::rpc must own PCP supervisor recycle graph helpers and still call focused recycle-request IO directly"
     );
     for (relative, required) in [
         (
             "agent-doc-orchestration/src/start/idle_watch.rs",
-            "agent_doc_supervisor_io::recycle_yield::request_recycle_yield",
+            "agent_doc_controller_io::project_controller::supervisor_recycle_yield_requested_for_file",
         ),
         (
             "agent-doc-orchestration/src/start/idle_watch.rs",
-            "agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight",
+            "agent_doc_controller_io::project_controller::clear_supervisor_recycle_yield_for_file",
+        ),
+        (
+            "agent-doc-orchestration/src/start/idle_watch.rs",
+            "agent_doc_controller_io::project_controller::supervisor_recycle_started_for_file",
         ),
         (
             "agent-doc-route-io/src/dispatch_only/proof.rs",
-            "agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending",
+            "agent_doc_controller_io::project_controller::wait_for_supervisor_recycle_settle_for_file",
+        ),
+        (
+            "agent-doc-route-io/src/direct_pane_dispatch.rs",
+            "agent_doc_controller_io::project_controller::supervisor_recycle_pending_for_file",
         ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains(required),
-            "{relative} should call focused supervisor marker IO directly: {required}"
+            "{relative} should use PCP supervisor recycle graph helpers directly: {required}"
         );
     }
 }
 
 #[test]
-fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
+fn test_agent_doc_route_submit_uses_controller_projection_not_sidecar_markers() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let supervisor_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
-    assert!(supervisor_lib.contains("pub mod route_submit_inflight;"));
+    let supervisor_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/lib.rs")).unwrap();
+    assert!(
+        !supervisor_lib.contains("pub mod route_submit_inflight;")
+            && !supervisor_io_lib.contains("pub mod route_submit_inflight;"),
+        "route-submit in-flight state must not be exported as a supervisor sidecar module"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-supervisor/src/route_submit_inflight.rs")
+            .exists()
+            && !manifest_dir
+                .join("agent-doc-supervisor-io/src/route_submit_inflight.rs")
+                .exists(),
+        "route-submit marker storage files should be retired"
+    );
 
-    let supervisor_route_submit =
-        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/route_submit_inflight.rs"))
-            .unwrap();
+    let state_backbone =
+        fs::read_to_string(manifest_dir.join("agent-doc-state-backbone/src/lib.rs")).unwrap();
     for required in [
-        "pub const ROUTE_IN_FLIGHT_DIR",
-        "pub const ROUTE_IN_FLIGHT_TTL_SECS",
-        "pub const ROUTE_READY_PROBE_TTL_SECS",
-        "pub const ROUTE_BLOCKED_DIR",
-        "pub const ROUTE_BLOCKED_TTL_SECS",
+        "pub const ROUTE_SUBMIT_IN_FLIGHT_TTL_SECS",
+        "pub const ROUTE_SUBMIT_READY_PROBE_TTL_SECS",
+        "pub const ROUTE_SUBMIT_BLOCKED_TTL_SECS",
         "pub const ROUTE_DISPATCH_SUBMIT_REASON",
         "pub const ROUTE_DISPATCH_ONLY_READY_PROBE_REASON",
-        "pub struct RouteSubmitInFlight",
-        "pub struct RouteSubmitBlocked",
-        "pub enum RouteSubmitMarkerJson",
-        "pub fn route_submit_inflight_marker(",
-        "pub fn route_submit_blocked_marker(",
-        "pub fn route_submit_inflight_marker_json(",
-        "pub fn route_submit_blocked_marker_json(",
-        "pub fn parse_route_submit_inflight_marker_json(",
-        "pub fn parse_route_submit_blocked_marker_json(",
-        "pub fn route_submit_ttl_secs_for_reason(",
-        "pub fn route_submit_inflight_marker_is_fresh(",
-        "pub fn route_submit_blocked_marker_is_fresh(",
-        "agent_doc_lease::timestamp_is_fresh",
+        "RouteSubmitStarted",
+        "RouteSubmitSettled",
+        "RouteSubmitBlocked",
+        "pub struct RouteSubmitProjection",
+        "pub enum RouteSubmitPhase",
+        "pub enum RouteSubmitEvent",
+        "pub struct RouteSubmitMachine",
+        "pub fn transition_route_submit(",
+        "pub fn is_pending_at(",
     ] {
         assert!(
-            supervisor_route_submit.contains(required),
-            "agent-doc-supervisor must own route-submit marker policy: {required}"
+            state_backbone.contains(required),
+            "agent-doc-state-backbone must own route-submit projection policy: {required}"
         );
     }
 
-    assert!(
-        !manifest_dir
-            .join("agent-doc-orchestration/src/route_in_flight.rs")
-            .exists(),
-        "orchestration must not own route-submit marker storage IO"
-    );
+    let controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    for required in [
+        "pub struct RouteSubmitProjectionGuard",
+        "pub fn begin_route_submit(",
+        "pub fn begin_route_submit_with_reason(",
+        "pub fn mark_route_submit_blocked(",
+        "pub fn route_submit_in_flight_for_file(",
+        "command: \"route_submit_started\".to_string()",
+        "command: \"route_submit_settled\".to_string()",
+        "command: \"route_submit_blocked\".to_string()",
+        "command: \"route_submit_status\".to_string()",
+        "handle_route_submit_started(",
+        "handle_route_submit_settled(",
+        "handle_route_submit_blocked(",
+        "handle_route_submit_status(",
+    ] {
+        assert!(
+            controller_rpc.contains(required),
+            "project controller must own route-submit projection helper: {required}"
+        );
+    }
+
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     for forbidden in [
@@ -9339,58 +9413,45 @@ fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
         );
     }
 
-    let route_submit_io = fs::read_to_string(
-        manifest_dir.join("agent-doc-supervisor-io/src/route_submit_inflight.rs"),
-    )
-    .unwrap();
     for forbidden in [
-        "const ROUTE_IN_FLIGHT_",
-        "const ROUTE_READY_PROBE_",
-        "const ROUTE_BLOCKED_",
-        "pub struct RouteSubmitInFlight {",
-        "pub struct RouteSubmitBlocked {",
-        "fn route_submit_ttl_secs_for_reason(",
-        "pub fn route_submit_ttl_secs_for_reason(",
-        "agent_doc_lease::timestamp_is_fresh",
-        "pub use agent_doc_supervisor::route_submit_inflight",
+        "route_submit_inflight_marker",
+        "route_submit_blocked_marker",
+        "RouteSubmitMarkerJson",
+        ".agent-doc/route-in-flight",
+        ".agent-doc/route-submit-blocked",
     ] {
         assert!(
-            !route_submit_io.contains(forbidden),
-            "route-submit IO must not re-own or facade route-submit marker policy: {forbidden}"
+            !state_backbone.contains(forbidden)
+                && !controller_rpc.contains(forbidden)
+                && !supervisor_lib.contains(forbidden)
+                && !supervisor_io_lib.contains(forbidden),
+            "route-submit runtime authority must not use marker storage: {forbidden}"
         );
     }
-    assert!(
-        route_submit_io.contains("use agent_doc_supervisor::route_submit_inflight::{")
-            && route_submit_io.contains("parse_route_submit_inflight_marker_json")
-            && route_submit_io.contains("parse_route_submit_blocked_marker_json")
-            && route_submit_io.contains("route_submit_inflight_marker_json")
-            && route_submit_io.contains("route_submit_blocked_marker_json"),
-        "route-submit IO should import focused supervisor marker policy directly"
-    );
     for (relative, required) in [
         (
             "agent-doc-route-io/src/dispatch.rs",
-            "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit",
+            "agent_doc_controller_io::project_controller::begin_route_submit",
         ),
         (
             "agent-doc-route-io/src/dispatch_only.rs",
-            "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit_with_reason",
+            "agent_doc_controller_io::project_controller::begin_route_submit_with_reason",
         ),
         (
             "agent-doc-orchestration/src/start/idle_watch.rs",
-            "agent_doc_supervisor_io::route_submit_inflight::route_submit_in_flight",
+            "agent_doc_controller_io::project_controller::route_submit_in_flight_for_file",
+        ),
+        (
+            "agent-doc-route-io/src/dispatch_only/proof.rs",
+            "agent_doc_controller_io::project_controller::mark_route_submit_blocked",
         ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains(required),
-            "{relative} should call focused route-submit marker IO directly: {required}"
+            "{relative} should call controller route-submit projection helpers directly: {required}"
         );
     }
-    assert!(
-        !route_submit_io.contains("pub use "),
-        "agent-doc-supervisor-io must not expose pub use facades"
-    );
 }
 
 #[test]
@@ -9624,17 +9685,29 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
     let queue_source =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue.rs")).unwrap();
     for required in [
-        "pub const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS",
-        "pub struct ContextClearInFlight",
-        "pub fn context_clear_in_flight_marker(",
         "pub struct IdleQueueContextClearInFlightSettleFacts",
         "pub struct IdleQueueContextClearInFlightSettle",
-        "pub fn context_clear_in_flight_marker_active(",
         "pub fn idle_queue_context_clear_in_flight_settle_ticks(",
+        "projection_active: bool",
     ] {
         assert!(
             queue_source.contains(required),
-            "agent-doc-queue must own context-clear in-flight policy: {required}"
+            "agent-doc-queue must own pure context-clear in-flight decision policy: {required}"
+        );
+    }
+
+    for forbidden in [
+        "pub struct ContextClearInFlight",
+        "pub fn context_clear_in_flight_marker(",
+        "pub fn context_clear_in_flight_marker_active(",
+        "CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS",
+        "agent_doc_hash::content_hash",
+        "Serialize",
+        "Deserialize",
+    ] {
+        assert!(
+            !queue_source.contains(forbidden),
+            "agent-doc-queue must not own context-clear marker storage/freshness policy after the PCP projection migration: {forbidden}"
         );
     }
 
@@ -9658,30 +9731,96 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
         "orchestration must not expose a context-clear marker IO facade"
     );
 
-    let context_clear_adapter =
-        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/context_clear_in_flight.rs"))
-            .unwrap();
-    for forbidden in [
-        "pub struct ContextClearInFlight",
-        "head_sha256: active_head.map",
-        "head_bytes: active_head.map",
-        "const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS",
-        "saturating_sub(marker.written_at)",
-        "agent_doc_orchestration::",
-        "crate::snapshot",
+    let queue_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/lib.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-queue-io/src/context_clear_in_flight.rs")
+            .exists()
+            && !queue_io_lib.contains("pub mod context_clear_in_flight;"),
+        "agent-doc-queue-io must not keep the context-clear marker sidecar module"
+    );
+
+    let state_backbone =
+        fs::read_to_string(manifest_dir.join("agent-doc-state-backbone/src/lib.rs")).unwrap();
+    for required in [
+        "QUEUE_CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS",
+        "QueueContextClearStarted",
+        "QueueContextClearSettled",
+        "QueueContextClearDeferred",
+        "QueueContextClearProjection",
+        "QueueContextClearPhase",
+        "QueueContextClearEvent",
+        "QueueContextClearMachine",
+        "transition_queue_context_clear",
+        "is_pending_at",
+        "is_deferred_operator_clear",
+        "QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_MANUAL_COOLDOWN",
+        "is_manual_operator_clear_cooldown",
     ] {
         assert!(
-            !context_clear_adapter.contains(forbidden),
-            "queue IO context_clear_in_flight.rs must stay marker storage, not re-own stale-marker policy: {forbidden}"
+            state_backbone.contains(required),
+            "agent-doc-state-backbone must own context-clear projection policy: {required}"
         );
     }
+
+    let controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    for required in [
+        "pub fn queue_context_clear_started_for_file(",
+        "pub fn queue_context_clear_deferred_for_file(",
+        "pub fn queue_context_clear_manual_cooldown_for_file(",
+        "pub fn queue_context_clear_settled_for_file(",
+        "pub fn queue_context_clear_status_for_file(",
+        "pub fn queue_context_clear_in_flight_for_file(",
+        "pub fn queue_context_clear_deferred_operator_for_file(",
+        "pub fn queue_context_clear_manual_cooldown_active_for_file(",
+        "pub fn clear_queue_context_clear_in_flight_for_file(",
+        "pub fn clear_queue_context_clear_manual_cooldown_for_file(",
+        "pub fn clear_queue_context_clear_deferred_for_file(",
+        "\"queue_context_clear_started\"",
+        "\"queue_context_clear_deferred\"",
+        "\"queue_context_clear_settled\"",
+        "\"queue_context_clear_status\"",
+        "handle_queue_context_clear_started",
+        "handle_queue_context_clear_deferred",
+        "handle_queue_context_clear_settled",
+        "handle_queue_context_clear_status",
+    ] {
+        assert!(
+            controller_rpc.contains(required),
+            "project controller must own context-clear projection helper/RPC: {required}"
+        );
+    }
+
     assert!(
-        context_clear_adapter.contains("agent_doc_queue::queue::{")
-            && context_clear_adapter.contains("ContextClearInFlight")
-            && context_clear_adapter.contains("context_clear_in_flight_marker")
-            && context_clear_adapter.contains("context_clear_in_flight_marker_active"),
-        "queue IO context_clear_in_flight.rs should call queue-owned marker policy directly"
+        !controller_rpc.contains(".agent-doc/context-clear-in-flight")
+            && !state_backbone.contains(".agent-doc/context-clear-in-flight")
+            && !controller_rpc.contains(".agent-doc/deferred-clears")
+            && !state_backbone.contains(".agent-doc/deferred-clears")
+            && !controller_rpc.contains(".agent-doc/queue-cooldowns")
+            && !state_backbone.contains(".agent-doc/queue-cooldowns"),
+        "context-clear projection owners must not preserve the old marker path authority"
     );
+
+    let queue_io_marker =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/continuation_marker.rs"))
+            .unwrap();
+    for forbidden in [
+        "QUEUE_COOLDOWNS_DIR",
+        "cooldown_marker_path(",
+        "pub fn write_clear_cooldown(",
+        "pub fn clear_cooldown_marker(",
+        "pub fn clear_cooldown_active(",
+        ".agent-doc/queue-cooldowns",
+    ] {
+        assert!(
+            !queue_io_marker.contains(forbidden),
+            "queue IO must not own clear-cooldown sidecar storage after the projection migration: {forbidden}"
+        );
+    }
 
     let idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
@@ -9698,8 +9837,20 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
     assert!(
         idle_watch.contains("idle_queue_context_clear_in_flight_settle_ticks")
             && idle_watch.contains("IdleQueueContextClearInFlightSettleFacts")
-            && idle_watch.contains("agent_doc_queue_io::context_clear_in_flight::"),
-        "idle_watch.rs should call queue policy and focused queue IO directly"
+            && idle_watch.contains(
+                "agent_doc_controller_io::project_controller::queue_context_clear_in_flight_for_file"
+            )
+            && idle_watch.contains(
+                "agent_doc_controller_io::project_controller::clear_queue_context_clear_in_flight_for_file"
+            )
+            && idle_watch.contains(
+                "agent_doc_controller_io::project_controller::queue_context_clear_started_for_file"
+            )
+            && idle_watch.contains(
+                "agent_doc_controller_io::project_controller::clear_queue_context_clear_manual_cooldown_for_file"
+            )
+            && !idle_watch.contains("agent_doc_queue_io::context_clear_in_flight::"),
+        "idle_watch.rs should call queue policy and controller context-clear projection helpers directly"
     );
 }
 
@@ -10084,6 +10235,22 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         tracker.contains("## Coarse Extraction Ledger"),
         "crate decomposition PRD must track intentionally coarse extraction rounds"
     );
+    let statechart_plan = fs::read_to_string(
+        manifest_dir.join("tasks/agent-doc/plan-state-backbone-realtime-statecharts.md"),
+    )
+    .unwrap();
+    for required in [
+        "agent-doc-state-backbone",
+        "agent-doc-document-realtime",
+        "lazily-backed projection",
+        "Marker files may remain only as advisory wakeups",
+        "Visible-write guard proof",
+    ] {
+        assert!(
+            statechart_plan.contains(required),
+            "state backbone/realtime statechart theme must document placement rule: {required}"
+        );
+    }
     let coarse_section = tracker
         .split("## Coarse Extraction Ledger")
         .nth(1)
@@ -15256,8 +15423,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn require_dispatch_only_dispatch_start_proof(",
         "pub fn dispatch_only_sent_log_message_for(",
         "pub fn dispatch_only_sent_console_message_for(",
-        "agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(",
-        "agent_doc_supervisor_io::route_submit_inflight::mark_route_submit_blocked(",
+        "agent_doc_controller_io::project_controller::supervisor_recycle_status_for_file(",
+        "agent_doc_controller_io::project_controller::wait_for_supervisor_recycle_settle_for_file(",
+        "agent_doc_state_backbone::SupervisorRecyclePhase::InFlight",
+        "agent_doc_controller_io::project_controller::mark_route_submit_blocked(",
         "agent_doc_flow_io::log_flow_event(",
         "crate::dispatch_start::codex_dispatch_start_tracking_enabled(",
         "DispatchOnlyProofOutcomeFacts",
@@ -15297,7 +15466,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_only_source
                 .contains("agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source")
             && route_dispatch_only_source.contains(
-                "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit_with_reason"
+                "agent_doc_controller_io::project_controller::begin_route_submit_with_reason"
             ),
         "agent-doc-route-io dispatch_only.rs should own dispatch-only send/retry IO directly"
     );
@@ -15314,7 +15483,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct SupervisorIpcDispatchOptions",
         "pub struct DirectPaneDispatchOptions",
         "agent_doc_supervisor_io::ipc::send_command(",
-        "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit(",
+        "agent_doc_controller_io::project_controller::begin_route_submit(",
         "agent_doc_tmux_io::input_diag::log_text_submit(",
         "busy_dispatch_start_outcome(true, probe_proof)",
         "routed_dispatch_start_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test))",
@@ -15360,7 +15529,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "direct_pane_can_full_resend_not_landed(",
         "agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(",
         "agent_doc_tmux_io::send_submitted_text_for_harness_logged(",
-        "agent_doc_supervisor_io::recycle_inflight::wait_for_recycle_settle(",
+        "agent_doc_controller_io::project_controller::supervisor_recycle_pending_for_file(",
+        "agent_doc_controller_io::project_controller::wait_for_supervisor_recycle_settle_for_file(",
     ] {
         assert!(
             route_direct_pane_dispatch_source.contains(required_snippet),
@@ -17549,12 +17719,14 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn handle_replica_pull(",
         "pub fn handle_replica_ack(",
         "pub fn handle_replica_awareness(",
+        "pub fn handle_crdt_checkpoint(",
         "agent_doc_crdt_relay_io::register_replica_for_file(",
         "agent_doc_crdt_relay_io::deregister_replica_for_file(",
         "agent_doc_crdt_relay_io::relay_replica_update_for_file(",
         "agent_doc_crdt_relay_io::pull_replica_updates_for_file(",
         "agent_doc_crdt_relay_io::ack_replica_update_for_file(",
         "agent_doc_crdt_relay_io::set_replica_awareness_for_file(",
+        "agent_doc_crdt_relay_io::checkpoint_durable_projection_for_file(",
         "IpcResponse::ok(",
         "IpcResponse::err(",
     ] {
@@ -17592,6 +17764,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .contains("agent_doc_supervisor_crdt_io::handle_replica_register(file, identity)")
             && orchestration_supervisor_io
                 .contains("agent_doc_supervisor_crdt_io::handle_replica_awareness(")
+            && orchestration_supervisor_io
+                .contains("agent_doc_supervisor_crdt_io::handle_crdt_checkpoint(")
             && orchestration_supervisor_io.contains(
                 "impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShared"
             )
@@ -19690,10 +19864,6 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
         "pub fn plan_operator_queue_preemption(",
         "pub fn plan_busy_clear(",
         "pub fn plan_deferred_clear_step(",
-        "pub struct DeferredOperatorClear",
-        "pub fn deferred_operator_clear_marker(",
-        "pub fn deferred_operator_clear_marker_json(",
-        "pub fn parse_deferred_operator_clear_marker_json(",
     ] {
         assert!(
             queue_preemption.contains(required),
@@ -19711,11 +19881,6 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
         "pub fn load_continuation_marker(",
         "pub fn scan_pending_marker_continuations_for_roots",
         "pub fn record_continuation_requested_head(",
-        "pub fn write_deferred_operator_clear(",
-        "pub fn read_deferred_operator_clear(",
-        "deferred_operator_clear_marker(",
-        "deferred_operator_clear_marker_json(",
-        "parse_deferred_operator_clear_marker_json(",
     ] {
         assert!(
             queue_io_marker.contains(required),
@@ -19725,10 +19890,50 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
     for forbidden in [
         "pub struct DeferredOperatorClear",
         "DeferredOperatorClear {",
+        "pub fn write_deferred_operator_clear(",
+        "pub fn read_deferred_operator_clear(",
+        "pub fn clear_deferred_operator_clear_marker(",
+        "deferred_operator_clear_marker(",
+        "deferred_operator_clear_marker_json(",
+        "parse_deferred_operator_clear_marker_json(",
+        ".agent-doc/deferred-clears",
     ] {
         assert!(
             !queue_io_marker.contains(forbidden),
-            "queue continuation marker IO must not re-own deferred-clear payload policy: {forbidden}"
+            "queue continuation marker IO must not keep deferred-clear marker authority: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "pub struct DeferredOperatorClear",
+        "deferred_operator_clear_marker(",
+        "deferred_operator_clear_marker_json(",
+        "parse_deferred_operator_clear_marker_json(",
+    ] {
+        assert!(
+            !queue_preemption.contains(forbidden),
+            "agent-doc-queue must not own deferred-clear marker payload policy after projection migration: {forbidden}"
+        );
+    }
+    let state_backbone =
+        fs::read_to_string(manifest_dir.join("agent-doc-state-backbone/src/lib.rs")).unwrap();
+    let controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    for required in [
+        "QueueContextClearDeferred",
+        "QueueContextClearPhase::Deferred",
+        "QueueContextClearEvent::Deferred",
+        "is_deferred_operator_clear",
+        "pub fn queue_context_clear_deferred_for_file(",
+        "pub fn queue_context_clear_deferred_operator_for_file(",
+        "pub fn clear_queue_context_clear_deferred_for_file(",
+        "\"queue_context_clear_deferred\"",
+        "handle_queue_context_clear_deferred",
+    ] {
+        assert!(
+            state_backbone.contains(required) || controller_rpc.contains(required),
+            "deferred operator clears must use the context-clear projection: {required}"
         );
     }
     let orchestration_lib =
@@ -23280,8 +23485,11 @@ fn test_agent_doc_document_owns_model_projection_policy() {
     }
     let merge_io = fs::read_to_string(manifest_dir.join("agent-doc-merge-io/src/lib.rs")).unwrap();
     assert!(
-        merge_io.contains("agent_doc_snapshot_io::save_overlay_crdt_from_markdown(doc, markdown)?"),
-        "agent-doc-merge-io should delegate markdown-to-overlay sidecar encoding to snapshot IO"
+        merge_io.contains("agent_doc_snapshot_io::overlay_crdt_state_from_markdown(markdown)")
+            && merge_io.contains(
+                "agent_doc_snapshot_io::write_crdt_state_file_if_changed(&overlay_path, &overlay)?"
+            ),
+        "agent-doc-merge-io should delegate markdown-to-overlay encoding to snapshot IO and write it through the projection actor"
     );
     assert!(
         snapshot_io.contains("resolve_model_baseline_projection")
@@ -23322,6 +23530,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
         "pub fn load_pre_response(",
         "pub fn delete_pre_response(",
         "pub fn with_crdt_lock",
+        "pub fn with_crdt_lock_labeled",
         "pub fn load_crdt(",
         "pub fn load_overlay_crdt(",
         "pub fn save_crdt(",
@@ -23333,7 +23542,9 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
         "pub fn crdt_merge_base_state_with(",
         "pub fn read_crdt_state_file(",
         "pub fn write_crdt_state_file(",
+        "pub fn write_crdt_state_file_if_changed(",
         "pub fn write_overlay_crdt_state_file_from_markdown(",
+        "pub fn overlay_crdt_state_from_markdown(",
         "pub fn mps_enabled(",
         "pub fn probe_overlay_projection(",
         "pub fn save_baseline_model(",
@@ -23537,12 +23748,13 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
     for required in [
         "pub fn multinode_crdt_state(",
         "pub fn save_document_crdt(",
-        "agent_doc_snapshot_io::with_crdt_lock(doc, ||",
+        "agent_doc_snapshot_io::with_crdt_lock_labeled(doc, \"sidecar_projection\", ||",
         "agent_doc_snapshot_io::read_crdt_state_file(&nodes_path, \"per-node CRDT state\")?",
         "agent_doc_snapshot_io::read_crdt_state_file(&legacy_path, \"CRDT state\")?",
-        "agent_doc_snapshot_io::save_crdt(doc, legacy_state)?",
-        "agent_doc_snapshot_io::save_overlay_crdt_from_markdown(doc, markdown)?",
-        "agent_doc_snapshot_io::save_multinode_crdt(doc, &multinode.encode())?",
+        "agent_doc_snapshot_io::write_crdt_state_file_if_changed(&legacy_path, &legacy)?",
+        "agent_doc_snapshot_io::overlay_crdt_state_from_markdown(markdown)",
+        "agent_doc_snapshot_io::write_crdt_state_file_if_changed(&overlay_path, &overlay)?",
+        "agent_doc_snapshot_io::write_crdt_state_file_if_changed(&nodes_path, nodes)",
         "agent_doc_merge::crdt::MultiNodeState::decode_or_migrate(",
         "agent_doc_merge::crdt::MultiNodeState::from_text(",
     ] {
@@ -23565,7 +23777,6 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
-        "agent-doc-orchestration/src/git.rs",
         "agent-doc-write-converge-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -23600,6 +23811,13 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         write_ipc_transport.contains("save_ipc_snapshot_and_crdt_nonfatal(")
             && !write_ipc_transport.contains("agent_doc_merge_io::save_document_crdt("),
         "write/ipc/transport.rs should route IPC snapshot/CRDT persistence through agent-doc-write-converge-io"
+    );
+    let transient_cleanup_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/transient_cleanup.rs")).unwrap();
+    assert!(
+        transient_cleanup_source.contains("crdt_checkpoint_skip")
+            && transient_cleanup_source.contains("editor_authority_owns_sidecar_lock"),
+        "commit closeout must keep CRDT sidecar projection off the hot path"
     );
 }
 
@@ -25431,6 +25649,8 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let realtime_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
+    let crdt_relay_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-crdt-relay-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "enum SnapshotPersistMode",
         "fn snapshot_persist_mode(",
@@ -25483,6 +25703,19 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             && realtime_io_source.contains("VisibleWriteReconcile::DiskDrifted")
             && realtime_io_source.contains("pub fn guard_visible_write_reconcile_with_target("),
         "agent-doc-document-realtime-io should adapt visible-write effects into focused realtime reconcile outcomes directly"
+    );
+    assert!(
+        crdt_relay_io_source.contains("pub fn ensure_document_model(")
+            && crdt_relay_io_source.contains("document_model_ensure_start")
+            && crdt_relay_io_source.contains("send_publish_live_buffer")
+            && crdt_relay_io_source.contains("send_publish_live_buffer_file_signal")
+            && realtime_io_source
+                .contains("pub fn observe_live_editor_authority_after_model_ensure(")
+            && realtime_io_source
+                .contains("agent_doc_crdt_relay_io::ensure_document_model(file, source)")
+            && realtime_io_source
+                .contains("try_resolve_current_doc_from_file(file: &std::path::Path)"),
+        "preflight/current-doc resolution should attempt bounded document-model ensure before surfacing editor-authority failures"
     );
     assert!(
         write_source.contains("pub(crate) use agent_doc_document_realtime_io::{")
@@ -25674,6 +25907,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "orchestration must not keep a realtime_model source-file facade"
     );
     for required_dependency in [
+        "agent-doc-controller-io",
         "agent-doc-debounce",
         "agent-doc-document-realtime",
         "agent-doc-fs",
@@ -25752,6 +25986,22 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub struct VisibleWriteTypingFacts",
         "pub enum VisibleWriteDecision",
         "pub fn decide_visible_write_after_typing",
+        "pub struct VisibleWriteCommitCandidateFacts",
+        "pub enum VisibleWriteCommitCandidateDecision",
+        "pub enum VisibleWriteCommitCandidateState",
+        "pub enum VisibleWriteCommitCandidateEvent",
+        "pub struct VisibleWriteCommitCandidateMachine",
+        "pub fn transition_visible_write_commit_candidate",
+        "pub fn visible_write_commit_candidate_state",
+        "pub fn decide_visible_write_commit_candidate",
+        "pub struct VisibleWriteMaterializedCarryForwardFacts",
+        "pub enum VisibleWriteMaterializedCarryForwardDecision",
+        "pub enum VisibleWriteMaterializedCarryForwardState",
+        "pub enum VisibleWriteMaterializedCarryForwardEvent",
+        "pub struct VisibleWriteMaterializedCarryForwardMachine",
+        "pub fn transition_visible_write_materialized_carry_forward",
+        "pub fn visible_write_materialized_carry_forward_state",
+        "pub fn decide_visible_write_materialized_carry_forward",
         "pub fn visible_write_guard_event",
         "pub fn visible_write_current_changed_event",
         "pub struct FullContentSourceProof",
@@ -25842,10 +26092,54 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     }
     assert!(
         realtime_io_source.contains("write_policy::decide_visible_write_after_typing")
+            && realtime_io_source.contains("write_policy::decide_visible_write_commit_candidate")
             && realtime_io_source.contains("write_policy::visible_write_guard_event")
+            && realtime_io_source.contains(
+                "agent_doc_controller_io::project_controller::visible_write_commit_candidate_applied_for_file"
+            )
             && realtime_io_source.contains("agent_doc_debounce::await_idle_via_file"),
-        "agent-doc-document-realtime-io must own the visible-write guard effect adapter"
+        "agent-doc-document-realtime-io must adapt visible-write effects into focused realtime policy and lazily receipt proof"
     );
+    for forbidden_snippet in [
+        "visible_write_live_buffer_matches_target",
+        "visible_write_live_buffer_committed_blob_reconcile",
+        "visible_write_replica_churn_reconcile",
+    ] {
+        assert!(
+            !realtime_io_source.contains(forbidden_snippet),
+            "visible-write guard must not preserve legacy non-PCP allowances: {forbidden_snippet}"
+        );
+    }
+    let orchestration_git_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let controller_rpc_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    for required_snippet in [
+        "VisibleWriteMaterializedCarryForwardObserved",
+        "record_visible_write_materialized_carry_forward_for_file",
+        "visible_write_materialized_carry_forward_for_file",
+        "handle_visible_write_materialized_carry_forward_observed",
+        "handle_visible_write_materialized_carry_forward_status",
+    ] {
+        assert!(
+            controller_rpc_source.contains(required_snippet)
+                || realtime_write_policy.contains(required_snippet)
+                || orchestration_git_source.contains(required_snippet),
+            "visible-write carry-forward proof must stay in PCP/realtime adapters: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "staged_snapshot_matches_synced_operator_buffer",
+        "staged_snapshot_excludes_materialized_operator_buffer",
+        "live_buffer_insertions_are_materialized_in_file",
+    ] {
+        assert!(
+            !orchestration_git_source.contains(forbidden_snippet),
+            "commit guard must not preserve legacy non-PCP visible-write allowances: {forbidden_snippet}"
+        );
+    }
     let run_source = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     assert!(
         !write_source.contains("pub use agent_doc_document_realtime_io::guard_visible_write_idle")
@@ -27392,8 +27686,9 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
             && route_command.contains("pub struct RouteCommandEffects")
             && route_command.contains("pub fn run_with_tmux_with_options(")
             && route_command.contains("agent_doc_sync_io::resync::prune_with_tmux_timed_in_mode")
-            && route_command
-                .contains("agent_doc_queue_io::continuation_marker::clear_cooldown_marker")
+            && route_command.contains(
+                "agent_doc_controller_io::project_controller::clear_queue_context_clear_manual_cooldown_for_file"
+            )
             && route_command
                 .contains("prepare_route_document(file, effects.document_prep_effects)")
             && route_command
@@ -27477,11 +27772,12 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "stale_snapshot_reset_drift(snapshot_doc, current_doc)",
         "fn classify_stale_snapshot_visible_rebase",
         "fn component_change_is_turn_independent",
-        "pub fn read_ack_content_sidecar",
+        "pub enum VisibleWriteContentAuthority",
         "pub fn ipc_direct_disk_degraded",
         "pub fn record_ipc_socket_ack_timeout",
         "pub fn clear_ipc_socket_ack_timeouts",
-        "pub fn poll_ack_content_sidecar",
+        "pub fn poll_ack_content_lazily_event",
+        "pub fn poll_visible_write_content_lazily_event_or_projection",
         "pub fn editor_ipc_write_wedged",
         "pub fn stale_supervisor_write_short_circuit",
         "pub fn schedule_stale_supervisor_pcp_recycle",
@@ -27518,6 +27814,15 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         assert!(
             write_converge_io.contains(required_snippet),
             "agent-doc-write-converge-io must own write convergence IO: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "pub fn read_ack_content_sidecar",
+        "pub fn poll_ack_content_sidecar",
+    ] {
+        assert!(
+            !write_converge_io.contains(forbidden_snippet),
+            "agent-doc-write-converge-io must not restore legacy ACK sidecar helpers: {forbidden_snippet}"
         );
     }
     assert!(

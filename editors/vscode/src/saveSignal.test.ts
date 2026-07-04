@@ -1,7 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import * as path from 'path';
-import { parseSaveDocumentSignal, ackContentSidecarPath } from './saveSignal';
+import { parseSaveDocumentSignal } from './saveSignal';
 
 describe('parseSaveDocumentSignal', () => {
     it('parses a well-formed signal with file + patch_id', () => {
@@ -33,15 +32,5 @@ describe('parseSaveDocumentSignal', () => {
 
     it('returns null when the file path is empty', () => {
         assert.strictEqual(parseSaveDocumentSignal(JSON.stringify({ file: '' })), null);
-    });
-});
-
-describe('ackContentSidecarPath', () => {
-    it('derives the sibling ack-content sidecar from the patches dir', () => {
-        const patchesDir = path.join('/repo', '.agent-doc', 'patches');
-        assert.strictEqual(
-            ackContentSidecarPath(patchesDir, 'save-123'),
-            path.join('/repo', '.agent-doc', 'ack-content', 'save-123.md'),
-        );
     });
 });

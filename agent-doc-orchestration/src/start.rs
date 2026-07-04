@@ -895,7 +895,7 @@ fn clear_cooldown_blocks_auto_dispatch(
     session_log: &mut Option<std::fs::File>,
     logged: &mut bool,
 ) -> bool {
-    match agent_doc_queue_io::continuation_marker::clear_cooldown_active(path) {
+    match queue_context_clear_blocks_auto_dispatch(path) {
         Ok(true) => {
             if !*logged {
                 log_event(
@@ -938,6 +938,12 @@ fn clear_cooldown_blocks_auto_dispatch(
             true
         }
     }
+}
+
+fn queue_context_clear_blocks_auto_dispatch(path: &Path) -> anyhow::Result<bool> {
+    let projection =
+        agent_doc_controller_io::project_controller::queue_context_clear_status_for_file(path)?;
+    Ok(projection.is_manual_operator_clear_cooldown() || projection.is_deferred_operator_clear())
 }
 
 #[cfg(unix)]

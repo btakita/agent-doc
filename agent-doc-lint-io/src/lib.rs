@@ -51,6 +51,8 @@ use tagpath::lint::agent_doc::{
     AgentDocOptions, LintFinding, LintSeverity, format_findings_text, lint_agent_doc,
 };
 
+use agent_doc_element::ElementShape;
+
 /// Best-effort lint marker logger used by production callers.
 pub type OpsLogger = fn(&Path, &str);
 
@@ -126,9 +128,45 @@ pub fn run_with_logger(file: &Path, cli: Option<LintCliMode>, ops_logger: OpsLog
         fs_checks: false,
         rule_filter: Vec::new(),
     };
-    let findings = lint_agent_doc(file, &content, &opts);
+    let findings =
+        reconcile_findings_with_agent_doc_registry(lint_agent_doc(file, &content, &opts));
 
     classify_and_emit(file, &findings, mode, source, ops_logger)
+}
+
+fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec<LintFinding> {
+    findings
+        .into_iter()
+        .filter(|finding| !is_registry_known_unknown_component_finding(finding))
+        .collect()
+}
+
+fn is_registry_known_unknown_component_finding(finding: &LintFinding) -> bool {
+    if finding.rule != "agent-doc/unknown-component" {
+        return false;
+    }
+    let Some(name) = unknown_component_name_from_message(&finding.message) else {
+        return false;
+    };
+    registry_known_agent_marker_name(name)
+}
+
+fn unknown_component_name_from_message(message: &str) -> Option<&str> {
+    let token = message.split('`').nth(1)?;
+    let token = token.strip_prefix('/').unwrap_or(token);
+    token.strip_prefix("agent:")
+}
+
+fn registry_known_agent_marker_name(name: &str) -> bool {
+    if agent_doc_element_registry::find_built_in(name).is_some() {
+        return true;
+    }
+
+    let Some((base, _suffix)) = name.split_once(':') else {
+        return false;
+    };
+    agent_doc_element_registry::find_built_in(base)
+        .is_some_and(|descriptor| descriptor.shape == ElementShape::InlineMarker)
 }
 
 fn classify_and_emit(
@@ -226,6 +264,51 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let file = write_doc(&dir, "clean.md", CLEAN_DOC);
         run(&file, None).expect("clean doc must pass lint gate");
+    }
+
+    #[test]
+    fn notes_component_reconciles_against_agent_doc_registry() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:notes -->\n\
+            operator-owned scratch state\n\
+            <!-- /agent:notes -->\n";
+        let file = write_doc(&dir, "notes.md", doc);
+        run(&file, None).expect("registered notes component must pass lint gate");
+    }
+
+    #[test]
+    fn boundary_marker_artifact_reconciles_against_inline_registry_element() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:boundary:a37c9696 -->\n\
+            <!-- /agent:exchange -->\n";
+        let file = write_doc(&dir, "boundary-artifact.md", doc);
+        run(&file, None).expect("registered boundary inline marker artifact must pass lint gate");
+    }
+
+    #[test]
+    fn unregistered_component_still_blocks_after_registry_reconciliation() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:operator-notes -->\n\
+            scratch\n\
+            <!-- /agent:operator-notes -->\n";
+        let file = write_doc(&dir, "unknown.md", doc);
+        let err = run(&file, None).expect_err("unregistered component must still block");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("agent-doc/unknown-component"),
+            "expected unknown-component rule in error, got: {msg}"
+        );
     }
 
     #[test]

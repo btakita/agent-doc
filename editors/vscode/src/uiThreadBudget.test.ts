@@ -56,8 +56,8 @@ describe('editor UI thread budget', () => {
 
         const handlerStart = source.indexOf('private async processPublishLiveBufferSignal');
         assert.ok(handlerStart >= 0, 'publish-live-buffer signal handler should exist');
-        const handlerEnd = source.indexOf('private writeAckContent', handlerStart);
-        assert.ok(handlerEnd > handlerStart, 'handler should precede ack-content helper');
+        const handlerEnd = source.indexOf('private writeEditorContentProjection', handlerStart);
+        assert.ok(handlerEnd > handlerStart, 'handler should precede content projection helper');
         const handler = source.slice(handlerStart, handlerEnd);
         assert.ok(handler.includes('this.publishLiveBufferNow(document, projectRoot);'));
         assert.strictEqual(handler.includes('workspace.applyEdit'), false);
@@ -69,7 +69,7 @@ describe('editor UI thread budget', () => {
         assert.ok(publishEnd > publishStart, 'publisher should precede editor-op scheduler');
         const publisher = source.slice(publishStart, publishEnd);
         assert.ok(publisher.includes('document.getText()'));
-        assert.ok(publisher.includes('native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID);'));
+        assert.ok(publisher.includes('native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID, noUnsavedOperatorEdits);'));
         assert.strictEqual(publisher.includes('workspace.applyEdit'), false);
         assert.strictEqual(publisher.includes('.save('), false);
     });

@@ -1,7 +1,7 @@
 //! # Module: write
 //!
 //! All write paths for agent responses: inline append, template patch, stream
-//! (CRDT), IPC-to-IDE-plugin, and recovery helpers. Each path follows the same
+//! flush, IPC-to-IDE-plugin, and recovery helpers. Each path follows the same
 //! invariant: save pending → acquire lock → compute `content_ours` (baseline +
 //! response) → merge with any concurrent user edits → atomic write → save a
 //! snapshot that is usually `final_content` (the actual post-merge disk state),
@@ -39,13 +39,14 @@
 //!   `agent_doc_template_io::apply_patches`, then performs the same lock/merge/atomic-write
 //!   cycle as `run`.
 //!
-//! - `run_stream`: CRDT stream-flush mode. Like `run_template` but uses
-//!   `merge::merge_contents_crdt` for conflict-free merge. Saves both a text
-//!   snapshot and a CRDT state snapshot after every flush. Supports IPC-first
-//!   writes: when `.agent-doc/patches/` exists and `--force-disk` is not set,
-//!   tries `try_ipc` first; on timeout or missing proof, retains the pending
-//!   response/queued patch and fails closed so the operator retries through the
-//!   editor path instead of writing behind the active buffer.
+//! - `run_stream`: template stream-flush mode. Like `run_template` but resolves
+//!   concurrent changes through the document-model component/semantic merge
+//!   policy, then persists the text snapshot and compatibility state snapshot
+//!   after every flush. Supports IPC-first writes: when `.agent-doc/patches/`
+//!   exists and `--force-disk` is not set, tries `try_ipc` first; on timeout or
+//!   missing proof, retains the pending response/queued patch and fails closed
+//!   so the operator retries through the editor path instead of writing behind
+//!   the active buffer.
 //!
 //! - `run_ipc`: explicit IPC-only mode. Serialises patches as JSON to
 //!   `.agent-doc/patches/<hash>.json`, polls for the plugin to delete the file
@@ -86,7 +87,7 @@
 //!
 //! - `apply_template_from_string`: recovery variant of `run_template`.
 //!
-//! - `apply_stream_from_string`: recovery variant of `run_stream` (CRDT merge).
+//! - `apply_stream_from_string`: recovery variant of `run_stream`.
 //!
 //! - `agent_doc_turn::heuristics::future_work_signal`: detects deferred-work
 //!   phrases in responses while `run_stream` owns only the warning side effect
@@ -223,10 +224,13 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 use agent_doc_document::write_normalization::{
-    SplicePendingComponentWarning, cleanup_resolved_backlog_prompts_after_response,
-    count_code_fence_openings, latest_response_block_missing_from_current,
-    lift_pending_from_exchange, splice_pending_component,
+    SplicePendingComponentWarning, splice_pending_component,
+};
+use agent_doc_document::write_normalization::{
+    cleanup_resolved_backlog_prompts_after_response, count_code_fence_openings,
+    latest_response_block_missing_from_current, lift_pending_from_exchange,
     splice_response_block_into_current_exchange, strip_boundary_for_dedup,
 };
 use agent_doc_document_realtime::write_policy::{
@@ -452,6 +456,7 @@ fn log_resolved_backlog_prompt_cleanup(file: &Path, removed_total: usize) {
     );
 }
 
+#[cfg(test)]
 fn log_splice_pending_component_warning(warning: &SplicePendingComponentWarning) {
     match warning {
         SplicePendingComponentWarning::SourceParseFailed(err) => {
@@ -976,8 +981,12 @@ fn apply_pending_and_status_mutations(
     has_pending_ops: bool,
 ) -> Result<()> {
     if has_pending_ops || options.status.is_some() {
-        let current_content = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let current_content =
+            agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)
+                .map(|resolved| resolved.content)
+                .with_context(|| {
+                    format!("failed to resolve current document {}", file.display())
+                })?;
         let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
         guard_stale_snapshot_recovery_only(
             file,
@@ -1021,8 +1030,10 @@ fn apply_pending_and_status_mutations(
                     // the front-insert default so anchor ids added this same cycle resolve.
                     for pair in options.pending_add_after.chunks(2) {
                         if let [anchor, text] = pair {
-                            let id = backlog_cmd::add_after(file, anchor, text)
-                                .with_context(|| format!("failed to apply --backlog-add-after {anchor}"))?;
+                            let id =
+                                backlog_cmd::add_after(file, anchor, text).with_context(|| {
+                                    format!("failed to apply --backlog-add-after {anchor}")
+                                })?;
                             same_cycle_added_ids.push(id);
                         } else {
                             anyhow::bail!("--backlog-add-after expects repeated ID TEXT pairs");
@@ -1030,8 +1041,10 @@ fn apply_pending_and_status_mutations(
                     }
                     for pair in options.pending_add_before.chunks(2) {
                         if let [anchor, text] = pair {
-                            let id = backlog_cmd::add_before(file, anchor, text)
-                                .with_context(|| format!("failed to apply --backlog-add-before {anchor}"))?;
+                            let id =
+                                backlog_cmd::add_before(file, anchor, text).with_context(|| {
+                                    format!("failed to apply --backlog-add-before {anchor}")
+                                })?;
                             same_cycle_added_ids.push(id);
                         } else {
                             anyhow::bail!("--backlog-add-before expects repeated ID TEXT pairs");
@@ -1045,7 +1058,9 @@ fn apply_pending_and_status_mutations(
                     for pair in options.icebox_add_after.chunks(2) {
                         if let [anchor, text] = pair {
                             let id = backlog_cmd::icebox_add_after(file, anchor, text)
-                                .with_context(|| format!("failed to apply --icebox-add-after {anchor}"))?;
+                                .with_context(|| {
+                                    format!("failed to apply --icebox-add-after {anchor}")
+                                })?;
                             same_cycle_added_ids.push(id);
                         } else {
                             anyhow::bail!("--icebox-add-after expects repeated ID TEXT pairs");
@@ -1054,7 +1069,9 @@ fn apply_pending_and_status_mutations(
                     for pair in options.icebox_add_before.chunks(2) {
                         if let [anchor, text] = pair {
                             let id = backlog_cmd::icebox_add_before(file, anchor, text)
-                                .with_context(|| format!("failed to apply --icebox-add-before {anchor}"))?;
+                                .with_context(|| {
+                                    format!("failed to apply --icebox-add-before {anchor}")
+                                })?;
                             same_cycle_added_ids.push(id);
                         } else {
                             anyhow::bail!("--icebox-add-before expects repeated ID TEXT pairs");
@@ -1416,7 +1433,14 @@ fn run_command_inner(
     } else if options.is_stream || template_flag_on_crdt_doc {
         if template_flag_on_crdt_doc && !options.is_stream {
             eprintln!(
-                "[write] CRDT document received --template; routing through stream/CRDT write path"
+                "[write] template write requested for realtime document; routing through stream document-model write path"
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "template_flag_realtime_routed_to_stream file={} recovery=reconcile_document_model",
+                    file.display()
+                ),
             );
             agent_doc_ops_log_io::log_op(
                 file,
@@ -1759,6 +1783,13 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                 // flushes live editor replicas to a consistent cut before commit.
                 let barrier_ready = agent_doc_crdt_relay_io::commit_barrier_for_file(file);
                 if !barrier_ready {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "commit_editor_authority_unavailable file={} reason=relay_convergence_pending",
+                            file.display()
+                        ),
+                    );
                     log_closeout_guard(
                         file,
                         agent_doc_flow::types::FlowStage::PreCommitGuard,
@@ -1766,12 +1797,12 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                         agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
                     );
                     eprintln!(
-                        "[commit] skipped: live editor replica delivery is still pending for {}",
+                        "[commit] skipped: live editor relay convergence is still pending for {}",
                         file.display()
                     );
                     if session_document {
                         anyhow::bail!(
-                            "live editor replica delivery is still pending for {}; retry after the editor buffer reaches disk",
+                            "editor is the current authority for {}, but CRDT relay convergence is still pending; disk is a non-authoritative replica and was not used as commit authority",
                             file.display()
                         );
                     }
@@ -2775,13 +2806,15 @@ mod tests {
             &editor_visible,
             Some("jetbrains:test"),
         );
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = finalize_commit(&doc, CommitMode::BestEffort)
-            .expect_err("session best-effort commit must fail closed on an unflushed live buffer");
+            .expect_err("session best-effort commit must fail closed on active editor authority");
         assert!(
-            err.to_string()
-                .contains("session-document best-effort commit failed")
-                || err.to_string().contains("live editor buffer"),
+            err.to_string().contains("editor is the current authority")
+                && err
+                    .to_string()
+                    .contains("disk is a non-authoritative replica"),
             "error should identify the unresolved session closeout:\n{err}"
         );
 
@@ -2794,8 +2827,9 @@ mod tests {
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("commit_blocked_live_buffer_ahead_of_disk file="),
-            "blocked live-buffer commit should be logged:\n{log}"
+            log.contains("commit_editor_authority_unavailable file=")
+                && log.contains("reason=relay_convergence_pending"),
+            "blocked editor-authority commit should be logged:\n{log}"
         );
     }
 
@@ -3048,7 +3082,8 @@ mod tests {
         .unwrap_err();
         let err = format!("{err:?}");
         assert!(
-            err.contains("refused direct disk write"),
+            err.contains("editor is the current authority")
+                && err.contains("disk is a non-authoritative replica"),
             "non-force closeout pending maintenance must protect the active listener: {err}"
         );
         assert_eq!(
@@ -3167,8 +3202,11 @@ mod tests {
         .unwrap_err();
         let err = format!("{err:?}");
         assert!(
-            err.contains("visible editor buffer"),
-            "pending maintenance should defer on unsaved operator buffer before IPC: {err}"
+            (err.contains("editor is the current authority")
+                || err.contains("editor authority unavailable"))
+                && err.contains("editor_attached_model_missing")
+                && err.contains("disk is a non-authoritative replica"),
+            "pending maintenance should defer on editor authority before IPC: {err}"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -3177,9 +3215,10 @@ mod tests {
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_deferred_live_buffer_changed")
-                && log.contains("source=pending_maintenance"),
-            "defer should be attributed to the visible-write guard:\n{log}"
+            log.contains("visible_write_editor_authority_unavailable")
+                && log.contains("source=pending_maintenance")
+                && log.contains("reason=missing_replica"),
+            "defer should be attributed to editor authority resolution:\n{log}"
         );
         assert!(
             !log.contains("pending_maintenance_editor_convergence_attempt"),

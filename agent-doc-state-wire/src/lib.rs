@@ -27,13 +27,15 @@ use agent_doc_state_backbone::{DocumentStateProjection, EventLedger, StateOwner}
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 
-/// The eight agent-doc state node `type_tag`s: the stable cross-language
+/// The agent-doc state node `type_tag`s: the stable cross-language
 /// vocabulary plugins address nodes by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentDocNodeType {
     /// `agent_doc.document.baseline`: document baseline projection.
     DocumentBaseline,
+    /// `agent_doc.document.authority`: document authority projection.
+    DocumentAuthority,
     /// `agent_doc.queue`: queue document singleton.
     Queue,
     /// `agent_doc.queue.head`: one per queue head node key.
@@ -56,6 +58,7 @@ impl AgentDocNodeType {
     pub const fn type_tag(self) -> &'static str {
         match self {
             Self::DocumentBaseline => "agent_doc.document.baseline",
+            Self::DocumentAuthority => "agent_doc.document.authority",
             Self::Queue => "agent_doc.queue",
             Self::QueueHead => "agent_doc.queue.head",
             Self::CloseoutCycle => "agent_doc.closeout.cycle",
@@ -67,8 +70,9 @@ impl AgentDocNodeType {
     }
 
     /// All node kinds in canonical order for deterministic node walks.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::DocumentBaseline,
+        Self::DocumentAuthority,
         Self::Queue,
         Self::QueueHead,
         Self::CloseoutCycle,
@@ -261,6 +265,14 @@ fn collect_nodes(projection: &DocumentStateProjection) -> Vec<ProjectionNodeReco
         });
     }
 
+    if let Some(authority) = &projection.document.latest_authority {
+        nodes.push(ProjectionNodeRecord {
+            node_type: AgentDocNodeType::DocumentAuthority,
+            entity_key: projection.document_hash.clone(),
+            payload: b64_payload(authority),
+        });
+    }
+
     // Queue document singleton is emitted whenever there is any queue state so a
     // plugin can track the active head even before a head is selected.
     let has_queue_state = projection.queue.active_head.is_some()
@@ -444,6 +456,7 @@ fn collect_roots(document_hash: &str, nodes: &[ProjectionNodeRecord]) -> Vec<u64
             matches!(
                 node.node_type,
                 AgentDocNodeType::DocumentBaseline
+                    | AgentDocNodeType::DocumentAuthority
                     | AgentDocNodeType::Queue
                     | AgentDocNodeType::CloseoutCycle
                     | AgentDocNodeType::Route
@@ -614,7 +627,9 @@ pub fn subscribe(ledger: &EventLedger, document_hash: &str, last_epoch: u64) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact, StateOwner};
+    use agent_doc_state_backbone::{
+        DocumentAuthority, EventLedger, StateEvent, StateFact, StateOwner,
+    };
 
     fn baseline_event(id: &str, doc: &str, cycle: &str, baseline: &str) -> StateEvent {
         StateEvent::new(
@@ -635,6 +650,26 @@ mod tests {
                 document_hash: doc.to_string(),
                 cycle_id: cycle.to_string(),
                 session_id: None,
+            },
+        )
+    }
+
+    fn authority_event(
+        id: &str,
+        doc: &str,
+        authority: DocumentAuthority,
+        authority_epoch: u64,
+    ) -> StateEvent {
+        StateEvent::new(
+            id,
+            StateFact::DocumentAuthorityObserved {
+                document_hash: doc.to_string(),
+                authority,
+                authority_epoch,
+                source: "test".to_string(),
+                reason: "test".to_string(),
+                content_hash: Some("hash".to_string()),
+                editor_id: None,
             },
         )
     }
@@ -712,6 +747,7 @@ mod tests {
             AgentDocNodeType::ALL.map(AgentDocNodeType::type_tag),
             [
                 "agent_doc.document.baseline",
+                "agent_doc.document.authority",
                 "agent_doc.queue",
                 "agent_doc.queue.head",
                 "agent_doc.closeout.cycle",
@@ -770,6 +806,40 @@ mod tests {
         // Baseline + cycle are roots.
         assert!(snapshot.roots.contains(&baseline_slot));
         assert!(snapshot.roots.contains(&cycle_slot));
+    }
+
+    #[test]
+    fn cold_read_emits_document_authority_node() {
+        let mut ledger = EventLedger::new();
+        let doc = "authority-doc";
+        ledger.append(authority_event(
+            "e1",
+            doc,
+            DocumentAuthority::EditorRelay,
+            42,
+        ));
+
+        let result = subscribe(&ledger, doc, 0);
+        let snapshot = match &result {
+            WireSubscribe::Snapshot(s) => s,
+            _ => panic!("last_epoch=0 must yield a snapshot"),
+        };
+        let authority_slot = slot_id(doc, AgentDocNodeType::DocumentAuthority.type_tag(), doc);
+        let authority_node = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.slot_id == authority_slot)
+            .expect("authority node should be present");
+        assert_eq!(
+            authority_node.type_tag,
+            AgentDocNodeType::DocumentAuthority.type_tag()
+        );
+        assert!(snapshot.roots.contains(&authority_slot));
+        let payload = authority_node.payload.as_ref().expect("authority payload");
+        let bytes = BASE64_STANDARD.decode(payload).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["authority"], "editor_relay");
+        assert_eq!(json["authority_epoch"], 42);
     }
 
     #[test]
@@ -923,7 +993,7 @@ mod tests {
     /// | `cycle_phase` | `preflight_started` | `committed` |
     /// | `queue_head_phase` | `selected` | `completed` |
     /// | `epoch` | 3 | 6 |
-    /// | transport patch phase | (absent) | `acked` |
+    /// | transport patch phase | (absent) | `applied` |
     ///
     /// This Rust half (a) parses the canonical fixtures and asserts their
     /// declared assertions ARE that pinned expectation, then (b) drives an
@@ -1002,7 +1072,7 @@ mod tests {
         /// derived expectation the fixtures declare. The fixture encodes a
         /// snapshot (epoch 3): baseline + closeout.cycle(preflight_started) +
         /// queue.head(selected), then a delta (→epoch 6): cycle→committed,
-        /// head→completed, transport.patch(acked) added. We replay the
+        /// head→completed, transport.patch(applied) added. We replay the
         /// equivalent accepted-event stream and assert the projection summary.
         #[test]
         fn ledger_projection_converges_to_canonical_expectation() {
@@ -1077,8 +1147,8 @@ mod tests {
                     hosting_epoch: None,
                 },
             ));
-            // Transport patch acked at editor generation 12. The patch reaches
-            // `acked` via queued→acked; with no OwnerGenerationChanged the
+            // Transport patch applied at editor generation 12. The patch reaches
+            // `applied` via queued→applied; with no OwnerGenerationChanged the
             // generation gate accepts gen 12 (none_or).
             ledger.append(StateEvent::new(
                 "p6",
@@ -1090,7 +1160,7 @@ mod tests {
             ));
             ledger.append(StateEvent::new(
                 "p7",
-                StateFact::EditorAckObserved {
+                StateFact::EditorPatchApplied {
                     document_hash: doc.to_string(),
                     patch_id: "patch-1".to_string(),
                     actor_generation: 12,
@@ -1099,7 +1169,7 @@ mod tests {
 
             // Two transport events advance the epoch to 5 then 6 — but the
             // fixture pins epoch 6 to "snapshot(3) + 3 mutation events". We model
-            // commit + complete + (queued+acked) = 4 events → epoch 7. The
+            // commit + complete + (queued+applied) = 4 events → epoch 7. The
             // fixture's epoch is the lazily-spec accepted-event frontier for its
             // op set; the cross-language pin is the *derived phases*, which is the
             // signal editors consume. Assert the derived expectation directly.
@@ -1124,22 +1194,22 @@ mod tests {
                 agent_doc_state_backbone::QueueHeadPhase::Completed,
                 "queue head must converge to completed"
             );
-            // transport.patch phase = acked
+            // transport.patch phase = applied
             let patch = after
                 .transport
                 .patches
                 .get("patch-1")
-                .expect("transport patch present after ack");
+                .expect("transport patch present after apply");
             assert_eq!(
                 patch.phase,
-                agent_doc_state_backbone::TransportPatchPhase::Acked,
-                "transport patch must converge to acked"
+                agent_doc_state_backbone::TransportPatchPhase::Applied,
+                "transport patch must converge to applied"
             );
             assert_eq!(patch.actor_generation, 12);
 
             // And the same expectation reaches the wire snapshot the editors
             // mirror: build a snapshot and confirm the cycle/head/patch payloads
-            // decode to committed/completed/acked. This is the exact wire the
+            // decode to committed/completed/applied. This is the exact wire the
             // kt/js mirrors apply, so it ties the ledger pin to the mirror pin.
             let wire = build_snapshot(doc, &after, ledger.document_epoch(doc));
             let decode = |type_tag: &str| -> serde_json::Value {
@@ -1154,7 +1224,7 @@ mod tests {
             };
             assert_eq!(decode("agent_doc.closeout.cycle")["phase"], "committed");
             assert_eq!(decode("agent_doc.queue.head")["phase"], "completed");
-            assert_eq!(decode("agent_doc.transport.patch")["phase"], "acked");
+            assert_eq!(decode("agent_doc.transport.patch")["phase"], "applied");
         }
     }
 

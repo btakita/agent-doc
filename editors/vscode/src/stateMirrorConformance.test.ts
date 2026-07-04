@@ -21,7 +21,7 @@ import { AgentDocNodeType, StateGraphMirror } from './stateMirror';
  * | cycle_phase      | preflight_started | committed   |
  * | queue_head_phase | selected          | completed   |
  * | epoch            | 3                 | 6           |
- * | transport phase  | (absent)          | acked       |
+ * | transport phase  | (absent)          | applied       |
  *
  * The fixtures use the lazily-spec *generic graph* wire shape
  * (`node` / `state.Payload` byte arrays / adjacently-tagged `{ CellSet: … }`).
@@ -141,10 +141,10 @@ describe('state mirror cross-editor conformance parity (#6n5j)', () => {
         assert.strictEqual(phaseOf(mirror, AgentDocNodeType.CLOSEOUT_CYCLE), 'committed');
         assert.strictEqual(phaseOf(mirror, AgentDocNodeType.QUEUE_HEAD), 'completed');
 
-        // Transport patch added mid-cycle, phase acked — readable via the
+        // Transport patch added mid-cycle, phase applied — readable via the
         // reactive summary the editor consumes.
         const summary = mirror.summary();
-        assert.strictEqual(summary.latestTransportPhase, 'acked');
+        assert.strictEqual(summary.latestTransportPhase, 'applied');
         assert.strictEqual(mirror.nodesOfType(AgentDocNodeType.TRANSPORT_PATCH).length, 1);
     });
 

@@ -26,9 +26,13 @@
 //!   cycle; duplicate terminal bookkeeping stays idempotent for already-committed
 //!   cycles.
 //! - Phase transitions are accepted through `cycle_state_machine`; the sidecar
-//!   remains the durable crash-recovery log emitted after that transition table
-//!   accepts an event.
-//! - `load()` returns the current persisted state when present.
+//!   remains a compatibility crash-recovery projection emitted after that
+//!   transition table accepts an event, and accepted transitions also append
+//!   typed closeout facts into the state backbone.
+//! - `load()` returns the current persisted JSON compatibility projection when
+//!   present.
+//! - `load_closeout_projection()` returns the state-backbone closeout projection
+//!   when lazily facts have been recorded for the document.
 //!
 //! ## Agentic Contracts
 //! - State is per-document, never global across the repo.
@@ -330,6 +334,137 @@ pub fn load(file: &Path) -> Result<Option<CycleState>> {
     Ok(Some(state))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedCloseoutState {
+    pub cycle_id: Option<String>,
+    pub session_id: Option<String>,
+    pub phase: Option<CyclePhase>,
+    pub capture_id: Option<String>,
+    pub response_sha256: Option<String>,
+    pub patch_id: Option<String>,
+    pub commit: Option<String>,
+    pub session_check_passed: bool,
+    pub abandoned_reason: Option<String>,
+}
+
+impl ProjectedCloseoutState {
+    pub fn phase_is_open(&self) -> Option<bool> {
+        self.phase.map(CyclePhase::is_open)
+    }
+
+    pub fn matches_cycle(&self, cycle_id: &str) -> bool {
+        self.cycle_id.as_deref() == Some(cycle_id)
+    }
+
+    pub fn event_label(&self, phase: CyclePhase) -> String {
+        match phase {
+            CyclePhase::PreflightStarted => "state_backbone_preflight_started".to_string(),
+            CyclePhase::ResponseCaptured => self
+                .capture_id
+                .as_deref()
+                .map(|capture_id| {
+                    format!("state_backbone_response_captured capture_id={capture_id}")
+                })
+                .unwrap_or_else(|| "state_backbone_response_captured".to_string()),
+            CyclePhase::WriteApplied => self
+                .patch_id
+                .as_deref()
+                .map(|patch_id| format!("state_backbone_write_applied patch_id={patch_id}"))
+                .unwrap_or_else(|| "state_backbone_write_applied".to_string()),
+            CyclePhase::Committed => self
+                .commit
+                .as_deref()
+                .map(|commit| format!("state_backbone_commit_observed commit={commit}"))
+                .unwrap_or_else(|| "state_backbone_commit_observed".to_string()),
+            CyclePhase::Abandoned => self
+                .abandoned_reason
+                .as_deref()
+                .map(|reason| format!("state_backbone_cycle_abandoned reason={reason}"))
+                .unwrap_or_else(|| "state_backbone_cycle_abandoned".to_string()),
+        }
+    }
+}
+
+impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutState {
+    fn from(projection: agent_doc_state_backbone::CloseoutProjection) -> Self {
+        Self {
+            cycle_id: projection.cycle_id,
+            session_id: projection.session_id,
+            phase: projection.phase,
+            capture_id: projection.capture_id,
+            response_sha256: projection.response_sha256,
+            patch_id: projection.patch_id,
+            commit: projection.commit,
+            session_check_passed: projection.session_check_passed,
+            abandoned_reason: projection.abandoned_reason,
+        }
+    }
+}
+
+pub fn load_closeout_projection(file: &Path) -> Result<Option<ProjectedCloseoutState>> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(None);
+    };
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
+        return Ok(None);
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let rows =
+        agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(&document_hash))?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+
+    let mut ledger = agent_doc_state_backbone::EventLedger::new();
+    for row in rows {
+        let event: agent_doc_state_backbone::StateEvent =
+            serde_json::from_str(&row.payload_json)
+                .with_context(|| format!("decode state event {}", row.event_id))?;
+        ledger.append(event);
+    }
+
+    Ok(ledger
+        .project_document(&document_hash)
+        .map(|document| ProjectedCloseoutState::from(document.closeout)))
+}
+
+pub fn apply_closeout_projection_to_cycle_state(
+    state: &mut CycleState,
+    projection: &ProjectedCloseoutState,
+) -> bool {
+    let Some(projected_phase) = projection.phase else {
+        return false;
+    };
+    if !projection.matches_cycle(&state.cycle_id) {
+        return false;
+    }
+
+    let changed = state.phase != projected_phase;
+    state.phase = projected_phase;
+    state.last_event = projection.event_label(projected_phase);
+    if state.capture_id.is_none() {
+        state.capture_id = projection.capture_id.clone();
+    }
+    if state.response_sha256.is_none() {
+        state.response_sha256 = projection.response_sha256.clone();
+    }
+    changed
+}
+
+pub fn load_with_closeout_projection(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if let Some(projection) = load_closeout_projection(file)?
+        && projection.matches_cycle(&state.cycle_id)
+    {
+        apply_closeout_projection_to_cycle_state(&mut state, &projection);
+    }
+    Ok(Some(state))
+}
+
 pub fn admit_with_current_resolver<R, S, L>(
     file: &Path,
     mut resolve_current: R,
@@ -337,7 +472,7 @@ pub fn admit_with_current_resolver<R, S, L>(
     mut log_admission: L,
 ) -> Result<AdmitOutput>
 where
-    R: FnMut(&Path, &str) -> String,
+    R: FnMut(&Path) -> Result<String>,
     S: FnMut(&Path) -> Result<Option<String>>,
     L: FnMut(&Path, &str),
 {
@@ -345,9 +480,8 @@ where
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let disk = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    let current = resolve_current(file, &disk);
+    let current = resolve_current(file)
+        .with_context(|| format!("failed to resolve current document for {}", file.display()))?;
     let snapshot = load_snapshot(file)
         .with_context(|| format!("failed to load snapshot for {}", file.display()))?;
 
@@ -469,6 +603,7 @@ pub fn start_preflight_with_task(
         blocked_closeout: None,
     };
     save(file, &state)?;
+    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::PreflightStarted)?;
     append_phase_event_to_session_log(file, &state);
     Ok(state)
 }
@@ -626,6 +761,7 @@ pub fn mark_write_applied(
     state.normalized_snapshot_hash = snapshot_content.map(replay_content_hash);
     state.normalized_file_hash = file_content.map(replay_content_hash);
     save(file, &state)?;
+    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::WriteApplied)?;
     append_phase_event_to_session_log(file, &state);
     Ok(state)
 }
@@ -655,6 +791,7 @@ pub fn mark_response_captured(
     state.capture_id = Some(state.cycle_id.clone());
     state.response_sha256 = Some(response_sha256.to_string());
     save(file, &state)?;
+    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::ResponseCaptured)?;
     append_phase_event_to_session_log(file, &state);
     // NB: intentionally do NOT mirror the pipeline block here. `response_captured`
     // can fire mid-stream (partial checkpoints), and a naive read-modify-write of
@@ -1168,6 +1305,7 @@ pub fn mark_committed(
     if matches!(state.phase, CyclePhase::Committed)
         && (state.last_event == event || is_stable_commit_event(&state.last_event))
     {
+        append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Committed)?;
         return Ok(state);
     }
     let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::Committed) else {
@@ -1186,6 +1324,7 @@ pub fn mark_committed(
         state.normalized_file_hash = Some(replay_content_hash(content));
     }
     save(file, &state)?;
+    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Committed)?;
     append_phase_event_to_session_log(file, &state);
     Ok(state)
 }
@@ -1198,6 +1337,10 @@ pub fn mark_abandoned(
 ) -> Result<CycleState> {
     let mut state =
         load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
+    if state.phase == CyclePhase::Abandoned {
+        append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Abandoned)?;
+        return Ok(state);
+    }
     if !state.is_open() {
         return Ok(state);
     }
@@ -1216,6 +1359,7 @@ pub fn mark_abandoned(
         state.normalized_file_hash = Some(replay_content_hash(content));
     }
     save(file, &state)?;
+    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Abandoned)?;
     append_phase_event_to_session_log(file, &state);
     Ok(state)
 }
@@ -1256,6 +1400,128 @@ fn save(file: &Path, state: &CycleState) -> Result<()> {
     let json = serde_json::to_string_pretty(state)?;
     write_atomic(&path, &json)?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CloseoutProjectionEvent {
+    PreflightStarted,
+    ResponseCaptured,
+    WriteApplied,
+    Committed,
+    Abandoned,
+}
+
+fn append_closeout_projection_event(
+    file: &Path,
+    state: &CycleState,
+    event: CloseoutProjectionEvent,
+) -> Result<bool> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    let fact = match event {
+        CloseoutProjectionEvent::PreflightStarted => {
+            agent_doc_state_backbone::StateFact::PreflightStarted {
+                document_hash: document_hash.clone(),
+                cycle_id: state.cycle_id.clone(),
+                session_id: None,
+            }
+        }
+        CloseoutProjectionEvent::ResponseCaptured => {
+            let Some(capture_id) = state.capture_id.clone() else {
+                return Ok(false);
+            };
+            let Some(response_sha256) = state.response_sha256.clone() else {
+                return Ok(false);
+            };
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.clone(),
+                cycle_id: state.cycle_id.clone(),
+                capture_id,
+                response_sha256,
+            }
+        }
+        CloseoutProjectionEvent::WriteApplied => {
+            agent_doc_state_backbone::StateFact::WriteApplied {
+                document_hash: document_hash.clone(),
+                cycle_id: state.cycle_id.clone(),
+                patch_id: None,
+            }
+        }
+        CloseoutProjectionEvent::Committed => agent_doc_state_backbone::StateFact::CommitObserved {
+            document_hash: document_hash.clone(),
+            cycle_id: state.cycle_id.clone(),
+            commit: state
+                .file_hash
+                .as_ref()
+                .map(|hash| format!("content:{hash}"))
+                .unwrap_or_else(|| format!("event:{}", state.last_event)),
+        },
+        CloseoutProjectionEvent::Abandoned => agent_doc_state_backbone::StateFact::CycleAbandoned {
+            document_hash: document_hash.clone(),
+            cycle_id: state.cycle_id.clone(),
+            reason: state.last_event.clone(),
+        },
+    };
+    let fact_label = fact.label();
+    let event_id = closeout_projection_event_id(&document_hash, state, event);
+    let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let payload_json = serde_json::to_string(&event).context("serialize closeout state event")?;
+    agent_doc_sqlite::state_store::insert_state_event_in_db(
+        &conn,
+        &agent_doc_sqlite::state_store::StateEventInsert {
+            event_id: &event.event_id,
+            document_hash: event.document_hash(),
+            domain: event.domain().label(),
+            fact_type: fact_label,
+            payload_json: &payload_json,
+        },
+    )
+}
+
+fn cycle_document_hash(file: &Path) -> Result<Option<String>> {
+    Ok(agent_doc_fs::cycle_state_path_for(file)?.and_then(|path| {
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(|stem| stem.to_string())
+    }))
+}
+
+fn closeout_projection_event_id(
+    document_hash: &str,
+    state: &CycleState,
+    event: CloseoutProjectionEvent,
+) -> String {
+    match event {
+        CloseoutProjectionEvent::PreflightStarted => {
+            format!(
+                "closeout-preflight-started:{document_hash}:{}",
+                state.cycle_id
+            )
+        }
+        CloseoutProjectionEvent::ResponseCaptured => format!(
+            "closeout-response-captured:{document_hash}:{}:{}",
+            state.cycle_id,
+            state.response_sha256.as_deref().unwrap_or("missing")
+        ),
+        CloseoutProjectionEvent::WriteApplied => format!(
+            "closeout-write-applied:{document_hash}:{}:{}",
+            state.cycle_id,
+            state.file_hash.as_deref().unwrap_or("missing")
+        ),
+        CloseoutProjectionEvent::Committed => format!(
+            "closeout-committed:{document_hash}:{}:{}",
+            state.cycle_id,
+            state.file_hash.as_deref().unwrap_or("missing")
+        ),
+        CloseoutProjectionEvent::Abandoned => format!(
+            "closeout-abandoned:{document_hash}:{}:{}",
+            state.cycle_id, state.last_event
+        ),
+    }
 }
 
 /// `#lzsidecaratomic`: write `bytes` to `path` via a temp file in the same
@@ -1457,7 +1723,7 @@ mod tests {
 
         let output = admit_with_current_resolver(
             &doc,
-            |_file, disk| disk.to_string(),
+            |file| std::fs::read_to_string(file).context("test resolver should read document"),
             |_file| Ok(None),
             |file, message| logs.push((file.display().to_string(), message.to_string())),
         )
@@ -1870,6 +2136,195 @@ mod tests {
         let state = mark_committed(&doc, "commit", Some("new"), Some("new")).unwrap();
         assert_eq!(state.phase, CyclePhase::Committed);
         assert!(!state.is_open());
+    }
+
+    #[test]
+    fn cycle_transitions_feed_state_backbone_closeout_projection() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("snap"),
+            Some("body"),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        mark_write_applied(&doc, "write_applied", Some("written"), Some("written")).unwrap();
+        mark_committed(&doc, "commit_success", Some("written"), Some("written")).unwrap();
+
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let mut ledger = agent_doc_state_backbone::EventLedger::new();
+        for row in agent_doc_sqlite::state_store::load_state_events_from_db(&conn, None).unwrap() {
+            let event: agent_doc_state_backbone::StateEvent =
+                serde_json::from_str(&row.payload_json).unwrap();
+            ledger.append(event);
+        }
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let closeout = ledger
+            .project_document(&document_hash)
+            .expect("cycle transition events should project document state")
+            .closeout;
+        assert_eq!(
+            closeout.cycle_id.as_deref(),
+            Some(started.cycle_id.as_str())
+        );
+        assert_eq!(closeout.phase, Some(CyclePhase::Committed));
+        assert_eq!(
+            closeout.capture_id.as_deref(),
+            Some(started.cycle_id.as_str())
+        );
+        assert_eq!(closeout.response_sha256.as_deref(), Some("response-sha"));
+        assert!(
+            closeout
+                .commit
+                .as_deref()
+                .is_some_and(|commit| commit.starts_with("content:"))
+        );
+    }
+
+    #[test]
+    fn load_closeout_projection_absent_store_does_not_create_state_db() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let state_db = agent_doc_sqlite::state_store::state_db_path(dir.path());
+        assert!(!state_db.exists());
+
+        assert_eq!(load_closeout_projection(&doc).unwrap(), None);
+        assert!(
+            !state_db.exists(),
+            "read-only projection lookup must not initialize state.db"
+        );
+    }
+
+    #[test]
+    fn load_closeout_projection_replays_state_backbone_events() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("snap"),
+            Some("body"),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        mark_write_applied(&doc, "write_applied", Some("written"), Some("written")).unwrap();
+        mark_committed(&doc, "commit_success", Some("written"), Some("written")).unwrap();
+
+        let projected = load_closeout_projection(&doc)
+            .unwrap()
+            .expect("closeout projection should replay from state backbone");
+        assert_eq!(
+            projected.cycle_id.as_deref(),
+            Some(started.cycle_id.as_str())
+        );
+        assert_eq!(projected.phase, Some(CyclePhase::Committed));
+        assert_eq!(
+            projected.capture_id.as_deref(),
+            Some(started.cycle_id.as_str())
+        );
+        assert_eq!(projected.response_sha256.as_deref(), Some("response-sha"));
+        assert!(
+            projected
+                .commit
+                .as_deref()
+                .is_some_and(|commit| commit.starts_with("content:"))
+        );
+    }
+
+    #[test]
+    fn load_with_closeout_projection_overlays_stale_matching_sidecar_phase() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let opened = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle sidecar path");
+        fs::write(sidecar_path, serde_json::to_string_pretty(&opened).unwrap()).unwrap();
+        assert_eq!(
+            load(&doc).unwrap().unwrap().phase,
+            CyclePhase::PreflightStarted
+        );
+
+        let projected = load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state");
+        assert_eq!(projected.cycle_id, opened.cycle_id);
+        assert_eq!(projected.phase, CyclePhase::Committed);
+        assert!(
+            projected
+                .last_event
+                .contains("state_backbone_commit_observed")
+        );
+    }
+
+    #[test]
+    fn committed_reentry_repairs_missing_terminal_closeout_projection() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("snap"),
+            Some("body"),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        mark_write_applied(&doc, "write_applied", Some("written"), Some("written")).unwrap();
+        mark_committed(&doc, "commit_success", Some("written"), Some("written")).unwrap();
+
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let deleted = conn
+            .execute(
+                "DELETE FROM state_events WHERE fact_type = 'commit_observed'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(deleted, 1);
+
+        mark_committed(&doc, "commit_success", Some("written"), Some("written")).unwrap();
+        mark_committed(&doc, "commit_success", Some("written"), Some("written")).unwrap();
+
+        let rows = agent_doc_sqlite::state_store::load_state_events_from_db(&conn, None).unwrap();
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.fact_type == "commit_observed")
+                .count(),
+            1,
+            "terminal re-entry should restore the missing commit fact exactly once"
+        );
+        let mut ledger = agent_doc_state_backbone::EventLedger::new();
+        for row in rows {
+            let event: agent_doc_state_backbone::StateEvent =
+                serde_json::from_str(&row.payload_json).unwrap();
+            ledger.append(event);
+        }
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let closeout = ledger
+            .project_document(&document_hash)
+            .expect("repaired terminal event should project document state")
+            .closeout;
+        assert_eq!(closeout.phase, Some(CyclePhase::Committed));
+        assert!(
+            closeout
+                .commit
+                .as_deref()
+                .is_some_and(|commit| commit.starts_with("content:"))
+        );
     }
 
     #[test]

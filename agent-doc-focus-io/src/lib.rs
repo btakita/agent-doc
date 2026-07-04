@@ -108,6 +108,26 @@ fn live_owner_override(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RegisteredFocusDecision<'a> {
+    SelectRegistered,
+    RepairToLiveOwner(&'a str),
+    FailUnproven,
+}
+
+fn decide_registered_focus_candidate<'a>(
+    registered_pane: &'a str,
+    live_owner: Option<&'a str>,
+) -> RegisteredFocusDecision<'a> {
+    match live_owner {
+        Some(owner) if owner != registered_pane => {
+            RegisteredFocusDecision::RepairToLiveOwner(owner)
+        }
+        Some(_) => RegisteredFocusDecision::SelectRegistered,
+        None => RegisteredFocusDecision::FailUnproven,
+    }
+}
+
 pub fn run(effects: &impl FocusEffects, file: &Path, pane: Option<&str>) -> Result<()> {
     run_with_tmux(effects, file, pane, &Tmux::default_server())
 }
@@ -234,16 +254,32 @@ pub fn run_with_tmux_opts(
         Some(pane_id) if tmux.pane_alive(&pane_id) => {
             // A registered pane that is alive as a *pane* is not proof it still
             // owns the document — its owner process may be gone while the live
-            // session runs in another pane. Prefer the provable live owner.
-            if let Some(owner) = live_owner_override(effects, file, &session_id, &pane_id, tmux) {
-                promote_and_select(effects, tmux, &owner, defer_stash_promote)?;
-                eprintln!(
-                    "Focused live-owner pane {} (stale registry pane {}) ({})",
-                    owner,
-                    pane_id,
-                    file.display()
-                );
-                return Ok(());
+            // session runs in another pane, or the pane may be a stale
+            // geometry-only binding from passive editor sync. Select only a
+            // pane that currently proves ownership.
+            let live_owner = effects
+                .find_live_owner_pane_quiet(tmux, file, &session_id)
+                .filter(|owner| tmux.pane_alive(owner));
+            match decide_registered_focus_candidate(&pane_id, live_owner.as_deref()) {
+                RegisteredFocusDecision::RepairToLiveOwner(owner) => {
+                    promote_and_select(effects, tmux, owner, defer_stash_promote)?;
+                    eprintln!(
+                        "Focused live-owner pane {} (stale registry pane {}) ({})",
+                        owner,
+                        pane_id,
+                        file.display()
+                    );
+                    return Ok(());
+                }
+                RegisteredFocusDecision::SelectRegistered => {}
+                RegisteredFocusDecision::FailUnproven => {
+                    anyhow::bail!(
+                        "registered pane {} is alive for {} but no live agent-doc owner was proven; run `agent-doc start {}` to create a fresh pane",
+                        pane_id,
+                        file.display(),
+                        file.display()
+                    );
+                }
             }
             promote_and_select(effects, tmux, &pane_id, defer_stash_promote)?;
             eprintln!("Focused pane {} ({})", pane_id, file.display());
@@ -288,5 +324,34 @@ pub fn run_with_tmux_opts(
                 &session_id[..std::cmp::min(8, session_id.len())]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registered_focus_decision_selects_matching_live_owner() {
+        assert_eq!(
+            decide_registered_focus_candidate("%7", Some("%7")),
+            RegisteredFocusDecision::SelectRegistered
+        );
+    }
+
+    #[test]
+    fn registered_focus_decision_repairs_to_different_live_owner() {
+        assert_eq!(
+            decide_registered_focus_candidate("%7", Some("%9")),
+            RegisteredFocusDecision::RepairToLiveOwner("%9")
+        );
+    }
+
+    #[test]
+    fn registered_focus_decision_fails_unproven_alive_registry_pane() {
+        assert_eq!(
+            decide_registered_focus_candidate("%7", None),
+            RegisteredFocusDecision::FailUnproven
+        );
     }
 }

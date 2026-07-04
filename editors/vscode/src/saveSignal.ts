@@ -1,12 +1,11 @@
-import * as path from 'path';
-
 /**
  * Pure helpers for the `save-document.signal` handler (#jbeditorsavedrift-vscode).
  *
  * The binary writes `.agent-doc/patches/save-document.signal` (JSON `{ file,
  * patch_id }`) when it detects the editor buffer is ahead of disk after a commit
  * (carry-forward drift). The VS Code PatchWatcher flushes the matching editor
- * buffer to disk and writes the saved content back to the ack-content sidecar.
+ * buffer to disk and publishes the saved content as a lazily receipt-backed
+ * content projection.
  * These helpers hold the side-effect-free parts so they can be unit-tested
  * without the `vscode` API. Mirrors the JB plugin's socket `save_document` path.
  */
@@ -34,15 +33,4 @@ export function parseSaveDocumentSignal(raw: string): SaveDocumentSignal | null 
         ? payload.patch_id
         : undefined;
     return { file: payload.file, patchId };
-}
-
-/**
- * Resolve the ack-content sidecar path for a patch id, given the patches dir.
- *
- * `patchesDir` is `<root>/.agent-doc/patches`; the sidecar lives next to it at
- * `<root>/.agent-doc/ack-content/<patch_id>.md` — the exact path the binary's
- * FFI `agent_doc_write_ack_content` writes, so the binary reads it back.
- */
-export function ackContentSidecarPath(patchesDir: string, patchId: string): string {
-    return path.join(path.dirname(patchesDir), 'ack-content', `${patchId}.md`);
 }

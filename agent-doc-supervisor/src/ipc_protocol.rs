@@ -106,10 +106,22 @@ pub enum IpcMethod {
         /// Base64-encoded JSON `agent_doc_document_realtime::crdt_relay::AwarenessState`.
         awareness_b64: String,
     },
+    /// Flush the supervisor-owned live relay hub for `file` to the durable CRDT
+    /// recovery projection before a recycle/reload boundary tears this process
+    /// down. The sidecar is recovery state, not closeout authority.
+    CrdtCheckpoint {
+        file: String,
+        #[serde(default = "default_checkpoint_source")]
+        source: String,
+    },
 }
 
 fn default_restart_mode() -> String {
     "continue".to_string()
+}
+
+fn default_checkpoint_source() -> String {
+    "supervisor_ipc".to_string()
 }
 
 /// Return true when an IPC method is a real prompt dispatch that must pass the
@@ -259,6 +271,23 @@ mod tests {
             ack
         );
 
+        let checkpoint = IpcMethod::CrdtCheckpoint {
+            file: "plan.md".into(),
+            source: "admin_reload_lib".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&checkpoint).unwrap(),
+            r#"{"method":"crdt_checkpoint","file":"plan.md","source":"admin_reload_lib"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<IpcMethod>(r#"{"method":"crdt_checkpoint","file":"plan.md"}"#)
+                .unwrap(),
+            IpcMethod::CrdtCheckpoint {
+                file: "plan.md".into(),
+                source: "supervisor_ipc".into(),
+            }
+        );
+
         assert_eq!(
             serde_json::to_string(&IpcMethod::State).unwrap(),
             r#"{"method":"state"}"#
@@ -313,6 +342,12 @@ mod tests {
             &IpcMethod::ReplicaRegister {
                 file: "doc.md".to_string(),
                 identity: "editor".to_string(),
+            },
+        ));
+        assert!(!ipc_method_requires_capability_gate(
+            &IpcMethod::CrdtCheckpoint {
+                file: "doc.md".to_string(),
+                source: "test".to_string(),
             },
         ));
     }

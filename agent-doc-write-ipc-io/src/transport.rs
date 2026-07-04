@@ -9,22 +9,24 @@ use agent_doc_flow::types::{FlowOutcome, FlowStage};
 use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{
-    AlreadyAppliedSnapshotOutcome, FullContentIpcMode, IpcRepairDecision, IpcSnapshotSource,
+    AlreadyAppliedSnapshotOutcome, FullContentIpcMode, IpcSnapshotSource,
     build_ipc_node_patches_json, effective_unmatched_for_patch_payload,
     is_already_applied_ack_error_message, is_socket_ack_timeout_error,
 };
 use agent_doc_template as template;
 use agent_doc_template::stale_baseline::patch_touches_exchange;
 use agent_doc_write_converge_io::{
-    AlreadyAppliedSocketSnapshotContext, ack_content_disk_write_proof, cleanup_legacy_ipc_degraded,
-    clear_ipc_socket_ack_timeouts, dedupe_ipc_snapshot_content, full_content_ipc_scope_allows,
+    AlreadyAppliedSocketSnapshotContext, VisibleWriteContentAuthority,
+    ack_content_disk_write_proof, cleanup_legacy_ipc_degraded, clear_ipc_socket_ack_timeouts,
+    dedupe_ipc_snapshot_content, full_content_ipc_scope_allows,
     guard_ipc_snapshot_adoption_against_live_prompt_drift,
     guard_ipc_snapshot_adoption_against_prompt_duplication, ipc_direct_disk_degraded,
     ipc_repair_decision_from_sidecar, log_full_content_ipc_disabled,
     log_ipc_dewedge_prefer_file_ipc, log_ipc_snapshot_adoption_allowed,
     log_ipcfullprompt_corruption_if_any, mark_ack_content_live_buffer_synced_after_write,
     materialize_missing_response_for_socket_ack_drift,
-    persist_already_applied_socket_content_ours_snapshot, poll_ack_content_sidecar,
+    persist_already_applied_socket_content_ours_snapshot,
+    poll_visible_write_content_lazily_event_or_projection,
     prefer_visible_content_over_stale_ack_content, reconcile_ack_snapshot_to_newer_operator_buffer,
     record_ipc_socket_ack_timeout, save_ipc_snapshot_and_crdt_nonfatal,
     stale_supervisor_write_short_circuit, write_ack_content_through_to_disk,
@@ -441,14 +443,17 @@ fn try_ipc_inner(
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC patch delivered");
                 clear_ipc_socket_ack_timeouts(&project_root, file, "socket_ack")?;
-                // Poll for ack-content sidecar (written by plugin after apply).
-                let sidecar = poll_ack_content_sidecar(
+                // Poll for lazily-backed visible-write proof (published by the
+                // editor after the Document API applies the patch).
+                let visible_write = poll_visible_write_content_lazily_event_or_projection(
+                    file,
                     &project_root,
                     &patch_id,
                     std::time::Duration::from_millis(200),
                     std::time::Duration::from_millis(25),
                 )?;
-                if let Some(snap_content) = sidecar {
+                if let Some(visible_write_content) = visible_write {
+                    let snap_content = visible_write_content.content;
                     let mut repair_decision = ipc_repair_decision_from_sidecar(
                         file,
                         Some(&patch_id),
@@ -457,6 +462,11 @@ fn try_ipc_inner(
                         content_ours,
                         normalize_prefix_lines,
                     );
+                    if visible_write_content.authority == VisibleWriteContentAuthority::LazilyEvent
+                        && repair_decision.snap_source == IpcSnapshotSource::AckContentSidecar
+                    {
+                        repair_decision.snap_source = IpcSnapshotSource::LazilyVisibleWriteEvent;
+                    }
 
                     let pre_dedupe_snap = repair_decision.snapshot_content.clone();
                     let (effective_snap, dedupe_repair) = dedupe_ipc_snapshot_content(
@@ -475,9 +485,10 @@ fn try_ipc_inner(
                         agent_doc_template::response_materialization::response_materialization_probe(
                             patches, unmatched,
                         );
+                    let visible_source = "socket_visible_write";
                     prefer_visible_content_over_stale_ack_content(
                         file,
-                        "socket_ack_content",
+                        visible_source,
                         Some(&patch_id),
                         baseline,
                         content_ours,
@@ -489,7 +500,7 @@ fn try_ipc_inner(
                     let ipcfullprompt_candidate = repair_decision.snapshot_content.clone();
                     let drift_fired = guard_ipc_snapshot_adoption_against_live_prompt_drift(
                         file,
-                        "socket_ack_content",
+                        visible_source,
                         Some(&patch_id),
                         baseline,
                         content_ours,
@@ -497,7 +508,7 @@ fn try_ipc_inner(
                     );
                     let dup_fired = guard_ipc_snapshot_adoption_against_prompt_duplication(
                         file,
-                        "socket_ack_content",
+                        visible_source,
                         Some(&patch_id),
                         content_ours,
                         &mut repair_decision,
@@ -512,7 +523,7 @@ fn try_ipc_inner(
                     );
                     log_ipc_snapshot_adoption_allowed(
                         file,
-                        "socket_ack_content",
+                        visible_source,
                         Some(&patch_id),
                         baseline,
                         content_ours,
@@ -521,7 +532,7 @@ fn try_ipc_inner(
                     );
                     log_ipcfullprompt_corruption_if_any(
                         file,
-                        "socket_ack_content",
+                        visible_source,
                         Some(&patch_id),
                         baseline,
                         &ipcfullprompt_candidate,
@@ -529,13 +540,13 @@ fn try_ipc_inner(
 
                     if !ipc_response_materialized_or_fallback(
                         file,
-                        "socket_ack_content",
+                        visible_source,
                         &expected_response,
                         &repair_decision.snapshot_content,
                     ) {
                         log_partial_response_materialization_for_retry(
                             file,
-                            "socket_ack_content",
+                            visible_source,
                             &expected_response,
                         )?;
                         return Ok(IpcResult {
@@ -553,7 +564,7 @@ fn try_ipc_inner(
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "ipc_socket_ack_content file={} patch_id={} snap_source={} sidecar_len={} sidecar_hash={} disk_len={} disk_hash={}",
+                            "ipc_socket_visible_write file={} patch_id={} snap_source={} visible_len={} visible_hash={} disk_len={} disk_hash={}",
                             file.display(),
                             patch_id,
                             repair_decision.snap_source.label(),
@@ -655,26 +666,24 @@ fn try_ipc_inner(
                         skipped_committed_cycle: false,
                     });
                 }
-                // `#ipc-degrade-false-vote`: the socket already returned a
-                // delivery ack (`Ok(Some(_ack))`), so the plugin received the
-                // patch and is applying it through the Document API — only the
-                // *content sidecar* was slow. The plugin writes that sidecar
-                // after `saveDocument`, which can lag well past the poll budget
-                // while the EDT is busy or the user is typing. A slow sidecar is
-                // NOT a listener timeout: it must not vote toward the de-wedge
-                // degrade threshold and must not latch this session to disk-only.
+                // `#ipc-degrade-false-vote`: the socket returned a transport
+                // response (`Ok(Some(_ack))`), so the plugin received the patch
+                // and is applying it through the Document API — only the lazily
+                // visible-write receipt was slow. A slow receipt is NOT a listener
+                // timeout: it must not vote toward the de-wedge degrade threshold
+                // and must not latch this session to disk-only.
                 // Recover the snapshot through the file-IPC patch queue below
                 // (still the plugin path) so a confirmed-but-slow delivery never
                 // manufactures a raw foreign disk write — the source of IDEA
                 // "File Cache Conflict". Genuine transport failures still vote in
                 // the `Err(timeout)` arm.
                 eprintln!(
-                    "[write] socket delivered but content sidecar was slow — recovering snapshot via file-IPC fallback (no degrade vote)"
+                    "[write] socket delivered but lazily visible-write receipt was slow — recovering snapshot via file-IPC fallback (no degrade vote)"
                 );
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "ipc_socket_sidecar_slow_no_degrade file={} patch_id={}",
+                        "ipc_socket_visible_write_receipt_slow_no_degrade file={} patch_id={}",
                         file.display(),
                         patch_id
                     ),
@@ -685,7 +694,7 @@ fn try_ipc_inner(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "ipc_socket_sidecar_timeout file={} — retrying through file_ipc_without_disk_write",
+                        "ipc_socket_visible_write_receipt_timeout file={} — retrying through file_ipc_without_disk_write",
                         file.display()
                     ),
                 );
@@ -693,9 +702,9 @@ fn try_ipc_inner(
                     file,
                     "socket_ipc",
                     Some(&patch_id),
-                    "no_ack_content_sidecar",
+                    "no_lazily_visible_write_receipt",
                     "file_ipc_retry_without_disk_write",
-                    "ack_content_timeout=true",
+                    "lazily_receipt_timeout=true",
                 );
                 if let Some(ref cycle_id) = cycle_already_committed(file) {
                     eprintln!(
@@ -711,7 +720,7 @@ fn try_ipc_inner(
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "ipc_socket_sidecar_timeout_skip_file_fallback file={} cycle_id={} reason=already_committed",
+                            "ipc_socket_visible_write_receipt_timeout_skip_file_fallback file={} cycle_id={} reason=already_committed",
                             file.display(),
                             cycle_id
                         ),
@@ -1063,36 +1072,43 @@ pub(crate) fn write_ipc_and_poll(
     }
 
     {
-        // Plugin consumed the patch — poll for ack-content sidecar (authoritative
-        // post-apply snapshot). Falls back to file read after timeout.
+        // Plugin consumed the patch file. The authoritative post-apply proof is
+        // the lazily visible-write receipt/projection, not deletion of the file
+        // and not a compatibility ack-content sidecar.
         let patch_id = payload
             .get("patch_id")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let (mut current_on_disk, mut repair_decision, ack_content_proven) = if !patch_id.is_empty()
         {
-            match poll_ack_content_sidecar(
+            match poll_visible_write_content_lazily_event_or_projection(
+                doc_file,
                 options.project_root,
                 patch_id,
                 std::time::Duration::from_millis(500),
                 std::time::Duration::from_millis(25),
-            ) {
-                Ok(Some(content)) => {
+            )? {
+                Some(visible_write_content) => {
                     let baseline = payload
                         .get("baseline")
                         .and_then(|value| value.as_str())
                         .filter(|value| !value.is_empty());
-                    let decision = ipc_repair_decision_from_sidecar(
+                    let mut decision = ipc_repair_decision_from_sidecar(
                         doc_file,
                         Some(patch_id),
                         baseline,
-                        content,
+                        visible_write_content.content,
                         options.content_ours,
                         options.normalize_prefix_lines,
                     );
-                    if decision.snap_source == IpcSnapshotSource::AckContentSidecar {
+                    if visible_write_content.authority == VisibleWriteContentAuthority::LazilyEvent
+                        && decision.snap_source == IpcSnapshotSource::AckContentSidecar
+                    {
+                        decision.snap_source = IpcSnapshotSource::LazilyVisibleWriteEvent;
+                    }
+                    if decision.snap_source == IpcSnapshotSource::LazilyVisibleWriteEvent {
                         eprintln!(
-                            "[write] snapshot from ack-content sidecar ({} bytes)",
+                            "[write] snapshot from lazily visible-write receipt ({} bytes)",
                             decision.snapshot_content.len()
                         );
                     }
@@ -1100,20 +1116,34 @@ pub(crate) fn write_ipc_and_poll(
                     let snapshot_content = decision.snapshot_content.clone();
                     (snapshot_content, decision, ack_content_proven)
                 }
-                _ => {
+                None => {
                     eprintln!(
-                        "[write] snapshot from file read (ack-content sidecar not available after 500ms)"
+                        "[write] file IPC consumed but lazily visible-write receipt was not available after 500ms"
                     );
-                    let content = std::fs::read_to_string(doc_file).unwrap_or_default();
-                    let decision = IpcRepairDecision::file_read(content.clone());
-                    (content, decision, false)
+                    log_ipc_proof_failure(
+                        doc_file,
+                        "file_ipc",
+                        Some(patch_id),
+                        "no_lazily_visible_write_receipt",
+                        "retry_without_disk_write",
+                        "lazily_receipt_timeout=true",
+                    );
+                    return Ok(false);
                 }
             }
         } else {
-            eprintln!("[write] snapshot from file read (no patch_id for sidecar lookup)");
-            let content = std::fs::read_to_string(doc_file).unwrap_or_default();
-            let decision = IpcRepairDecision::file_read(content.clone());
-            (content, decision, false)
+            eprintln!(
+                "[write] file IPC consumed without patch_id; lazily receipt proof unavailable"
+            );
+            log_ipc_proof_failure(
+                doc_file,
+                "file_ipc",
+                None,
+                "missing_patch_id",
+                "retry_without_disk_write",
+                "lazily_receipt_unavailable=true",
+            );
+            return Ok(false);
         };
         let baseline_content = payload
             .get("baseline")
@@ -1224,8 +1254,8 @@ pub(crate) fn write_ipc_and_poll(
             return Ok(false);
         }
 
-        // Plugin applied the patch — update snapshot as actual post-write disk state.
-        // `current_on_disk` is from ack-content sidecar when available, or 200ms file read.
+        // Plugin applied the patch — update snapshot from the lazily visible-write
+        // receipt/projection, which is the editor-visible post-write state.
         // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
         let pre_dedupe_content = repair_decision.snapshot_content.clone();
         let (snap_content, dedupe_repair) = dedupe_ipc_snapshot_content(

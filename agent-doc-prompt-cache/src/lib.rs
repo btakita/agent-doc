@@ -138,11 +138,8 @@ impl PromptCacheSessionCostSample {
         }
     }
 
-    pub fn with_usage(
-        mut self,
-        cached_input_tokens: Option<u64>,
-        creation_tokens: Option<u64>,
-    ) -> Self {
+    pub fn with_usage(mut self, cache_tokens: (Option<u64>, Option<u64>)) -> Self {
+        let (cached_input_tokens, creation_tokens) = cache_tokens;
         self.cached_input_tokens = cached_input_tokens;
         self.creation_tokens = creation_tokens;
         self
@@ -603,8 +600,7 @@ mod tests {
             "stable",
             "resume:codex-session",
             "agent=codex;model=gpt-5;mode=template",
-            Some(120_000),
-            Some(1_000),
+            (Some(120_000), Some(1_000)),
         )
         .observed_at_unix_ms(1_700_000_001);
         let current = effectiveness_sample(
@@ -614,8 +610,7 @@ mod tests {
             "stable",
             "resume:codex-session",
             "agent=codex;model=gpt-5;mode=template",
-            Some(2_000),
-            Some(90_000),
+            (Some(2_000), Some(90_000)),
         );
 
         let check = check_prompt_cache_effectiveness_trend(
@@ -660,8 +655,7 @@ mod tests {
             "stable-a",
             "resume:claude-session",
             "agent=claude;model=opus;mode=template",
-            Some(90_000),
-            Some(2_000),
+            (Some(90_000), Some(2_000)),
         );
         let current = effectiveness_sample(
             "anthropic",
@@ -670,8 +664,7 @@ mod tests {
             "stable-b",
             "resume:claude-session",
             "agent=claude;model=opus;mode=template",
-            Some(89_000),
-            Some(2_200),
+            (Some(89_000), Some(2_200)),
         );
 
         let check = check_prompt_cache_effectiveness_trend(
@@ -695,8 +688,7 @@ mod tests {
             "stable",
             "resume:codex-session",
             "agent=codex;model=gpt-5;mode=template",
-            Some(120_000),
-            Some(1_000),
+            (Some(120_000), Some(1_000)),
         );
         let current = effectiveness_sample(
             "openai",
@@ -705,8 +697,7 @@ mod tests {
             "stable",
             "resume:codex-session",
             "agent=codex;model=gpt-5;mode=template",
-            Some(119_500),
-            Some(1_100),
+            (Some(119_500), Some(1_100)),
         );
 
         let check = check_prompt_cache_effectiveness_trend(
@@ -733,8 +724,7 @@ mod tests {
             "stable",
             "fresh",
             "agent=codex;model=gpt-5;mode=template",
-            Some(2_000),
-            Some(90_000),
+            (Some(2_000), Some(90_000)),
         );
 
         let check = check_prompt_cache_effectiveness_trend(
@@ -757,9 +747,9 @@ mod tests {
         stable_prefix_sha256: &str,
         adapter_state: &str,
         routing_affinity: &str,
-        cached_input_tokens: Option<u64>,
-        creation_tokens: Option<u64>,
+        cache_tokens: (Option<u64>, Option<u64>),
     ) -> PromptCacheEffectivenessSample {
+        let (cached_input_tokens, creation_tokens) = cache_tokens;
         PromptCacheEffectivenessSample::new(
             provider,
             harness,

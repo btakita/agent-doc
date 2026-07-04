@@ -10652,6 +10652,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split remaining private debounce config helper",
         ),
         (
+            "Preflight stale install and editor-plugin warning IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/warnings.rs",
+            "Split stale install freshness from live editor plugin version warnings",
+        ),
+        (
             "Session-check guard IO adapter batch",
             "agent-doc-orchestration/src/session_check/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs}",
             "agent-doc-session-check-io/src/{backlog_guards.rs,partial_staging.rs,queue_head_guards.rs,queue_head_provenance_guards.rs,guard_modes.rs}",
@@ -19058,6 +19064,82 @@ fn test_agent_doc_preflight_io_owns_debounce_wait_graph() {
         assert!(
             preflight_debounce.contains(required),
             "agent-doc-preflight-io debounce module should own preflight debounce IO: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let orchestration_build =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/build.rs")).unwrap();
+    let preflight_warnings =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
+    let preflight_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    let preflight_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+    let preflight_build =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/build.rs")).unwrap();
+
+    assert!(
+        preflight_io_lib.contains("pub mod warnings;")
+            && preflight_manifest.contains("agent-doc-supervisor ="),
+        "agent-doc-preflight-io must expose stale warning IO and own supervisor freshness classification dependency"
+    );
+    for forbidden in [
+        "fn stale_install_warning(",
+        "fn expected_plugin_version(",
+        "fn plugin_version_is_older(",
+        "fn stale_plugin_warnings(",
+        "fn stale_plugin_warnings_from_snapshots(",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight.rs must not own moved stale warning graph: {forbidden}"
+        );
+    }
+    assert!(
+        !orchestration_build.contains("AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION")
+            && !orchestration_build.contains("AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION"),
+        "orchestration build.rs must not own editor plugin version baking after warning extraction"
+    );
+    assert!(
+        orchestration_preflight_run.contains("stale_install_warning(&git_root)")
+            && orchestration_preflight_run.contains("stale_plugin_warnings(file)"),
+        "preflight command should call focused stale warning adapters directly"
+    );
+    for required in [
+        "pub fn stale_install_warning(",
+        "pub fn expected_plugin_version(",
+        "pub fn plugin_version_is_older(",
+        "pub fn stale_plugin_warnings(",
+        "pub fn stale_plugin_warnings_from_snapshots(",
+        "agent_doc_fs::install_freshness::locate_agent_doc_source_repo",
+        "agent_doc_supervisor::config::classify_stale_install_artifacts",
+        "agent_doc_debounce::live_buffer_snapshots",
+        "agent_doc_debounce::live_buffer_snapshot_editor_is_live",
+        "option_env!(\"AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION\")",
+    ] {
+        assert!(
+            preflight_warnings.contains(required),
+            "agent-doc-preflight-io warnings module should own stale warning IO: {required}"
+        );
+    }
+    for required in [
+        "cargo:rustc-env=AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION",
+        "cargo:rustc-env=AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION",
+        "jetbrains/gradle.properties",
+        "vscode/package.json",
+    ] {
+        assert!(
+            preflight_build.contains(required),
+            "agent-doc-preflight-io build.rs should own plugin version baking: {required}"
         );
     }
 }

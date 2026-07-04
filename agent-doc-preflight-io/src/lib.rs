@@ -3,6 +3,7 @@
 pub mod debounce;
 pub mod gc;
 pub mod layout;
+pub mod warnings;
 
 use agent_doc_document::queue_projection::{
     set_in_progress_work_item_markers, strip_in_progress_marker, strip_priority_markers,

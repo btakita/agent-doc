@@ -82,7 +82,7 @@ use agent_doc_document::commit_normalization::{
 use agent_doc_document::transient_markers::{
     normalize_for_replay_hash, normalize_post_commit_re_heading_drift,
     normalize_transient_agent_doc_markers, repair_stale_agent_response_collapse_doc,
-    strip_guard_markers, strip_head_markers,
+    strip_head_markers,
 };
 use anyhow::Result;
 use std::collections::HashSet;
@@ -119,6 +119,11 @@ struct OrchestrationCommitPreStageRepairEffects;
 static COMMIT_PRE_STAGE_REPAIR_EFFECTS: OrchestrationCommitPreStageRepairEffects =
     OrchestrationCommitPreStageRepairEffects;
 
+struct OrchestrationGuardMarkerCleanupEffects;
+
+static GUARD_MARKER_CLEANUP_EFFECTS: OrchestrationGuardMarkerCleanupEffects =
+    OrchestrationGuardMarkerCleanupEffects;
+
 impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
     for OrchestrationCommitPreStageRepairEffects
 {
@@ -132,6 +137,38 @@ impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
 
     fn log_op(&self, file: &Path, message: &str) {
         agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
+    for OrchestrationGuardMarkerCleanupEffects
+{
+    fn load_snapshot(&self, file: &Path) -> Result<Option<String>> {
+        agent_doc_snapshot_io::load(file)
+    }
+
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn read_to_string(&self, file: &Path) -> Result<String> {
+        Ok(std::fs::read_to_string(file)?)
+    }
+
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        current_content: &str,
+        target_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            file,
+            current_content,
+            target_content,
+            reason,
+        )
     }
 }
 
@@ -1031,7 +1068,10 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
 
         // Strip ephemeral guard markers from snapshot and working tree so they
         // match the committed blob (which was already stripped during staging).
-        strip_guard_markers_from_disk(file);
+        agent_doc_git_io::guard_marker_cleanup::strip_guard_markers_from_disk(
+            &GUARD_MARKER_CLEANUP_EFFECTS,
+            file,
+        );
         if let Ok(cleaned) = std::fs::read_to_string(file) {
             match repair_clean_head_if_only_transient_worktree_drift(file, &cleaned) {
                 Ok(Some(_)) => {}
@@ -1082,41 +1122,6 @@ fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
     let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
     signal_file.parent().filter(|p| p.exists())?;
     Some(signal_file)
-}
-
-/// Strip ephemeral guard markers from the snapshot and working-tree file on disk.
-/// Best-effort: logs warnings on failure but does not propagate errors.
-fn strip_guard_markers_from_disk(file: &Path) {
-    if let Ok(Some(ref content)) = agent_doc_snapshot_io::load(file) {
-        let cleaned = strip_guard_markers(content);
-        if cleaned != *content
-            && let Err(e) =
-                agent_doc_snapshot_io::save(file, &cleaned, agent_doc_ops_log_io::log_op)
-        {
-            eprintln!("[commit] warning: failed to strip guard markers from snapshot: {e}");
-        }
-    }
-    if let Ok(content) = std::fs::read_to_string(file) {
-        let cleaned = strip_guard_markers(&content);
-        // #fccaudit: route the working-tree guard-marker strip through the
-        // editor-IPC converge gate so it never writes behind a live JB editor
-        // buffer (File Cache Conflict). The stripped markers
-        // (`<!-- no-pending-capture -->`, `<!-- no-pending-done-guard -->`) are
-        // ephemeral directives, not `(HEAD)` annotations, so the editor buffer
-        // should drop them too. With no listener this falls back to the same
-        // byte-for-byte disk write as before.
-        if cleaned != content
-            && let Err(e) = agent_doc_write_converge_io::converge_or_disk_write(
-                &crate::write::WRITE_CONVERGENCE_EFFECTS,
-                file,
-                &content,
-                &cleaned,
-                "strip_guard_markers",
-            )
-        {
-            eprintln!("[commit] warning: failed to strip guard markers from file: {e}");
-        }
-    }
 }
 
 /// Reposition boundary in snapshot AND working tree deterministically.

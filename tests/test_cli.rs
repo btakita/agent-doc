@@ -1061,12 +1061,11 @@ fn process_global_test_mutations_share_session_check_lock() {
         "test_support must route env and cwd test guards through a reentrant shared process-global lock"
     );
 
-    // session_check was decomposed into functional submodules (#splitmods4); its
-    // integration-style tests + shared inspection helpers were bundled back inline
-    // into `session_check.rs`'s own `#[cfg(test)] mod tests` (the helpers shadow
-    // core fn names like `inspect`, so they stay in the core test mod).
+    // session_check was decomposed into focused IO modules and the remaining
+    // orchestration-bound coverage now lives as an integration test. The helpers
+    // shadow core fn names like `inspect`, so they stay together in that test.
     let session_check_tests =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/session_check.rs"))
             .unwrap();
     assert!(
         session_check_tests.contains("fn inspect(file: &std::path::Path)")
@@ -3929,7 +3928,7 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "queue-io continuation host should inject snapshot/recycle effects into the focused detector"
     );
     for relative in [
-        "agent-doc-orchestration/src/session_check.rs",
+        "agent-doc-orchestration/tests/session_check.rs",
         "agent-doc-route-io/src/authoritative_actor.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-preflight-io/src/lib.rs",
@@ -10801,6 +10800,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the remaining session-check boundary tests into `agent-doc-session-check-io`",
         ),
         (
+            "Session-check test-only source module deletion",
+            "agent-doc-orchestration/src/session_check.rs",
+            "agent-doc-orchestration/tests/session_check.rs",
+            "Move the remaining orchestration-bound session-check tests into `agent-doc-session-check-io`",
+        ),
+        (
             "Flow closeout effects facade demotion",
             "agent-doc-orchestration/src/flow/mod.rs",
             "agent-doc-flow-io",
@@ -11162,20 +11167,25 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         );
     }
 
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/session_check.rs")
+            .exists(),
+        "orchestration must not keep the moved session_check source module"
+    );
     let session_check =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/session_check.rs"))
             .unwrap();
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
         !orchestration_lib.contains("pub mod session_check;")
-            && orchestration_lib.contains("#[cfg(test)]")
-            && orchestration_lib.contains("mod session_check;")
+            && !orchestration_lib.contains("mod session_check;")
             && orchestration_lib.contains("pub fn session_check_effects()")
             && orchestration_lib.contains(
                 "impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionCheckEffects"
             ),
-        "orchestration must keep session_check as a test-only shim and expose only the focused SessionCheckEffects port"
+        "orchestration must delete the session_check source shim and expose only the focused SessionCheckEffects port"
     );
     for production_source in [
         "src/main.rs",
@@ -11211,18 +11221,19 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     ] {
         assert!(
             !session_check.contains(forbidden),
-            "orchestration session_check.rs must not retain moved guard module facade: {forbidden}"
+            "moved orchestration session_check test must not retain moved guard module facade: {forbidden}"
         );
     }
     for required in [
-        "agent_doc_session_check_io::inspect(file, &crate::session_check_effects())",
-        "agent_doc_session_check_io::inspect_with_warnings(file, &crate::session_check_effects())",
+        "agent_doc_session_check_io::inspect(file,",
+        "agent_doc_session_check_io::inspect_with_warnings(",
+        "&agent_doc_orchestration::session_check_effects()",
         "agent_doc_session_check_io::run_with_options(",
         "agent_doc_session_check_io::enforce_clean_closeout(",
     ] {
         assert!(
             session_check.contains(required),
-            "remaining orchestration session-check tests should call focused command IO directly: {required}"
+            "moved orchestration session-check tests should call focused command IO directly: {required}"
         );
     }
     let closeout_guards =

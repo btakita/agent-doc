@@ -43,9 +43,6 @@ pub mod route;
 pub mod start;
 pub mod write;
 
-#[cfg(test)]
-mod session_check;
-
 pub(crate) struct BacklogCommandEffects;
 
 pub(crate) static BACKLOG_COMMAND_EFFECTS: BacklogCommandEffects = BacklogCommandEffects;
@@ -72,10 +69,11 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for BacklogCommandEffec
     }
 }
 
-pub(crate) struct PipelineFrontmatterEffects;
+#[doc(hidden)]
+pub struct PipelineFrontmatterEffects;
 
-pub(crate) const PIPELINE_FRONTMATTER_EFFECTS: PipelineFrontmatterEffects =
-    PipelineFrontmatterEffects;
+#[doc(hidden)]
+pub const PIPELINE_FRONTMATTER_EFFECTS: PipelineFrontmatterEffects = PipelineFrontmatterEffects;
 
 impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
     for PipelineFrontmatterEffects

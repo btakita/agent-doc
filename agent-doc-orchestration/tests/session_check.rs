@@ -4,7 +4,7 @@
 //!
 //! Production inspection/closeout logic lives in `agent-doc-session-check-io`.
 //! Orchestration supplies the remaining effects through
-//! [`crate::session_check_effects`]; this module keeps historical orchestration
+//! [`agent_doc_orchestration::session_check_effects`]; this module keeps historical orchestration
 //! boundary tests available without compiling a production facade.
 
 use anyhow::Result;
@@ -24,7 +24,7 @@ use agent_doc_turn::op_log::PREFLIGHT_START_EVENT;
 use agent_doc_workflow::session_check::GuardResult;
 
 fn closeout_recovery_hint(file: &Path) -> String {
-    crate::closeout_recovery_hint(file)
+    agent_doc_orchestration::closeout_recovery_hint(file)
 }
 
 #[cfg(test)]
@@ -58,11 +58,14 @@ mod tests {
     use std::process::Command;
     fn inspect(file: &std::path::Path) -> Result<SessionCheckStatus> {
         let _process_global_lock = agent_doc_test_support::env_lock();
-        agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
+        agent_doc_session_check_io::inspect(file, &agent_doc_orchestration::session_check_effects())
     }
     fn inspect_with_warnings(file: &std::path::Path) -> Result<SessionCheckReport> {
         let _process_global_lock = agent_doc_test_support::env_lock();
-        agent_doc_session_check_io::inspect_with_warnings(file, &crate::session_check_effects())
+        agent_doc_session_check_io::inspect_with_warnings(
+            file,
+            &agent_doc_orchestration::session_check_effects(),
+        )
     }
     /// Phase 6 (#lr-content-6): build a `RunContext` whose `DocContentCell` holds
     /// the file's current content, mirroring how `inspect_with_warnings` shares
@@ -234,7 +237,7 @@ mod tests {
             .unwrap();
         }
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&current),
@@ -282,7 +285,7 @@ mod tests {
             .unwrap();
         }
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&current),
@@ -308,7 +311,7 @@ mod tests {
         // ...and this is a queue-drain turn (a head was recorded).
         agent_doc_cycle_state_io::record_active_queue_heads(&doc, &["x".to_string()]).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&content),
@@ -389,7 +392,7 @@ mod tests {
             .unwrap();
         }
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&current),
@@ -471,7 +474,7 @@ mod tests {
             agent_doc_cycle_state_io::mark_pending_added(&doc).unwrap();
         }
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&current),
@@ -556,7 +559,7 @@ mod tests {
         )
         .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(visible_lost_latest),
@@ -644,7 +647,7 @@ mod tests {
         )
         .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(visible_disk_lost_latest),
@@ -685,7 +688,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(doc_content), Some(doc_content))
             .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(doc_content),
@@ -749,7 +752,7 @@ mod tests {
         }
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -798,7 +801,7 @@ mod tests {
         agent_doc_capture_io::capture_response(doc, response).unwrap();
         let content = fs::read_to_string(doc).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             doc,
             "commit_success",
             Some(&content),
@@ -1276,7 +1279,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(current),
@@ -1341,7 +1344,7 @@ Body\n\
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -1389,7 +1392,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, current, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(current),
@@ -1592,7 +1595,7 @@ Body\n\
         )
         .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_already_current",
             Some(&current),
@@ -2154,7 +2157,7 @@ Body\n\
         let doc = make_project(tmp.path());
         agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit",
             Some("body"),
@@ -2362,7 +2365,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -2404,7 +2407,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -2456,7 +2459,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -2523,7 +2526,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -2577,7 +2580,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -2632,7 +2635,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -2705,7 +2708,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -3150,7 +3153,7 @@ Body\n\
         agent_doc_cycle_state_io::start_preflight(&doc, Some(stale_snapshot), Some(historical))
             .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(historical),
@@ -3271,7 +3274,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(head)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(head),
@@ -3394,7 +3397,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "repair_preflight_committed_historical",
             Some(snapshot),
@@ -3496,7 +3499,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(head)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(head),
@@ -4916,7 +4919,7 @@ Body\n\
         agent_doc_cycle_state_io::start_preflight(&doc, Some(old_content), Some(old_content))
             .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(snapshot_content),
@@ -4991,7 +4994,7 @@ Body\n\
         agent_doc_cycle_state_io::start_preflight(&doc, Some(old_content), Some(old_content))
             .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(new_content),
@@ -5056,7 +5059,7 @@ Body\n\
             .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -5139,7 +5142,7 @@ Body\n\
         // response capture and abandoned it.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(committed),
@@ -5208,7 +5211,7 @@ Body\n\
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(committed),
@@ -5286,7 +5289,7 @@ Body\n\
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(committed),
@@ -5299,7 +5302,7 @@ Body\n\
         match agent_doc_session_check_io::run_with_options(
             &doc,
             true,
-            &crate::session_check_effects(),
+            &agent_doc_orchestration::session_check_effects(),
         ) {
             Ok(()) => {}
             other => panic!("expected codex_final_gate to adopt manual patchback, got {other:?}"),
@@ -5353,7 +5356,7 @@ Body\n\
             .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -5439,7 +5442,7 @@ Body\n\
         }
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -5509,7 +5512,7 @@ Body\n\
         }
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -6481,7 +6484,7 @@ Body\n\
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(content),
@@ -6551,7 +6554,7 @@ Body\n\
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(content),
@@ -6639,7 +6642,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -6698,7 +6701,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -6768,7 +6771,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -6831,7 +6834,7 @@ Body\n\
         // Recursive guard abandoned the cycle with no captured response.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(committed),
@@ -7028,7 +7031,7 @@ Body\n\
             .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),
@@ -7048,8 +7051,11 @@ Body\n\
             "precondition: late-IPC over-application present"
         );
 
-        agent_doc_session_check_io::enforce_clean_closeout(&doc, &crate::session_check_effects())
-            .expect("enforce_clean_closeout should self-heal, not bail");
+        agent_doc_session_check_io::enforce_clean_closeout(
+            &doc,
+            &agent_doc_orchestration::session_check_effects(),
+        )
+        .expect("enforce_clean_closeout should self-heal, not bail");
         assert_eq!(fs::read_to_string(&doc).unwrap(), committed);
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),

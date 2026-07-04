@@ -4566,6 +4566,87 @@ Compacted content:\n\
     }
 
     #[test]
+    fn repair_historical_snapshot_drift_accepts_committed_capture_with_queue_mutation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let doc = root.join("session.md");
+        let stale_snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- [ ] [#old] old work\n",
+            "<!-- /agent:queue -->\n",
+        );
+        commit_file(root, "session.md", stale_snapshot, "initial session");
+        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: go-mode backlog - gpt-5\n\n",
+            "The response is already committed.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "### Re: go-mode backlog - gpt-5 (HEAD)\n\n",
+            "The response is already committed.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- [x] [#old] old work\n",
+            "- [ ] [#next] next work\n",
+            "<!-- /agent:queue -->\n",
+        );
+        commit_file(
+            root,
+            "session.md",
+            head,
+            "committed response with queue mutation",
+        );
+
+        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(stale_snapshot),
+            Some(head),
+        )
+        .unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+
+        let repaired = agent_doc_repair_io::repair_committed_historical_snapshot_drift(&doc)
+            .expect("committed capture proof should repair stale snapshot");
+
+        assert_eq!(repaired, Some("committed_capture"));
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap(),
+            Some(head.to_string())
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("snapshot_repair file=")
+                && log.contains("reason=committed_capture")
+                && log.contains("basis=head"),
+            "repair should be audited as committed-capture snapshot refresh:\n{log}"
+        );
+    }
+
+    #[test]
     fn commit_allows_clean_exchange_only_compaction_with_head_marker_worktree() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();

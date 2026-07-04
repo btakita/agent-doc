@@ -1526,6 +1526,8 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     let Some(head_doc) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(None);
     };
+    let committed_capture_materialized =
+        committed_capture_response_materialized_in_head(file, &head_doc);
     let historical_mutation =
         agent_doc_document_realtime::write_policy::classify_committed_historical_agent_doc_mutation(
             &snapshot_doc,
@@ -1553,6 +1555,7 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
             &head_doc,
         );
     let Some(reason) = (match historical_mutation {
+        _ if committed_capture_materialized => Some("committed_capture"),
         Some("exchange") => Some("exchange"),
         None if !non_exchange_component_drift && historical_response_marker.is_some() => {
             Some("exchange")
@@ -1624,6 +1627,34 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     }
 
     Ok(None)
+}
+
+fn committed_capture_response_materialized_in_head(file: &Path, head_doc: &str) -> bool {
+    let capture = match agent_doc_capture_io::latest_committed(file) {
+        Ok(Some(capture)) => capture,
+        Ok(None) => return false,
+        Err(e) => {
+            eprintln!(
+                "[repair] committed-capture snapshot repair warning for {}: {}",
+                file.display(),
+                e
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "snapshot_repair_committed_capture_warning file={} err={}",
+                    file.display(),
+                    e
+                ),
+            );
+            return false;
+        }
+    };
+    !capture.response_body.trim().is_empty()
+        && agent_doc_turn::response_replay::response_materialized_in_content(
+            &capture.response_body,
+            head_doc,
+        )
 }
 
 pub fn recover_missing_commit_boundary(

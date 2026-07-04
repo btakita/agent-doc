@@ -940,120 +940,51 @@ fn set_status_with_options(file: &Path, text: &str, force_disk: bool) -> Result<
     agent_doc_status_io::set_with_options(&STATUS_EFFECTS, file, text, force_disk)
 }
 
-pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
-    run_command_inner(options, commit_mode, None)
-}
-
-fn run_command_inner(
-    options: CommandOptions,
-    commit_mode: CommitMode,
-    empty_response_recovery: Option<EmptyResponseRecovery>,
-) -> Result<()> {
-    let file = options.file.as_path();
-
-    if let Some(ref origin) = options.origin {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!("write_origin file={} origin={}", file.display(), origin),
-        );
-    }
-    // #jb-tsift-pane-sync diagnostic: capture a write/commit to `file` that is
-    // executing inside a tmux pane owning a different document (the
-    // cross-document contamination vector — e.g. a tsift.md-owned pane
-    // committing agent-doc-bugs2.md's response).
-    agent_doc_sync_io::sync::log_cross_document_execution_context(file, "write");
-
-    // #manual-queue-head-loss: extend the `#queue-clear-unrun-items` removal-proof
-    // anchor to user queue heads inserted AFTER preflight (for example a
-    // `do [#id]` typed into `agent:queue` during a stalled / busy-pane dispatch
-    // attempt). Read the live working-tree document here — before any pending
-    // mutation or queue convergence mutates it — and union its directive heads
-    // into the recorded set so closeout cannot silently drop a runnable manual
-    // head whose backlog item is still open. Best-effort: an absent cycle state
-    // is a no-op, and a read failure is logged (the real write path below reads
-    // the document again and surfaces any genuine I/O error).
-    match std::fs::read_to_string(file) {
-        Ok(live_doc) => {
-            if let Err(err) = agent_doc_cycle_state_io::observe_live_queue_heads(file, &live_doc) {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "observe_live_queue_heads_failed file={} err={}",
-                        file.display(),
-                        err
-                    ),
-                );
-            }
-        }
+pub(crate) fn guard_stale_snapshot_recovery_only(
+    file: &Path,
+    snapshot_doc: Option<&str>,
+    current_doc: &str,
+    phase: &str,
+) -> bool {
+    match agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
+        file,
+        snapshot_doc,
+        current_doc,
+        phase,
+    ) {
+        Ok(rebased) => rebased,
         Err(err) => {
+            eprintln!("[write] snapshot recovery warning during {phase}: {err}");
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "observe_live_queue_heads_read_failed file={} err={}",
+                    "stale_snapshot_recovery_warning file={} phase={} err={}",
                     file.display(),
+                    phase,
                     err
                 ),
             );
+            false
         }
     }
+}
 
-    let has_pending_ops = options.has_pending_mutation();
-
-    if options.pending_only && !has_pending_ops {
-        anyhow::bail!("--backlog-only requires at least one backlog/icebox/review mutation flag");
-    }
-    if options.pending_only && (options.is_template || options.is_stream || options.is_ipc) {
-        anyhow::bail!("--backlog-only cannot be combined with --template, --stream, or --ipc");
-    }
-    if options.pending_only && commit_mode == CommitMode::Required {
-        anyhow::bail!("finalize does not support --backlog-only");
-    }
-    if !options.pending_add_to.len().is_multiple_of(2) {
-        anyhow::bail!("--backlog-add-to expects repeated FILE TEXT pairs");
-    }
-    if options.commit_sibling.len() != options.commit_sibling_message.len() {
-        anyhow::bail!(
-            "--commit-sibling and --commit-sibling-message must be repeated the same number of times in positional pairs (got {} sibling(s), {} message(s))",
-            options.commit_sibling.len(),
-            options.commit_sibling_message.len()
-        );
-    }
-    if !options.commit_sibling.is_empty() && commit_mode == CommitMode::None {
-        anyhow::bail!(
-            "--commit-sibling requires --commit (or `agent-doc finalize`); the sibling trailer URL needs the session-document commit sha"
-        );
-    }
-    let pending_kept_open_ids = pending_kept_open_ids_from_mutations(
-        &options.pending_edit,
-        &options.pending_gate,
-        &options.pending_ungate,
-        &options.pending_set_gate_type,
-        &options.pending_set_verify,
-        &options.review_edit,
-        options.pending_reorder.as_deref(),
-    );
-    let mut commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
-    if commit_mode == CommitMode::Required && !agent_doc_git_io::status::is_in_git_repo(file) {
-        if is_session_document(file)? {
-            anyhow::bail!(
-                "write --commit requires a git repository for session documents so the cycle can reach a committed state"
-            );
-        }
-        anyhow::bail!(
-            "finalize requires a git repository so the cycle can reach a committed state"
-        );
-    }
-
+fn apply_pending_and_status_mutations(
+    file: &Path,
+    options: &CommandOptions,
+    pending_kept_open_ids: &[String],
+    has_pending_ops: bool,
+) -> Result<()> {
     if has_pending_ops || options.status.is_some() {
         let current_content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-        agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
+        guard_stale_snapshot_recovery_only(
             file,
             snapshot_doc.as_deref(),
             &current_content,
-            "pre-pending write",
-        )?;
+            "pending/status write",
+        );
     }
 
     if has_pending_ops {
@@ -1090,10 +1021,8 @@ fn run_command_inner(
                     // the front-insert default so anchor ids added this same cycle resolve.
                     for pair in options.pending_add_after.chunks(2) {
                         if let [anchor, text] = pair {
-                            let id =
-                                backlog_cmd::add_after(file, anchor, text).with_context(|| {
-                                    format!("failed to apply --backlog-add-after {anchor}")
-                                })?;
+                            let id = backlog_cmd::add_after(file, anchor, text)
+                                .with_context(|| format!("failed to apply --backlog-add-after {anchor}"))?;
                             same_cycle_added_ids.push(id);
                         } else {
                             anyhow::bail!("--backlog-add-after expects repeated ID TEXT pairs");
@@ -1101,10 +1030,8 @@ fn run_command_inner(
                     }
                     for pair in options.pending_add_before.chunks(2) {
                         if let [anchor, text] = pair {
-                            let id =
-                                backlog_cmd::add_before(file, anchor, text).with_context(|| {
-                                    format!("failed to apply --backlog-add-before {anchor}")
-                                })?;
+                            let id = backlog_cmd::add_before(file, anchor, text)
+                                .with_context(|| format!("failed to apply --backlog-add-before {anchor}"))?;
                             same_cycle_added_ids.push(id);
                         } else {
                             anyhow::bail!("--backlog-add-before expects repeated ID TEXT pairs");
@@ -1118,9 +1045,7 @@ fn run_command_inner(
                     for pair in options.icebox_add_after.chunks(2) {
                         if let [anchor, text] = pair {
                             let id = backlog_cmd::icebox_add_after(file, anchor, text)
-                                .with_context(|| {
-                                    format!("failed to apply --icebox-add-after {anchor}")
-                                })?;
+                                .with_context(|| format!("failed to apply --icebox-add-after {anchor}"))?;
                             same_cycle_added_ids.push(id);
                         } else {
                             anyhow::bail!("--icebox-add-after expects repeated ID TEXT pairs");
@@ -1129,9 +1054,7 @@ fn run_command_inner(
                     for pair in options.icebox_add_before.chunks(2) {
                         if let [anchor, text] = pair {
                             let id = backlog_cmd::icebox_add_before(file, anchor, text)
-                                .with_context(|| {
-                                    format!("failed to apply --icebox-add-before {anchor}")
-                                })?;
+                                .with_context(|| format!("failed to apply --icebox-add-before {anchor}"))?;
                             same_cycle_added_ids.push(id);
                         } else {
                             anyhow::bail!("--icebox-add-before expects repeated ID TEXT pairs");
@@ -1248,7 +1171,7 @@ fn run_command_inner(
                     if !pending_kept_open_ids.is_empty() {
                         agent_doc_cycle_state_io::record_pending_kept_open_ids(
                             file,
-                            &pending_kept_open_ids,
+                            pending_kept_open_ids,
                         )?;
                     }
                     agent_doc_cycle_state_io::mark_pending_mutations(file)?;
@@ -1262,7 +1185,120 @@ fn run_command_inner(
         set_status_with_options(file, status_text, options.force_disk)?;
     }
 
+    Ok(())
+}
+
+pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
+    run_command_inner(options, commit_mode, None)
+}
+
+fn run_command_inner(
+    options: CommandOptions,
+    commit_mode: CommitMode,
+    empty_response_recovery: Option<EmptyResponseRecovery>,
+) -> Result<()> {
+    let file = options.file.as_path();
+
+    if let Some(ref origin) = options.origin {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("write_origin file={} origin={}", file.display(), origin),
+        );
+    }
+    // #jb-tsift-pane-sync diagnostic: capture a write/commit to `file` that is
+    // executing inside a tmux pane owning a different document (the
+    // cross-document contamination vector — e.g. a tsift.md-owned pane
+    // committing agent-doc-bugs2.md's response).
+    agent_doc_sync_io::sync::log_cross_document_execution_context(file, "write");
+
+    // #manual-queue-head-loss: extend the `#queue-clear-unrun-items` removal-proof
+    // anchor to user queue heads inserted AFTER preflight (for example a
+    // `do [#id]` typed into `agent:queue` during a stalled / busy-pane dispatch
+    // attempt). Read the live working-tree document here — before any pending
+    // mutation or queue convergence mutates it — and union its directive heads
+    // into the recorded set so closeout cannot silently drop a runnable manual
+    // head whose backlog item is still open. Best-effort: an absent cycle state
+    // is a no-op, and a read failure is logged (the real write path below reads
+    // the document again and surfaces any genuine I/O error).
+    match std::fs::read_to_string(file) {
+        Ok(live_doc) => {
+            if let Err(err) = agent_doc_cycle_state_io::observe_live_queue_heads(file, &live_doc) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "observe_live_queue_heads_failed file={} err={}",
+                        file.display(),
+                        err
+                    ),
+                );
+            }
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "observe_live_queue_heads_read_failed file={} err={}",
+                    file.display(),
+                    err
+                ),
+            );
+        }
+    }
+
+    let has_pending_ops = options.has_pending_mutation();
+
+    if options.pending_only && !has_pending_ops {
+        anyhow::bail!("--backlog-only requires at least one backlog/icebox/review mutation flag");
+    }
+    if options.pending_only && (options.is_template || options.is_stream || options.is_ipc) {
+        anyhow::bail!("--backlog-only cannot be combined with --template, --stream, or --ipc");
+    }
+    if options.pending_only && commit_mode == CommitMode::Required {
+        anyhow::bail!("finalize does not support --backlog-only");
+    }
+    if !options.pending_add_to.len().is_multiple_of(2) {
+        anyhow::bail!("--backlog-add-to expects repeated FILE TEXT pairs");
+    }
+    if options.commit_sibling.len() != options.commit_sibling_message.len() {
+        anyhow::bail!(
+            "--commit-sibling and --commit-sibling-message must be repeated the same number of times in positional pairs (got {} sibling(s), {} message(s))",
+            options.commit_sibling.len(),
+            options.commit_sibling_message.len()
+        );
+    }
+    if !options.commit_sibling.is_empty() && commit_mode == CommitMode::None {
+        anyhow::bail!(
+            "--commit-sibling requires --commit (or `agent-doc finalize`); the sibling trailer URL needs the session-document commit sha"
+        );
+    }
+    let pending_kept_open_ids = pending_kept_open_ids_from_mutations(
+        &options.pending_edit,
+        &options.pending_gate,
+        &options.pending_ungate,
+        &options.pending_set_gate_type,
+        &options.pending_set_verify,
+        &options.review_edit,
+        options.pending_reorder.as_deref(),
+    );
+    let mut commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
+    if commit_mode == CommitMode::Required && !agent_doc_git_io::status::is_in_git_repo(file) {
+        if is_session_document(file)? {
+            anyhow::bail!(
+                "write --commit requires a git repository for session documents so the cycle can reach a committed state"
+            );
+        }
+        anyhow::bail!(
+            "finalize requires a git repository so the cycle can reach a committed state"
+        );
+    }
+
     if options.pending_only {
+        apply_pending_and_status_mutations(
+            file,
+            &options,
+            &pending_kept_open_ids,
+            has_pending_ops,
+        )?;
         agent_doc_session_check_io::run_closeout_pending_maintenance(
             file,
             commit_mode == CommitMode::Required,
@@ -1451,6 +1487,15 @@ fn run_command_inner(
                 file.display()
             );
         }
+    }
+
+    if write_result.is_ok() {
+        apply_pending_and_status_mutations(
+            file,
+            &options,
+            &pending_kept_open_ids,
+            has_pending_ops,
+        )?;
     }
 
     if write_result.is_ok() {

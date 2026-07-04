@@ -1029,7 +1029,11 @@ pub fn run_stream(
                 "[write] response already present in current file; adopting normalized current content"
             );
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repaired_current);
-            (repaired_current, doc.encode_state(), false)
+            (
+                repaired_current,
+                doc.encode_state(),
+                force_disk_editor_attached,
+            )
         } else if content_current == base {
             // No edits — build CRDT state from result
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours);

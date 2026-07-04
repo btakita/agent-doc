@@ -335,6 +335,37 @@ pub struct CommandOptions {
     pub commit_sibling_message: Vec<String>,
 }
 
+impl CommandOptions {
+    pub fn has_pending_mutation(&self) -> bool {
+        !self.pending_add.is_empty()
+            || !self.pending_add_to.is_empty()
+            || !self.pending_add_gated.is_empty()
+            || !self.pending_add_after.is_empty()
+            || !self.pending_add_before.is_empty()
+            || !self.pending_add_back.is_empty()
+            || !self.icebox_add.is_empty()
+            || !self.icebox_add_after.is_empty()
+            || !self.icebox_add_before.is_empty()
+            || !self.icebox_add_back.is_empty()
+            || !self.icebox_edit.is_empty()
+            || self.icebox_clear
+            || self.icebox_reorder.is_some()
+            || !self.pending_done.is_empty()
+            || !self.pending_edit.is_empty()
+            || self.pending_clear
+            || self.pending_reorder.is_some()
+            || !self.pending_gate.is_empty()
+            || !self.pending_ungate.is_empty()
+            || !self.pending_resolve_gate.is_empty()
+            || !self.pending_set_gate_type.is_empty()
+            || !self.pending_set_verify.is_empty()
+            || !self.review_add.is_empty()
+            || !self.review_edit.is_empty()
+            || !self.review_remove.is_empty()
+            || !self.review_resolve.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct WriteFlags {
     pub allow_replace_pending: bool,
@@ -346,6 +377,7 @@ pub struct WriteFlags {
     pub pending_kept_open_ids: Vec<String>,
     pub strict_closeout: bool,
     pub force_disk: bool,
+    pub(crate) empty_response_recovery: Option<EmptyResponseRecovery>,
     pub rerun_command_base: Option<String>,
 }
 
@@ -368,6 +400,10 @@ pub enum CommitMode {
     Required,
 }
 
+pub(crate) const EMPTY_RESPONSE_ERROR: &str = "empty response — nothing to write";
+
+pub(crate) type EmptyResponseRecovery = fn(&Path, bool, bool) -> Result<bool>;
+
 pub fn run_command_with_response(
     options: CommandOptions,
     commit_mode: CommitMode,
@@ -379,6 +415,14 @@ pub fn run_command_with_response(
         slot.replace(previous);
     });
     result
+}
+
+pub(crate) fn run_command_with_empty_response_recovery(
+    options: CommandOptions,
+    commit_mode: CommitMode,
+    empty_response_recovery: EmptyResponseRecovery,
+) -> Result<()> {
+    run_command_inner(options, commit_mode, Some(empty_response_recovery))
 }
 
 fn read_response_input() -> Result<String> {
@@ -895,6 +939,14 @@ fn set_status_with_options(file: &Path, text: &str, force_disk: bool) -> Result<
 }
 
 pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
+    run_command_inner(options, commit_mode, None)
+}
+
+fn run_command_inner(
+    options: CommandOptions,
+    commit_mode: CommitMode,
+    empty_response_recovery: Option<EmptyResponseRecovery>,
+) -> Result<()> {
     let file = options.file.as_path();
 
     if let Some(ref origin) = options.origin {
@@ -943,32 +995,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
     }
 
-    let has_pending_ops = !options.pending_add.is_empty()
-        || !options.pending_add_to.is_empty()
-        || !options.pending_add_gated.is_empty()
-        || !options.pending_add_after.is_empty()
-        || !options.pending_add_before.is_empty()
-        || !options.pending_add_back.is_empty()
-        || !options.icebox_add.is_empty()
-        || !options.icebox_add_after.is_empty()
-        || !options.icebox_add_before.is_empty()
-        || !options.icebox_add_back.is_empty()
-        || !options.icebox_edit.is_empty()
-        || options.icebox_clear
-        || options.icebox_reorder.is_some()
-        || !options.pending_done.is_empty()
-        || !options.pending_edit.is_empty()
-        || options.pending_clear
-        || options.pending_reorder.is_some()
-        || !options.pending_gate.is_empty()
-        || !options.pending_ungate.is_empty()
-        || !options.pending_resolve_gate.is_empty()
-        || !options.pending_set_gate_type.is_empty()
-        || !options.pending_set_verify.is_empty()
-        || !options.review_add.is_empty()
-        || !options.review_edit.is_empty()
-        || !options.review_remove.is_empty()
-        || !options.review_resolve.is_empty();
+    let has_pending_ops = options.has_pending_mutation();
 
     if options.pending_only && !has_pending_ops {
         anyhow::bail!("--backlog-only requires at least one backlog/icebox/review mutation flag");
@@ -1284,6 +1311,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         pending_kept_open_ids: pending_kept_open_ids.clone(),
         strict_closeout: commit_mode == CommitMode::Required,
         force_disk: options.force_disk,
+        empty_response_recovery,
         rerun_command_base: finalize_rerun_command_base(FinalizeRerunCommand {
             required_commit: commit_mode == CommitMode::Required,
             file,
@@ -1702,7 +1730,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                     }
                     return Ok(());
                 }
-                match crate::git::commit(file) {
+                match commit_via_closeout_effects(file) {
                     // `#staleinmem` — record what we just committed so a later
                     // out-of-band disk correction is detectable at the next barrier.
                     Ok(_) => agent_doc_crdt_relay_io::record_committed_baseline_for_file(file),
@@ -1766,7 +1794,7 @@ pub(crate) fn recover_missing_committed_head_response(file: &Path) -> Result<boo
     guard_visible_write_idle_and_current(file, "recover_committed_head_response", &current)?;
     atomic_write(file, &recovered)?;
     agent_doc_snapshot_io::save(file, &recovered, agent_doc_ops_log_io::log_op)?;
-    crate::git::commit(file)?;
+    commit_via_closeout_effects(file)?;
     Ok(true)
 }
 
@@ -1805,8 +1833,12 @@ pub(crate) fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
         file.display()
     );
     agent_doc_snapshot_io::save(file, &current, agent_doc_ops_log_io::log_op)?;
-    crate::git::commit(file)?;
+    commit_via_closeout_effects(file)?;
     Ok(true)
+}
+
+fn commit_via_closeout_effects(file: &Path) -> Result<bool> {
+    agent_doc_flow_io::closeout::CloseoutEffects::commit(&crate::closeout_effects(), file)
 }
 
 fn ipc_response_materialized_or_fallback(

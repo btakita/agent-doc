@@ -3565,19 +3565,45 @@ fn test_orchestration_repair_owns_strict_empty_response_recovery() {
     let write_run_entry =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
             .unwrap();
+    let main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
 
     assert!(
         repair.contains("pub(crate) fn recover_empty_response_for_strict_closeout("),
         "repair.rs should own strict empty-response closeout recovery coordination"
     );
     assert!(
+        repair.contains("pub fn run_write_command_with_empty_response_recovery("),
+        "repair.rs should own the write-command recovery bridge"
+    );
+    assert!(
         !write.contains("fn recover_empty_response_for_strict_closeout("),
         "write.rs must not re-own strict empty-response closeout recovery coordination"
     );
     assert_source_mentions_all(
-        &write_run_entry,
-        "agent-doc-orchestration/src/write/run_entry.rs",
-        &["crate::repair::recover_empty_response_for_strict_closeout("],
+        &main,
+        "src/main.rs",
+        &["agent_doc_orchestration::repair::run_write_command_with_empty_response_recovery("],
+    );
+    assert!(
+        !write_run_entry.contains("crate::repair::"),
+        "write/run_entry.rs must not call repair; empty-response recovery belongs at the repair-owned command boundary"
+    );
+}
+
+#[test]
+fn test_orchestration_write_uses_closeout_commit_adapter() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let write =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+
+    assert!(
+        !write.contains("crate::git::commit("),
+        "write.rs must not call git directly; commit ownership belongs behind closeout effects"
+    );
+    assert!(
+        write.contains("fn commit_via_closeout_effects(")
+            && write.contains("CloseoutEffects::commit(&crate::closeout_effects(), file)"),
+        "write.rs should route commit boundaries through the injected closeout effects adapter"
     );
 }
 
@@ -26990,6 +27016,8 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
     let route_command =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/command.rs")).unwrap();
+    let route_invocation =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/invocation.rs")).unwrap();
 
     for forbidden_snippet in [
         "agent_doc_sync_io::resync::prune_with_tmux_timed_in_mode",
@@ -27000,15 +27028,18 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
         "resolve_target_session(tmux",
         "clear_for_success(\n                file,\n                \"route_success\"",
         "cleanup_failed_route_panes(tmux",
+        "static WAIT_FOR_READY_OVERRIDE",
+        "static FORCE_DISK_ROUTE_WRITES",
     ] {
         assert!(
             !route_source.contains(forbidden_snippet),
-            "route.rs must not re-own the top-level route command runtime after it moves to route IO: {forbidden_snippet}"
+            "route.rs must not re-own the top-level route command runtime or invocation state after it moves to route IO: {forbidden_snippet}"
         );
     }
 
     assert!(
         route_io_lib.contains("pub mod command;")
+            && route_io_lib.contains("pub mod invocation;")
             && route_command.contains("pub enum RouteMode")
             && route_command.contains("pub struct RouteCommandEffects")
             && route_command.contains("pub fn run_with_tmux_with_options(")
@@ -27027,10 +27058,16 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
             && route_command
                 .contains("agent_doc_controller_io::editor_route_errors::clear_for_success")
             && route_command.contains("cleanup_failed_route_panes(tmux")
+            && route_invocation.contains("static WAIT_FOR_READY_OVERRIDE")
+            && route_invocation.contains("static FORCE_DISK_ROUTE_WRITES")
+            && route_invocation.contains("pub fn wait_for_ready_override(")
+            && route_invocation.contains("pub fn force_disk_route_writes(")
+            && route_invocation.contains("pub fn run_with_tmux_with_options(")
+            && route_invocation.contains("command::run_with_tmux_with_options(")
             && route_source.contains("pub use agent_doc_route_io::command::RouteMode;")
-            && route_source.contains("agent_doc_route_io::command::run_with_tmux_with_options(")
+            && route_source.contains("agent_doc_route_io::invocation::run_with_tmux_with_options(")
             && route_source.contains("RouteCommandEffects"),
-        "agent-doc-route-io command should own top-level route runtime while orchestration injects effect bundles"
+        "agent-doc-route-io command/invocation should own top-level route runtime and invocation state while orchestration injects effect bundles"
     );
 }
 

@@ -81,6 +81,17 @@ use agent_doc_workflow::capture::{
 
 use crate::write;
 
+pub fn run_write_command_with_empty_response_recovery(
+    options: write::CommandOptions,
+    commit_mode: write::CommitMode,
+) -> Result<()> {
+    write::run_command_with_empty_response_recovery(
+        options,
+        commit_mode,
+        recover_empty_response_for_strict_closeout,
+    )
+}
+
 pub(crate) fn recover_empty_response_for_strict_closeout(
     file: &Path,
     strict_closeout: bool,

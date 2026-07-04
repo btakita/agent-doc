@@ -3737,7 +3737,7 @@ fn main() -> anyhow::Result<()> {
                         .map_err(|e| anyhow::anyhow!(e))?,
                 ),
             };
-            agent_doc_orchestration::write::run_command(
+            agent_doc_orchestration::repair::run_write_command_with_empty_response_recovery(
                 agent_doc_orchestration::write::CommandOptions {
                     file: args.file,
                     baseline_file: args.baseline_file,
@@ -3795,7 +3795,7 @@ fn main() -> anyhow::Result<()> {
                         .map_err(|e| anyhow::anyhow!(e))?,
                 ),
             };
-            agent_doc_orchestration::write::run_command(
+            agent_doc_orchestration::repair::run_write_command_with_empty_response_recovery(
                 agent_doc_orchestration::write::CommandOptions {
                     file: args.file,
                     baseline_file: args.baseline_file,

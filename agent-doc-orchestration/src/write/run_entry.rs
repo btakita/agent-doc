@@ -26,6 +26,14 @@ use agent_doc_write_ipc_io::build_ipc_patches_json;
 // `content_ours_drops_operator_text` and `agent_doc_fs::preserve_dropped_operator_buffer`
 // remain available for diagnostics.
 
+fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Result<bool> {
+    if let Some(recover) = flags.empty_response_recovery {
+        recover(file, flags.strict_closeout, flags.has_pending_mutation)
+    } else {
+        Ok(false)
+    }
+}
+
 /// Run the write command: append assistant response to document.
 ///
 /// `baseline` is the document content at the time the response was generated.
@@ -39,14 +47,10 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     let response = read_response_input()?;
 
     if response.trim().is_empty() {
-        if crate::repair::recover_empty_response_for_strict_closeout(
-            file,
-            flags.strict_closeout,
-            flags.has_pending_mutation,
-        )? {
+        if recover_empty_response_if_configured(file, &flags)? {
             return Ok(());
         }
-        anyhow::bail!("empty response — nothing to write");
+        anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
     let current_content = std::fs::read_to_string(file)
@@ -225,14 +229,10 @@ pub fn run_template(
     let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
-        if crate::repair::recover_empty_response_for_strict_closeout(
-            file,
-            flags.strict_closeout,
-            flags.has_pending_mutation,
-        )? {
+        if recover_empty_response_if_configured(file, &flags)? {
             return Ok(());
         }
-        anyhow::bail!("empty response — nothing to write");
+        anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
     let current_content = std::fs::read_to_string(file)
@@ -567,14 +567,10 @@ pub fn run_stream(
     let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
-        if crate::repair::recover_empty_response_for_strict_closeout(
-            file,
-            flags.strict_closeout,
-            flags.has_pending_mutation,
-        )? {
+        if recover_empty_response_if_configured(file, &flags)? {
             return Ok(());
         }
-        anyhow::bail!("empty response — nothing to write");
+        anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
     let current_content = std::fs::read_to_string(file)
@@ -1295,14 +1291,10 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
-        if crate::repair::recover_empty_response_for_strict_closeout(
-            file,
-            flags.strict_closeout,
-            flags.has_pending_mutation,
-        )? {
+        if recover_empty_response_if_configured(file, &flags)? {
             return Ok(());
         }
-        anyhow::bail!("empty response — nothing to write");
+        anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
     // #rtwwire rung 3b: the IPC write path normalizes/parses its patches against

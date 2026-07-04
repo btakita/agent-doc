@@ -256,59 +256,6 @@ use tmux_router::Tmux;
 
 #[cfg(test)]
 use agent_doc_session_registry_io::registration as sessions;
-use std::cell::Cell;
-
-thread_local! {
-    /// Per-invocation override for the bounded wait that
-    /// `wait_for_authoritative_actor_ready` applies when the authoritative
-    /// actor is still `starting`. Set from `route::run_with_tmux` when the
-    /// caller passed `--wait-for-ready <SECONDS>` so user-initiated dispatches
-    /// (e.g. JB plugin Run Agent Doc on a slow-starting supervisor) can hold
-    /// the wait longer than the harness-specific default. `None` means no
-    /// override — the binary-specific timeout in
-    /// `authoritative_actor_ready_retry_budget` applies.
-    static WAIT_FOR_READY_OVERRIDE: Cell<Option<Duration>> = const { Cell::new(None) };
-    static FORCE_DISK_ROUTE_WRITES: Cell<bool> = const { Cell::new(false) };
-}
-
-/// RAII guard that installs a `wait_for_ready` override on entry and restores
-/// the previous value on drop. Keeps the override scoped to the single
-/// `route::run_with_tmux` invocation even if it returns early via `?`.
-struct WaitForReadyOverrideGuard {
-    previous: Option<Duration>,
-}
-
-impl WaitForReadyOverrideGuard {
-    fn set(value: Option<Duration>) -> Self {
-        let previous = WAIT_FOR_READY_OVERRIDE.with(|cell| cell.replace(value));
-        Self { previous }
-    }
-}
-
-impl Drop for WaitForReadyOverrideGuard {
-    fn drop(&mut self) {
-        let previous = self.previous;
-        WAIT_FOR_READY_OVERRIDE.with(|cell| cell.set(previous));
-    }
-}
-
-struct ForceDiskRouteWritesGuard {
-    previous: bool,
-}
-
-impl ForceDiskRouteWritesGuard {
-    fn set(value: bool) -> Self {
-        let previous = FORCE_DISK_ROUTE_WRITES.with(|cell| cell.replace(value));
-        Self { previous }
-    }
-}
-
-impl Drop for ForceDiskRouteWritesGuard {
-    fn drop(&mut self) {
-        let previous = self.previous;
-        FORCE_DISK_ROUTE_WRITES.with(|cell| cell.set(previous));
-    }
-}
 
 fn route_write_document(
     file: &Path,
@@ -316,7 +263,7 @@ fn route_write_document(
     previous_content: &str,
     reason: &str,
 ) -> Result<()> {
-    if FORCE_DISK_ROUTE_WRITES.with(Cell::get) {
+    if agent_doc_route_io::invocation::force_disk_route_writes() {
         crate::write::atomic_write_pub(file, next_content)?;
         agent_doc_ops_log_io::log_op(
             file,
@@ -341,7 +288,7 @@ fn route_write_document(
 }
 
 fn wait_for_ready_override() -> Option<Duration> {
-    WAIT_FOR_READY_OVERRIDE.with(|cell| cell.get())
+    agent_doc_route_io::invocation::wait_for_ready_override()
 }
 
 fn route_dispatch_effects() -> RouteDispatchEffects {
@@ -477,7 +424,7 @@ fn enqueue_route_dispatch_prompt_for_dispatch_only(
 }
 
 fn route_dispatch_bug_force_disk_pending_writes() -> bool {
-    FORCE_DISK_ROUTE_WRITES.with(Cell::get)
+    agent_doc_route_io::invocation::force_disk_route_writes()
 }
 
 fn add_route_dispatch_bug_backlog_items(
@@ -526,7 +473,7 @@ pub fn run(
     plain_trigger: bool,
     wait_for_ready: Option<Duration>,
 ) -> Result<()> {
-    run_with_force_disk(
+    agent_doc_route_io::invocation::run(
         file,
         pane,
         debounce_ms,
@@ -534,7 +481,7 @@ pub fn run(
         mode,
         plain_trigger,
         wait_for_ready,
-        false,
+        route_command_effects(),
     )
 }
 
@@ -549,9 +496,8 @@ pub fn run_with_force_disk(
     wait_for_ready: Option<Duration>,
     force_disk: bool,
 ) -> Result<()> {
-    run_with_tmux_with_options(
+    agent_doc_route_io::invocation::run_with_force_disk(
         file,
-        &Tmux::default_server(),
         pane,
         debounce_ms,
         col_args,
@@ -559,6 +505,7 @@ pub fn run_with_force_disk(
         plain_trigger,
         wait_for_ready,
         force_disk,
+        route_command_effects(),
     )
 }
 
@@ -573,7 +520,7 @@ pub fn run_with_tmux(
     plain_trigger: bool,
     wait_for_ready: Option<Duration>,
 ) -> Result<()> {
-    run_with_tmux_with_options(
+    agent_doc_route_io::invocation::run_with_tmux(
         file,
         tmux,
         pane,
@@ -582,7 +529,7 @@ pub fn run_with_tmux(
         mode,
         plain_trigger,
         wait_for_ready,
-        false,
+        route_command_effects(),
     )
 }
 
@@ -598,9 +545,7 @@ pub fn run_with_tmux_with_options(
     wait_for_ready: Option<Duration>,
     force_disk: bool,
 ) -> Result<()> {
-    let _wait_for_ready_guard = WaitForReadyOverrideGuard::set(wait_for_ready);
-    let _force_disk_guard = ForceDiskRouteWritesGuard::set(force_disk);
-    agent_doc_route_io::command::run_with_tmux_with_options(
+    agent_doc_route_io::invocation::run_with_tmux_with_options(
         file,
         tmux,
         pane,
@@ -608,6 +553,8 @@ pub fn run_with_tmux_with_options(
         col_args,
         mode,
         plain_trigger,
+        wait_for_ready,
+        force_disk,
         route_command_effects(),
     )
 }
@@ -846,7 +793,8 @@ mod tests {
         assert_eq!(ctx.prompt_text, "/clear");
         assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
 
-        let _force_disk_guard = ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_exchange_slash_command_for_idle_drain(
             &doc,
             &ctx,
@@ -907,7 +855,8 @@ mod tests {
         assert_eq!(ctx.prompt_text, "/clear");
         assert_eq!(ctx.slash_command.as_deref(), Some("/clear"));
 
-        let _force_disk_guard = ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_exchange_slash_command_for_idle_drain(
             &doc,
             &ctx,
@@ -1305,7 +1254,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "❯ do [#qipc]. #spec-test-build-install-commit-push",
@@ -1449,7 +1399,8 @@ mod tests {
                 .any(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Freeform(_)))
         );
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "do [#newitem]",
@@ -1506,7 +1457,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "do [#qipc]. #spec-test-build-install-commit-push",
@@ -1560,7 +1512,8 @@ mod tests {
             Some("do [#shipstationaudit]. #spec-test-commit-push")
         );
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = activate_existing_route_queue_head(&doc, "busy actor", route_queue_effects())
             .unwrap()
             .expect("legacy inactive auto go queue head should activate");
@@ -1728,7 +1681,8 @@ mod tests {
             Some("do [#committed]"),
             "a committed-backed head is dispatchable"
         );
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = activate_existing_route_queue_head(
             &doc,
             "dispatch_only_inactive_queue",
@@ -1850,7 +1804,8 @@ mod tests {
             "marker-side `go` must be recognized as an activatable head despite `queue: stop`"
         );
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = activate_existing_route_queue_head(&doc, "busy actor", route_queue_effects())
             .unwrap()
             .expect("startable inactive `go` queue head should activate");
@@ -1934,7 +1889,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "do [#adoc-orch-shim-cleanup]",
@@ -1976,7 +1932,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "Run Agent Doc queued the edited prompt.",
@@ -2030,7 +1987,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "third queued prompt",
@@ -2077,7 +2035,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "manual preempt prompt",
@@ -2126,7 +2085,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
             "manual preempt prompt",
@@ -2170,7 +2130,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         enqueue_route_dispatch_prompt(
             &doc,
             "manual preempt prompt",
@@ -2442,7 +2403,8 @@ mod tests {
         // The drain may still report Blocked on later (committed/etc.) guards in this
         // minimal fixture, but the all-surface reap runs before that — assert the
         // completed review item is gone from the file.
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let _ = super::drain_open_closeout_before_routed_dispatch(
             &doc,
             super::route_closeout_drain_effects(),
@@ -2665,7 +2627,8 @@ mod tests {
             proof: None,
             diagnostic_path: Some(&first_diagnostic),
         };
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         file_route_dispatch_bug_report(base);
         file_route_dispatch_bug_report(RouteDispatchBugReportFacts {
             diagnostic_path: Some(&second_diagnostic),
@@ -2736,7 +2699,8 @@ mod tests {
             diagnostic_path: Some(&diagnostic),
         };
 
-        let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         file_route_dispatch_bug_report(facts);
 
         let source = std::fs::read_to_string(&doc).unwrap();
@@ -3700,6 +3664,7 @@ mod tests {
     }
     #[test]
     fn wait_for_ready_override_guard_sets_and_restores_thread_local() {
+        use agent_doc_route_io::invocation::{WaitForReadyOverrideGuard, wait_for_ready_override};
         use std::time::Duration;
 
         // Baseline: no override set.
@@ -3728,6 +3693,7 @@ mod tests {
     }
     #[test]
     fn dispatch_only_starting_pane_ready_timeout_honors_override_then_default() {
+        use agent_doc_route_io::invocation::WaitForReadyOverrideGuard;
         use std::time::Duration;
 
         let codex = agent_doc_harness::HarnessConfig::codex();

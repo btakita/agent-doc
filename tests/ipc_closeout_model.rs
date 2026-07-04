@@ -15,7 +15,11 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const TEST_EDITOR_ID: &str = "jetbrains-test-editor";
-const FILE_IPC_WATCHER_TIMEOUT: Duration = Duration::from_secs(10);
+// The watcher starts before the `agent-doc finalize` subprocess reaches the
+// file-IPC write. Under nextest load the subprocess can spend more than 10s in
+// setup/preflight before the patch exists, even though delivery is immediate
+// once the patch is written. Keep this below nextest's 60s slow-test period.
+const FILE_IPC_WATCHER_TIMEOUT: Duration = Duration::from_secs(45);
 
 fn agent_doc() -> Command {
     cargo_bin_cmd!("agent-doc")

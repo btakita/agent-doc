@@ -6366,16 +6366,14 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
             && session_check.contains("agent_doc_ops_log_io::last_ops_event("),
         "session-check command IO should import focused ops-log policy and call focused ops-log IO directly"
     );
-    let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let preflight_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let repair_source =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     for (path, source, required) in [
         (
-            "agent-doc-orchestration/src/preflight.rs",
-            preflight_source.as_str(),
+            "agent-doc-preflight-io/src/lib.rs",
+            preflight_io_source.as_str(),
             "agent_doc_ops_log_io::latest_ipc_proof_diagnostic(",
         ),
         (
@@ -11059,7 +11057,13 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Preflight cycle-completion coordinator IO graph",
             "agent-doc-orchestration/src/preflight.rs",
             "agent-doc-preflight-io/src/lib.rs",
-            "Split `PreflightCycleCompletionEffects` into repair, commit, session-inspection, bypassed-response evidence, and dogfood-note ports",
+            "Split `PreflightCycleCompletionEffects` into repair, commit, session-inspection, and bypassed-response evidence ports",
+        ),
+        (
+            "Preflight IPC dogfood note append IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Split dogfood-root detection, latest diagnostic lookup, exchange note synthesis/dedupe, atomic file write, and ops-log marker",
         ),
         (
             "Codex hook user-prompt-submit tracking IO graph",
@@ -19323,8 +19327,9 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         "fn commit(&self, file: &Path) -> Result<bool>;",
         "fn session_interruption(&self, file: &Path) -> Result<Option<String>>;",
         "fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>>;",
-        "fn append_latest_ipc_dogfood_note(&self, file: &Path) -> Result<bool>;",
         "pub fn enforce_cycle_completion(",
+        "pub fn append_latest_ipc_dogfood_note(",
+        "pub fn append_ipc_dogfood_note_for_diagnostic(",
         "detect_write_completed_commit_missing(file)?",
         "interrupted_cycle_detected file=",
         "resume_commit_attempt file=",
@@ -19332,6 +19337,12 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         "resume_commit_blocked_drift file=",
         "previous cycle `{}` is still `{}` after recovery/commit",
         ".detect_bypassed_response_write(file)?",
+        "append_latest_ipc_dogfood_note(file)",
+        "dogfood_agent_doc_crate_root(file).is_none()",
+        "latest_ipc_proof_diagnostic(file)?",
+        "format_ipc_dogfood_note(diagnostic)",
+        "append_deduped_content_to_exchange(",
+        "ipc_dogfood_note_appended file=",
     ] {
         assert!(
             preflight_io.contains(required),
@@ -19346,6 +19357,13 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         "resume_commit_blocked_drift file=",
         "previous cycle `{}` is still `{}` after recovery/commit",
         ".detect_bypassed_response_write(file)?",
+        "fn append_latest_ipc_dogfood_note(",
+        "fn append_ipc_dogfood_note_for_diagnostic(",
+        "dogfood_agent_doc_crate_root(file).is_none()",
+        "latest_ipc_proof_diagnostic(file)?",
+        "format_ipc_dogfood_note(diagnostic)",
+        "append_deduped_content_to_exchange(",
+        "ipc_dogfood_note_appended file=",
     ] {
         assert!(
             !orchestration_preflight_runtime.contains(forbidden),
@@ -19366,8 +19384,9 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         "orchestration preflight.rs should only adapt concrete repair, commit, and session-check effects"
     );
     assert!(
-        !preflight_manifest.contains("agent-doc-session-check-io"),
-        "preflight IO cycle completion must use callbacks instead of depending on session-check IO"
+        preflight_manifest.contains("agent-doc-element-exchange =")
+            && !preflight_manifest.contains("agent-doc-session-check-io"),
+        "preflight IO cycle completion should own exchange note append IO while using callbacks instead of depending on session-check IO"
     );
 }
 

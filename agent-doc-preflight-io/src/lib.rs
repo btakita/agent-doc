@@ -101,8 +101,6 @@ pub trait PreflightCycleCompletionEffects {
     fn session_interruption(&self, file: &Path) -> Result<Option<String>>;
 
     fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>>;
-
-    fn append_latest_ipc_dogfood_note(&self, file: &Path) -> Result<bool>;
 }
 
 pub fn enforce_cycle_completion(
@@ -242,7 +240,7 @@ pub fn enforce_cycle_completion(
         }
     };
     let ipc_dogfood_note_appended = if recovered {
-        match effects.append_latest_ipc_dogfood_note(file) {
+        match append_latest_ipc_dogfood_note(file) {
             Ok(appended) => appended,
             Err(e) => {
                 eprintln!("[preflight] IPC dogfood note warning: {}", e);
@@ -299,6 +297,46 @@ pub fn enforce_cycle_completion(
     }
 
     Ok((recovered || ipc_dogfood_note_appended, committed))
+}
+
+pub fn append_latest_ipc_dogfood_note(file: &Path) -> Result<bool> {
+    // Only agent-doc's OWN dogfood sessions may have an IPC diagnostic folded into
+    // the document exchange. A user's document (e.g. a recruiting doc that merely
+    // lives in a superproject alongside `src/agent-doc`) must never have binary
+    // IPC diagnostics written into its content - for those the diagnostic stays in
+    // ops.log only. Without this gate the interrupted-cycle recovery pollutes and
+    // re-duplicates diagnostics into real user documents. Single source of truth:
+    // `project_controller::rpc::dogfood_agent_doc_crate_root` (None => not dogfood).
+    if agent_doc_controller_io::project_controller::dogfood_agent_doc_crate_root(file).is_none() {
+        return Ok(false);
+    }
+    let Some(diagnostic) = agent_doc_ops_log_io::latest_ipc_proof_diagnostic(file)? else {
+        return Ok(false);
+    };
+    append_ipc_dogfood_note_for_diagnostic(file, &diagnostic)
+}
+
+pub fn append_ipc_dogfood_note_for_diagnostic(file: &Path, diagnostic: &str) -> Result<bool> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {} for IPC dogfood note", file.display()))?;
+    let note = agent_doc_workflow::preflight_policy::format_ipc_dogfood_note(diagnostic);
+    let Some(updated) = agent_doc_element_exchange::append_deduped_content_to_exchange(
+        &content, diagnostic, &note,
+    )?
+    else {
+        return Ok(false);
+    };
+    std::fs::write(file, updated)
+        .with_context(|| format!("failed to write IPC dogfood note to {}", file.display()))?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!("ipc_dogfood_note_appended file={}", file.display()),
+    );
+    eprintln!(
+        "[preflight] IPC dogfood note appended to {}",
+        file.display()
+    );
+    Ok(true)
 }
 
 /// Resolve the live finalize-pipeline view surfaced in preflight output

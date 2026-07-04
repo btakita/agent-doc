@@ -1252,6 +1252,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",
  "agent-doc-element-done",
+ "agent-doc-element-exchange",
  "agent-doc-element-queue",
  "agent-doc-element-review",
  "agent-doc-frontmatter",

@@ -209,6 +209,8 @@ use agent_doc_route_io::closeout_drain::RouteCloseoutDrainEffects;
 use agent_doc_route_io::closeout_drain::{
     classify_route_closeout_block, drain_open_closeout_before_routed_dispatch,
 };
+use agent_doc_route_io::command::RouteCommandEffects;
+pub use agent_doc_route_io::command::RouteMode;
 use agent_doc_route_io::cycle_ack::RouteCycleAckEffects;
 #[cfg(test)]
 use agent_doc_route_io::cycle_ack::pending_prompt_bearing_context_for_route;
@@ -235,17 +237,19 @@ pub(crate) use agent_doc_route_io::dispatch_only::{
 use agent_doc_route_io::dispatch_recovery::resolve_fresh_dispatch_target_after_ready_wait;
 #[cfg(test)]
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
+use agent_doc_route_io::document_prep::RouteDocumentPrepEffects;
 #[cfg(test)]
 use agent_doc_route_io::document_prep::scrub_duplicate_prompt_comments_for_route;
-use agent_doc_route_io::document_prep::{RouteDocumentPrepEffects, prepare_route_document};
 #[cfg(test)]
 use agent_doc_route_io::launch_contract::reapply_codex_launch_contract_before_reuse;
 #[cfg(test)]
 use agent_doc_route_io::pane_provenance::pane_route_provenance;
 #[cfg(test)]
+use agent_doc_route_io::pane_resolution::cleanup_failed_route_panes;
+#[cfg(test)]
 use agent_doc_route_io::pane_resolution::should_preserve_failed_route_pane;
 use agent_doc_route_io::pane_resolution::{
-    ManagedPaneResolutionEffects, RouteBusyPaneRetryEffects, cleanup_failed_route_panes,
+    ManagedPaneResolutionEffects, RouteBusyPaneRetryEffects,
 };
 #[cfg(test)]
 use agent_doc_route_io::pane_resolution::{
@@ -258,9 +262,7 @@ use agent_doc_route_io::queue_dispatch::{
     activate_existing_route_queue_head, enqueue_exchange_slash_command_for_idle_drain,
     inactive_route_queue_head,
 };
-use agent_doc_route_io::session_resolution::resolve_target_session;
 use agent_doc_route_io::startup::RouteStartupEffects;
-use agent_doc_route_io::startup_debounce::await_idle;
 #[cfg(test)]
 use agent_doc_route_io::supervisor_runtime::{query_supervisor_health, restart_via_supervisor};
 #[cfg(test)]
@@ -362,12 +364,6 @@ fn route_write_document(
 
 fn wait_for_ready_override() -> Option<Duration> {
     WAIT_FOR_READY_OVERRIDE.with(|cell| cell.get())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RouteMode {
-    Managed,
-    DispatchOnly,
 }
 
 fn route_dispatch_effects() -> RouteDispatchEffects {
@@ -533,6 +529,16 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
     file_route_dispatch_bug_report_with_effects(facts, route_dispatch_bug_report_effects());
 }
 
+fn route_command_effects() -> RouteCommandEffects {
+    RouteCommandEffects {
+        document_prep_effects: route_document_prep_effects(),
+        managed_pane_resolution_effects: route_managed_pane_resolution_effects(),
+        authoritative_actor_effects: route_authoritative_actor_effects(),
+        dispatch_only_effects: route_dispatch_only_effects(),
+        startup_effects: route_startup_effects(),
+    }
+}
+
 pub fn run(
     file: &Path,
     pane: Option<&str>,
@@ -616,135 +622,16 @@ pub fn run_with_tmux_with_options(
 ) -> Result<()> {
     let _wait_for_ready_guard = WaitForReadyOverrideGuard::set(wait_for_ready);
     let _force_disk_guard = ForceDiskRouteWritesGuard::set(force_disk);
-    tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
-    // Clean stale registry entries before lookup, but stay on the editor-driven
-    // fast path: use `SkipExpensiveStashCleanup` so the pre-lookup prune does NOT
-    // scan stash panes. The expensive stash-pane purge re-resolves every live
-    // fleet session's owner pane (tmux capture + process sampling + supervisor
-    // probe) *per unregistered stash pane*, which measured ~28s on a busy fleet
-    // and was the dominant `Run Agent Doc` dispatch latency (`#run-agent-doc-latency`).
-    // Route only needs stale registry rows + dead non-stash panes pruned for an
-    // accurate pane lookup; orphaned stash-pane hygiene belongs to explicit
-    // `resync`/`sync`, mirroring `safe_passive_prune_cleanup_mode`.
-    let _ = agent_doc_sync_io::resync::prune_with_tmux_timed_in_mode(
-        tmux,
-        agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup,
-    );
-
-    if !file.exists() {
-        anyhow::bail!("file not found: {}", file.display());
-    }
-    if let Err(err) = agent_doc_queue_io::continuation_marker::clear_cooldown_marker(file) {
-        eprintln!(
-            "[route] warning: failed to clear queue cooldown marker for {}: {err:#}",
-            file.display()
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_clear_queue_cooldown_failed file={} error={:?}",
-                file.display(),
-                err.to_string()
-            ),
-        );
-    }
-
-    // Debounce: wait for file mtime and editor typing indicator to settle before
-    // route performs visible mutations such as session UUID insertion or
-    // duplicate-prompt cleanup.
-    if debounce_ms > 0 {
-        await_idle(file, Duration::from_millis(debounce_ms))?;
-    }
-
-    let prepared = prepare_route_document(file, route_document_prep_effects())?;
-    let updated_content = prepared.content;
-    let session_id = prepared.session_id;
-
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
-    let fm = agent_doc_frontmatter_io::session::parse_for_file_with_context(
-        &updated_content,
+    agent_doc_route_io::command::run_with_tmux_with_options(
         file,
-        &rc.ssh_context(),
+        tmux,
+        pane,
+        debounce_ms,
+        col_args,
+        mode,
+        plain_trigger,
+        route_command_effects(),
     )
-    .map(|(f, _)| f)?;
-    let global_config = rc.global_config();
-    let mut harness = HarnessConfig::from_context(&fm, &global_config);
-    if plain_trigger {
-        harness.apply_plain_trigger_override();
-    }
-
-    // Use absolute path for trigger commands to avoid CWD-dependent resolution
-    // when the pane's CWD differs from the invoker's (e.g., narrowed to a
-    // submodule root). Relative paths would resolve to the submodule's version
-    // of the file when the same relative path exists in both locations.
-    let file_path = agent_doc_git_io::dirs::resolve_absolute_file_path(file)
-        .to_string_lossy()
-        .into_owned();
-    let target_session = resolve_target_session(tmux, None, col_args, Some(file), &harness);
-    eprintln!("[route] target tmux session: {}", target_session);
-
-    // === SINGLE EXIT POINT PATTERN ===
-    // All paths resolve to a pane_id, then ONE sync call handles layout.
-    // This prevents propagation bugs where cross-cutting behavior (sync)
-    // is added to one path but missed on others.
-
-    let mut created_panes = Vec::new();
-
-    let pane_id = match mode {
-        RouteMode::Managed => agent_doc_route_io::pane_resolution::resolve_or_create_pane(
-            tmux,
-            file,
-            pane,
-            col_args,
-            &session_id,
-            &file_path,
-            &target_session,
-            &harness,
-            &mut created_panes,
-            route_managed_pane_resolution_effects(),
-        ),
-        RouteMode::DispatchOnly => {
-            agent_doc_route_io::pane_resolution::resolve_or_create_pane_dispatch_only(
-                tmux,
-                file,
-                pane,
-                col_args,
-                &session_id,
-                &file_path,
-                &target_session,
-                &harness,
-                &mut created_panes,
-                route_authoritative_actor_effects(),
-                route_dispatch_only_effects(),
-                route_startup_effects(),
-            )
-        }
-    };
-
-    match pane_id {
-        Ok(ref _pid) => {
-            // NOTE: sync_after_claim was removed here to eliminate the double-sync
-            // glitch. The JB plugin already triggers sync with the correct window
-            // and col_args via the route call. A second sync (with window=None)
-            // races with the first sync's stash operations, causing panes to
-            // bounce between stash and agent-doc window visibly.
-            // The JB plugin's sync call is authoritative — no defensive re-sync needed.
-            agent_doc_controller_io::editor_route_errors::clear_for_success(
-                file,
-                "route_success",
-                agent_doc_ops_log_io::log_op,
-            );
-            Ok(())
-        }
-        Err(e) => {
-            // Clean up panes created during the failed route attempt, but fail
-            // closed for the current session owner: if a newly-created pane is
-            // still the registered live pane for this document, preserve it so
-            // a missed start-ack cannot crash the user's active tmux pane.
-            cleanup_failed_route_panes(tmux, file, &session_id, &created_panes);
-            Err(e)
-        }
-    }
 }
 
 fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {

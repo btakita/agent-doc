@@ -9,6 +9,7 @@ pub mod authoritative_actor;
 pub mod authoritative_dispatch;
 pub mod busy_pane;
 pub mod closeout_drain;
+pub mod command;
 pub mod cycle_ack;
 pub mod diagnostics;
 pub mod direct_pane_dispatch;

@@ -9653,7 +9653,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 52,
+        ledger_rows.len() >= 53,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10166,6 +10166,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/route.rs",
             "agent-doc-route-io/src/authoritative_dispatch.rs",
             "Split the queue, dispatch, closeout, and wait-override effect callbacks",
+        ),
+        (
+            "Route command runtime IO graph",
+            "agent-doc-orchestration/src/route.rs",
+            "agent-doc-route-io/src/command.rs",
+            "Split the remaining `RouteCommandEffects` bundle",
         ),
     ] {
         let row_text = ledger_rows
@@ -14096,6 +14102,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_command_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/command.rs")).unwrap();
     let route_dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch.rs")).unwrap();
     let route_direct_pane_dispatch_source =
@@ -14685,8 +14693,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_pane_resolution_io_source.contains("pub fn resolve_or_create_pane(")
             && route_pane_resolution_io_source.contains("pub fn rescue_from_stash(")
             && route_pane_resolution_io_source.contains("DispatchOnlyRouteEffects")
-            && route_source
-                .contains("agent_doc_route_io::pane_resolution::resolve_or_create_pane(")
+            && route_command_source.contains("crate::pane_resolution::resolve_or_create_pane(")
             && route_source.contains("#[cfg(test)]\nmod pane_resolution;")
             && route_pane_resolution_io_source.contains("dispatch_only_send_reopen(")
             && route_pane_resolution_io_source.contains("pub fn optimistic_busy_pane_dispatch(")
@@ -15233,7 +15240,7 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
         "orchestration must not keep an editor_route_errors facade"
     );
     for relative in [
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-route-io/src/command.rs",
         "agent-doc-sync-io/src/sync.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -25474,6 +25481,8 @@ fn test_agent_doc_route_io_owns_route_document_prep() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     let document_prep =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/document_prep.rs")).unwrap();
+    let route_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/command.rs")).unwrap();
 
     for forbidden_snippet in [
         "agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)",
@@ -25506,7 +25515,8 @@ fn test_agent_doc_route_io_owns_route_document_prep() {
             && document_prep.contains(
                 "agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs",
             )
-            && route_source.contains("prepare_route_document(file, route_document_prep_effects())"),
+            && route_command.contains("prepare_route_document(file, effects.document_prep_effects)")
+            && route_source.contains("document_prep_effects: route_document_prep_effects()"),
         "route document preparation should live in agent-doc-route-io while orchestration injects only write authority"
     );
 }
@@ -25594,6 +25604,59 @@ fn test_agent_doc_route_io_owns_authoritative_dispatch_loop() {
             && pane_resolution.contains("RouteAuthoritativeActorEffects")
             && pane_resolution.contains("route_via_authoritative_actor("),
         "agent-doc-route-io authoritative_dispatch should own authoritative actor reroute decisions and pane resolution should call it directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_route_io_owns_route_command_runtime() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
+    let route_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/command.rs")).unwrap();
+
+    for forbidden_snippet in [
+        "agent_doc_sync_io::resync::prune_with_tmux_timed_in_mode",
+        "agent_doc_queue_io::continuation_marker::clear_cooldown_marker",
+        "prepare_route_document(file,",
+        "parse_for_file_with_context(\n        &updated_content",
+        "agent_doc_git_io::dirs::resolve_absolute_file_path(file)",
+        "resolve_target_session(tmux",
+        "clear_for_success(\n                file,\n                \"route_success\"",
+        "cleanup_failed_route_panes(tmux",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own the top-level route command runtime after it moves to route IO: {forbidden_snippet}"
+        );
+    }
+
+    assert!(
+        route_io_lib.contains("pub mod command;")
+            && route_command.contains("pub enum RouteMode")
+            && route_command.contains("pub struct RouteCommandEffects")
+            && route_command.contains("pub fn run_with_tmux_with_options(")
+            && route_command.contains("agent_doc_sync_io::resync::prune_with_tmux_timed_in_mode")
+            && route_command
+                .contains("agent_doc_queue_io::continuation_marker::clear_cooldown_marker")
+            && route_command
+                .contains("prepare_route_document(file, effects.document_prep_effects)")
+            && route_command
+                .contains("agent_doc_frontmatter_io::session::parse_for_file_with_context")
+            && route_command.contains("agent_doc_git_io::dirs::resolve_absolute_file_path(file)")
+            && route_command.contains("resolve_target_session(tmux")
+            && route_command.contains("crate::pane_resolution::resolve_or_create_pane(")
+            && route_command
+                .contains("crate::pane_resolution::resolve_or_create_pane_dispatch_only(")
+            && route_command
+                .contains("agent_doc_controller_io::editor_route_errors::clear_for_success")
+            && route_command.contains("cleanup_failed_route_panes(tmux")
+            && route_source.contains("pub use agent_doc_route_io::command::RouteMode;")
+            && route_source.contains("agent_doc_route_io::command::run_with_tmux_with_options(")
+            && route_source.contains("RouteCommandEffects"),
+        "agent-doc-route-io command should own top-level route runtime while orchestration injects effect bundles"
     );
 }
 

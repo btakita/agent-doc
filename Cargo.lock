@@ -1953,7 +1953,9 @@ dependencies = [
  "agent-doc-ipc-io",
  "agent-doc-plugin-owner",
  "agent-doc-template",
+ "agent-doc-tmux-io",
  "serde_json",
+ "tmux-router",
 ]
 
 [[package]]

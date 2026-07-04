@@ -1119,9 +1119,19 @@ fn agent_doc_test_support_owns_orchestration_test_helpers() {
 
     let test_support =
         fs::read_to_string(manifest_dir.join("agent-doc-test-support/src/lib.rs")).unwrap();
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     for required in [
         "pub struct ProcessGlobalLockGuard",
         "pub fn env_lock()",
+        "pub struct ScopedCurrentDir",
+        "pub fn tmux_start_lock()",
+        "pub fn route_bin_env_lock()",
+        "pub fn wait_for_pane_contains(",
+        "pub fn send_keys_with_retry(",
+        "pub fn write_mock_registered_agent_doc(",
+        "pub fn write_mock_busy_registered_agent_doc(",
+        "pub fn launch_mock_registered_agent_doc(",
         "pub fn seed_live_plugin_owner_lease(",
         "pub fn init_repo_with_doc(",
         "pub fn start_live_prompt_drift_ack_listener(",
@@ -1132,6 +1142,26 @@ fn agent_doc_test_support_owns_orchestration_test_helpers() {
             "agent-doc-test-support must own orchestration's moved helper: {required}"
         );
     }
+    for removed in [
+        "static TMUX_START_MUTEX",
+        "static TMUX_INJECT_MUTEX",
+        "static ROUTE_BIN_ENV_MUTEX",
+        "fn wait_for_pane_contains(",
+        "fn send_keys_with_retry(",
+        "fn write_mock_registered_agent_doc(",
+        "fn launch_mock_registered_agent_doc(",
+    ] {
+        assert!(
+            !route_source.contains(removed),
+            "route.rs must not retain route test helper body after moving it to agent-doc-test-support: {removed}"
+        );
+    }
+    assert!(
+        route_source.contains("pub(crate) use agent_doc_test_support::{")
+            && route_source.contains("write_mock_registered_agent_doc")
+            && route_source.contains("wait_for_pane_contains"),
+        "route.rs should only adapt moved route test helpers through the focused test-support crate"
+    );
 }
 
 #[test]
@@ -9715,7 +9745,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 84,
+        ledger_rows.len() >= 85,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10414,6 +10444,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/route/pane_resolution.rs",
             "agent-doc-route-io/src/pane_resolution.rs::resolve_or_create_pane*",
             "Move the retained pane-resolution tests into `agent-doc-route-io`",
+        ),
+        (
+            "Route tmux mock-agent test helper graph",
+            "agent-doc-orchestration/src/route.rs",
+            "agent-doc-test-support/src/lib.rs",
+            "Move route startup and pane-resolution tests into focused route IO fixtures",
         ),
         (
             "Codex hook user-prompt-submit tracking IO graph",
@@ -19920,6 +19956,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let test_support_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-test-support/src/lib.rs")).unwrap();
     let sessions_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/registration.rs"))
             .unwrap();
@@ -19964,7 +20002,8 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && route_pane_provenance.contains("agent_doc_tmux_io::pane_pid(")
             && route_pane_provenance.contains("agent_doc_tmux_io::target_session_name(")
             && route_pane_provenance.contains("agent_doc_tmux_io::target_current_command(")
-            && route_source.contains("agent_doc_tmux_io::target_current_command(")
+            && route_source.contains("pub(crate) use agent_doc_test_support::{")
+            && test_support_source.contains("agent_doc_tmux_io::target_current_command(")
             && startup_ready_source.contains("agent_doc_tmux_io::target_current_command(")
             && route_dispatch_target.contains("agent_doc_tmux_io::target_window_id(")
             && route_startup_sync.contains("agent_doc_tmux_io::target_window_id(")

@@ -1,8 +1,9 @@
 //! Shared test-only helpers for agent-doc crates that need process-global
 //! locks, temporary git documents, and fake editor IPC listeners.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::MutexGuard;
+use std::time::{Duration, Instant};
 
 thread_local! {
     static PROCESS_GLOBAL_LOCK_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -43,6 +44,368 @@ pub fn env_lock() -> ProcessGlobalLockGuard {
     ProcessGlobalLockGuard {
         _guard: Some(guard),
     }
+}
+
+static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static TMUX_INJECT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static ROUTE_BIN_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub fn tmux_start_lock() -> std::sync::MutexGuard<'static, ()> {
+    TMUX_START_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+pub fn tmux_inject_lock() -> std::sync::MutexGuard<'static, ()> {
+    TMUX_INJECT_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+pub fn route_bin_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    ROUTE_BIN_ENV_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+pub struct ScopedCurrentDir {
+    prev_cwd: PathBuf,
+    _env_guard: ProcessGlobalLockGuard,
+}
+
+impl ScopedCurrentDir {
+    pub fn set(path: &Path) -> Self {
+        let env_guard = env_lock();
+        let prev_cwd = std::env::current_dir().unwrap_or_else(|_| path.to_path_buf());
+        std::env::set_current_dir(path).unwrap();
+        Self {
+            prev_cwd,
+            _env_guard: env_guard,
+        }
+    }
+}
+
+impl Drop for ScopedCurrentDir {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.prev_cwd);
+    }
+}
+
+pub fn test_registry_entry(pane: &str, file: &str, cwd: &Path) -> tmux_router::RegistryEntry {
+    tmux_router::RegistryEntry {
+        pane: pane.to_string(),
+        pid: 1234,
+        cwd: cwd.to_string_lossy().to_string(),
+        started: "2026-01-01T00:00:00Z".to_string(),
+        session_id: "test-session".to_string(),
+        file: file.to_string(),
+        window: "@1".to_string(),
+        supervisor_instance_id: String::new(),
+    }
+}
+
+pub fn wait_for_pane_contains(
+    iso: &tmux_router::IsolatedTmux,
+    pane: &str,
+    needle: &str,
+    timeout: Duration,
+) -> String {
+    let start = Instant::now();
+    let poll = Duration::from_millis(100);
+    let mut last = String::new();
+    while start.elapsed() < timeout {
+        last = agent_doc_tmux_io::capture_pane(iso, pane).unwrap_or_default();
+        if last.contains(needle) {
+            return last;
+        }
+        std::thread::sleep(poll);
+    }
+    last
+}
+
+pub fn pane_capture_contains_wrapped(capture: &str, needle: &str) -> bool {
+    capture.contains(needle) || capture.replace(['\r', '\n'], "").contains(needle)
+}
+
+pub fn send_keys_with_retry(iso: &tmux_router::IsolatedTmux, pane: &str, text: &str) {
+    let start = Instant::now();
+    let timeout = Duration::from_secs(3);
+    let poll = Duration::from_millis(100);
+    let mut last_err = None;
+
+    while start.elapsed() < timeout {
+        match iso.send_keys(pane, text) {
+            Ok(()) => return,
+            Err(err) => last_err = Some(err.to_string()),
+        }
+        std::thread::sleep(poll);
+    }
+
+    panic!(
+        "failed to send keys to pane {} after {:.1}s: {}",
+        pane,
+        start.elapsed().as_secs_f64(),
+        last_err.unwrap_or_else(|| "unknown error".to_string())
+    );
+}
+
+pub fn pane_current_command(iso: &tmux_router::IsolatedTmux, pane: &str) -> Option<String> {
+    agent_doc_tmux_io::target_current_command(iso, pane)
+}
+
+pub fn wait_for_shell(iso: &tmux_router::IsolatedTmux, pane: &str, timeout: Duration) -> bool {
+    const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if let Some(cmd) = pane_current_command(iso, pane)
+            && IDLE_SHELLS.contains(&cmd.as_str())
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
+/// Create a mock agent script: blocks for delay, then prints a prompt on its own line.
+/// Uses `cat` to keep the process alive after showing the prompt.
+pub fn mock_agent_script(delay_ms: u64) -> String {
+    format!(
+        r#"exec /bin/sh -c 'printf "Starting agent...\n"; sleep {}; printf "❯ \n"; cat'"#,
+        delay_ms as f64 / 1000.0
+    )
+}
+
+fn write_executable_script(base: &Path, name: &str, content: impl AsRef<[u8]>) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join(name);
+    std::fs::write(&script, content).unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+
+pub fn write_mock_registered_agent_doc(base: &Path) -> PathBuf {
+    write_executable_script(
+        base,
+        "agent-doc",
+        "#!/bin/sh\nprintf \"> \\n\"\nwhile IFS= read -r CMD; do\n  [ -z \"$CMD\" ] && continue\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+    )
+}
+
+pub fn write_mock_registered_agent_doc_with_prefix(
+    base: &Path,
+    name: &str,
+    prefix: &str,
+) -> PathBuf {
+    write_executable_script(
+        base,
+        name,
+        format!(
+            "#!/bin/sh\nprintf \"> \\n\"\nwhile IFS= read -r CMD; do\n  printf '{prefix}:%s\\n' \"$CMD\"\ndone\n",
+        ),
+    )
+}
+
+pub fn write_mock_registered_agent_doc_extra_line_detector(base: &Path) -> PathBuf {
+    write_executable_script(
+        base,
+        "agent-doc-extra-line-detector",
+        "#!/bin/bash\nprintf \"> \\n\"\nIFS= read -r CMD || exit 0\nprintf 'GOT:%s\\n' \"$CMD\"\nif IFS= read -r -t 0.5 EXTRA; then\n  printf 'EXTRA:%s\\n' \"$EXTRA\"\nfi\ncat\n",
+    )
+}
+
+pub fn write_mock_busy_registered_agent_doc(base: &Path) -> PathBuf {
+    write_executable_script(
+        base,
+        "agent-doc-busy",
+        "#!/bin/sh\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+    )
+}
+
+pub fn write_mock_active_codex_turn_registered_agent_doc(base: &Path) -> PathBuf {
+    write_executable_script(
+        base,
+        "agent-doc-active-codex-turn",
+        "#!/bin/sh\nprintf 'Working...\\n'\ni=0\nwhile [ \"$i\" -lt 20 ]; do\n  printf 'Working (1m 34s - esc to interrupt)\\n'\n  i=$((i + 1))\ndone\nprintf '\\n> Write tests for @filename\\ngpt-5 high - ~/work/btakita/agent-loop - Context 41%% used\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+    )
+}
+
+pub fn write_mock_busy_registered_agent_doc_ignores_interrupt(base: &Path) -> PathBuf {
+    write_executable_script(
+        base,
+        "agent-doc-busy-ignore-int",
+        "#!/bin/sh\ntrap '' INT\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+    )
+}
+
+pub fn write_mock_busy_opencode_recovers_on_escape(base: &Path) -> PathBuf {
+    write_executable_script(
+        base,
+        "agent-doc-busy-opencode",
+        r#"#!/bin/bash
+trap '' INT
+cleanup() { stty sane 2>/dev/null || true; }
+trap cleanup EXIT
+stty -echo -icanon min 1 time 0
+printf '⬝⬝■■■■■■  esc interrupt\n'
+while IFS= read -r -n1 ch; do
+  stty sane
+  printf '> \n'
+  while IFS= read -r CMD; do
+    printf 'GOT:%s\n' "$CMD"
+  done
+  exit 0
+done
+"#,
+    )
+}
+
+pub fn write_mock_busy_registered_agent_doc_recovers_on_ctrl_g(base: &Path) -> PathBuf {
+    write_executable_script(
+        base,
+        "agent-doc-busy-recovers-on-ctrl-g",
+        r#"#!/bin/bash
+trap '' INT
+cleanup() { stty sane 2>/dev/null || true; }
+trap cleanup EXIT
+stty -echo -icanon min 1 time 0
+printf 'Working...\n'
+printf 'reverse-i-search: bugs enter accept · esc cancel\n'
+while IFS= read -r -n1 ch; do
+  if [[ "$ch" == $'\a' ]]; then
+    stty sane
+    printf '› \n'
+    printf 'gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used\n'
+    while IFS= read -r CMD; do
+      printf 'GOT:%s\n' "$CMD"
+    done
+    exit 0
+  fi
+done
+"#,
+    )
+}
+
+pub fn write_mock_start_agent_doc(base: &Path) -> PathBuf {
+    write_executable_script(
+        base,
+        "agent-doc-start",
+        "#!/bin/sh\nprintf 'Starting agent...\\n'\nprintf '> \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+    )
+}
+
+pub fn write_mock_delayed_start_agent_doc(base: &Path, delay_secs: u64) -> PathBuf {
+    write_executable_script(
+        base,
+        "agent-doc-start-delayed",
+        format!(
+            "#!/bin/sh\nsleep {}\nprintf 'Starting agent...\\n'\nprintf '> \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+            delay_secs
+        ),
+    )
+}
+
+pub fn launch_mock_registered_agent_doc(
+    iso: &tmux_router::IsolatedTmux,
+    pane: &str,
+    script: &Path,
+    file: &Path,
+) {
+    {
+        let _tmux_guard = tmux_inject_lock();
+        assert!(
+            wait_for_shell(iso, pane, Duration::from_secs(5)),
+            "shell did not become ready before mock agent launch"
+        );
+        send_keys_with_retry(
+            iso,
+            pane,
+            &format!("exec {} {}", script.display(), file.display()),
+        );
+    }
+    let launch_command = format!("exec {} {}", script.display(), file.display());
+    let content = wait_for_mock_agent_prompt(iso, pane, &launch_command);
+    assert!(
+        content.lines().any(|line| line.trim() == ">"),
+        "mock agent-doc session should present a prompt, got: {content}"
+    );
+}
+
+pub fn launch_mock_agent_doc_without_file_arg(
+    iso: &tmux_router::IsolatedTmux,
+    pane: &str,
+    script: &Path,
+) {
+    {
+        let _tmux_guard = tmux_inject_lock();
+        assert!(
+            wait_for_shell(iso, pane, Duration::from_secs(5)),
+            "shell did not become ready before mock agent launch"
+        );
+        send_keys_with_retry(iso, pane, &format!("exec {}", script.display()));
+    }
+    let launch_command = format!("exec {}", script.display());
+    let content = wait_for_mock_agent_prompt(iso, pane, &launch_command);
+    assert!(
+        content.lines().any(|line| line.trim() == ">"),
+        "mock agent-doc session should present a prompt, got: {content}"
+    );
+}
+
+pub fn wait_for_mock_agent_prompt(
+    iso: &tmux_router::IsolatedTmux,
+    pane: &str,
+    launch_command: &str,
+) -> String {
+    let start = Instant::now();
+    let timeout = Duration::from_secs(20);
+    let poll = Duration::from_millis(100);
+    let mut last_submit = Instant::now()
+        .checked_sub(Duration::from_secs(1))
+        .unwrap_or_else(Instant::now);
+    let mut last = String::new();
+
+    while start.elapsed() < timeout {
+        last = agent_doc_tmux_io::capture_pane(iso, pane).unwrap_or_default();
+        if last.lines().any(|line| line.trim() == ">") {
+            return last;
+        }
+        if last.contains(launch_command) && last_submit.elapsed() >= Duration::from_millis(500) {
+            let _ = iso.send_keys_raw(pane, "Enter");
+            last_submit = Instant::now();
+        }
+        std::thread::sleep(poll);
+    }
+
+    last
+}
+
+pub fn wait_for_process_pid(pattern: &str, timeout: Duration) -> u32 {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if let Ok(output) = std::process::Command::new("pgrep")
+            .args(["-f", pattern])
+            .output()
+            && output.status.success()
+        {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                let pid = line.trim();
+                if pid.is_empty() {
+                    continue;
+                }
+                if let Ok(parsed) = pid.parse::<u32>() {
+                    return parsed;
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("timed out waiting for process matching pattern: {pattern}");
 }
 
 pub fn seed_live_plugin_owner_lease(file: &str) {

@@ -15,4 +15,6 @@ agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.67" }
 agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }
 serde_json = "1"
+tmux-router = { path = "../../tmux-router", version = "0.3.11" }

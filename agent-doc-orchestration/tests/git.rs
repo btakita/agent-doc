@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use agent_doc_commit_io::commit;
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
-use agent_doc_orchestration::git::commit;
 use agent_doc_queue_io::queue_consume;
 
 #[cfg(test)]
@@ -1035,7 +1035,7 @@ Duplicate replay should stay live.
         fs::write(&pending, "in-flight").unwrap();
 
         agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
@@ -2267,7 +2267,7 @@ Duplicate replay should stay live.
 
         queue_consume::strike_answered_free_text_heads_at_commit_seam(
             &doc,
-            &agent_doc_orchestration::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
         );
 
         let after = fs::read_to_string(&doc).unwrap();
@@ -2954,7 +2954,7 @@ Duplicate replay should stay live.
         fs::write(&doc, working).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -2994,7 +2994,7 @@ Duplicate replay should stay live.
         fs::write(&doc, &superset).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -3037,7 +3037,7 @@ Duplicate replay should stay live.
         // Working tree already equals HEAD (no edit).
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -3083,7 +3083,7 @@ Duplicate replay should stay live.
         fs::write(&doc, drifted).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -3134,7 +3134,7 @@ Duplicate replay should stay live.
         fs::write(&doc, corrupted).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -3201,7 +3201,7 @@ Duplicate replay should stay live.
         fs::write(&doc, drifted).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -4991,7 +4991,7 @@ Compacted content:\n\
 
         // Run reposition — should skip working tree because the listener is active.
         let changed = agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
@@ -5084,7 +5084,7 @@ Compacted content:\n\
 
         // Run reposition
         agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
@@ -5187,7 +5187,7 @@ Compacted content:\n\
             .unwrap();
 
         agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
@@ -5254,7 +5254,7 @@ Compacted content:\n\
             .unwrap();
 
         agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 

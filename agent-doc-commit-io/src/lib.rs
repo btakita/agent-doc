@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts;
@@ -57,7 +57,396 @@ pub struct CommitCoordinatorPorts<
     pub write_convergence: &'a WriteConvergence,
 }
 
-pub fn commit_with_outcome<
+struct RuntimeCommitPreStageRepairEffects;
+
+static COMMIT_PRE_STAGE_REPAIR_EFFECTS: RuntimeCommitPreStageRepairEffects =
+    RuntimeCommitPreStageRepairEffects;
+
+struct RuntimeCommitResultReportingEffects;
+
+static COMMIT_RESULT_REPORTING_EFFECTS: RuntimeCommitResultReportingEffects =
+    RuntimeCommitResultReportingEffects;
+
+struct RuntimeCaptureMaterializationGuardEffects;
+
+static CAPTURE_MATERIALIZATION_GUARD_EFFECTS: RuntimeCaptureMaterializationGuardEffects =
+    RuntimeCaptureMaterializationGuardEffects;
+
+struct RuntimeGuardMarkerCleanupEffects;
+
+static GUARD_MARKER_CLEANUP_EFFECTS: RuntimeGuardMarkerCleanupEffects =
+    RuntimeGuardMarkerCleanupEffects;
+
+struct RuntimeLiveBufferGuardEffects;
+
+static LIVE_BUFFER_GUARD_EFFECTS: RuntimeLiveBufferGuardEffects = RuntimeLiveBufferGuardEffects;
+
+#[doc(hidden)]
+pub struct RuntimeBoundaryRepositionEffects;
+
+#[doc(hidden)]
+pub static BOUNDARY_REPOSITION_EFFECTS: RuntimeBoundaryRepositionEffects =
+    RuntimeBoundaryRepositionEffects;
+
+struct RuntimeBoundaryInvariantEffects;
+
+static BOUNDARY_INVARIANT_EFFECTS: RuntimeBoundaryInvariantEffects =
+    RuntimeBoundaryInvariantEffects;
+
+struct RuntimeTransientCleanupEffects;
+
+static TRANSIENT_CLEANUP_EFFECTS: RuntimeTransientCleanupEffects = RuntimeTransientCleanupEffects;
+
+#[doc(hidden)]
+pub struct RuntimePostCommitCleanupEffects;
+
+#[doc(hidden)]
+pub static POST_COMMIT_CLEANUP_EFFECTS: RuntimePostCommitCleanupEffects =
+    RuntimePostCommitCleanupEffects;
+
+impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
+    for RuntimeCommitPreStageRepairEffects
+{
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+    }
+
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+impl agent_doc_git_io::commit_result_reporting::CommitResultReportingEffects
+    for RuntimeCommitResultReportingEffects
+{
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+impl agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuardEffects
+    for RuntimeCaptureMaterializationGuardEffects
+{
+    fn load_active_capture(
+        &self,
+        file: &Path,
+    ) -> Result<Option<agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization>>
+    {
+        Ok(agent_doc_capture_io::load_active(file)?.map(|capture| {
+            agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization {
+                capture_id: capture.capture_id,
+                response_sha256: capture.response_sha256,
+                response_body: capture.response_body,
+                terminal: matches!(
+                    capture.state,
+                    agent_doc_workflow::capture::CaptureState::Committed
+                        | agent_doc_workflow::capture::CaptureState::Discarded
+                ),
+            }
+        }))
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+
+    fn log_missing_capture_guard(&self, file: &Path) {
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
+            file,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::FailedClosed,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
+        );
+    }
+}
+
+impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
+    for RuntimeGuardMarkerCleanupEffects
+{
+    fn load_snapshot(&self, file: &Path) -> Result<Option<String>> {
+        agent_doc_snapshot_io::load(file)
+    }
+
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn read_to_string(&self, file: &Path) -> Result<String> {
+        Ok(std::fs::read_to_string(file)?)
+    }
+
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        current_content: &str,
+        target_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            current_content,
+            target_content,
+            reason,
+        )
+    }
+}
+
+impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLiveBufferGuardEffects {
+    fn live_buffer_diverges_from_content(
+        &self,
+        file: &Path,
+        file_content: &str,
+    ) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
+        let file_str = file.display().to_string();
+        agent_doc_debounce::live_buffer_diverges_from_content(&file_str, file_content)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+
+    fn log_live_buffer_guard_blocked(&self, file: &Path) {
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
+            file,
+            agent_doc_flow::types::FlowStage::PreCommitGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
+        );
+    }
+}
+
+impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
+    for RuntimeBoundaryRepositionEffects
+{
+    fn active_run(&self, file: &Path) -> bool {
+        file.canonicalize()
+            .ok()
+            .and_then(|canonical| agent_doc_fs::pending_response_path_for(&canonical).ok())
+            .map(|pending_path| pending_path.exists())
+            .unwrap_or(false)
+    }
+
+    fn load_snapshot(&self, file: &Path) -> Result<Option<String>> {
+        agent_doc_snapshot_io::load(file)
+    }
+
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn ipc_listener_active(&self, file: &Path) -> bool {
+        file.canonicalize()
+            .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
+            .map(|root| agent_doc_ipc_io::is_listener_active(&root))
+            .unwrap_or(false)
+    }
+
+    fn read_to_string(&self, file: &Path) -> Result<String> {
+        Ok(std::fs::read_to_string(file)?)
+    }
+
+    fn queue_file_ipc_reposition_boundary(
+        &self,
+        file: &Path,
+        committed_boundary_id: Option<&str>,
+        normalize_prefix_lines: &[String],
+    ) -> Result<agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery> {
+        match agent_doc_write_ipc_io::queue_file_ipc_reposition_boundary(
+            file,
+            committed_boundary_id,
+            normalize_prefix_lines,
+        )? {
+            agent_doc_write_ipc_io::FileIpcRepositionResult::Queued => {
+                Ok(agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Queued)
+            }
+            agent_doc_write_ipc_io::FileIpcRepositionResult::DeferredExistingPatch => Ok(
+                agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::DeferredExistingPatch,
+            ),
+            agent_doc_write_ipc_io::FileIpcRepositionResult::Unavailable => {
+                Ok(agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Unavailable)
+            }
+        }
+    }
+
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+    }
+}
+
+impl agent_doc_git_io::boundary_invariant::BoundaryInvariantEffects
+    for RuntimeBoundaryInvariantEffects
+{
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+impl agent_doc_git_io::transient_cleanup::TransientCleanupEffects
+    for RuntimeTransientCleanupEffects
+{
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+    }
+
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn save_document_crdt(&self, file: &Path, legacy_state: &[u8], markdown: &str) -> Result<()> {
+        agent_doc_merge_io::save_document_crdt(file, legacy_state, markdown)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+
+    fn project_root_containing(&self, file: &Path) -> Option<PathBuf> {
+        agent_doc_project_root_io::project_root_containing(file)
+    }
+
+    fn ipc_listener_active(&self, project_root: &Path) -> bool {
+        agent_doc_ipc_io::is_listener_active(project_root)
+    }
+
+    fn send_vcs_refresh(&self, project_root: &Path) -> Result<bool> {
+        agent_doc_ipc_io::send_vcs_refresh(project_root)
+    }
+
+    fn write_vcs_refresh_signal(&self, signal_file: &Path) -> Result<()> {
+        Ok(std::fs::write(signal_file, "")?)
+    }
+}
+
+impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
+    for RuntimePostCommitCleanupEffects
+{
+    fn read_to_string(&self, file: &Path) -> Result<String> {
+        Ok(std::fs::read_to_string(file)?)
+    }
+
+    fn load_snapshot(&self, file: &Path) -> Option<String> {
+        agent_doc_snapshot_io::load(file).ok().flatten()
+    }
+
+    fn cycle_is_terminal(&self, file: &Path) -> bool {
+        agent_doc_cycle_state_io::load(file)
+            .ok()
+            .flatten()
+            .is_some_and(|state| !state.is_open())
+    }
+
+    fn log_cycle(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) {
+        agent_doc_ops_log_io::log_cycle(file, event, snapshot_content, file_content);
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+
+    fn log_closeout_commit_completed(&self, file: &Path, reason: &str) {
+        agent_doc_flow_io::log_flow_event(
+            file,
+            agent_doc_flow::types::FlowEvent::new(
+                agent_doc_flow::types::FlowName::Closeout,
+                agent_doc_flow::types::FlowStage::Commit,
+                agent_doc_flow::types::FlowOutcome::Completed,
+            )
+            .with_reason(reason),
+            agent_doc_ops_log_io::log_op,
+        );
+    }
+
+    fn mark_pipeline_committed(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<()> {
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            event,
+            snapshot_content,
+            file_content,
+        )?;
+        Ok(())
+    }
+
+    fn mark_capture_committed(&self, file: &Path) -> Result<()> {
+        agent_doc_capture_io::mark_committed(file)
+    }
+
+    fn clear_queue_journal(&self, file: &Path) {
+        agent_doc_queue_io::queue_journal::clear(file);
+    }
+
+    fn reconcile_queue_continuation(
+        &self,
+        file: &Path,
+        phase: &str,
+    ) -> Option<agent_doc_git_io::post_commit_cleanup::QueueContinuationProof> {
+        agent_doc_queue_io::queue_continuation::reconcile_marker(file, phase).map(|continuation| {
+            agent_doc_git_io::post_commit_cleanup::QueueContinuationProof {
+                head_prompt: continuation.head_prompt,
+                head_id: continuation.head_id,
+            }
+        })
+    }
+
+    fn read_session_id(&self, file: &Path) -> String {
+        agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_default()
+    }
+
+    fn fire_post_commit(&self, file: &Path, session_id: &str) {
+        agent_doc_hooks_io::fire_post_commit(file, session_id, None);
+    }
+
+    fn fire_doc_event(&self, file: &Path, event: &str) {
+        agent_doc_hooks_io::fire_doc_event(file, event);
+    }
+}
+
+pub fn commit(file: &Path) -> Result<bool> {
+    Ok(commit_with_outcome(file)?.did_commit)
+}
+
+pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
+    commit_with_ports_outcome(
+        CommitCoordinatorPorts {
+            pre_stage_repair: &COMMIT_PRE_STAGE_REPAIR_EFFECTS,
+            commit_result_reporting: &COMMIT_RESULT_REPORTING_EFFECTS,
+            capture_materialization_guard: &CAPTURE_MATERIALIZATION_GUARD_EFFECTS,
+            guard_marker_cleanup: &GUARD_MARKER_CLEANUP_EFFECTS,
+            live_buffer_guard: &LIVE_BUFFER_GUARD_EFFECTS,
+            boundary_reposition: &BOUNDARY_REPOSITION_EFFECTS,
+            boundary_invariant: &BOUNDARY_INVARIANT_EFFECTS,
+            transient_cleanup: &TRANSIENT_CLEANUP_EFFECTS,
+            post_commit_cleanup: &POST_COMMIT_CLEANUP_EFFECTS,
+            queue_consume_write:
+                &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            write_convergence: &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+        },
+        file,
+    )
+}
+
+pub fn commit_with_ports_outcome<
     PreStageRepair,
     CommitResultReporting,
     CaptureMaterializationGuard,

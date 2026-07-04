@@ -223,11 +223,13 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use agent_doc_document::write_normalization::count_code_fence_openings;
 use agent_doc_document::write_normalization::{
     SplicePendingComponentWarning, cleanup_resolved_backlog_prompts_after_response,
-    count_code_fence_openings, latest_response_block_missing_from_current,
-    lift_pending_from_exchange, splice_pending_component,
-    splice_response_block_into_current_exchange, strip_boundary_for_dedup,
+    latest_response_block_missing_from_current, lift_pending_from_exchange,
+    splice_pending_component, splice_response_block_into_current_exchange,
+    strip_boundary_for_dedup,
 };
 use agent_doc_document_realtime::write_policy::{
     reconcile_visible_write, response_already_in_current,
@@ -247,7 +249,7 @@ use agent_doc_element_exchange::{
 use agent_doc_queue::queue_consume::{
     queue_consumption_allowed_for_response, queue_targeted_completion_id_for_current_head,
 };
-use agent_doc_queue_io::queue_consume::{self, QueueConsumeWriteEffects, QueueConsumptionOutcome};
+use agent_doc_queue_io::queue_consume::{self, QueueConsumptionOutcome};
 use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 use agent_doc_workflow::session_cycle::{
     FinalizeRerunCommand, compact_command_hint, finalize_rerun_command_base,
@@ -816,95 +818,12 @@ fn consume_queue_prompts_for_done_ids_closeout(
     }
 }
 
-#[doc(hidden)]
-pub struct QueueConsumeWritebackEffects;
-
-#[doc(hidden)]
-pub static QUEUE_CONSUME_WRITEBACK_EFFECTS: QueueConsumeWritebackEffects =
-    QueueConsumeWritebackEffects;
-
-pub struct WriteConvergenceEffects;
-
-pub static WRITE_CONVERGENCE_EFFECTS: WriteConvergenceEffects = WriteConvergenceEffects;
-
-impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceEffects {
-    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        atomic_write_pub(file, content)
-    }
-
-    fn guard_visible_write_idle_and_current(
-        &self,
-        file: &Path,
-        source: &str,
-        expected_current: &str,
-    ) -> Result<()> {
-        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
-            file,
-            source,
-            expected_current,
-        )
-    }
-
-    fn atomic_write_if_current(
-        &self,
-        file: &Path,
-        content: &str,
-        expected_current: &str,
-        source: &str,
-    ) -> Result<()> {
-        atomic_write_if_current_pub(file, content, expected_current, source)
-    }
-
-    fn cycle_already_committed(&self, file: &Path) -> Option<String> {
-        agent_doc_flow_io::closeout::cycle_already_committed(file)
-    }
-
-    fn log_file_ipc_already_committed(&self, file: &Path, _cycle_id: &str) {
-        log_closeout_guard(
-            file,
-            agent_doc_flow::types::FlowStage::TerminalGuard,
-            agent_doc_flow::types::FlowOutcome::Blocked,
-            agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
-        );
-    }
-
-    fn cleanup_fallback_patch_files(&self, file: &Path) {
-        agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
-    }
-
-    fn log_file_ipc_proof_failure(
-        &self,
-        file: &Path,
-        patch_id: Option<&str>,
-        invariant: &str,
-        recovery: &str,
-        detail: &str,
-    ) {
-        log_ipc_proof_failure(file, "file_ipc", patch_id, invariant, recovery, detail);
-    }
-}
-
-impl QueueConsumeWriteEffects for QueueConsumeWritebackEffects {
-    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        atomic_write(file, content)
-    }
-
-    fn converge_document_or_disk(
-        &self,
-        file: &Path,
-        target_content: &str,
-        source_content: &str,
-        reason: &str,
-    ) -> Result<()> {
-        agent_doc_write_converge_io::converge_document_or_disk(
-            &WRITE_CONVERGENCE_EFFECTS,
-            file,
-            target_content,
-            source_content,
-            reason,
-        )
-    }
-}
+pub use agent_doc_document_realtime_io::{
+    RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS as QUEUE_CONSUME_WRITEBACK_EFFECTS,
+    RUNTIME_WRITE_CONVERGENCE_EFFECTS as WRITE_CONVERGENCE_EFFECTS,
+    RuntimeQueueConsumeWritebackEffects as QueueConsumeWritebackEffects,
+    RuntimeWriteConvergenceEffects as WriteConvergenceEffects,
+};
 
 struct WriteStatusEffects;
 
@@ -2378,7 +2297,7 @@ pub(crate) fn repair_response_prompt_order_for_file(
 
 /// Atomic write: write to temp file then rename. Public for use by compact.
 pub fn atomic_write_pub(path: &Path, content: &str) -> Result<()> {
-    atomic_write(path, content)
+    agent_doc_document_realtime_io::atomic_write_through_authority(path, content)
 }
 
 /// Atomic write guarded by the same visible-buffer proof used by response writes.
@@ -2388,98 +2307,16 @@ pub fn atomic_write_if_current_pub(
     expected_current: &str,
     source: &str,
 ) -> Result<()> {
-    guard_visible_write_idle_and_current(path, source, expected_current)?;
-    atomic_write(path, content)
+    agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+        path,
+        content,
+        expected_current,
+        source,
+    )
 }
 
-/// `#codefence-strip`: best-effort detection log for code-fence loss during
-/// agent-doc document writes. Reads the existing file before the write, counts
-/// opening fence lines (``` or ~~~ at line start after optional whitespace),
-/// and logs an `ops.log` marker when the new content carries strictly fewer
-/// fence openings than the old content. The marker is a detection signal for
-/// the operator, not a hard assertion — a deliberate edit that removes a code
-/// block also fires it. Fails open silently on any IO error.
-fn log_fence_count_drop_if_any(path: &Path, new_content: &str) {
-    let Some(old_content) = std::fs::read_to_string(path).ok() else {
-        return;
-    };
-    let old_fences = count_code_fence_openings(&old_content);
-    let new_fences = count_code_fence_openings(new_content);
-    if new_fences < old_fences {
-        agent_doc_ops_log_io::log_op(
-            path,
-            &format!(
-                "fence_count_dropped file={} old_fences={} new_fences={} old_len={} new_len={}",
-                path.display(),
-                old_fences,
-                new_fences,
-                old_content.len(),
-                new_content.len(),
-            ),
-        );
-    }
-}
-
-/// Atomic write through the 08b document write-authority end state
-/// ([`crate::write_authority`]). Every editor-visible document `.md` write
-/// serializes through the session actor's single ordered write queue
-/// (`agent-doc-queue-io`), so a supervisor write and an agent-finalize write for
-/// the same document can never interleave. This was the `#pcpc5cut` migration
-/// (gated `off → shadow → dual-write → authority → removed`); the cutover is complete
-/// and the `AGENT_DOC_WRITE_AUTHORITY` flag + bare-write bypass were removed, so
-/// routing is now unconditional.
-///
-/// `.agent-doc/` sidecar/snapshot writes and writes already executing on the
-/// session-actor owner thread take the raw path directly (the latter prevents a
-/// re-entrant mailbox deadlock).
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
-    if agent_doc_document_realtime::write_authority::is_visible_document(path)
-        && !agent_doc_document_realtime::write_authority::within_owner_scope()
-    {
-        log_fence_count_drop_if_any(path, content);
-        let base_dir = agent_doc_project_root_io::project_root_containing(path)
-            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
-        let file = path.to_string_lossy().to_string();
-        let result = agent_doc_queue_io::write_queue::serialized_atomic_write_with(
-            &crate::SESSION_ACTOR_WRITE_QUEUE,
-            &base_dir,
-            &file,
-            path,
-            content,
-            crate::write::atomic_write_pub,
-        );
-        if result.is_ok() {
-            // Log after the write lands so the document path canonicalizes
-            // (ops.log root resolution requires the file to exist).
-            agent_doc_ops_log_io::log_op(
-                path,
-                &format!(
-                    "write_authority action=routed transport=write_queue len={} hash={}",
-                    content.len(),
-                    agent_doc_hash::content_hash(content)
-                ),
-            );
-        }
-        return result;
-    }
-
-    atomic_write_raw(path, content)
-}
-
-/// The raw atomic disk write: write to a temp file then rename, recording
-/// write-provenance for editor-visible documents. This is the gate ladder's
-/// `off` path and the path taken inside the ordered write queue.
-fn atomic_write_raw(path: &Path, content: &str) -> Result<()> {
-    use std::io::Write;
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    tmp.write_all(content.as_bytes())
-        .with_context(|| "failed to write temp file")?;
-    tmp.persist(path)
-        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
-    record_document_write_provenance(path, content);
-    Ok(())
+    agent_doc_document_realtime_io::atomic_write_through_authority(path, content)
 }
 
 /// Record write-provenance for agent-doc's own disk write to a session document
@@ -2493,29 +2330,7 @@ fn atomic_write_raw(path: &Path, content: &str) -> Result<()> {
 /// disk change from any agent-doc writer is positively attributed instead of
 /// inferred from the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic.
 pub fn record_document_write_provenance(path: &Path, content: &str) {
-    if !agent_doc_document_realtime::write_authority::is_visible_document(path) {
-        return;
-    }
-    let canonical = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    let write_id = uuid::Uuid::new_v4().to_string();
-    let hash = agent_doc_hash::content_hash(content);
-    if let Err(e) = agent_doc_debounce::record_write_provenance(
-        &canonical,
-        content.len(),
-        &hash,
-        &write_id,
-        "agent",
-    ) {
-        eprintln!(
-            "[write] WARNING: failed to record write provenance for {}: {}",
-            path.display(),
-            e
-        );
-    }
+    agent_doc_document_realtime_io::record_document_write_provenance(path, content);
 }
 
 #[cfg(test)]

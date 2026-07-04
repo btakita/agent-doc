@@ -1168,7 +1168,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     const TOKEN_BUDGET_TOLERANCE: usize = 4;
     let hot_paths = [
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
         "agent-doc-document/src/commit_normalization.rs",
         "agent-doc-git-io/src/dirs.rs",
@@ -1269,7 +1269,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // strip_head_markers policy/tests moved from git into the focused
         // `agent-doc-document::transient_markers` module. The removed tokens are
         // document-normalization names, not removed flow guard boundaries.
-        ("agent-doc-orchestration/src/git.rs", "guard_") => 15,
+        ("agent-doc-commit-io/src/lib.rs", "guard_") => 15,
         // #safe-mutation-extract: safe out-of-band mutation classification moved
         // into the focused realtime write policy crate. The four `guard_` tokens
         // are the existing transient marker stripper name/call plus two policy
@@ -1305,7 +1305,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // logs the audited allowance when the staged snapshot already matches a
         // synced operator-authoritative live buffer. This is a proof diagnostic
         // for the existing pre-stage guard path, not a new ad hoc flow branch.
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 10,
+        ("agent-doc-commit-io/src/lib.rs", "reason=") => 10,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it
@@ -2616,7 +2616,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent_doc_hooks_io::fire_post_write_with_effects(",
         ),
         (
-            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-commit-io/src/lib.rs",
             "agent_doc_hooks_io::fire_post_commit(file, session_id, None)",
         ),
         (
@@ -2628,7 +2628,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent_doc_hooks_io::fire_doc_event(file, \"post_write\")",
         ),
         (
-            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-commit-io/src/lib.rs",
             "agent_doc_hooks_io::fire_doc_event(file, event)",
         ),
         (
@@ -3469,7 +3469,6 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
 
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
-    let git = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let commit_io =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -3508,7 +3507,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         );
     }
     assert!(
-        !git.contains("pub fn repair_committed_historical_snapshot_drift(")
+        !commit_io.contains("pub fn repair_committed_historical_snapshot_drift(")
             && commit_io
                 .contains("agent_doc_repair_io::repair_committed_historical_snapshot_drift("),
         "commit lifecycle must call focused repair IO for committed historical snapshot drift repair"
@@ -4049,8 +4048,6 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             "agent-doc-queue must own queue replay-normalization policy: {required_snippet}"
         );
     }
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let commit_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
@@ -4059,8 +4056,8 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "fn preserved_queue_additions_neutralized_by_replay(",
     ] {
         assert!(
-            !git_source.contains(forbidden_snippet),
-            "git.rs must not re-own queue replay-normalization policy: {forbidden_snippet}"
+            !commit_io_source.contains(forbidden_snippet),
+            "commit-io must not re-own queue replay-normalization policy: {forbidden_snippet}"
         );
     }
     assert!(
@@ -4440,8 +4437,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
 
     let queue_io_consume =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
-    let orchestration_git =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     let orchestration_git_tests =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/git.rs")).unwrap();
     let orchestration_preflight =
@@ -4490,8 +4487,9 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
             && queue_io_consume.contains("agent_doc_capture_io::load_by_id(")
             && orchestration_git_tests
                 .contains("queue_consume::strike_answered_free_text_heads_at_commit_seam(")
-            && !orchestration_git.contains("fn strike_answered_free_text_heads_at_commit_seam(")
-            && !orchestration_git.contains("fn capture_response_body_for("),
+            && commit_io.contains("queue_consume::strike_answered_free_text_heads_at_commit_seam(")
+            && !commit_io.contains("fn strike_answered_free_text_heads_at_commit_seam(")
+            && !commit_io.contains("fn capture_response_body_for("),
         "agent-doc-queue-io should own the commit-seam answered free-text queue strike IO graph"
     );
     let orchestration_write_run_entry =
@@ -5172,7 +5170,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-flow-io closeout should call focused flow latency formatting directly"
     );
     for relative in [
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
@@ -7035,27 +7033,25 @@ fn test_agent_doc_queue_io_owns_write_queue_serialization_policy() {
             .exists(),
         "orchestration must not keep a write_queue module after the focused queue IO extraction"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
-    let orchestration_write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let realtime_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     for required_snippet in [
         "agent_doc_queue_io::write_queue::DocumentWriteQueueSubmitter",
         "SessionActorWriteQueueSubmitter",
         "document_actor_in(",
     ] {
         assert!(
-            orchestration_lib.contains(required_snippet),
-            "orchestration root should only adapt queue IO to the local session actor effect: {required_snippet}"
+            realtime_io.contains(required_snippet),
+            "realtime IO should adapt queue IO to the session actor effect: {required_snippet}"
         );
     }
     for required_snippet in [
         "serialized_atomic_write_with(",
-        "crate::write::atomic_write_pub",
+        "atomic_write_through_authority,",
     ] {
         assert!(
-            orchestration_write.contains(required_snippet),
-            "write.rs should call focused queue IO directly for serialized writes: {required_snippet}"
+            realtime_io.contains(required_snippet),
+            "realtime IO should call focused queue IO directly for serialized writes: {required_snippet}"
         );
     }
 }
@@ -11081,6 +11077,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the remaining commit-boundary tests into `agent-doc-commit-io` and focused `agent-doc-git-io` fixtures",
         ),
         (
+            "Git commit runtime facade deletion",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-commit-io/src/lib.rs",
+            "Move the integration test suite from `agent-doc-orchestration/tests/git.rs` into focused `agent-doc-commit-io`/`agent-doc-git-io` fixtures",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
@@ -13342,14 +13344,14 @@ fn test_agent_doc_frontmatter_owns_write_mode_detection_policy() {
     let write_run_entry =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
             .unwrap();
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     let git_transient_cleanup =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/transient_cleanup.rs")).unwrap();
     for forbidden in ["fn content_uses_crdt_write(", "fn document_uses_crdt("] {
         assert!(
             !write_run_entry.contains(forbidden)
-                && !git_source.contains(forbidden)
+                && !commit_io_source.contains(forbidden)
                 && !git_transient_cleanup.contains(forbidden),
             "callers must not re-own CRDT write-mode detection: {forbidden}"
         );
@@ -13359,7 +13361,8 @@ fn test_agent_doc_frontmatter_owns_write_mode_detection_policy() {
             .contains("use agent_doc_frontmatter::frontmatter::content_uses_crdt_write;")
             && git_transient_cleanup
                 .contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write(")
-            && !git_source.contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write("),
+            && !commit_io_source
+                .contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write("),
         "write and git transient cleanup should call frontmatter-owned CRDT write-mode detection directly"
     );
 }
@@ -22235,11 +22238,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         &["agent_doc_project_root_io", "project_root_from_cwd"],
     );
     let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     assert!(
         !git_source.contains("agent_doc_fs::find_project_root(")
             && git_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "git orchestration should call focused project-root IO instead of owning VCS-refresh root discovery"
+        "commit runtime should call focused project-root IO instead of owning VCS-refresh root discovery"
     );
     let admin_source =
         fs::read_to_string(manifest_dir.join("agent-doc-admin-io/src/lib.rs")).unwrap();
@@ -22329,10 +22332,12 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     );
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let realtime_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     assert!(
         !write_source.contains("agent_doc_fs::find_project_root(")
-            && write_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "write should call focused project-root IO instead of owning write-authority root discovery"
+            && realtime_io.contains("agent_doc_project_root_io::project_root_containing("),
+        "realtime IO should call focused project-root IO for write-authority root discovery"
     );
     let flow_closeout_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/closeout.rs")).unwrap();
@@ -23490,7 +23495,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
     }
     for relative in [
         "src/reset.rs",
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
         "agent-doc-compact-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -23565,7 +23570,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
         "agent-doc-write-converge-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -23823,10 +23828,10 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
     }
 
     let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     assert!(
         !git_source.contains("mod normalize;") && !git_source.contains("pub use normalize"),
-        "git.rs must call document commit normalization directly, not keep a facade module"
+        "commit-io must call document commit normalization directly, not keep a facade module"
     );
     let git_pre_stage_repair =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/pre_stage_repair.rs")).unwrap();
@@ -23987,8 +23992,6 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "orchestration must not retain the old git normalization module or facade"
     );
 
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let git_policy_source =
         fs::read_to_string(manifest_dir.join("agent-doc-git/src/lib.rs")).unwrap();
     let commit_io_source =
@@ -24023,8 +24026,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "fn non_exchange_change_is_turn_independent(",
     ] {
         assert!(
-            !git_source.contains(forbidden),
-            "git.rs must stay a git adapter, not re-own commit normalization: {forbidden}"
+            !commit_io_source.contains(forbidden),
+            "commit-io must stay a coordinator, not re-own commit normalization: {forbidden}"
         );
     }
     assert!(
@@ -24043,8 +24046,11 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "commit coordinator should call focused non-exchange component drift policy directly"
     );
     assert!(
-        git_source.contains("agent_doc_commit_io::commit_with_outcome("),
-        "git.rs should delegate commit lifecycle policy to agent-doc-commit-io"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && commit_io_source.contains("pub fn commit_with_outcome("),
+        "orchestration git facade should be deleted and commit-io should own the default commit API"
     );
 
     let partial_staging =
@@ -24316,8 +24322,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub fn verify_snapshot_committed(",
     ] {
         assert!(
-            !git_source.contains(forbidden),
-            "orchestration git adapter must not re-own snapshot-vs-HEAD commit verification: {forbidden}"
+            !commit_io_source.contains(forbidden),
+            "commit-io must not re-own snapshot-vs-HEAD commit verification: {forbidden}"
         );
     }
     let git_dirs_source =
@@ -24350,16 +24356,17 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             .exists(),
         "orchestration must not retain a git dirs shim module"
     );
-    let git_adapter_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     assert!(
         commit_io_source.contains("dirs::{narrow_to_submodule, resolve_to_git_root}")
             && commit_io_source.contains("transaction::{"),
         "commit coordinator should import focused git IO helpers directly"
     );
     assert!(
-        git_adapter_source.contains("agent_doc_commit_io::CommitCoordinatorPorts"),
-        "orchestration git adapter should delegate to focused commit coordinator"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && commit_io_source.contains("pub struct CommitCoordinatorPorts"),
+        "orchestration git adapter should be deleted and focused commit coordinator should own ports"
     );
     let doctor_source =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/doctor.rs")).unwrap();
@@ -24433,8 +24440,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub(crate) fn tracked_side_effect_note(",
     ] {
         assert!(
-            !git_adapter_source.contains(forbidden),
-            "orchestration git adapter must not facade git directory/path IO: {forbidden}"
+            !commit_io_source.contains(forbidden),
+            "commit-io must not facade git directory/path IO: {forbidden}"
         );
     }
     assert!(
@@ -24448,8 +24455,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "revision::rev_parse(&super_root, &parent_spec)?",
     ] {
         assert!(
-            !git_adapter_source.contains(forbidden),
-            "orchestration git adapter must not re-own submodule pointer drift IO: {forbidden}"
+            !commit_io_source.contains(forbidden),
+            "commit-io must not re-own submodule pointer drift IO: {forbidden}"
         );
     }
 
@@ -24800,25 +24807,28 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         ),
         "repair IO should import response-body prompt-prefix repair from the focused crate directly"
     );
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     let git_post_commit_cleanup =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/post_commit_cleanup.rs"))
             .unwrap();
     assert!(
         git_post_commit_cleanup.contains(
             "use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;"
-        ) && !git_source.contains(
+        ) && !commit_io_source.contains(
             "use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;"
         ),
         "git post-commit cleanup should import exchange-only reposition policy from the focused crate"
     );
     assert!(
-        !git_source.contains("fn redact_exchange_component_content(")
-            && !git_source.contains("fn post_commit_ipc_reposition_only_exchange_safe(")
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && !commit_io_source.contains("fn redact_exchange_component_content(")
+            && !commit_io_source.contains("fn post_commit_ipc_reposition_only_exchange_safe(")
             && !git_post_commit_cleanup
                 .contains("fn post_commit_ipc_reposition_only_exchange_safe("),
-        "git.rs must not re-own exchange-only post-commit IPC policy"
+        "orchestration git facade must be gone and commit/git IO must not re-own exchange-only post-commit IPC policy"
     );
     let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
     assert!(
@@ -25039,7 +25049,7 @@ fn test_agent_doc_element_boundary_owns_boundary_id_lookup() {
     for relative_path in [
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         for forbidden_snippet in [
@@ -25364,8 +25374,6 @@ fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
         "agent-doc-orchestration must not keep a safe_mutation policy module"
     );
 
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let commit_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
@@ -25379,8 +25387,8 @@ fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
         "fn is_safe_user_follow_up_exchange_growth",
     ] {
         assert!(
-            !git_source.contains(forbidden_snippet),
-            "git.rs must not define or reexport safe mutation classification: {forbidden_snippet}"
+            !commit_io_source.contains(forbidden_snippet),
+            "commit-io must not define or reexport safe mutation classification: {forbidden_snippet}"
         );
     }
     assert!(
@@ -25390,8 +25398,11 @@ fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
         "commit coordinator should call the focused realtime safe mutation policy directly"
     );
     assert!(
-        git_source.contains("agent_doc_commit_io::commit_with_outcome("),
-        "git.rs should delegate commit lifecycle policy instead of duplicating safe mutation checks"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && commit_io_source.contains("pub fn commit_with_outcome("),
+        "orchestration git facade should be deleted and commit-io should own commit lifecycle policy"
     );
 }
 
@@ -25735,7 +25746,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     }
     for relative in [
         "agent-doc-session-actor-io/src/lib.rs",
-        "agent-doc-orchestration/src/lib.rs",
+        "agent-doc-document-realtime-io/src/lib.rs",
         "agent-doc-queue-io/src/write_queue.rs",
         "src/main.rs",
     ] {
@@ -26606,14 +26617,16 @@ fn test_agent_doc_template_owns_stale_baseline_policy() {
 #[test]
 fn test_commit_lifecycle_policy_has_single_owner() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let git = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let commit_io =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
 
     assert!(
-        git.contains("agent_doc_commit_io::commit_with_outcome(")
-            && git.contains("agent_doc_commit_io::CommitCoordinatorPorts"),
-        "git.rs should be the concrete adapter into the focused commit coordinator"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && commit_io.contains("pub fn commit_with_outcome(")
+            && commit_io.contains("pub struct CommitCoordinatorPorts"),
+        "orchestration git facade should be deleted and commit-io should own the commit API and ports"
     );
 
     for required in [
@@ -26626,10 +26639,6 @@ fn test_commit_lifecycle_policy_has_single_owner() {
         assert!(
             commit_io.contains(required),
             "agent-doc-commit-io must own commit lifecycle policy marker: {required}"
-        );
-        assert!(
-            !git.contains(required),
-            "git.rs must not duplicate focused commit lifecycle policy marker: {required}"
         );
     }
 }
@@ -27461,6 +27470,8 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     .unwrap();
     let write_converge_io =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
+    let realtime_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let write_ipc =
@@ -27555,11 +27566,11 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         !write_source.contains("#[cfg(test)]\nmod converge;")
             && !write_source.contains("pub use converge::*;")
             && !write_source.contains("pub(crate) use converge::*;")
-            && write_source.contains("pub static WRITE_CONVERGENCE_EFFECTS")
-            && write_source.contains(
-                "impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceEffects",
+            && write_source.contains("WRITE_CONVERGENCE_EFFECTS")
+            && realtime_io.contains("pub static RUNTIME_WRITE_CONVERGENCE_EFFECTS")
+            && realtime_io.contains(
+                "impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConvergenceEffects",
             )
-            && write_source.contains("fn log_file_ipc_proof_failure(")
             && write_converge_io.contains("#[cfg(test)]\nmod convergence_fixture_tests;")
             && convergence_fixture.contains("Test-only write convergence coverage relocated")
             && !convergence_fixture.contains("fn try_detached_disk_write(")
@@ -27568,7 +27579,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
             && !convergence_fixture.contains("fn live_editor_sidecar_present(")
             && !convergence_fixture.contains("stale_snapshot_reset_drift(snapshot_doc, current_doc)")
             && !convergence_fixture.contains("fn classify_stale_snapshot_visible_rebase"),
-        "production write convergence should live in agent-doc-write-converge-io with orchestration retaining only explicit effects"
+        "write convergence policy should live in write-converge-io with runtime effects in realtime IO"
     );
     for forbidden_snippet in [
         "pub(crate) fn editor_ipc_write_wedged",

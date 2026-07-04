@@ -36,7 +36,6 @@
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod codex_hook;
-pub mod git;
 pub mod preflight;
 pub mod repair;
 pub mod route;
@@ -69,35 +68,10 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for BacklogCommandEffec
     }
 }
 
-#[doc(hidden)]
-pub struct PipelineFrontmatterEffects;
-
-#[doc(hidden)]
-pub const PIPELINE_FRONTMATTER_EFFECTS: PipelineFrontmatterEffects = PipelineFrontmatterEffects;
-
-impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
-    for PipelineFrontmatterEffects
-{
-    fn converge_or_disk_write(
-        &self,
-        file: &std::path::Path,
-        current_content: &str,
-        target_content: &str,
-        reason: &str,
-    ) -> anyhow::Result<()> {
-        agent_doc_write_converge_io::converge_or_disk_write(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
-            file,
-            current_content,
-            target_content,
-            reason,
-        )
-    }
-
-    fn log_op(&self, file: &std::path::Path, message: &str) {
-        agent_doc_ops_log_io::log_op(file, message);
-    }
-}
+pub use agent_doc_document_realtime_io::{
+    RUNTIME_PIPELINE_FRONTMATTER_EFFECTS as PIPELINE_FRONTMATTER_EFFECTS,
+    RuntimePipelineFrontmatterEffects as PipelineFrontmatterEffects,
+};
 
 pub struct OrchestrationRepairIoEffects;
 
@@ -290,30 +264,6 @@ impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplay
     }
 }
 
-pub(crate) struct SessionActorWriteQueueSubmitter;
-
-pub(crate) static SESSION_ACTOR_WRITE_QUEUE: SessionActorWriteQueueSubmitter =
-    SessionActorWriteQueueSubmitter;
-
-impl agent_doc_queue_io::write_queue::DocumentWriteQueueSubmitter
-    for SessionActorWriteQueueSubmitter
-{
-    fn submit<R, F>(
-        &self,
-        base_dir: &std::path::Path,
-        file: &str,
-        kind: agent_doc_document_realtime::session_ops::SessionOpKind,
-        job: F,
-    ) -> anyhow::Result<R>
-    where
-        R: Send + 'static,
-        F: FnOnce() -> R + Send + 'static,
-    {
-        let actor = agent_doc_session_actor_io::document_actor_in(base_dir, file);
-        actor.submit(kind, move |_ctx| job())
-    }
-}
-
 pub struct OrchestrationSessionCheckEffects;
 
 pub fn session_check_effects() -> OrchestrationSessionCheckEffects {
@@ -359,7 +309,7 @@ impl agent_doc_run_io::DirectRunEffects for OrchestrationDirectRunEffects {
     }
 
     fn commit(&self, file: &std::path::Path) -> anyhow::Result<bool> {
-        crate::git::commit(file)
+        agent_doc_commit_io::commit(file)
     }
 
     fn normalize_template_structure_or_fail(
@@ -423,7 +373,7 @@ pub fn closeout_effects() -> OrchestrationCloseoutEffects {
 
 impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffects {
     fn commit(&self, file: &std::path::Path) -> anyhow::Result<bool> {
-        crate::git::commit(file)
+        agent_doc_commit_io::commit(file)
     }
 
     fn run_pending_maintenance(

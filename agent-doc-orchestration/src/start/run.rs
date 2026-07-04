@@ -98,7 +98,7 @@ pub fn run_with_reap_policy(
     // the IPC listener starts. Prevents CRDT corruption from stale state.
     match agent_doc_workflow_io::document_init::ensure_initialized(
         file,
-        crate::git::commit,
+        agent_doc_commit_io::commit,
         agent_doc_ops_log_io::log_op,
     ) {
         Ok(true) => {

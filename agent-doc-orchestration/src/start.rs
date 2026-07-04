@@ -299,7 +299,7 @@ fn complete_idle_queue_slash_command_head(
                     ),
                 );
             }
-            match crate::git::commit(file) {
+            match agent_doc_commit_io::commit(file) {
                 Ok(did_commit) => {
                     log_event(
                         session_log,

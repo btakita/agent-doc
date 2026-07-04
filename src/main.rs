@@ -109,7 +109,7 @@ struct CliClaimRuntimeEffects;
 
 impl ClaimRuntimeEffects for CliClaimRuntimeEffects {
     fn commit(&self, file: &Path) -> anyhow::Result<bool> {
-        agent_doc_orchestration::git::commit(file)
+        agent_doc_commit_io::commit(file)
     }
 
     fn provision_pane(
@@ -185,7 +185,7 @@ struct CliSyncRuntimeEffects;
 
 impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
     fn commit(&self, file: &Path) -> anyhow::Result<bool> {
-        agent_doc_orchestration::git::commit(file)
+        agent_doc_commit_io::commit(file)
     }
 
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> anyhow::Result<bool> {
@@ -264,7 +264,7 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_compact_io::CompactCommitOutcome> {
-        let outcome = agent_doc_orchestration::git::commit_with_outcome(file)?;
+        let outcome = agent_doc_commit_io::commit_with_outcome(file)?;
         Ok(agent_doc_compact_io::CompactCommitOutcome {
             did_commit: outcome.did_commit,
             vcs_refresh_signaled: outcome.vcs_refresh_signaled,
@@ -758,7 +758,7 @@ fn cli_stream_effects() -> Arc<dyn agent_doc_stream_io::StreamRuntimeEffects> {
 
 impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
     fn commit(&self, file: &Path) -> anyhow::Result<bool> {
-        agent_doc_orchestration::git::commit(file)
+        agent_doc_commit_io::commit(file)
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
@@ -3524,7 +3524,7 @@ fn main() -> anyhow::Result<()> {
                 None => agent_doc_prompt_io::run(&file),
             }
         }
-        Commands::Commit { file } => agent_doc_orchestration::git::commit(&file).map(|_| ()),
+        Commands::Commit { file } => agent_doc_commit_io::commit(&file).map(|_| ()),
         Commands::Dedupe { file } => dedupe_cmd::run(&file),
         Commands::Cancel { file } => {
             match agent_doc_repair_io::cancel_preflight_cycle(

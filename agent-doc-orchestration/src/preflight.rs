@@ -117,7 +117,7 @@ use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
 use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 
-use crate::{git, repair};
+use crate::repair;
 use agent_doc_document::write_normalization::editor_buffer_preserved_head_exchange;
 
 /// A change detected in a related document since the last cycle.
@@ -558,7 +558,7 @@ impl PreflightCycleCompletionEffects for OrchestrationPreflightCycleCompletionEf
     }
 
     fn commit(&self, file: &Path) -> Result<bool> {
-        git::commit(file)
+        agent_doc_commit_io::commit(file)
     }
 
     fn session_interruption(&self, file: &Path) -> Result<Option<String>> {
@@ -670,7 +670,7 @@ fn enforce_no_uncommitted_closeout_drift(
             "[preflight] jb_cache_conflict_cancel: response written but not committed for {} — running auto-commit",
             file.display()
         );
-        match crate::git::commit(file) {
+        match agent_doc_commit_io::commit(file) {
             Ok(_) => {
                 rc.invalidate_head_content();
                 agent_doc_ops_log_io::log_op(
@@ -897,7 +897,7 @@ fn recover_route_queue_snapshot_commit_boundary(
         "[preflight] route_queue_snapshot: queued dispatch snapshot is not committed for {}; running auto-commit",
         file.display()
     );
-    match crate::git::commit(file) {
+    match agent_doc_commit_io::commit(file) {
         Ok(_) => {
             rc.invalidate_head_content();
             agent_doc_ops_log_io::log_op(

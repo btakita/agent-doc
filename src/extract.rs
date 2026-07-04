@@ -489,7 +489,7 @@ pub fn transfer(
     // Commit the target so transferred headings are in git HEAD.
     // Without this, the next agent-doc commit classifies all transferred
     // headings as "new" and marks each with (HEAD).
-    agent_doc_orchestration::git::commit(target)?;
+    agent_doc_commit_io::commit(target)?;
 
     eprintln!(
         "[transfer] Moved component '{}' from {} → {}",
@@ -589,7 +589,7 @@ fn transfer_pending_items(
     write::atomic_write_pub(target, &new_target)?;
     agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
-    agent_doc_orchestration::git::commit(target)?;
+    agent_doc_commit_io::commit(target)?;
 
     eprintln!(
         "[transfer] Moved {} {} item(s) ({}) from {} → {}",
@@ -703,7 +703,7 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
     write::atomic_write_pub(target, &new_target)?;
     agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
-    agent_doc_orchestration::git::commit(target)?;
+    agent_doc_commit_io::commit(target)?;
 
     eprintln!(
         "[transfer] Inserted referral to {}:{} in {}",

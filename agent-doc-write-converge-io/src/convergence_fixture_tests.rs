@@ -21,11 +21,11 @@ impl EditorConvergenceEffects for TestWriteConvergenceEffects {
         source: &str,
         expected_current: &str,
     ) -> Result<()> {
-        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
-            file,
-            source,
-            expected_current,
-        )
+        let current = std::fs::read_to_string(file).unwrap_or_default();
+        if current != expected_current {
+            anyhow::bail!("refusing {source} write: document changed before write");
+        }
+        Ok(())
     }
 
     fn atomic_write_if_current(
@@ -35,27 +35,17 @@ impl EditorConvergenceEffects for TestWriteConvergenceEffects {
         expected_current: &str,
         source: &str,
     ) -> Result<()> {
-        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
-            file,
-            source,
-            expected_current,
-        )?;
-        let current = std::fs::read_to_string(file).unwrap_or_default();
-        if current != expected_current {
-            anyhow::bail!("refusing {source} write: document changed before write");
-        }
+        self.guard_visible_write_idle_and_current(file, source, expected_current)?;
         super::atomic_write(file, content)
     }
 
-    fn cycle_already_committed(&self, file: &Path) -> Option<String> {
-        agent_doc_flow_io::closeout::cycle_already_committed(file)
+    fn cycle_already_committed(&self, _file: &Path) -> Option<String> {
+        None
     }
 
     fn log_file_ipc_already_committed(&self, _file: &Path, _cycle_id: &str) {}
 
-    fn cleanup_fallback_patch_files(&self, file: &Path) {
-        agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
-    }
+    fn cleanup_fallback_patch_files(&self, _file: &Path) {}
 
     fn log_file_ipc_proof_failure(
         &self,

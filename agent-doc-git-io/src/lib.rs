@@ -1,5 +1,6 @@
 //! Git command I/O adapters for agent-doc.
 
+pub mod boundary_reposition;
 pub mod branch;
 pub mod checkpoint;
 pub mod commit;

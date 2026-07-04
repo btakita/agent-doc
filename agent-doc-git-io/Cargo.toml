@@ -12,9 +12,12 @@ name = "agent_doc_git_io"
 [dependencies]
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.67" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.34.67" }
 agent-doc-element-exchange-io = { path = "../agent-doc-element-exchange-io", version = "0.34.67" }
 agent-doc-git = { path = "../agent-doc-git", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 anyhow = "1"
 fs2 = "0.4"

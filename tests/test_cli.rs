@@ -23743,8 +23743,11 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         );
     }
     assert!(
-        git_source.contains("use agent_doc_document::commit_normalization::{"),
-        "git.rs should import focused commit normalization directly"
+        git_source.contains("normalize_committed_exchange_artifacts")
+            && fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/boundary_reposition.rs"))
+                .unwrap()
+                .contains("canonicalize_answered_prompt_prefixes"),
+        "git.rs and git-io boundary reposition should import focused commit normalization directly"
     );
     assert!(
         git_source.contains("use agent_doc_git::{"),

@@ -76,9 +76,7 @@
 //! - verify_snapshot_committed_no_head: file not tracked → `NoHead`
 //! - submodule_noop_commit_updates_stale_parent_pointer: no-op commit in submodule still updates stale parent pointer
 
-use agent_doc_document::commit_normalization::{
-    canonicalize_answered_prompt_prefixes, normalize_committed_exchange_artifacts,
-};
+use agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts;
 use agent_doc_document::transient_markers::{
     normalize_for_replay_hash, normalize_post_commit_re_heading_drift,
     normalize_transient_agent_doc_markers, repair_stale_agent_response_collapse_doc,
@@ -169,6 +167,71 @@ impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
             target_content,
             reason,
         )
+    }
+}
+
+struct OrchestrationBoundaryRepositionEffects;
+
+static BOUNDARY_REPOSITION_EFFECTS: OrchestrationBoundaryRepositionEffects =
+    OrchestrationBoundaryRepositionEffects;
+
+impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
+    for OrchestrationBoundaryRepositionEffects
+{
+    fn active_run(&self, file: &Path) -> bool {
+        file.canonicalize()
+            .ok()
+            .and_then(|canonical| agent_doc_fs::pending_response_path_for(&canonical).ok())
+            .map(|pending_path| pending_path.exists())
+            .unwrap_or(false)
+    }
+
+    fn load_snapshot(&self, file: &Path) -> Result<Option<String>> {
+        agent_doc_snapshot_io::load(file)
+    }
+
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn ipc_listener_active(&self, file: &Path) -> bool {
+        file.canonicalize()
+            .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
+            .map(|root| agent_doc_ipc_io::is_listener_active(&root))
+            .unwrap_or(false)
+    }
+
+    fn read_to_string(&self, file: &Path) -> Result<String> {
+        Ok(std::fs::read_to_string(file)?)
+    }
+
+    fn queue_file_ipc_reposition_boundary(
+        &self,
+        file: &Path,
+        committed_boundary_id: Option<&str>,
+        normalize_prefix_lines: &[String],
+    ) -> Result<agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery> {
+        match agent_doc_write_ipc_io::queue_file_ipc_reposition_boundary(
+            file,
+            committed_boundary_id,
+            normalize_prefix_lines,
+        )? {
+            agent_doc_write_ipc_io::FileIpcRepositionResult::Queued => {
+                Ok(agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Queued)
+            }
+            agent_doc_write_ipc_io::FileIpcRepositionResult::DeferredExistingPatch => {
+                Ok(
+                    agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::DeferredExistingPatch,
+                )
+            }
+            agent_doc_write_ipc_io::FileIpcRepositionResult::Unavailable => {
+                Ok(agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Unavailable)
+            }
+        }
+    }
+
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        crate::write::atomic_write_pub(file, content)
     }
 }
 
@@ -814,7 +877,10 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // is skipped and the IPC path owns the transition, matching prior
     // behavior for that case.
     let t_reposition = std::time::Instant::now();
-    let _snap_changed = reposition_boundary_in_snapshot(file);
+    let _snap_changed = agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
+        &BOUNDARY_REPOSITION_EFFECTS,
+        file,
+    );
     // Reload snapshot_content from disk — the reposition may have rewritten
     // it with a fresh boundary id. Staging must use the repositioned blob.
     if let Ok(Some(reloaded)) = agent_doc_snapshot_io::load(file) {
@@ -1122,177 +1188,6 @@ fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
     let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
     signal_file.parent().filter(|p| p.exists())?;
     Some(signal_file)
-}
-
-/// Reposition boundary in snapshot AND working tree deterministically.
-///
-/// After commit, moves the boundary to the end of exchange in both the
-/// snapshot and the working-tree file. The active-run guard
-/// (`pending_path_for`) prevents racing a concurrent `agent-doc write`:
-/// in-flight runs are skipped so the plugin's IPC write path owns the
-/// transition. Outside of an active run — including sweep-committed
-/// foreign docs that never touch `agent-doc write` — this function is
-/// the canonical place the on-disk state becomes consistent.
-///
-/// The cleanup uses the clean boundary-only reposition helper so the on-disk
-/// snapshot/file match the committed blob shape instead of introducing
-/// transient `(HEAD)` / boundary-only churn.
-///
-/// Returns true if the snapshot OR working tree content changed.
-fn reposition_boundary_in_snapshot(file: &Path) -> bool {
-    // An in-flight `agent-doc write` owns the *working-tree/editor* transition
-    // via IPC — but the binary-owned snapshot/staged blob is never raced by the
-    // editor (git stages a snapshot, not the live file). So the active-run guard
-    // must scope ONLY the disk/working-tree rewrite below; the snapshot collapse
-    // that follows runs unconditionally. Previously this early-returned before
-    // the snapshot collapse too, so a wedged finalize (leftover pending-response
-    // file) that landed via a direct commit skipped the collapse and accreted
-    // one boundary per cycle (#boundaryaccum1).
-    let active_run = file
-        .canonicalize()
-        .ok()
-        .and_then(|canonical| agent_doc_fs::pending_response_path_for(&canonical).ok())
-        .map(|pending_path| pending_path.exists())
-        .unwrap_or(false);
-
-    let mut changed = false;
-
-    // Reposition the snapshot to the same clean shape we stage into git.
-    // ALWAYS runs — the snapshot is a binary-owned artifact that never races the
-    // live editor buffer, so collapsing it to exactly one boundary here is the
-    // invariant-enforcement point regardless of which write path delivered the
-    // response (finalize, wedged direct commit, or sweep commit).
-    if let Ok(Some(snap_content)) = agent_doc_snapshot_io::load(file) {
-        let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&snap_content);
-        let new_snap = agent_doc_template::reposition_boundary_to_end_clean(&prompt_canonicalized);
-        if new_snap != snap_content {
-            match agent_doc_snapshot_io::save(file, &new_snap, agent_doc_ops_log_io::log_op) {
-                Ok(()) => {
-                    eprintln!("[commit] repositioned boundary in snapshot");
-                    changed = true;
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[commit] failed to update snapshot after boundary reposition: {}",
-                        e
-                    );
-                }
-            }
-        }
-    }
-
-    // Working-tree/editor rewrite. Skipped during an active run — the in-flight
-    // `agent-doc write` owns the disk/editor transition via IPC. The snapshot
-    // collapse above already ran, so the staged/committed blob is single-boundary
-    // regardless; only the live disk file is deferred here.
-    if active_run {
-        eprintln!("[commit] skipping working-tree boundary reposition — active run detected");
-        return changed;
-    }
-
-    // Reposition in the working tree unless a live IDE listener is available.
-    // A stale `.agent-doc/patches/` directory by itself is not enough — the
-    // reposition signal is socket-based, so skipping the disk rewrite without
-    // a listener would leave boundary-only dirtiness behind.
-    //
-    // When the listener is present, the IPC reposition signal (sent
-    // post-commit) lets the plugin handle the working-tree boundary via
-    // Document API, coordinated with user edits.
-    // Doing a disk-level read-modify-write here races with the user typing
-    // in the IDE, producing duplicate structural tails (bug #xbs3).
-    let ipc_listener_active = file
-        .canonicalize()
-        .map(|c| agent_doc_project_root_io::resolve_ipc_project_root(&c))
-        .map(|root| agent_doc_ipc_io::is_listener_active(&root))
-        .unwrap_or(false);
-    if ipc_listener_active {
-        eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
-    } else if let Ok(working) = std::fs::read_to_string(file) {
-        let snapshot_after_reposition = agent_doc_snapshot_io::load(file).ok().flatten();
-        let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&working);
-        let normalize_prefix_lines = snapshot_after_reposition
-            .as_deref()
-            .map(|snapshot| {
-                agent_doc_element_exchange::extract_post_commit_normalization_targets(
-                    snapshot,
-                    &prompt_canonicalized,
-                )
-            })
-            .unwrap_or_default();
-        let prefix_repaired = if normalize_prefix_lines.is_empty() {
-            prompt_canonicalized
-        } else {
-            agent_doc_element_exchange::normalize_exchange_prefixes_for_targets(
-                &prompt_canonicalized,
-                &normalize_prefix_lines,
-            )
-        };
-        let repositioned =
-            agent_doc_template::reposition_boundary_to_end_preserve_head(&prefix_repaired);
-        if repositioned != working {
-            let committed_boundary_id = snapshot_after_reposition.as_deref().and_then(|snapshot| {
-                agent_doc_element_boundary::boundary::find_boundary_id(snapshot, "exchange")
-            });
-            let file_ipc = agent_doc_write_ipc_io::queue_file_ipc_reposition_boundary(
-                file,
-                committed_boundary_id.as_deref(),
-                &normalize_prefix_lines,
-            );
-            match file_ipc {
-                Ok(agent_doc_write_ipc_io::FileIpcRepositionResult::Queued) => {
-                    eprintln!("[commit] queued working-tree boundary reposition through file IPC");
-                    changed = true;
-                }
-                Ok(agent_doc_write_ipc_io::FileIpcRepositionResult::DeferredExistingPatch) => {
-                    eprintln!(
-                        "[commit] deferred working-tree boundary reposition to existing file IPC patch"
-                    );
-                    changed = true;
-                }
-                Ok(agent_doc_write_ipc_io::FileIpcRepositionResult::Unavailable) => {
-                    match crate::write::atomic_write_pub(file, &repositioned) {
-                        Ok(()) => {
-                            if normalize_prefix_lines.is_empty() {
-                                eprintln!("[commit] repositioned boundary in working tree");
-                            } else {
-                                eprintln!(
-                                    "[commit] repaired {} prefix lines and repositioned boundary in working tree",
-                                    normalize_prefix_lines.len()
-                                );
-                            }
-                            changed = true;
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "[commit] failed to reposition boundary in working tree: {}",
-                                e
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[commit] failed to queue file IPC boundary reposition: {}",
-                        e
-                    );
-                    match crate::write::atomic_write_pub(file, &repositioned) {
-                        Ok(()) => {
-                            eprintln!("[commit] repositioned boundary in working tree");
-                            changed = true;
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "[commit] failed to reposition boundary in working tree: {}",
-                                e
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    changed
 }
 
 /// Enforce the single-boundary invariant on the just-committed HEAD artifact
@@ -2877,7 +2772,10 @@ Duplicate replay should stay live.
         }
         fs::write(&pending, "in-flight").unwrap();
 
-        reposition_boundary_in_snapshot(&doc);
+        agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
+            &BOUNDARY_REPOSITION_EFFECTS,
+            &doc,
+        );
 
         let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         let count = snap
@@ -6808,7 +6706,10 @@ Compacted content:\n\
         thread::sleep(Duration::from_millis(100));
 
         // Run reposition — should skip working tree because the listener is active.
-        let changed = reposition_boundary_in_snapshot(&doc);
+        let changed = agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
+            &BOUNDARY_REPOSITION_EFFECTS,
+            &doc,
+        );
 
         // Snapshot should be repositioned
         let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
@@ -6898,7 +6799,10 @@ Compacted content:\n\
         fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
 
         // Run reposition
-        reposition_boundary_in_snapshot(&doc);
+        agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
+            &BOUNDARY_REPOSITION_EFFECTS,
+            &doc,
+        );
 
         // Snapshot is repositioned for commit staging.
         let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
@@ -6998,7 +6902,10 @@ Compacted content:\n\
             .output()
             .unwrap();
 
-        reposition_boundary_in_snapshot(&doc);
+        agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
+            &BOUNDARY_REPOSITION_EFFECTS,
+            &doc,
+        );
 
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
@@ -7062,7 +6969,10 @@ Compacted content:\n\
             .output()
             .unwrap();
 
-        reposition_boundary_in_snapshot(&doc);
+        agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
+            &BOUNDARY_REPOSITION_EFFECTS,
+            &doc,
+        );
 
         let working = fs::read_to_string(&doc).unwrap();
         assert!(

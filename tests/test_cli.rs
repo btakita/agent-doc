@@ -4830,6 +4830,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     );
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_authoritative_dispatch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_dispatch.rs"))
+            .unwrap();
     for forbidden in [
         "pub enum CloseoutGuardReason",
         "impl CloseoutGuardReason",
@@ -4920,11 +4923,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "orchestration closeout recovery should call focused turn policy directly"
     );
     assert!(
-        route_source.contains("blocked_closeout_recovery_command")
+        route_authoritative_dispatch_source.contains("blocked_closeout_recovery_command")
             && !route_source.contains("fn extract_recovery_command(")
             && !route_source.contains("fn short_recovery_command_from_recommendation(")
             && !route_source.contains("fn route_closeout_blocked_recovery_command("),
-        "route should call focused turn blocked-recovery projection directly, not re-own the parser"
+        "route authoritative dispatch should call focused turn blocked-recovery projection directly, not re-own the parser"
     );
     for relative in [
         "agent-doc-capture-io/src/lib.rs",
@@ -9650,7 +9653,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 51,
+        ledger_rows.len() >= 52,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10157,6 +10160,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/route.rs",
             "agent-doc-route-io/src/closeout_drain.rs",
             "Split the preflight, repair, and session-check callbacks",
+        ),
+        (
+            "Route authoritative dispatch loop IO graph",
+            "agent-doc-orchestration/src/route.rs",
+            "agent-doc-route-io/src/authoritative_dispatch.rs",
+            "Split the queue, dispatch, closeout, and wait-override effect callbacks",
         ),
     ] {
         let row_text = ledger_rows
@@ -14082,6 +14091,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let authoritative_actor =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_actor.rs"))
             .unwrap();
+    let route_authoritative_dispatch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_dispatch.rs"))
+            .unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     let route_dispatch_source =
@@ -14151,7 +14163,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .join("agent-doc-orchestration/src/route/cycle_ack.rs")
             .exists()
             && !route_source.contains("mod cycle_ack;")
-            && route_source.contains("use agent_doc_route_io::cycle_ack::{"),
+            && route_source.contains("use agent_doc_route_io::cycle_ack::RouteCycleAckEffects;"),
         "orchestration must not keep a route cycle-ack module after the route cycle acknowledgment graph moves to agent-doc-route-io"
     );
     assert!(
@@ -14161,7 +14173,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && !route_source.contains("mod dispatch_only;")
             && route_source.contains("agent_doc_route_io::dispatch_only::{")
             && route_source.contains("DispatchOnlyRouteEffects")
-            && route_source.contains("dispatch_only_send_reopen"),
+            && route_dispatch_only_source.contains("pub fn dispatch_only_send_reopen("),
         "orchestration must not keep a route dispatch-only module after the send/retry graph moves to agent-doc-route-io"
     );
     assert!(
@@ -14721,46 +14733,50 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "agent-doc-flow types must not keep route decision policy after it moves to agent-doc-controller"
     );
     assert!(
-        route_source.contains("use agent_doc_controller::dispatch::{")
-            && route_source.contains("ActorDispatchState")
-            && route_source.contains("ReopenMode")
-            && route_source.contains("RoutedReopenFacts")
-            && route_source.contains("decide_authoritative_reopen")
-            && route_source.contains("AuthoritativeActorDispatchAction")
-            && route_source.contains("AuthoritativeActorDispatchActionFacts")
-            && route_source.contains("classify_authoritative_actor_dispatch_action")
+        route_authoritative_dispatch_source.contains("use agent_doc_controller::dispatch::{")
+            && route_authoritative_dispatch_source.contains("ActorDispatchState")
+            && route_authoritative_dispatch_source.contains("ReopenMode")
+            && route_authoritative_dispatch_source.contains("RoutedReopenFacts")
+            && route_authoritative_dispatch_source.contains("decide_authoritative_reopen")
+            && route_authoritative_dispatch_source.contains("AuthoritativeActorDispatchAction")
+            && route_authoritative_dispatch_source
+                .contains("AuthoritativeActorDispatchActionFacts")
+            && route_authoritative_dispatch_source
+                .contains("classify_authoritative_actor_dispatch_action")
             && authoritative_actor.contains("pub fn wait_for_authoritative_actor_ready(")
             && authoritative_actor.contains("PromptReadyBarrierDecision")
             && authoritative_actor.contains("AuthoritativeActorReadyFacts")
             && authoritative_actor.contains("AuthoritativePromptReadyBarrierFacts")
             && authoritative_actor.contains("classify_authoritative_prompt_ready_barrier")
-            && route_source.contains("RoutedReopenGuardReason")
+            && route_authoritative_dispatch_source.contains("RoutedReopenGuardReason")
             && authoritative_actor.contains("prompt_ready_barrier_failed_event")
             && authoritative_actor.contains("agent_doc_flow_io::log_flow_event")
             && route_dispatch_only_source.contains("dispatch_only_blocked_guard_reason")
             && authoritative_actor.contains("effective_authoritative_actor_state")
             && route_pane_resolution_io_source.contains("DispatchRuntimeHealth")
-            && route_source.contains("RoutedDispatchStartProof")
+            && route_pane_resolution_io_source.contains("RoutedDispatchStartProof")
             && authoritative_actor.contains("RetryBudget")
             && authoritative_actor.contains("authoritative_actor_ready_retry_budget")
-            && route_source.contains("CloseoutBlockDispatchDecision")
+            && route_authoritative_dispatch_source.contains("CloseoutBlockDispatchDecision")
             && route_closeout_drain_source.contains("CloseoutBlockDispatchFacts")
             && route_closeout_drain_source.contains("classify_closeout_block_dispatch")
-            && route_source.contains("RouteCloseoutDrainOutcome")
-            && route_source.contains("route_closeout_user_outcome_fields")
+            && route_authoritative_dispatch_source.contains("RouteCloseoutDrainOutcome")
+            && route_authoritative_dispatch_source.contains("route_closeout_user_outcome_fields")
             && route_source.contains("dispatch_only_starting_pane_ready_timeout_for_binary")
-            && route_source.contains("dispatch_only_starting_pane_recovery_timeout_for_binary")
+            && route_authoritative_dispatch_source
+                .contains("dispatch_only_starting_pane_recovery_timeout_for_binary")
             && route_dispatch_recovery_source
                 .contains("dispatch_only_starting_pane_recovery_retry_budget")
             && authoritative_actor.contains("STARTING_ACTOR_TIMEOUT_REASON")
-            && route_source.contains("StartingTimeoutActorFacts")
-            && route_source.contains("actor_blocked_by_starting_timeout")
+            && route_authoritative_dispatch_source.contains("StartingTimeoutActorFacts")
+            && route_authoritative_dispatch_source.contains("actor_blocked_by_starting_timeout")
             && authoritative_actor.contains("starting_timeout_blocked_actor_can_recover")
             && route_pane_resolution_io_source.contains("StartupMissRouteFacts")
-            && route_source.contains("startup_miss_requires_fresh_start")
-            && route_source.contains("startup_miss_superseded_by_later_open_start")
-            && route_source.contains("startup_miss_should_restart_live_owner")
-            && route_source.contains("startup_miss_should_fail_closed")
+            && route_pane_resolution_io_source.contains("startup_miss_requires_fresh_start")
+            && route_pane_resolution_io_source
+                .contains("startup_miss_superseded_by_later_open_start")
+            && route_pane_resolution_io_source.contains("startup_miss_should_restart_live_owner")
+            && route_pane_resolution_io_source.contains("startup_miss_should_fail_closed")
             && route_cycle_ack_source.contains("RoutedCycleAckFacts")
             && route_cycle_ack_source.contains("should_require_routed_cycle_ack")
             && route_cycle_ack_source.contains("MissingCycleAckFacts")
@@ -14771,21 +14787,24 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_diagnostics_source.contains("route_busy_diagnostic_message(")
             && route_diagnostics_source.contains("RouteBusyQueuedDiagnosticFacts")
             && route_diagnostics_source.contains("route_busy_queued_diagnostic_message(")
-            && route_source.contains("failclosed_wait_context(")
+            && route_authoritative_dispatch_source.contains("failclosed_wait_context(")
             && route_diagnostics_source.contains("RouteDispatchBugReportItemFacts")
             && route_diagnostics_source.contains("route_dispatch_bug_report_item(")
-            && route_source.contains("DispatchOnlyReopenDelivery")
+            && route_authoritative_dispatch_source.contains("DispatchOnlyReopenDelivery")
             && route_dispatch_only_source.contains("dispatch_only_should_print_unproven_progress")
             && route_startup_source.contains("fresh_route_start_ack_timeout")
             && route_cycle_ack_source.contains("routed_cycle_ack_timeout")
-            && route_source.contains("DispatchOnlyBusyRefusalFacts")
-            && route_source.contains("controller_dispatch_only_busy_refusal_message(")
+            && route_authoritative_dispatch_source.contains("DispatchOnlyBusyRefusalFacts")
+            && route_authoritative_dispatch_source
+                .contains("controller_dispatch_only_busy_refusal_message(")
             && route_pane_resolution_io_source.contains("DispatchActorState")
-            && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
-            && route_source.contains("dispatch_only_should_probe_active_turn_cue(")
+            && route_authoritative_dispatch_source
+                .contains("dispatch_only_busy_should_wait_for_ready(")
+            && route_authoritative_dispatch_source
+                .contains("dispatch_only_should_probe_active_turn_cue(")
             && route_closeout_drain_source.contains("DispatchDrainRetryDecision")
             && route_closeout_drain_source.contains("dispatch_drain_retry_decision("),
-        "route.rs should call focused controller dispatch policy directly"
+        "agent-doc-route-io authoritative dispatch should call focused controller dispatch policy directly"
     );
     assert!(
         route_diagnostics_source.contains("pub struct RouteDispatchBugReportEffects")
@@ -25529,6 +25548,52 @@ fn test_agent_doc_route_io_owns_route_closeout_drain() {
             && closeout_drain
                 .contains("agent_doc_queue::queue_continuation::live_continuation_head"),
         "route closeout drain and block classification should live in agent-doc-route-io while orchestration injects only runtime closeout effects"
+    );
+}
+
+#[test]
+fn test_agent_doc_route_io_owns_authoritative_dispatch_loop() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
+    let authoritative_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_dispatch.rs"))
+            .unwrap();
+    let pane_resolution =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
+
+    for forbidden_snippet in [
+        "fn route_via_authoritative_actor(",
+        "decide_authoritative_reopen(RoutedReopenFacts",
+        "classify_authoritative_actor_dispatch_action(",
+        "AuthoritativeActorDispatchAction::",
+        "RouteCloseoutDrainOutcome::",
+        "dispatch_only_busy_should_wait_for_ready(",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own the authoritative actor dispatch loop after it moves to route IO: {forbidden_snippet}"
+        );
+    }
+
+    assert!(
+        route_io_lib.contains("pub mod authoritative_dispatch;")
+            && authoritative_dispatch.contains("pub struct RouteAuthoritativeActorEffects")
+            && authoritative_dispatch.contains("pub fn route_via_authoritative_actor(")
+            && authoritative_dispatch.contains("decide_authoritative_reopen(RoutedReopenFacts")
+            && authoritative_dispatch.contains("classify_authoritative_actor_dispatch_action(")
+            && authoritative_dispatch.contains("AuthoritativeActorDispatchAction::")
+            && authoritative_dispatch.contains("RouteCloseoutDrainOutcome::")
+            && authoritative_dispatch.contains("dispatch_only_busy_should_wait_for_ready(")
+            && authoritative_dispatch.contains("dispatch_via_supervisor_ipc(")
+            && authoritative_dispatch.contains("require_routed_cycle_ack(")
+            && authoritative_dispatch.contains("dispatch_only_send_reopen(")
+            && authoritative_dispatch.contains("activate_existing_route_queue_head(")
+            && pane_resolution.contains("RouteAuthoritativeActorEffects")
+            && pane_resolution.contains("route_via_authoritative_actor("),
+        "agent-doc-route-io authoritative_dispatch should own authoritative actor reroute decisions and pane resolution should call it directly"
     );
 }
 

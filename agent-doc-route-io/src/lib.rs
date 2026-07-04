@@ -6,6 +6,7 @@
 //! in focused crates.
 
 pub mod authoritative_actor;
+pub mod authoritative_dispatch;
 pub mod busy_pane;
 pub mod closeout_drain;
 pub mod cycle_ack;

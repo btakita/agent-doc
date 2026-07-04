@@ -54,6 +54,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
             pending_prompt_context.as_ref(),
             true,
             actor.clone(),
+            route_authoritative_actor_effects(),
         );
     }
     let live_owner = if registered.is_some() {
@@ -416,6 +417,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
             pending_prompt_context.as_ref(),
             false,
             actor,
+            route_authoritative_actor_effects(),
         );
     }
     let live_owner = if registered.is_some() {

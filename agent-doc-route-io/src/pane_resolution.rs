@@ -4,10 +4,13 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 use crate::authoritative_actor::{
-    AuthoritativeActorDispatchTarget, RouteDispatchAuthorization, authorize_controller_dispatch,
+    RouteDispatchAuthorization, authorize_controller_dispatch,
     dispatch_only_can_use_degraded_authoritative_actor, load_authoritative_actor_binding,
     load_authoritative_actor_dispatch_target, load_authoritative_actor_for_registered_pane,
     route_dispatch_deduped_pane,
+};
+use crate::authoritative_dispatch::{
+    RouteAuthoritativeActorEffects, route_via_authoritative_actor,
 };
 use crate::busy_pane::{
     BusyPaneInterruptRecoveryOutcome, ExistingPaneDispatchReadiness,
@@ -52,16 +55,7 @@ use agent_doc_supervisor::route_runtime::{
 };
 use agent_doc_supervisor::startup_miss::StartingPaneRecoveryTarget;
 use agent_doc_tmux::is_first_column;
-use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 use tmux_router::Tmux;
-
-type RouteAuthoritativeActorFn<'a> = dyn FnMut(
-        bool,
-        Option<&agent_doc_cycle_state_io::CycleState>,
-        Option<&PromptBearingRouteContext>,
-        AuthoritativeActorDispatchTarget,
-    ) -> Result<String>
-    + 'a;
 
 pub fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
     match health {
@@ -256,12 +250,7 @@ pub fn resolve_or_create_pane_dispatch_only(
     target_session: &str,
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
-    mut route_authoritative_actor: impl FnMut(
-        bool,
-        Option<&agent_doc_cycle_state_io::CycleState>,
-        Option<&PromptBearingRouteContext>,
-        AuthoritativeActorDispatchTarget,
-    ) -> Result<String>,
+    authoritative_effects: RouteAuthoritativeActorEffects,
     dispatch_only_effects: DispatchOnlyRouteEffects,
     startup_effects: RouteStartupEffects,
 ) -> Result<String> {
@@ -282,11 +271,19 @@ pub fn resolve_or_create_pane_dispatch_only(
         .as_ref()
         .filter(|actor| supervisor_authoritative_actor_dispatch_target_eligible(&actor.runtime))
     {
-        return route_authoritative_actor(
+        return route_via_authoritative_actor(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            target_session,
             is_first_column(file, col_args),
+            harness,
             cycle_baseline.as_ref(),
             pending_prompt_context.as_ref(),
+            true,
             actor.clone(),
+            authoritative_effects,
         );
     }
     let live_owner = if registered.is_some() {
@@ -574,12 +571,13 @@ pub fn resolve_or_create_pane_dispatch_only(
     )
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct ManagedPaneResolutionEffects {
     pub route_dispatch_effects: RouteDispatchEffects,
     pub route_cycle_ack_effects: RouteCycleAckEffects,
     pub route_busy_pane_retry_effects: RouteBusyPaneRetryEffects,
     pub route_startup_effects: RouteStartupEffects,
+    pub route_authoritative_actor_effects: RouteAuthoritativeActorEffects,
 }
 
 /// Resolve an existing managed pane or create a new one. Returns the pane ID.
@@ -594,12 +592,6 @@ pub fn resolve_or_create_pane(
     target_session: &str,
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
-    mut route_authoritative_actor: impl FnMut(
-        bool,
-        Option<&agent_doc_cycle_state_io::CycleState>,
-        Option<&PromptBearingRouteContext>,
-        AuthoritativeActorDispatchTarget,
-    ) -> Result<String>,
     effects: ManagedPaneResolutionEffects,
 ) -> Result<String> {
     resolve_or_create_pane_with_auto_fix_retry(
@@ -612,7 +604,6 @@ pub fn resolve_or_create_pane(
         target_session,
         harness,
         created_panes,
-        &mut route_authoritative_actor,
         effects,
         true,
         true,
@@ -631,7 +622,6 @@ fn resolve_or_create_pane_with_auto_fix_retry(
     target_session: &str,
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
-    route_authoritative_actor: &mut RouteAuthoritativeActorFn<'_>,
     effects: ManagedPaneResolutionEffects,
     allow_auto_fix_retry: bool,
     allow_busy_interrupt_retry: bool,
@@ -650,11 +640,19 @@ fn resolve_or_create_pane_with_auto_fix_retry(
     if let Some(actor) = load_authoritative_actor_dispatch_target(
         tmux, file, session_id, file_path, harness, true, true,
     )? {
-        return route_authoritative_actor(
+        return route_via_authoritative_actor(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            target_session,
             is_first_column(file, col_args),
+            harness,
             cycle_baseline.as_ref(),
             pending_prompt_context.as_ref(),
+            false,
             actor,
+            effects.route_authoritative_actor_effects,
         );
     }
     let live_owner = if registered.is_some() {
@@ -1045,7 +1043,6 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                     target_session,
                                     harness,
                                     created_panes,
-                                    route_authoritative_actor,
                                     effects,
                                     next_allow_auto_fix_retry,
                                     next_allow_busy_interrupt_retry,
@@ -1184,7 +1181,6 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             target_session,
                             harness,
                             created_panes,
-                            route_authoritative_actor,
                             effects,
                             next_allow_auto_fix_retry,
                             next_allow_busy_interrupt_retry,

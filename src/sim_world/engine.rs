@@ -1605,7 +1605,7 @@ impl SimWorld {
         before: &str,
         file: &Path,
     ) -> Result<()> {
-        let (repaired, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
+        let (repaired, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
             file,
             Some(before),
             &self.doc,

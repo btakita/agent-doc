@@ -1716,7 +1716,7 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
         .unwrap();
     assert_owned_scratch_comment_preserved(&direct_write, prompt);
 
-    let (ipc_handoff, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
+    let (ipc_handoff, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
         file,
         Some(&world.snapshot),
         &direct_write,
@@ -1758,7 +1758,7 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
             .unwrap();
         (before, generated_world.doc)
     };
-    let (scrubbed, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
+    let (scrubbed, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
         file,
         Some(&generated.0),
         &generated.1,
@@ -5775,7 +5775,7 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
         2,
         "without the already_applied gate the file-IPC fallback would land a duplicate response heading"
     );
-    let (deduped, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
+    let (deduped, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
         file,
         Some(&live_after_plugin_apply),
         &counterfactual,
@@ -5843,7 +5843,7 @@ fn cycle_1779845677327_scratch_directives_survive_already_applied_ipc_race() {
 
     let mut counterfactual = world.doc.clone();
     counterfactual.push_str(response_block);
-    let (deduped, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
+    let (deduped, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
         file,
         Some(&live_after_plugin_apply),
         &counterfactual,

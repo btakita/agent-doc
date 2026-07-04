@@ -5726,16 +5726,16 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let write_converge =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
         !write_ipc.contains("pub fn materialize_response_in_current_exchange")
             && !write_ipc.contains("fn materialize_response_in_current_exchange"),
         "write/ipc must not re-own response exchange materialization policy"
     );
     assert!(
-        write_ipc.contains(
-            "use agent_doc_turn::response_replay::materialize_response_in_current_exchange;"
-        ),
-        "write/ipc should call focused response exchange materialization policy directly"
+        write_converge.contains("materialize_response_in_current_exchange"),
+        "write-converge IO should call focused response exchange materialization policy directly"
     );
     let write_materialize = fs::read_to_string(
         manifest_dir.join("agent-doc-template-io/src/response_materialization_io.rs"),
@@ -9699,7 +9699,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 77,
+        ledger_rows.len() >= 78,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10362,6 +10362,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/start/supervisor_io.rs",
             "agent-doc-supervisor-process-io/src/lib.rs",
             "Split the `SupervisorProcessIoState` adapter",
+        ),
+        (
+            "Write IPC already-applied snapshot authority IO graph",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Split remaining transport delivery loops and test-only IPC repair fixtures",
         ),
     ] {
         let row_text = ledger_rows
@@ -22232,22 +22238,20 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
             "agent-doc-write-converge-io should own IPC snapshot/CRDT persistence helper: {required}"
         );
     }
-    for (relative, helper) in [
-        (
-            "agent-doc-orchestration/src/write/ipc.rs",
-            "save_document_snapshot_and_crdt(",
-        ),
-        (
-            "agent-doc-orchestration/src/write/ipc/transport.rs",
-            "save_ipc_snapshot_and_crdt_nonfatal(",
-        ),
-    ] {
-        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
-        assert!(
-            source.contains(helper) && !source.contains("agent_doc_merge_io::save_document_crdt("),
-            "{relative} should route IPC snapshot/CRDT persistence through agent-doc-write-converge-io: {helper}"
-        );
-    }
+    let write_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    assert!(
+        !write_ipc.contains("save_document_snapshot_and_crdt("),
+        "write/ipc.rs should not keep IPC snapshot/CRDT persistence helpers after they move to write-converge IO"
+    );
+    let write_ipc_transport =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
+            .unwrap();
+    assert!(
+        write_ipc_transport.contains("save_ipc_snapshot_and_crdt_nonfatal(")
+            && !write_ipc_transport.contains("agent_doc_merge_io::save_document_crdt("),
+        "write/ipc/transport.rs should route IPC snapshot/CRDT persistence through agent-doc-write-converge-io"
+    );
 }
 
 #[test]
@@ -23150,6 +23154,8 @@ fn test_agent_doc_document_owns_singleton_component_repair_policy() {
 
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let write_converge =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn canonical_singleton_component_name(",
         "fn singleton_components_by_name(",
@@ -23162,10 +23168,10 @@ fn test_agent_doc_document_owns_singleton_component_repair_policy() {
         );
     }
     assert!(
-        write_ipc.contains(
-            "use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;"
+        write_converge.contains(
+            "agent_doc_document::singleton_repair::repair_duplicate_singleton_components("
         ),
-        "write IPC should call focused singleton repair policy directly"
+        "write-converge IO should call focused singleton repair policy directly"
     );
 }
 
@@ -23372,7 +23378,8 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
     assert!(
-        write_ipc.contains("use agent_doc_element_exchange::normalize_exchange_prefixes_for_targets;"),
+        write_ipc
+            .contains("use agent_doc_element_exchange::normalize_exchange_prefixes_for_targets;"),
         "write IPC should import exchange prefix policy from the focused crate"
     );
 
@@ -24100,9 +24107,7 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "write.rs should import the focused visible-write reconcile IO adapter directly"
     );
     assert!(
-        write_ipc.contains("agent_doc_document_realtime::write_policy::{")
-            && write_ipc.contains("ipc_snapshot_would_absorb_live_prompt_drift_after_preflight")
-            && write_ipc.contains("guard_ipc_snapshot_adoption_against_live_prompt_drift")
+        write_ipc_transport.contains("guard_ipc_snapshot_adoption_against_live_prompt_drift")
             && write_converge.contains("guard_ipc_snapshot_adoption_against_live_prompt_drift(")
             && write_converge.contains("response_target_disjoint_from_user_edit")
             && write_converge.contains("dropped_prompt_lines_after_content_ours")
@@ -24110,7 +24115,9 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             && write_converge.contains("materialize_missing_response_for_socket_ack_drift(")
             && write_converge.contains("try_semantic_merge_convergence(")
             && write_converge.contains("new_agent_response_headings")
-            && write_converge.contains("first_response_heading"),
+            && write_converge.contains("first_response_heading")
+            && write_converge.contains("prefer_visible_content_over_stale_ack_content(")
+            && write_converge.contains("persist_already_applied_socket_content_ours_snapshot("),
         "write IPC paths should route snapshot/live-drift adoption decisions through the focused write-converge owner"
     );
     assert!(
@@ -26063,6 +26070,12 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(",
         "pub fn guard_ipc_snapshot_adoption_against_prompt_duplication(",
         "pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(",
+        "pub fn prefer_visible_content_over_stale_ack_content(",
+        "pub fn persist_already_applied_socket_content_ours_snapshot(",
+        "pub fn dedupe_consecutive_response_blocks(",
+        "pub fn dedupe_ipc_snapshot_content(",
+        "fn visible_content_supersedes_ack_content(",
+        "ipc_socket_already_applied_snapshot",
         "content_ours_adoption_refused_stale_supervisor",
     ] {
         assert!(
@@ -26139,12 +26152,24 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "fn guard_ipc_snapshot_adoption_against_prompt_duplication(",
         "fn stale_supervisor_content_ours_adoption_warning(",
         "fn log_content_ours_adoption_refused_stale_supervisor(",
+        "struct StaleAckContentContext",
+        "fn visible_content_supersedes_ack_content(",
+        "pub(crate) fn prefer_visible_content_over_stale_ack_content(",
+        "fn prefer_visible_content_over_stale_ack_content(",
+        "pub(crate) fn persist_already_applied_socket_content_ours_snapshot(",
+        "fn persist_already_applied_socket_content_ours_snapshot(",
+        "pub fn dedupe_ipc_snapshot_content(",
+        "fn dedupe_ipc_snapshot_content(",
     ] {
         assert!(
             !converge.contains(forbidden_snippet) && !write_ipc.contains(forbidden_snippet),
             "orchestration write/converge and write/ipc must not re-own write convergence sidecar IO: {forbidden_snippet}"
         );
     }
+    assert!(
+        !write_source.contains("fn dedupe_consecutive_response_blocks("),
+        "write.rs must not re-own IPC response dedupe after it moves to write-converge IO"
+    );
     assert!(
         write_ipc_transport.contains("use agent_doc_write_converge_io::{")
             && !write_ipc_transport

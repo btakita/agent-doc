@@ -16,8 +16,9 @@ use agent_doc_document_realtime::write_policy::{
     exchange_change_is_safe_historical_reduction, first_response_heading,
     ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, live_prompt_drift_recovery_target,
     new_agent_response_headings, normalize_visible_recovery_compare, operator_reconcile_step,
-    response_converged_in_visible_target, response_target_disjoint_from_user_edit,
-    should_refuse_disk_fallback, snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
+    response_already_in_current, response_converged_in_visible_target,
+    response_target_disjoint_from_user_edit, should_refuse_disk_fallback,
+    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::{
@@ -30,9 +31,9 @@ use agent_doc_ipc_io::editor_target::{
     live_editor_delivery_has_operator_authority, target_payload_to_live_editor,
 };
 use agent_doc_ipc_protocol::{
-    EditorBadStateFingerprint, FullContentIpcMode, FullContentRepairRedelivery,
-    IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, is_socket_ack_timeout_error,
-    is_socket_status_error,
+    AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
+    FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource,
+    is_socket_ack_timeout_error, is_socket_status_error,
 };
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
@@ -184,6 +185,509 @@ pub fn log_ipc_snapshot_adoption_allowed(
             dup_recheck,
         ),
     );
+}
+
+struct StaleAckContentContext<'a> {
+    file: &'a Path,
+    source: &'a str,
+    patch_id: Option<&'a str>,
+    baseline: Option<&'a str>,
+    content_ours: Option<&'a str>,
+    expected_response: &'a str,
+}
+
+fn visible_content_supersedes_ack_content(
+    context: &StaleAckContentContext<'_>,
+    ack_content: &str,
+    visible_content: &str,
+) -> bool {
+    if strip_boundary_for_dedup(ack_content) == strip_boundary_for_dedup(visible_content) {
+        return false;
+    }
+    if context.expected_response.trim().is_empty() {
+        return false;
+    }
+    let response_present =
+        response_materialized_in_content(context.expected_response, visible_content)
+            || match (context.baseline, context.content_ours) {
+                (Some(base), Some(ours)) => {
+                    response_already_in_current(base, ours, visible_content)
+                }
+                _ => false,
+            };
+    if !response_present {
+        return false;
+    }
+    let prompt_drift = match (context.baseline, context.content_ours) {
+        (Some(base), Some(ours)) => {
+            ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(base, visible_content, ours)
+        }
+        _ => false,
+    };
+    agent_doc_ops_log_io::log_op(
+        context.file,
+        &format!(
+            "{source}_ack_content_stale_visible_adopted file={} patch_id={} visible_len={} visible_hash={} ack_len={} ack_hash={} response_present=true prompt_drift={}",
+            context.file.display(),
+            context.patch_id.unwrap_or("-"),
+            visible_content.len(),
+            agent_doc_hash::content_hash(visible_content),
+            ack_content.len(),
+            agent_doc_hash::content_hash(ack_content),
+            prompt_drift,
+            source = context.source
+        ),
+    );
+    true
+}
+
+pub fn prefer_visible_content_over_stale_ack_content(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    content_ours: Option<&str>,
+    expected_response: &str,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    if decision.snap_source != IpcSnapshotSource::AckContentSidecar {
+        return false;
+    }
+    if decision.disk_repair_reason.is_some() {
+        return false;
+    }
+    let Ok(visible_content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    let context = StaleAckContentContext {
+        file,
+        source,
+        patch_id,
+        baseline,
+        content_ours,
+        expected_response,
+    };
+    if !visible_content_supersedes_ack_content(
+        &context,
+        &decision.snapshot_content,
+        &visible_content,
+    ) {
+        return false;
+    }
+    *decision = IpcRepairDecision::file_read(visible_content);
+    true
+}
+
+pub struct AlreadyAppliedSocketSnapshotContext<'a> {
+    pub file: &'a Path,
+    pub patch_id: &'a str,
+    pub editor_id: Option<&'a str>,
+    pub baseline: Option<&'a str>,
+    pub content_ours: Option<&'a str>,
+    pub normalize_prefix_lines: Option<&'a [String]>,
+    pub expected_response: &'a str,
+}
+
+pub fn persist_already_applied_socket_content_ours_snapshot(
+    effects: &dyn EditorConvergenceEffects,
+    context: AlreadyAppliedSocketSnapshotContext<'_>,
+) -> Result<AlreadyAppliedSnapshotOutcome> {
+    let AlreadyAppliedSocketSnapshotContext {
+        file,
+        patch_id,
+        editor_id,
+        baseline,
+        content_ours,
+        normalize_prefix_lines,
+        expected_response,
+    } = context;
+    let Some(ours) = content_ours else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_socket_already_applied_no_content_ours_snapshot file={} patch_id={}",
+                file.display(),
+                patch_id
+            ),
+        );
+        return Ok(AlreadyAppliedSnapshotOutcome::Persisted);
+    };
+
+    let ack_content = if !patch_id.is_empty() {
+        file.canonicalize().ok().and_then(|canonical| {
+            let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+            poll_ack_content_sidecar(
+                &project_root,
+                patch_id,
+                std::time::Duration::from_millis(500),
+                std::time::Duration::from_millis(25),
+            )
+            .ok()
+            .flatten()
+        })
+    } else {
+        None
+    };
+    let current_source = if ack_content.is_some() {
+        IpcSnapshotSource::AckContentSidecar
+    } else {
+        IpcSnapshotSource::FileRead
+    };
+    let current = ack_content.or_else(|| std::fs::read_to_string(file).ok());
+    let mut repair_decision = IpcRepairDecision::content_ours(ours.to_string());
+    if let Some(current) = current.as_deref()
+        && strip_boundary_for_dedup(current) != strip_boundary_for_dedup(ours)
+    {
+        let response_present = response_materialized_in_content(expected_response, current)
+            || baseline.is_some_and(|base| response_already_in_current(base, ours, current));
+        let prompt_drift = baseline.is_some_and(|base| {
+            ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(base, current, ours)
+        });
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_socket_already_applied_live_buffer_diverged file={} patch_id={} response_present={} current_len={} current_hash={} content_ours_len={} content_ours_hash={} prompt_drift={}",
+                file.display(),
+                patch_id,
+                response_present,
+                current.len(),
+                agent_doc_hash::content_hash(current),
+                ours.len(),
+                agent_doc_hash::content_hash(ours),
+                prompt_drift
+            ),
+        );
+        if prompt_drift {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "finalize_typing_during_write file={} patch_id={} typed_delta_bytes={} response_present={} resolution=content_ours_adopted",
+                    file.display(),
+                    patch_id,
+                    current.len() as i64 - ours.len() as i64,
+                    response_present
+                ),
+            );
+        }
+
+        if !response_present {
+            if let Some(repaired_current) =
+                materialize_response_in_current_exchange(current, expected_response)
+            {
+                log_ipc_proof_failure_with_recycle(
+                    file,
+                    "socket_already_applied",
+                    Some(patch_id),
+                    "disk_missing_response_probe",
+                    "content_ours_snapshot_visible_response_repair",
+                    &format!(
+                        "response_sha256={} current_len={} current_hash={} repaired_len={} repaired_hash={}",
+                        agent_doc_hash::content_hash(expected_response),
+                        current.len(),
+                        agent_doc_hash::content_hash(current),
+                        repaired_current.len(),
+                        agent_doc_hash::content_hash(&repaired_current)
+                    ),
+                );
+                if let Err(defer) = effects.guard_visible_write_idle_and_current(
+                    file,
+                    "socket_already_applied_missing_disk_response",
+                    current,
+                ) {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "ipc_socket_already_applied_visible_not_idle_file_fallback file={} patch_id={} reason={}",
+                            file.display(),
+                            patch_id,
+                            defer.to_string().replace('\n', " ")
+                        ),
+                    );
+                    return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+                }
+                effects.atomic_write(file, &repaired_current)?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "ipc_socket_already_applied_missing_disk_response_repaired file={} patch_id={} visible_len={} visible_hash={} content_ours_len={} content_ours_hash={}",
+                        file.display(),
+                        patch_id,
+                        repaired_current.len(),
+                        agent_doc_hash::content_hash(&repaired_current),
+                        ours.len(),
+                        agent_doc_hash::content_hash(ours)
+                    ),
+                );
+                repair_decision = IpcRepairDecision::file_read(repaired_current);
+            } else {
+                log_ipc_proof_failure_with_recycle(
+                    file,
+                    "socket_already_applied",
+                    Some(patch_id),
+                    "disk_missing_response_probe",
+                    "file_ipc_fallback",
+                    &format!(
+                        "response_sha256={} current_len={} current_hash={}",
+                        agent_doc_hash::content_hash(expected_response),
+                        current.len(),
+                        agent_doc_hash::content_hash(current)
+                    ),
+                );
+                return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+            }
+        } else {
+            repair_decision = match current_source {
+                IpcSnapshotSource::AckContentSidecar => {
+                    IpcRepairDecision::ack_content(current.to_string())
+                }
+                IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
+                    IpcRepairDecision::file_read(current.to_string())
+                }
+            };
+            if let Some(lines) = normalize_prefix_lines
+                && !lines.is_empty()
+            {
+                let normalized = normalize_exchange_prefixes_for_targets(
+                    &repair_decision.snapshot_content,
+                    lines,
+                );
+                if normalized != repair_decision.snapshot_content {
+                    repair_decision = IpcRepairDecision::file_read_prefix_repair(
+                        normalized,
+                        current.to_string(),
+                        lines,
+                    );
+                }
+            }
+
+            let before_response_dedupe = repair_decision.snapshot_content.clone();
+            let response_deduped =
+                dedupe_consecutive_response_blocks(&repair_decision.snapshot_content, file);
+            if response_deduped != repair_decision.snapshot_content {
+                repair_decision =
+                    repair_decision.apply_ipc_dedupe(response_deduped, before_response_dedupe);
+            }
+
+            let pre_dedupe_snap = repair_decision.snapshot_content.clone();
+            let (effective_snap, dedupe_repair) = dedupe_ipc_snapshot_content(
+                file,
+                baseline,
+                &repair_decision.snapshot_content,
+                "socket_already_applied_disk",
+            )?;
+            if dedupe_repair {
+                repair_decision = repair_decision.apply_ipc_dedupe(effective_snap, pre_dedupe_snap);
+            } else {
+                repair_decision.snapshot_content = effective_snap;
+            }
+        }
+    } else if let Some(current) = current.as_deref() {
+        repair_decision = match current_source {
+            IpcSnapshotSource::AckContentSidecar => {
+                IpcRepairDecision::ack_content(current.to_string())
+            }
+            IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
+                IpcRepairDecision::file_read(current.to_string())
+            }
+        };
+    }
+
+    prefer_visible_content_over_stale_ack_content(
+        file,
+        "already_applied",
+        Some(patch_id),
+        baseline,
+        Some(ours),
+        expected_response,
+        &mut repair_decision,
+    );
+
+    if expected_response.trim().is_empty() {
+        log_ipc_proof_failure_with_recycle(
+            file,
+            "socket_already_applied",
+            Some(patch_id),
+            "already_applied_empty_response_probe",
+            "file_ipc_fallback",
+            &format!(
+                "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
+                repair_decision.snapshot_content.len(),
+                agent_doc_hash::content_hash(&repair_decision.snapshot_content),
+                ours.len(),
+                agent_doc_hash::content_hash(ours)
+            ),
+        );
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+    }
+
+    if repair_decision.snap_source == IpcSnapshotSource::ContentOurs {
+        log_ipc_proof_failure_with_recycle(
+            file,
+            "socket_already_applied",
+            Some(patch_id),
+            "already_applied_unproven_content_ours",
+            "file_ipc_fallback",
+            &format!(
+                "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
+                repair_decision.snapshot_content.len(),
+                agent_doc_hash::content_hash(&repair_decision.snapshot_content),
+                ours.len(),
+                agent_doc_hash::content_hash(ours)
+            ),
+        );
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+    }
+
+    let response_present_in_snapshot =
+        response_materialized_in_content(expected_response, &repair_decision.snapshot_content)
+            || baseline.is_some_and(|base| {
+                response_already_in_current(base, ours, &repair_decision.snapshot_content)
+            });
+    if !response_present_in_snapshot {
+        log_ipc_proof_failure_with_recycle(
+            file,
+            "socket_already_applied",
+            Some(patch_id),
+            "already_applied_snapshot_missing_response",
+            "file_ipc_fallback",
+            &format!(
+                "response_sha256={} snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
+                agent_doc_hash::content_hash(expected_response),
+                repair_decision.snapshot_content.len(),
+                agent_doc_hash::content_hash(&repair_decision.snapshot_content),
+                ours.len(),
+                agent_doc_hash::content_hash(ours)
+            ),
+        );
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+    }
+
+    repair_ipc_decision_visible_state(
+        effects,
+        file,
+        &repair_decision,
+        Some(patch_id),
+        |file, repaired_content, expected_bad_state| {
+            try_ipc_full_content_response_fallback_from_source(
+                effects,
+                file,
+                repaired_content,
+                expected_bad_state,
+            )
+        },
+    )?;
+    if repair_decision.snap_source.is_ack_content_proven() {
+        let proof =
+            ack_content_disk_write_proof(file, editor_id, &repair_decision.snapshot_content);
+        let disk_synced = write_ack_content_through_to_disk(
+            effects,
+            file,
+            patch_id,
+            &repair_decision.snapshot_content,
+            proof,
+        )?;
+        if !disk_synced {
+            return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        }
+        mark_ack_content_live_buffer_synced_after_write(
+            file,
+            patch_id,
+            editor_id,
+            &repair_decision.snapshot_content,
+        );
+    }
+    save_document_snapshot_and_crdt(file, &repair_decision.snapshot_content)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_socket_already_applied_snapshot file={} patch_id={} snap_source={} snap_len={} snap_hash={}",
+            file.display(),
+            patch_id,
+            repair_decision.snap_source.label(),
+            repair_decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&repair_decision.snapshot_content)
+        ),
+    );
+    Ok(AlreadyAppliedSnapshotOutcome::Persisted)
+}
+
+pub fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
+    agent_doc_element_exchange_io::dedupe_consecutive_response_blocks_with_log(
+        content,
+        file,
+        agent_doc_ops_log_io::log_op,
+    )
+}
+
+fn log_duplicate_prompt_residue_guard(file: &Path) {
+    log_flow_event(
+        file,
+        agent_doc_template::structure_guard::template_structure_guard_event(
+            agent_doc_template::structure_guard::TemplateStructureGuardReason::DuplicatePromptResidue,
+            agent_doc_flow::types::FlowOutcome::FailedClosed,
+        ),
+    );
+}
+
+pub fn dedupe_ipc_snapshot_content(
+    file: &Path,
+    before: Option<&str>,
+    content: &str,
+    source: &str,
+) -> Result<(String, bool)> {
+    let singleton_repair =
+        agent_doc_document::singleton_repair::repair_duplicate_singleton_components(
+            before, content,
+        );
+    let singleton_changed = singleton_repair.is_some();
+    let singleton_repaired = singleton_repair
+        .as_ref()
+        .map(|repair| repair.content.as_str())
+        .unwrap_or(content);
+    let (deduped, report) =
+        agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
+            singleton_repaired,
+            file,
+            DuplicatePromptRepairOptions::new(source)
+                .with_before(before)
+                .preserving(before),
+            agent_doc_ops_log_io::log_op,
+            log_duplicate_prompt_residue_guard,
+        )?;
+    let changed = singleton_changed || deduped != content;
+    if let Some(repair) = &singleton_repair {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "duplicate_singleton_component_repaired file={} source={} groups={} removed={} canonical_source=before before_commit=true",
+                file.display(),
+                source,
+                repair.groups.join(","),
+                repair.removed
+            ),
+        );
+    }
+    if singleton_changed {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_snapshot_singleton_components_deduped file={} source={} before_commit=true",
+                file.display(),
+                source
+            ),
+        );
+    }
+    if singleton_changed || report.changed() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_snapshot_deduped file={} source={} before_commit=true",
+                file.display(),
+                source
+            ),
+        );
+    }
+    Ok((deduped, changed))
 }
 
 fn stale_supervisor_content_ours_adoption_warning(file: &Path) -> Option<String> {
@@ -732,6 +1236,13 @@ pub fn materialize_missing_response_for_socket_ack_drift(
 /// authority queue is being extracted.
 pub trait EditorConvergenceEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+
+    fn guard_visible_write_idle_and_current(
+        &self,
+        file: &Path,
+        source: &str,
+        expected_current: &str,
+    ) -> Result<()>;
 
     fn atomic_write_if_current(
         &self,

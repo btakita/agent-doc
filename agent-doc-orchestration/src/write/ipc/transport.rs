@@ -6,15 +6,25 @@ use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{
-    FullContentIpcMode, IpcRepairDecision, IpcSnapshotSource, build_ipc_node_patches_json,
-    effective_unmatched_for_patch_payload, existing_patch_is_reposition_only,
-    is_already_applied_ack_error_message, is_socket_ack_timeout_error,
+    AlreadyAppliedSnapshotOutcome, FullContentIpcMode, IpcRepairDecision, IpcSnapshotSource,
+    build_ipc_node_patches_json, effective_unmatched_for_patch_payload,
+    existing_patch_is_reposition_only, is_already_applied_ack_error_message,
+    is_socket_ack_timeout_error,
 };
 use agent_doc_write_converge_io::{
-    cleanup_legacy_ipc_degraded, clear_ipc_socket_ack_timeouts, full_content_ipc_scope_allows,
-    ipc_direct_disk_degraded, log_full_content_ipc_disabled, log_ipc_dewedge_direct_disk_skip,
-    log_ipc_dewedge_prefer_file_ipc, poll_ack_content_sidecar, record_ipc_socket_ack_timeout,
-    save_ipc_snapshot_and_crdt_nonfatal, stale_supervisor_write_short_circuit,
+    AlreadyAppliedSocketSnapshotContext, ack_content_disk_write_proof, cleanup_legacy_ipc_degraded,
+    clear_ipc_socket_ack_timeouts, dedupe_ipc_snapshot_content, full_content_ipc_scope_allows,
+    guard_ipc_snapshot_adoption_against_live_prompt_drift,
+    guard_ipc_snapshot_adoption_against_prompt_duplication, ipc_direct_disk_degraded,
+    ipc_repair_decision_from_sidecar, log_full_content_ipc_disabled,
+    log_ipc_dewedge_direct_disk_skip, log_ipc_dewedge_prefer_file_ipc,
+    log_ipc_snapshot_adoption_allowed, log_ipcfullprompt_corruption_if_any,
+    mark_ack_content_live_buffer_synced_after_write,
+    materialize_missing_response_for_socket_ack_drift,
+    persist_already_applied_socket_content_ours_snapshot, poll_ack_content_sidecar,
+    prefer_visible_content_over_stale_ack_content, reconcile_ack_snapshot_to_newer_operator_buffer,
+    record_ipc_socket_ack_timeout, save_ipc_snapshot_and_crdt_nonfatal,
+    stale_supervisor_write_short_circuit, write_ack_content_through_to_disk,
 };
 
 pub fn queue_file_ipc_reposition_boundary(
@@ -692,13 +702,16 @@ pub fn try_ipc(
                         patches, unmatched,
                     );
                 if persist_already_applied_socket_content_ours_snapshot(
-                    file,
-                    &patch_id,
-                    socket_editor_id.as_deref(),
-                    baseline,
-                    content_ours,
-                    normalize_prefix_lines,
-                    &expected_response,
+                    &crate::write::WRITE_CONVERGENCE_EFFECTS,
+                    AlreadyAppliedSocketSnapshotContext {
+                        file,
+                        patch_id: &patch_id,
+                        editor_id: socket_editor_id.as_deref(),
+                        baseline,
+                        content_ours,
+                        normalize_prefix_lines,
+                        expected_response: &expected_response,
+                    },
                 )? == AlreadyAppliedSnapshotOutcome::Persisted
                 {
                     cleanup_fallback_patch_files(file);
@@ -2296,13 +2309,16 @@ mod submodule_patch_routing_tests {
         fs::write(&doc, newer_visible).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &doc,
-            patch_id,
-            Some("jetbrains-test-editor"),
-            Some(baseline),
-            Some(content_ours),
-            None,
-            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            AlreadyAppliedSocketSnapshotContext {
+                file: &doc,
+                patch_id,
+                editor_id: Some("jetbrains-test-editor"),
+                baseline: Some(baseline),
+                content_ours: Some(content_ours),
+                normalize_prefix_lines: None,
+                expected_response: "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            },
         )
         .unwrap();
 
@@ -2396,13 +2412,16 @@ mod submodule_patch_routing_tests {
         .unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &doc,
-            patch_id,
-            Some(editor_id),
-            Some(baseline),
-            Some(stale_ack_content),
-            None,
-            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            AlreadyAppliedSocketSnapshotContext {
+                file: &doc,
+                patch_id,
+                editor_id: Some(editor_id),
+                baseline: Some(baseline),
+                content_ours: Some(stale_ack_content),
+                normalize_prefix_lines: None,
+                expected_response: "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            },
         )
         .unwrap();
 
@@ -2673,13 +2692,16 @@ mod submodule_patch_routing_tests {
         fs::write(&doc, stale_disk_with_live_prompt).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &doc,
-            "already-applied-missing",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            AlreadyAppliedSocketSnapshotContext {
+                file: &doc,
+                patch_id: "already-applied-missing",
+                editor_id: None,
+                baseline: Some(baseline),
+                content_ours: Some(content_ours),
+                normalize_prefix_lines: None,
+                expected_response: "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            },
         )
         .unwrap();
 
@@ -2756,13 +2778,16 @@ mod submodule_patch_routing_tests {
         .unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &doc,
-            patch_id,
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            AlreadyAppliedSocketSnapshotContext {
+                file: &doc,
+                patch_id,
+                editor_id: None,
+                baseline: Some(baseline),
+                content_ours: Some(content_ours),
+                normalize_prefix_lines: None,
+                expected_response: "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            },
         )
         .unwrap();
 
@@ -2802,13 +2827,16 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &doc,
-            "already-applied-missing-response",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            AlreadyAppliedSocketSnapshotContext {
+                file: &doc,
+                patch_id: "already-applied-missing-response",
+                editor_id: None,
+                baseline: Some(baseline),
+                content_ours: Some(content_ours),
+                normalize_prefix_lines: None,
+                expected_response: "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            },
         )
         .unwrap();
 
@@ -2844,13 +2872,16 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, content_ours, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &doc,
-            "already-applied-empty-response-probe",
-            None,
-            Some(content_ours),
-            Some(content_ours),
-            None,
-            "",
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            AlreadyAppliedSocketSnapshotContext {
+                file: &doc,
+                patch_id: "already-applied-empty-response-probe",
+                editor_id: None,
+                baseline: Some(content_ours),
+                content_ours: Some(content_ours),
+                normalize_prefix_lines: None,
+                expected_response: "",
+            },
         )
         .unwrap();
 

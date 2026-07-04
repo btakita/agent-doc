@@ -788,6 +788,19 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceE
         atomic_write_pub(file, content)
     }
 
+    fn guard_visible_write_idle_and_current(
+        &self,
+        file: &Path,
+        source: &str,
+        expected_current: &str,
+    ) -> Result<()> {
+        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
+            file,
+            source,
+            expected_current,
+        )
+    }
+
     fn atomic_write_if_current(
         &self,
         file: &Path,
@@ -1887,14 +1900,6 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
         }
         None => content.to_string(),
     }
-}
-
-fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
-    agent_doc_element_exchange_io::dedupe_consecutive_response_blocks_with_log(
-        content,
-        file,
-        agent_doc_ops_log_io::log_op,
-    )
 }
 
 pub fn repair_commit_prompt_artifacts_against_snapshot(
@@ -5091,8 +5096,13 @@ mod tests {
         );
         fs::write(&doc, before).unwrap();
 
-        let (repaired, changed) =
-            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc").unwrap();
+        let (repaired, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
+            &doc,
+            Some(before),
+            after,
+            "test_ipc",
+        )
+        .unwrap();
 
         assert!(
             !changed,
@@ -5189,8 +5199,13 @@ mod tests {
         );
         fs::write(&doc, before).unwrap();
 
-        let (repaired, changed) =
-            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc").unwrap();
+        let (repaired, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
+            &doc,
+            Some(before),
+            after,
+            "test_ipc",
+        )
+        .unwrap();
 
         assert!(changed);
         assert_eq!(repaired.matches("sent + re \n").count(), 0);
@@ -5227,8 +5242,13 @@ mod tests {
             );
         fs::write(&doc, before).unwrap();
 
-        let (repaired, changed) =
-            dedupe_ipc_snapshot_content(&doc, Some(before), &after, "test_ipc").unwrap();
+        let (repaired, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
+            &doc,
+            Some(before),
+            &after,
+            "test_ipc",
+        )
+        .unwrap();
 
         assert!(changed);
         assert!(
@@ -5278,8 +5298,13 @@ mod tests {
     );
         fs::write(&doc, &before).unwrap();
 
-        let (repaired, changed) =
-            dedupe_ipc_snapshot_content(&doc, Some(&before), &after, "test_ipc").unwrap();
+        let (repaired, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
+            &doc,
+            Some(&before),
+            &after,
+            "test_ipc",
+        )
+        .unwrap();
 
         assert!(
             !changed,
@@ -5322,7 +5347,13 @@ mod tests {
         );
         fs::write(&doc, &before).unwrap();
 
-        let err = dedupe_ipc_snapshot_content(&doc, Some(&before), &after, "test_ipc").unwrap_err();
+        let err = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
+            &doc,
+            Some(&before),
+            &after,
+            "test_ipc",
+        )
+        .unwrap_err();
 
         assert!(
             err.to_string().contains("duplicate prompt residue"),

@@ -149,6 +149,18 @@ Before I drive this: the last item is a **production deploy**, and I won't auto-
 - **Start with one** — e.g. `do lender form` or `do #pipe-rt-notify`; I'll hold deploy until you confirm.
 
 Both new items are real features in `src/equityfundingsource-dev`; I'll explore and implement whichever you point me at.
+
+### Re: snapshot sidecar fail-closed boundary — gpt-5
+
+You are right: a snapshot sidecar problem should not fail the hot path. The only fail-closed boundary that still makes sense here is operator-visible prompt authority: if the visible document has a newer unanswered prompt and the only candidate response is a recovery checkpoint that is missing from the visible document and cannot be safely rebased, the tool should leave the cycle open instead of pretending it committed a response to the current prompt.
+
+I changed the implementation to match that distinction.
+
+`9cd243c8 fix(agent-doc): keep snapshots off hot path` moved snapshot load/save/parse/mismatch failures to warnings or recovery-only paths across write, preflight, repair, queue consumption, and pending mutation sequencing.
+
+`a9f77417 fix(agent-doc): repair committed-capture snapshot drift` fixes the real wedge this exposed: when a committed capture proves the rendered response is already in `HEAD`, historical snapshot drift now refreshes recovery metadata even if that response commit also included queue/backlog mutations. That stale sidecar no longer becomes a direct-patchback blocker. I also kept the force-disk already-present response repair path preserving the editor-attached state so it does not silently skip the right closeout boundary.
+
+Verification: `make check` passed in `src/agent-doc`: clippy, 7115 nextest tests, doctests, medium SimWorld corpus, version checks, and Lean. Latest GitHub Actions CI was still `in_progress` (`28698197379`) when checked. I installed the updated `agent-doc` locally with `make install`; it also broadcast the cdylib reload and marked supervisors for idle recycle.
 <!-- agent:boundary:a9b35254 -->
 <!-- /agent:exchange -->
 

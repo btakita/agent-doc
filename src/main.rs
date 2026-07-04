@@ -8,7 +8,7 @@
 //! - On startup, calls `upgrade::warn_if_outdated()` for all subcommands except `Upgrade`.
 //! - Loads global config via `agent_doc_config::load()` before dispatching; config is threaded into
 //!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
-//! - Each subcommand delegates immediately to its owning module or focused crate (`agent_doc_orchestration::run::run`, `agent_doc_diff_io::run`, etc.);
+//! - Each subcommand delegates immediately to its owning module or focused crate (`agent_doc_run_io::run`, `agent_doc_diff_io::run`, etc.);
 //!   `main` contains no business logic beyond argument destructuring and dispatch.
 //! - `Route` no longer runs a follow-up sync; editor/plugin sync remains the
 //!   authoritative layout path.
@@ -30,7 +30,7 @@
 //! - `Upgrade` bypasses the version check that all other subcommands run on startup.
 //!
 //! ## Evals
-//! - dispatch_run: `agent-doc run <file>` → `agent_doc_orchestration::run::run` called with correct args
+//! - dispatch_run: `agent-doc run <file>` → `agent_doc_run_io::run` called with correct args
 //! - dispatch_write_crdt_autodetect: CRDT frontmatter + no flags → `agent_doc_orchestration::write::run_stream` selected
 //! - dispatch_write_inline_autodetect: inline frontmatter + no flags → `agent_doc_orchestration::write::run` selected
 //! - dispatch_prompt_all: `--all` → `agent_doc_prompt_io::run_all`, no FILE required
@@ -3326,7 +3326,8 @@ fn main() -> anyhow::Result<()> {
             dry_run,
             no_git,
             force_disk,
-        } => agent_doc_orchestration::run::run(
+        } => agent_doc_run_io::run(
+            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
             &file,
             branch,
             agent.as_deref(),

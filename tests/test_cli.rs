@@ -9804,8 +9804,8 @@ fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
         "src/notify.rs",
         "src/orchestrate.rs",
         "src/patch.rs",
+        "agent-doc-run-io/src/lib.rs",
         "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
     ] {
@@ -9925,7 +9925,24 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         orchestration_source.contains("agent_doc_run_io::{")
             && orchestration_source.contains("build_prompt")
             && orchestration_source.contains("should_continue_auto_queue"),
-        "orchestration run.rs should call the focused direct-run IO crate directly"
+        "test-only orchestration run.rs should exercise the focused direct-run IO crate directly"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod run;")
+            && orchestration_lib.contains("#[cfg(test)]\nmod run;")
+            && orchestration_lib.contains("pub struct OrchestrationDirectRunEffects")
+            && orchestration_lib.contains("pub static DIRECT_RUN_EFFECTS")
+            && orchestration_lib.contains("impl agent_doc_run_io::DirectRunEffects"),
+        "orchestration must expose only the direct-run effects adapter, not a production run facade"
+    );
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        main_source.contains("agent_doc_run_io::run(")
+            && main_source.contains("&agent_doc_orchestration::DIRECT_RUN_EFFECTS")
+            && !main_source.contains("agent_doc_orchestration::run::run("),
+        "CLI run dispatch should call focused direct-run IO directly"
     );
 
     let orchestration_manifest =
@@ -10501,6 +10518,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/run.rs",
             "agent-doc-run-io/src/lib.rs",
             "Split `DirectRunEffects` into commit, writeback, queue-consume, closeout, and cycle-abandon ports",
+        ),
+        (
+            "Direct-run production facade demotion",
+            "agent-doc-orchestration/src/run.rs",
+            "agent-doc-run-io/src/lib.rs",
+            "Move remaining direct-run tests into `agent-doc-run-io` and split `DirectRunEffects`",
         ),
         (
             "Git committed historical snapshot repair IO graph",

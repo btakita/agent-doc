@@ -117,136 +117,20 @@ use agent_doc_run_io::{
     direct_run_atomic_write, normalize_direct_run_prompt_prefixes, prompt_cache_routing_affinity,
     run_stderr_redirect_harness, should_continue_auto_queue, start_run_cycle,
 };
-use agent_doc_run_io::{DirectRunEffects, abandon_run_recursive_cycle};
 #[cfg(test)]
 use agent_doc_session_accretion::{SessionAccretionLevel, SessionAccretionReport};
-use anyhow::Result;
 use std::path::Path;
 
-use agent_doc_config::Config;
 #[cfg(test)]
 use agent_doc_prompt_cache::PromptCacheBlocks;
 #[cfg(test)]
 use agent_doc_prompt_cache::{PROMPT_CACHE_BOUNDARY, PROMPT_CACHE_CONTROL};
-use agent_doc_queue_io::queue_consume;
-
-use crate::{git, write};
-
-pub struct OrchestrationDirectRunEffects;
-
-static DIRECT_RUN_EFFECTS: OrchestrationDirectRunEffects = OrchestrationDirectRunEffects;
-
-impl DirectRunEffects for OrchestrationDirectRunEffects {
-    fn guard_no_exchange_compaction_request_for_diff(
-        &self,
-        file: &Path,
-        diff_text: &str,
-    ) -> Result<()> {
-        write::guard_no_exchange_compaction_request_for_diff(file, diff_text)
-    }
-
-    fn commit(&self, file: &Path) -> Result<bool> {
-        git::commit(file)
-    }
-
-    fn normalize_template_structure_or_fail(&self, content: &str, file: &Path) -> Result<String> {
-        write::normalize_template_structure_or_fail(content, file)
-    }
-
-    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        write::atomic_write_pub(file, content)
-    }
-
-    fn consume_queue_prompts_for_done_ids_with_outcome(
-        &self,
-        file: &Path,
-        done_ids: &[String],
-        force_disk: bool,
-    ) -> Result<Option<queue_consume::QueueConsumptionOutcome>> {
-        if force_disk {
-            queue_consume::consume_queue_prompts_with_outcome(
-                file,
-                done_ids,
-                true,
-                &write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
-            )
-        } else {
-            queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
-                file,
-                done_ids,
-                &write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
-            )
-        }
-    }
-
-    fn complete_required_closeout(&self, file: &Path) -> Result<()> {
-        write::complete_required_closeout(file).map(|_| ())
-    }
-
-    fn abandon_recursive_cycle(&self, file: &Path, event: &str, diagnostic: &str) -> Result<()> {
-        abandon_run_recursive_cycle(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            event,
-            diagnostic,
-        )
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn run(
-    file: &Path,
-    branch: bool,
-    agent_name: Option<&str>,
-    model: Option<&str>,
-    dry_run: bool,
-    no_git: bool,
-    force_disk: bool,
-    config: &Config,
-) -> Result<()> {
-    agent_doc_run_io::run(
-        &DIRECT_RUN_EFFECTS,
-        file,
-        branch,
-        agent_name,
-        model,
-        dry_run,
-        no_git,
-        force_disk,
-        config,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn run_with_context(
-    file: &Path,
-    branch: bool,
-    agent_name: Option<&str>,
-    model: Option<&str>,
-    dry_run: bool,
-    no_git: bool,
-    force_disk: bool,
-    config: &Config,
-    run_context: Option<&agent_doc_run_context_io::RunContext>,
-) -> Result<()> {
-    agent_doc_run_io::run_with_context(
-        &DIRECT_RUN_EFFECTS,
-        file,
-        branch,
-        agent_name,
-        model,
-        dry_run,
-        no_git,
-        force_disk,
-        config,
-        run_context,
-    )
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use agent_doc_config::Config;
+    use agent_doc_queue_io::queue_consume;
     use std::sync::{Arc, Barrier};
     use tempfile::TempDir;
 
@@ -1057,7 +941,7 @@ old status\n\
             "<!-- /patch:backlog -->\n",
         );
 
-        apply_template_response(&DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
+        apply_template_response(&crate::DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
             .expect("run path should normalize legacy backlog patches before enforcement");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -1106,7 +990,7 @@ old status\n\
             "<!-- /patch:backlog -->\n",
         );
 
-        apply_template_response(&DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
+        apply_template_response(&crate::DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
             .expect("run path should normalize sampleorders-style backlog patches");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -1155,7 +1039,7 @@ old status\n\
             "<!-- /patch:exchange -->\n",
         );
 
-        apply_template_response(&DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
+        apply_template_response(&crate::DIRECT_RUN_EFFECTS, &doc, baseline, response, false)
             .expect("direct-run template write should normalize prompt lines");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -1207,9 +1091,13 @@ old status\n\
 
         let diff_text = agent_doc_diff::unified_diff_from_contents(snapshot, baseline)
             .expect("snapshot and baseline differ");
-        let normalized =
-            normalize_direct_run_prompt_prefixes(&DIRECT_RUN_EFFECTS, &doc, baseline, &diff_text)
-                .expect("direct-run baseline prompt normalization should succeed");
+        let normalized = normalize_direct_run_prompt_prefixes(
+            &crate::DIRECT_RUN_EFFECTS,
+            &doc,
+            baseline,
+            &diff_text,
+        )
+        .expect("direct-run baseline prompt normalization should succeed");
         let on_disk = std::fs::read_to_string(&doc).unwrap();
 
         assert_eq!(normalized, on_disk);
@@ -1242,7 +1130,8 @@ old status\n\
         std::fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
-        let err = run(
+        let err = agent_doc_run_io::run(
+            &crate::DIRECT_RUN_EFFECTS,
             &doc,
             false,
             None,
@@ -1284,7 +1173,7 @@ old status\n\
     fn atomic_write_correct_content() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("atomic.md");
-        direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, "hello world").unwrap();
+        direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, "hello world").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello world");
     }
 
@@ -1293,7 +1182,7 @@ old status\n\
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("overwrite.md");
         std::fs::write(&path, "old content").unwrap();
-        direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, "new content").unwrap();
+        direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, "new content").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new content");
     }
 
@@ -1306,7 +1195,7 @@ old status\n\
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let path = dir.path().join("prov-direct-run.md");
-        direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, "direct run body").unwrap();
+        direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, "direct run body").unwrap();
         let key = path
             .canonicalize()
             .unwrap_or_else(|_| path.clone())
@@ -1333,7 +1222,8 @@ old status\n\
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc").join("logs")).unwrap();
         let path = dir.path().join("routed-direct-run.md");
-        direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, "routed direct-run body").unwrap();
+        direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, "routed direct-run body")
+            .unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "routed direct-run body"
@@ -1364,7 +1254,7 @@ old status\n\
             let content = format!("writer-{}-content", i);
             handles.push(std::thread::spawn(move || {
                 bar.wait();
-                direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &p, &content).unwrap();
+                direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &p, &content).unwrap();
             }));
         }
 
@@ -1403,7 +1293,7 @@ old status\n\
             let content = std::fs::read_to_string(&path_a).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
             direct_run_atomic_write(
-                &DIRECT_RUN_EFFECTS,
+                &crate::DIRECT_RUN_EFFECTS,
                 &path_a,
                 &format!("{}\n## Assistant\nResponse A", content),
             )
@@ -1418,7 +1308,7 @@ old status\n\
             let content = std::fs::read_to_string(&path_b).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
             direct_run_atomic_write(
-                &DIRECT_RUN_EFFECTS,
+                &crate::DIRECT_RUN_EFFECTS,
                 &path_b,
                 &format!("{}\n## Assistant\nResponse B", content),
             )
@@ -1457,7 +1347,7 @@ old status\n\
                 let content = std::fs::read_to_string(&path).unwrap();
                 let updated = format!("{}writer-{}\n", content, i);
                 std::thread::sleep(std::time::Duration::from_millis(5));
-                direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path, &updated).unwrap();
+                direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path, &updated).unwrap();
                 drop(lock);
             }));
         }
@@ -1493,7 +1383,7 @@ old status\n\
             locked_tx.send(()).unwrap();
             // Hold lock while "processing"
             std::thread::sleep(std::time::Duration::from_millis(50));
-            direct_run_atomic_write(&DIRECT_RUN_EFFECTS, &path_w, "after").unwrap();
+            direct_run_atomic_write(&crate::DIRECT_RUN_EFFECTS, &path_w, "after").unwrap();
             drop(lock);
         });
 

@@ -4,7 +4,7 @@ CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null 
 TEST_THREADS ?= 2
 TMUX_TEST_THREADS ?= 1
 CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
-NEXTEST_QUIET_FLAGS ?= --cargo-quiet --status-level fail --final-status-level fail --failure-output immediate-final --success-output never
+NEXTEST_QUIET_FLAGS ?= --cargo-quiet --show-progress none --status-level fail --final-status-level fail --failure-output immediate-final --success-output never
 LOCAL_INSTALL_PROFILE ?= release-local
 LOCAL_INSTALL_TARGET_DIR ?= target/local-install
 LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mold; elif command -v ld.lld >/dev/null 2>&1 || command -v lld >/dev/null 2>&1; then printf '%s' lld; fi)
@@ -145,8 +145,14 @@ lean:
 	@if command -v lake >/dev/null 2>&1; then \
 		for proj in formal/*/; do \
 			if [ -f "$$proj/lakefile.toml" ] || [ -f "$$proj/lakefile.lean" ]; then \
-				echo "[lean] building $$proj"; \
-				( cd "$$proj" && lake build ) || exit 1; \
+				log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-lean.XXXXXX.log"); \
+				if ! ( cd "$$proj" && lake build ) >"$$log" 2>&1; then \
+					echo "[lean] build failed: $$proj"; \
+					cat "$$log"; \
+					rm -f "$$log"; \
+					exit 1; \
+				fi; \
+				rm -f "$$log"; \
 			fi; \
 		done; \
 	else \

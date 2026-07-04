@@ -40,7 +40,8 @@ pub mod git;
 pub mod preflight;
 pub mod repair;
 pub mod route;
-pub mod run;
+#[cfg(test)]
+mod run;
 pub mod start;
 pub mod write;
 
@@ -196,6 +197,76 @@ impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionChe
         event: &str,
     ) -> anyhow::Result<Option<&'static str>> {
         agent_doc_repair_io::recover_missing_commit_boundary(&crate::REPAIR_IO_EFFECTS, file, event)
+    }
+}
+
+pub struct OrchestrationDirectRunEffects;
+
+pub static DIRECT_RUN_EFFECTS: OrchestrationDirectRunEffects = OrchestrationDirectRunEffects;
+
+impl agent_doc_run_io::DirectRunEffects for OrchestrationDirectRunEffects {
+    fn guard_no_exchange_compaction_request_for_diff(
+        &self,
+        file: &std::path::Path,
+        diff_text: &str,
+    ) -> anyhow::Result<()> {
+        crate::write::guard_no_exchange_compaction_request_for_diff(file, diff_text)
+    }
+
+    fn commit(&self, file: &std::path::Path) -> anyhow::Result<bool> {
+        crate::git::commit(file)
+    }
+
+    fn normalize_template_structure_or_fail(
+        &self,
+        content: &str,
+        file: &std::path::Path,
+    ) -> anyhow::Result<String> {
+        crate::write::normalize_template_structure_or_fail(content, file)
+    }
+
+    fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
+        crate::write::atomic_write_pub(file, content)
+    }
+
+    fn consume_queue_prompts_for_done_ids_with_outcome(
+        &self,
+        file: &std::path::Path,
+        done_ids: &[String],
+        force_disk: bool,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_consume::QueueConsumptionOutcome>> {
+        if force_disk {
+            agent_doc_queue_io::queue_consume::consume_queue_prompts_with_outcome(
+                file,
+                done_ids,
+                true,
+                &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            )
+        } else {
+            agent_doc_queue_io::queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
+                file,
+                done_ids,
+                &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            )
+        }
+    }
+
+    fn complete_required_closeout(&self, file: &std::path::Path) -> anyhow::Result<()> {
+        crate::write::complete_required_closeout(file).map(|_| ())
+    }
+
+    fn abandon_recursive_cycle(
+        &self,
+        file: &std::path::Path,
+        event: &str,
+        diagnostic: &str,
+    ) -> anyhow::Result<()> {
+        agent_doc_run_io::abandon_run_recursive_cycle(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            event,
+            diagnostic,
+        )
     }
 }
 

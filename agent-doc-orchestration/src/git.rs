@@ -175,6 +175,11 @@ struct OrchestrationBoundaryRepositionEffects;
 static BOUNDARY_REPOSITION_EFFECTS: OrchestrationBoundaryRepositionEffects =
     OrchestrationBoundaryRepositionEffects;
 
+struct OrchestrationBoundaryInvariantEffects;
+
+static BOUNDARY_INVARIANT_EFFECTS: OrchestrationBoundaryInvariantEffects =
+    OrchestrationBoundaryInvariantEffects;
+
 impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
     for OrchestrationBoundaryRepositionEffects
 {
@@ -232,6 +237,18 @@ impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
 
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
         crate::write::atomic_write_pub(file, content)
+    }
+}
+
+impl agent_doc_git_io::boundary_invariant::BoundaryInvariantEffects
+    for OrchestrationBoundaryInvariantEffects
+{
+    fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
     }
 }
 
@@ -997,7 +1014,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     match &commit_status {
         Ok(s) if s.success() => {
             did_commit = true;
-            enforce_committed_single_boundary_invariant(file, &git_root, &resolved);
+            agent_doc_git_io::boundary_invariant::enforce_committed_single_boundary_invariant(
+                &BOUNDARY_INVARIANT_EFFECTS,
+                file,
+                &git_root,
+                &resolved,
+            );
             agent_doc_ops_log_io::log_cycle(file, "commit", None, None);
             agent_doc_ops_log_io::log_op(file, &format!("commit_success file={}", file.display()));
             agent_doc_flow_io::log_flow_event(
@@ -1188,76 +1210,6 @@ fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
     let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
     signal_file.parent().filter(|p| p.exists())?;
     Some(signal_file)
-}
-
-/// Enforce the single-boundary invariant on the just-committed HEAD artifact
-/// (#boundaryaccum1). The pre-stage snapshot collapse in
-/// `reposition_boundary_in_snapshot` should already guarantee this, but a
-/// previously-accreted blob (committed before this fix, or any future
-/// regression) is caught here and self-healed with a binary-owned follow-up
-/// collapse commit. This never races the live editor — it re-collapses the
-/// committed content, which is a binary-owned artifact, not the editor buffer.
-fn enforce_committed_single_boundary_invariant(file: &Path, git_root: &Path, resolved: &Path) {
-    let Ok(Some(head_blob)) = agent_doc_git_io::revision::show_head(file) else {
-        return;
-    };
-    let boundary_count = head_blob
-        .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
-        .count();
-    if boundary_count <= 1 {
-        return;
-    }
-    eprintln!(
-        "[commit] boundary_invariant_violation: committed HEAD carries {} agent:boundary markers (expected 1) — self-healing collapse",
-        boundary_count
-    );
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "boundary_invariant_violation phase=post_commit file={} committed_boundaries={}",
-            file.display(),
-            boundary_count
-        ),
-    );
-    let collapsed = agent_doc_template::reposition_boundary_to_end_clean(&head_blob);
-    let collapsed_count = collapsed
-        .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
-        .count();
-    if collapsed == head_blob || collapsed_count > 1 {
-        eprintln!(
-            "[commit] boundary_invariant self-heal could not reduce to a single boundary (still {}); leaving for next cycle",
-            collapsed_count
-        );
-        return;
-    }
-    // Keep the snapshot aligned with the collapsed blob so the next preflight
-    // does not observe snapshot/HEAD drift.
-    if let Err(e) = agent_doc_snapshot_io::save(file, &collapsed, agent_doc_ops_log_io::log_op) {
-        eprintln!(
-            "[commit] boundary_invariant self-heal snapshot save failed: {} (non-fatal)",
-            e
-        );
-    }
-    match stage_and_commit_once(
-        git_root,
-        resolved,
-        Some(collapsed.as_str()),
-        "agent-doc: collapse accreted agent:boundary markers (#boundaryaccum1)",
-    ) {
-        Ok(_) => {
-            eprintln!("[commit] boundary_invariant self-heal collapse committed");
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "boundary_invariant_selfheal_committed file={}",
-                    file.display()
-                ),
-            );
-        }
-        Err(_) => {
-            eprintln!("[commit] boundary_invariant self-heal collapse failed (non-fatal)");
-        }
-    }
 }
 
 fn refresh_live_closeout_sidecars(

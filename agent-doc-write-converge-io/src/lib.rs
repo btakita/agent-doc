@@ -24,7 +24,8 @@ use agent_doc_element_exchange::{
 use agent_doc_element_exchange_io::DuplicatePromptRepairOptions;
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{
-    IpcRepairDecision, is_socket_ack_timeout_error, is_socket_status_error,
+    FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision,
+    is_socket_ack_timeout_error, is_socket_status_error,
 };
 use agent_doc_turn::response_replay::response_materialized_in_content;
 use anyhow::{Context, Result};
@@ -1591,6 +1592,209 @@ pub fn redeliver_normalization_fallback_to_editor(
     }
 
     full_content_fallback(file, repaired_content, expected_bad_state, source_patch_id)
+}
+
+fn log_ipc_proof_failure_with_recycle(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    invariant: &str,
+    recovery: &str,
+    detail: &str,
+) {
+    eprintln!(
+        "[write] IPC proof insufficient for {}: source={} patch_id={} invariant={} recovery={}{}{}",
+        file.display(),
+        source,
+        patch_id.unwrap_or("-"),
+        invariant,
+        recovery,
+        if detail.is_empty() { "" } else { " " },
+        detail
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_proof_insufficient file={} source={} patch_id={} invariant={} recovery={}{}{}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            invariant,
+            recovery,
+            if detail.is_empty() { "" } else { " " },
+            detail
+        ),
+    );
+    if recovery.contains("retry_without_disk_write") {
+        let _ = schedule_stale_supervisor_pcp_recycle(file, source);
+    }
+}
+
+pub fn repair_ipc_decision_visible_state(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    decision: &IpcRepairDecision,
+    patch_id: Option<&str>,
+    mut redeliver_full_content: impl FnMut(
+        &Path,
+        &str,
+        &str,
+        FullContentRepairRedelivery,
+        Option<&str>,
+    ) -> bool,
+) -> Result<()> {
+    let Some(reason) = decision.disk_repair_reason else {
+        return Ok(());
+    };
+    let bad_len = decision
+        .editor_bad_state
+        .as_ref()
+        .map(|state| state.len)
+        .unwrap_or(0);
+    let bad_hash = decision
+        .editor_bad_state
+        .as_ref()
+        .map(|state| state.hash.as_str())
+        .unwrap_or("-");
+    let current = std::fs::read_to_string(file).ok();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_repair_decision file={} patch_id={} snap_source={} repair_reason={} redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={} current_len={} current_hash={} normalize_targets={} duplicate_prompt_count={}",
+            file.display(),
+            patch_id.unwrap_or("-"),
+            decision.snap_source.label(),
+            reason.label(),
+            decision.redeliver_editor,
+            bad_len,
+            bad_hash,
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            current.as_deref().map(str::len).unwrap_or(0),
+            current
+                .as_deref()
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            decision.normalize_prefix_lines.len(),
+            duplicate_prompt_line_count(
+                decision
+                    .editor_bad_state
+                    .as_ref()
+                    .map(|state| state.content())
+                    .unwrap_or(&decision.snapshot_content)
+            )
+        ),
+    );
+
+    if decision.redeliver_editor
+        && let Some(expected_bad_state) = decision.editor_bad_state.as_ref()
+        && match reason {
+            IpcDiskRepairReason::PrefixDivergence => redeliver_normalization_fallback_to_editor(
+                file,
+                &decision.snapshot_content,
+                expected_bad_state.content(),
+                &decision.normalize_prefix_lines,
+                patch_id,
+                |file, repaired_content, expected_bad_state, source_patch_id| {
+                    redeliver_full_content(
+                        file,
+                        repaired_content,
+                        expected_bad_state,
+                        FullContentRepairRedelivery::NormalizationFallback,
+                        source_patch_id,
+                    )
+                },
+            ),
+            IpcDiskRepairReason::IpcDedupe
+            | IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe
+            | IpcDiskRepairReason::LivePromptDrift => redeliver_full_content(
+                file,
+                &decision.snapshot_content,
+                expected_bad_state.content(),
+                reason.redelivery_kind(),
+                patch_id,
+            ),
+        }
+    {
+        return Ok(());
+    }
+
+    if matches!(reason, IpcDiskRepairReason::LivePromptDrift) {
+        let listener_active = file
+            .canonicalize()
+            .ok()
+            .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
+            .as_deref()
+            .map(agent_doc_ipc_io::is_listener_active)
+            .unwrap_or(false);
+        if listener_active
+            && let Ok(file_content) = std::fs::read_to_string(file)
+            && let Ok(Some(_recovered)) = try_auto_recover_live_prompt_drift(
+                effects,
+                file,
+                &decision.snapshot_content,
+                &file_content,
+            )
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_visible_repair_incycle_editor_converged file={} patch_id={} repair_reason={} redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={} transport=editor_ipc",
+                    file.display(),
+                    patch_id.unwrap_or("-"),
+                    reason.label(),
+                    decision.redeliver_editor,
+                    bad_len,
+                    bad_hash,
+                    decision.snapshot_content.len(),
+                    agent_doc_hash::content_hash(&decision.snapshot_content),
+                ),
+            );
+            return Ok(());
+        }
+    }
+
+    let detail = format!(
+        "redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={}",
+        decision.redeliver_editor,
+        bad_len,
+        bad_hash,
+        decision.snapshot_content.len(),
+        agent_doc_hash::content_hash(&decision.snapshot_content)
+    );
+    log_ipc_proof_failure_with_recycle(
+        file,
+        "ipc_visible_repair",
+        patch_id,
+        reason.label(),
+        "retry_without_disk_write",
+        &detail,
+    );
+    if let Err(err) = agent_doc_cycle_state_io::record_editor_convergence_required(
+        file,
+        "ipc_visible_repair",
+        reason.label(),
+        patch_id,
+        Some(&detail),
+    ) {
+        eprintln!(
+            "[write] WARNING: failed to record IPC repair blocked closeout for {}: {err}",
+            file.display()
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_visible_repair_retry_required_no_disk_write file={} patch_id={} repair_reason={} recovery=retry_without_disk_write",
+            file.display(),
+            patch_id.unwrap_or("-"),
+            reason.label()
+        ),
+    );
+    anyhow::bail!(
+        "editor IPC repair did not prove visible state for {}; pending response retained for retry; refusing direct document write",
+        file.display()
+    );
 }
 
 pub fn try_editor_converge(

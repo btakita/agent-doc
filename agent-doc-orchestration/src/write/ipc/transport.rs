@@ -525,7 +525,21 @@ pub fn try_ipc(
                         socket_editor_id.as_deref(),
                         &mut repair_decision,
                     );
-                    repair_ipc_decision_visible_state(file, &repair_decision, Some(&patch_id))?;
+                    agent_doc_write_converge_io::repair_ipc_decision_visible_state(
+                        &crate::write::WRITE_CONVERGENCE_EFFECTS,
+                        file,
+                        &repair_decision,
+                        Some(&patch_id),
+                        |file, repaired_content, expected_bad_state, kind, source_patch_id| {
+                            redeliver_full_content_repair_to_editor(
+                                file,
+                                repaired_content,
+                                expected_bad_state,
+                                kind,
+                                source_patch_id,
+                            )
+                        },
+                    )?;
                     if repair_decision.snap_source.is_ack_content_proven() {
                         let proof = ack_content_disk_write_proof(
                             file,
@@ -1694,7 +1708,21 @@ pub(crate) fn write_ipc_and_poll(
             file_baseline,
             &ipcfullprompt_candidate,
         );
-        repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
+        agent_doc_write_converge_io::repair_ipc_decision_visible_state(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            doc_file,
+            &repair_decision,
+            Some(patch_id),
+            |file, repaired_content, expected_bad_state, kind, source_patch_id| {
+                redeliver_full_content_repair_to_editor(
+                    file,
+                    repaired_content,
+                    expected_bad_state,
+                    kind,
+                    source_patch_id,
+                )
+            },
+        )?;
         if repair_decision.snap_source.is_ack_content_proven() {
             let editor_id = payload.get("editor_id").and_then(|value| value.as_str());
             let proof = ack_content_disk_write_proof(
@@ -3995,8 +4023,8 @@ mod late_fallback_patch_guard_tests {
     use super::{
         WriteFlags, cleanup_fallback_patch_files, cycle_already_committed,
         recover_dedupe_only_drift, recover_empty_response_for_strict_closeout,
-        redeliver_ipc_dedupe_to_editor, repair_ipc_decision_visible_state, try_ipc,
-        try_ipc_full_content, try_ipc_full_content_operator_mutation_from_source,
+        redeliver_ipc_dedupe_to_editor, try_ipc, try_ipc_full_content,
+        try_ipc_full_content_operator_mutation_from_source,
     };
     use agent_doc_ipc_protocol::{
         EditorBadStateFingerprint, IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource,
@@ -4725,8 +4753,22 @@ mod late_fallback_patch_guard_tests {
 
         let decision = IpcRepairDecision::file_read(bad_state.to_string())
             .apply_ipc_dedupe(repaired.to_string(), bad_state.to_string());
-        let err =
-            repair_ipc_decision_visible_state(&doc, &decision, Some("source-patch")).unwrap_err();
+        let err = agent_doc_write_converge_io::repair_ipc_decision_visible_state(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &doc,
+            &decision,
+            Some("source-patch"),
+            |file, repaired_content, expected_bad_state, kind, source_patch_id| {
+                super::redeliver_full_content_repair_to_editor(
+                    file,
+                    repaired_content,
+                    expected_bad_state,
+                    kind,
+                    source_patch_id,
+                )
+            },
+        )
+        .unwrap_err();
         assert!(
             err.to_string().contains("refusing direct document write"),
             "template duplicate repair must fail closed without editor delivery: {err}"
@@ -5342,8 +5384,22 @@ Implemented.
             redeliver_editor: true,
         };
 
-        repair_ipc_decision_visible_state(&doc, &decision, Some("live-drift-1"))
-            .expect("in-cycle editor-IPC convergence should prove visible state and succeed");
+        agent_doc_write_converge_io::repair_ipc_decision_visible_state(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &doc,
+            &decision,
+            Some("live-drift-1"),
+            |file, repaired_content, expected_bad_state, kind, source_patch_id| {
+                super::redeliver_full_content_repair_to_editor(
+                    file,
+                    repaired_content,
+                    expected_bad_state,
+                    kind,
+                    source_patch_id,
+                )
+            },
+        )
+        .expect("in-cycle editor-IPC convergence should prove visible state and succeed");
 
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
@@ -5399,8 +5455,22 @@ Implemented.
             redeliver_editor: true,
         };
 
-        let err = repair_ipc_decision_visible_state(&doc, &decision, Some("live-drift-2"))
-            .expect_err("without a listener the stale live_prompt_drift repair must fail closed");
+        let err = agent_doc_write_converge_io::repair_ipc_decision_visible_state(
+            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &doc,
+            &decision,
+            Some("live-drift-2"),
+            |file, repaired_content, expected_bad_state, kind, source_patch_id| {
+                super::redeliver_full_content_repair_to_editor(
+                    file,
+                    repaired_content,
+                    expected_bad_state,
+                    kind,
+                    source_patch_id,
+                )
+            },
+        )
+        .expect_err("without a listener the stale live_prompt_drift repair must fail closed");
         assert!(
             err.to_string().contains("refusing direct document write"),
             "fail-closed bail expected: {err}"

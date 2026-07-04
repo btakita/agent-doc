@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 70,
+        ledger_rows.len() >= 71,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10196,7 +10196,13 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Write IPC sidecar repair-decision builder",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Move `repair_ipc_decision_visible_state`, full-content visible redelivery",
+            "Move full-content visible redelivery",
+        ),
+        (
+            "Write IPC visible-state repair IO graph",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Split full-content visible repair redelivery",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -25957,6 +25963,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn verify_normalization_repair_observed(",
         "pub fn try_ipc_normalization_repair_patch(",
         "pub fn redeliver_normalization_fallback_to_editor(",
+        "pub fn repair_ipc_decision_visible_state(",
     ] {
         assert!(
             write_converge_io.contains(required_snippet),
@@ -26023,6 +26030,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub(crate) fn verify_normalization_repair_observed(",
         "pub(crate) fn try_ipc_normalization_repair_patch(",
         "pub(crate) fn redeliver_normalization_fallback_to_editor(",
+        "pub(crate) fn repair_ipc_decision_visible_state(",
     ] {
         assert!(
             !converge.contains(forbidden_snippet) && !write_ipc.contains(forbidden_snippet),

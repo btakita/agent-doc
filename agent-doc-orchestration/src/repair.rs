@@ -70,14 +70,12 @@ use agent_doc_turn::{
         stale_preflight_cycle_age_secs, visible_response_recovery_is_adoptable,
     },
     repair::{
-        AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR, CancelOutcome,
-        EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR, RESPONSE_PATCHBACK_UNCOMMITTED_ERROR,
-        RepairOutcome, STALE_EMPTY_PREFLIGHT_TTL_SECS,
+        AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR, EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR,
+        RESPONSE_PATCHBACK_UNCOMMITTED_ERROR, RepairOutcome, STALE_EMPTY_PREFLIGHT_TTL_SECS,
     },
     response_replay,
 };
 use anyhow::{Context, Result};
-use std::collections::HashSet;
 use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
@@ -88,111 +86,6 @@ use agent_doc_workflow::capture::{
 };
 
 use crate::write;
-
-fn historical_committed_capture_replay(
-    file: &Path,
-    doc_content: &str,
-) -> Result<Option<agent_doc_capture_io::CaptureRecord>> {
-    let Some(capture) = agent_doc_capture_io::latest_committed(file)? else {
-        return Ok(None);
-    };
-    if response_replay::response_already_applied(doc_content, &capture.response_body) {
-        return Ok(None);
-    }
-    let Some(response_heading) =
-        response_replay::first_response_heading_line(&capture.response_body)
-    else {
-        return Ok(None);
-    };
-    if !response_replay::has_matching_orphan_prompt_for_committed_capture(
-        doc_content,
-        response_heading,
-    ) {
-        return Ok(None);
-    }
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "repair_replay_committed_capture file={} capture_id={}",
-            file.display(),
-            capture.capture_id
-        ),
-    );
-    Ok(Some(capture))
-}
-
-fn visible_response_patch_from_document(file: &Path, doc_content: &str) -> Result<Option<String>> {
-    let Some(snapshot_doc) = agent_doc_snapshot_io::load(file)? else {
-        return Ok(None);
-    };
-    let template_mode = frontmatter::parse(doc_content)
-        .map(|(fm, _)| fm.resolve_mode().is_template())
-        .unwrap_or(false);
-    Ok(response_replay::extract_visible_response_patch_between(
-        &snapshot_doc,
-        doc_content,
-        template_mode,
-    ))
-}
-
-/// `#cancel-orphans-preflight-cycle`: explicit run-cancel reclaim.
-///
-/// When the user cancels an in-progress run, the JB plugin (thin reporter)
-/// calls this so the orphaned `preflight_started` cycle is abandoned *now*
-/// instead of blocking the next `Run Agent Doc` until the
-/// [`STALE_EMPTY_PREFLIGHT_TTL_SECS`] window elapses. The abandon decision is a
-/// pure, fail-safe `cycle_state` operation: it only abandons an open cycle that
-/// is still `preflight_started` **and** owns no response capture. Any cycle
-/// that advanced past preflight or already captured a response is left intact
-/// (`Protected`) so a cancel can never discard real in-flight work.
-pub fn cancel_preflight_cycle(file: &Path) -> Result<CancelOutcome> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
-        return Ok(CancelOutcome::NoOpenCycle);
-    };
-    if !state.is_open() {
-        return Ok(CancelOutcome::NoOpenCycle);
-    }
-    if !matches!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
-        return Ok(CancelOutcome::Protected);
-    }
-    if agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some() {
-        return Ok(CancelOutcome::Protected);
-    }
-    let snapshot_content = agent_doc_snapshot_io::load(file)?;
-    let file_content = std::fs::read_to_string(file).ok();
-    agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-        &crate::PIPELINE_FRONTMATTER_EFFECTS,
-        file,
-        "cancel_preflight_cycle_abandoned",
-        snapshot_content.as_deref(),
-        file_content.as_deref(),
-    )?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "cancel_preflight_cycle_abandoned file={} cycle_id={}",
-            file.display(),
-            state.cycle_id
-        ),
-    );
-    eprintln!(
-        "[cancel] abandoned empty preflight_started cycle {} for {} on explicit run cancel; next dispatch starts fresh",
-        state.cycle_id,
-        file.display()
-    );
-    Ok(CancelOutcome::Abandoned)
-}
-
-fn head_already_matches_current_doc(file: &Path, doc_content: &str) -> Result<bool> {
-    Ok(agent_doc_git_io::revision::show_head(file)?
-        .as_deref()
-        .is_some_and(|head| {
-            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(head)
-                == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-                    doc_content,
-                )
-        }))
-}
 
 pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
@@ -226,7 +119,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         && state.normalized_snapshot_hash == current_normalized_snapshot_hash;
 
     if raw_hashes_match || normalized_hashes_match {
-        if !head_already_matches_current_doc(file, &file_content)?
+        if !agent_doc_repair_io::head_already_matches_current_doc(file, &file_content)?
             && let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)?
         {
             agent_doc_flow_io::closeout::log_closeout_guard_event(
@@ -416,194 +309,6 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
     }
 
     Ok(RepairOutcome::Noop)
-}
-
-pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Option<&'static str>> {
-    let state = agent_doc_cycle_state_io::load(file)?;
-    let has_open_commit_boundary = state.as_ref().is_some_and(|state| {
-        matches!(
-            state.phase,
-            agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
-        )
-    });
-    let has_missing_commit_event = if has_open_commit_boundary {
-        false
-    } else {
-        agent_doc_ops_log_io::detect_write_completed_commit_missing(file)?.is_some()
-    };
-    if !has_open_commit_boundary && !has_missing_commit_event {
-        return Ok(None);
-    }
-
-    let current_doc = std::fs::read_to_string(file).with_context(|| {
-        format!(
-            "failed to read {} for commit-boundary recovery",
-            file.display()
-        )
-    })?;
-    let head_doc = agent_doc_git_io::revision::show_head(file)?;
-    let reason = match agent_doc_snapshot_io::verify_snapshot_committed(file)? {
-        agent_doc_snapshot_io::SnapshotCommitStatus::Committed => head_doc
-            .as_deref()
-            .filter(|head| {
-                agent_doc_turn::document_drift::detect_bypassed_response_write_between(
-                    head,
-                    &current_doc,
-                )
-                .is_none()
-            })
-            .map(|_| "already-committed HEAD"),
-        _ => agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)?
-            .map(|_| "committed historical exchange snapshot drift"),
-    };
-    let Some(reason) = reason else {
-        return Ok(None);
-    };
-
-    let repaired_snapshot = agent_doc_snapshot_io::load(file)?;
-    agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-        &crate::PIPELINE_FRONTMATTER_EFFECTS,
-        file,
-        event,
-        repaired_snapshot.as_deref(),
-        Some(&current_doc),
-    )?;
-    agent_doc_capture_io::mark_committed(file)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "repair_commit_boundary_recovered file={} event={} reason={}",
-            file.display(),
-            event,
-            reason
-        ),
-    );
-    agent_doc_flow_io::closeout::log_closeout_guard_event(
-        file,
-        agent_doc_flow::types::FlowStage::TerminalGuard,
-        agent_doc_flow::types::FlowOutcome::Completed,
-        agent_doc_turn::closeout_guard::CloseoutGuardReason::CommitBoundaryRecovered,
-    );
-    Ok(Some(reason))
-}
-
-fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
-    let content = std::fs::read_to_string(file).with_context(|| {
-        format!(
-            "failed to read {} for completed backlog reap repair",
-            file.display()
-        )
-    })?;
-    let components = agent_doc_element::element::parse(&content).with_context(|| {
-        format!(
-            "failed to parse {} for completed backlog reap repair",
-            file.display()
-        )
-    })?;
-    let Some(backlog) = components
-        .iter()
-        .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
-    else {
-        return Ok(RepairOutcome::Noop);
-    };
-
-    let doc_id = agent_doc_hash::document_id_for_path(file);
-    let (canonical_body, _) = agent_doc_element_backlog::backlog::backfill(
-        backlog.content(&content),
-        &doc_id,
-        &HashSet::new(),
-    );
-    let (new_body, removed) = agent_doc_element_backlog::backlog::reap_with_items(&canonical_body)?;
-    if removed.is_empty() {
-        return Ok(RepairOutcome::Noop);
-    }
-
-    let mut repaired = backlog.replace_content(&content, &new_body);
-    if let Some(archived) =
-        agent_doc_element_backlog_io::done_archive::archive_pending_done(file, &repaired, &removed)?
-    {
-        repaired = archived;
-    }
-    if let Some(reconciled) =
-        agent_doc_document::status_projection::reconcile_top_backlog_status_content(&repaired)?
-    {
-        repaired = reconciled;
-    }
-
-    write::atomic_write_pub(file, &repaired)?;
-
-    let repaired_snapshot = if let Some(snap_content) = agent_doc_snapshot_io::load(file)? {
-        let snap_components =
-            agent_doc_element::element::parse(&snap_content).with_context(|| {
-                format!(
-                    "failed to parse snapshot for completed backlog reap repair {}",
-                    file.display()
-                )
-            })?;
-        let snap_backlog = snap_components
-            .iter()
-            .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
-            .with_context(|| {
-                format!(
-                    "completed backlog reap repair requires the snapshot backlog component in {}",
-                    file.display()
-                )
-            })?;
-
-        let mut new_snapshot = snap_backlog.replace_content(&snap_content, &new_body);
-        if let Some(archived) = agent_doc_element_backlog_io::done_archive::archive_pending_done(
-            file,
-            &new_snapshot,
-            &removed,
-        )? {
-            new_snapshot = archived;
-        }
-        if let Some(reconciled) =
-            agent_doc_document::status_projection::reconcile_top_backlog_status_content(
-                &new_snapshot,
-            )?
-        {
-            new_snapshot = reconciled;
-        }
-        agent_doc_snapshot_io::save(file, &new_snapshot, agent_doc_ops_log_io::log_op)?;
-        Some(new_snapshot)
-    } else {
-        None
-    };
-
-    if repaired_snapshot.as_deref() == Some(repaired.as_str()) {
-        let _ = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            "repair_completed_backlog_reap",
-            Some(&repaired),
-            Some(&repaired),
-        );
-    }
-
-    let refs = removed
-        .iter()
-        .map(|item| format!("#{}", item.id))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let removed_ids: Vec<String> = removed.iter().map(|item| item.id.clone()).collect();
-    let _ = agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "repair_completed_backlog_reap file={} count={} ids={}",
-            file.display(),
-            removed.len(),
-            refs
-        ),
-    );
-    eprintln!(
-        "[repair] reaped stale completed backlog item(s) in {}: {}",
-        file.display(),
-        refs
-    );
-
-    Ok(RepairOutcome::CompletedBacklogReaped)
 }
 
 fn repair_template_doc_if_needed(
@@ -1084,7 +789,7 @@ pub(crate) fn run_with_queue_completion_ids(
         .with_context(|| format!("failed to read document for repair {}", file.display()))?;
     let cycle_state = agent_doc_cycle_state_io::load(file)?;
     let historical_capture = if !pending_path.exists() && capture.is_none() {
-        historical_committed_capture_replay(&canonical, &doc_content)?
+        agent_doc_repair_io::historical_committed_capture_replay(&canonical, &doc_content)?
     } else {
         None
     };
@@ -1099,9 +804,9 @@ pub(crate) fn run_with_queue_completion_ids(
                 .is_some(),
         )
         && agent_doc_git_io::status::is_in_git_repo(file)
-        && !head_already_matches_current_doc(file, &doc_content)?
+        && !agent_doc_repair_io::head_already_matches_current_doc(file, &doc_content)?
     {
-        visible_response_patch_from_document(file, &doc_content)?
+        agent_doc_repair_io::visible_response_patch_from_document(file, &doc_content)?
     } else {
         None
     };
@@ -1125,7 +830,13 @@ pub(crate) fn run_with_queue_completion_ids(
             }
             return Ok(outcome);
         }
-        if recover_missing_commit_boundary(file, "repair_commit_boundary_recovered")?.is_some() {
+        if agent_doc_repair_io::recover_missing_commit_boundary(
+            &crate::REPAIR_IO_EFFECTS,
+            file,
+            "repair_commit_boundary_recovered",
+        )?
+        .is_some()
+        {
             return Ok(RepairOutcome::CommitBoundaryRecovered);
         }
         let scaffold_repaired_doc =
@@ -1146,7 +857,10 @@ pub(crate) fn run_with_queue_completion_ids(
                 return Ok(RepairOutcome::TemplateNormalized);
             }
         }
-        return repair_completed_backlog_items(file);
+        return agent_doc_repair_io::repair_completed_backlog_items(
+            &crate::REPAIR_IO_EFFECTS,
+            file,
+        );
     }
 
     let pending_response = if pending_path.exists() {
@@ -1542,6 +1256,7 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_turn::repair::CancelOutcome;
     use std::path::Path;
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
@@ -1644,7 +1359,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            cancel_preflight_cycle(&doc).unwrap(),
+            agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, &doc).unwrap(),
             CancelOutcome::Abandoned
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -1662,7 +1377,7 @@ mod tests {
         agent_doc_capture_io::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n").unwrap();
 
         assert_eq!(
-            cancel_preflight_cycle(&doc).unwrap(),
+            agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, &doc).unwrap(),
             CancelOutcome::Protected
         );
         assert!(
@@ -1690,7 +1405,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            cancel_preflight_cycle(&doc).unwrap(),
+            agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, &doc).unwrap(),
             CancelOutcome::Protected
         );
     }
@@ -1701,7 +1416,7 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "# Doc\n\nNothing\n").unwrap();
         assert_eq!(
-            cancel_preflight_cycle(&doc).unwrap(),
+            agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, &doc).unwrap(),
             CancelOutcome::NoOpenCycle
         );
     }

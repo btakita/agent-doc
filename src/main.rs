@@ -3515,7 +3515,10 @@ fn main() -> anyhow::Result<()> {
         Commands::Commit { file } => agent_doc_orchestration::git::commit(&file).map(|_| ()),
         Commands::Dedupe { file } => dedupe_cmd::run(&file),
         Commands::Cancel { file } => {
-            match agent_doc_orchestration::repair::cancel_preflight_cycle(&file)? {
+            match agent_doc_repair_io::cancel_preflight_cycle(
+                &agent_doc_orchestration::REPAIR_IO_EFFECTS,
+                &file,
+            )? {
                 agent_doc_turn::repair::CancelOutcome::Abandoned => {
                     println!(
                         "[cancel] abandoned orphaned preflight_started cycle; next dispatch starts fresh"

@@ -102,6 +102,48 @@ impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
     }
 }
 
+pub struct OrchestrationRepairIoEffects;
+
+pub static REPAIR_IO_EFFECTS: OrchestrationRepairIoEffects = OrchestrationRepairIoEffects;
+
+impl agent_doc_repair_io::RepairIoEffects for OrchestrationRepairIoEffects {
+    fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
+        crate::write::atomic_write_pub(file, content)
+    }
+
+    fn mark_committed_frontmatter(
+        &self,
+        file: &std::path::Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> anyhow::Result<agent_doc_cycle_state_io::CycleState> {
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            event,
+            snapshot_content,
+            file_content,
+        )
+    }
+
+    fn mark_abandoned_frontmatter(
+        &self,
+        file: &std::path::Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> anyhow::Result<agent_doc_cycle_state_io::CycleState> {
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            event,
+            snapshot_content,
+            file_content,
+        )
+    }
+}
+
 pub(crate) struct SessionActorWriteQueueSubmitter;
 
 pub(crate) static SESSION_ACTOR_WRITE_QUEUE: SessionActorWriteQueueSubmitter =
@@ -153,7 +195,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionChe
         file: &std::path::Path,
         event: &str,
     ) -> anyhow::Result<Option<&'static str>> {
-        crate::repair::recover_missing_commit_boundary(file, event)
+        agent_doc_repair_io::recover_missing_commit_boundary(&crate::REPAIR_IO_EFFECTS, file, event)
     }
 }
 
@@ -191,7 +233,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffec
     }
 
     fn cancel_preflight_cycle(&self, file: &std::path::Path) -> anyhow::Result<()> {
-        crate::repair::cancel_preflight_cycle(file).map(|_| ())
+        agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, file).map(|_| ())
     }
 
     fn detect_jb_cache_conflict_cancel_recoverable(

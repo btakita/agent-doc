@@ -610,7 +610,10 @@ pub fn clear(file: &Path) -> Result<()> {
 /// left intact. Reclaim failures are non-fatal — the clear itself already
 /// delivered — and surface as a warning.
 fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_turn::repair::CancelOutcome {
-    match agent_doc_orchestration::repair::cancel_preflight_cycle(file) {
+    match agent_doc_repair_io::cancel_preflight_cycle(
+        &agent_doc_orchestration::REPAIR_IO_EFFECTS,
+        file,
+    ) {
         Ok(outcome) => {
             agent_doc_ops_log_io::log_op(
                 file,

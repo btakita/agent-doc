@@ -93,6 +93,214 @@ pub trait PreflightMaintenanceWriteEffects {
     ) -> Result<()>;
 }
 
+pub trait PreflightCycleCompletionEffects {
+    fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome>;
+
+    fn commit(&self, file: &Path) -> Result<bool>;
+
+    fn session_interruption(&self, file: &Path) -> Result<Option<String>>;
+
+    fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>>;
+
+    fn append_latest_ipc_dogfood_note(&self, file: &Path) -> Result<bool>;
+}
+
+pub fn enforce_cycle_completion(
+    file: &Path,
+    effects: &impl PreflightCycleCompletionEffects,
+) -> Result<(bool, bool)> {
+    let state = agent_doc_cycle_state_io::load(file)?;
+    let missing_commit_event = if state.as_ref().map(|state| state.is_open()).unwrap_or(false) {
+        None
+    } else {
+        agent_doc_ops_log_io::detect_write_completed_commit_missing(file)?
+    };
+    if let Some(event) = missing_commit_event.as_deref() {
+        eprintln!(
+            "[preflight] WARNING: previous cycle wrote the response but no commit followed ({}) - attempting commit-boundary recovery before diff",
+            event
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "write_completed_commit_missing file={} last_event={}",
+                file.display(),
+                event
+            ),
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "resume_commit_attempt file={} last_event={}",
+                file.display(),
+                event
+            ),
+        );
+
+        let recovered = match effects.repair(file) {
+            Ok(outcome) => outcome.repaired(),
+            Err(e) => {
+                let message = e.to_string();
+                if message
+                    .contains(agent_doc_turn::repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                    || message
+                        .contains(agent_doc_turn::repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR)
+                    || message
+                        .contains(agent_doc_turn::repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
+                {
+                    anyhow::bail!("{}", e);
+                }
+                eprintln!("[preflight] interrupted-cycle repair warning: {}", e);
+                false
+            }
+        };
+
+        let committed = match effects.commit(file) {
+            Ok(did_commit) => did_commit,
+            Err(e) => {
+                eprintln!("[preflight] interrupted-cycle commit warning: {}", e);
+                false
+            }
+        };
+
+        if let Some(reason) = effects.session_interruption(file)? {
+            let reason = reason.replace('\n', " ");
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "resume_commit_blocked_drift file={} reason={}",
+                    file.display(),
+                    reason
+                ),
+            );
+            anyhow::bail!("{}", reason);
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("resume_commit_success file={}", file.display()),
+        );
+        return Ok((recovered, committed));
+    }
+
+    let Some(state) = state else {
+        return Ok((false, false));
+    };
+    if !state.is_open() {
+        return Ok((false, false));
+    }
+
+    let ipc_hint = agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(file)?
+        .map(|hint| format!("; {hint}"))
+        .unwrap_or_default();
+    eprintln!(
+        "[preflight] WARNING: previous cycle `{}` is still `{}` ({}){} - attempting recovery before diff",
+        state.cycle_id,
+        match state.phase {
+            agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+            agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+            agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+            agent_doc_turn::CyclePhase::Committed => "committed",
+            agent_doc_turn::CyclePhase::Abandoned => "abandoned",
+        },
+        state.last_event,
+        ipc_hint
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "interrupted_cycle_detected file={} cycle_id={} phase={:?} event={}",
+            file.display(),
+            state.cycle_id,
+            state.phase,
+            state.last_event
+        ),
+    );
+    if matches!(state.phase, agent_doc_turn::CyclePhase::WriteApplied) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "resume_commit_attempt file={} cycle_id={}",
+                file.display(),
+                state.cycle_id
+            ),
+        );
+    }
+
+    let recovered = match effects.repair(file) {
+        Ok(outcome) => outcome.repaired(),
+        Err(e) => {
+            let message = e.to_string();
+            if message.contains(agent_doc_turn::repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                || message.contains(agent_doc_turn::repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR)
+                || message
+                    .contains(agent_doc_turn::repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
+            {
+                anyhow::bail!("{}", e);
+            }
+            eprintln!("[preflight] interrupted-cycle repair warning: {}", e);
+            false
+        }
+    };
+    let ipc_dogfood_note_appended = if recovered {
+        match effects.append_latest_ipc_dogfood_note(file) {
+            Ok(appended) => appended,
+            Err(e) => {
+                eprintln!("[preflight] IPC dogfood note warning: {}", e);
+                false
+            }
+        }
+    } else {
+        false
+    };
+
+    let committed = match effects.commit(file) {
+        Ok(did_commit) => did_commit,
+        Err(e) => {
+            eprintln!("[preflight] interrupted-cycle commit warning: {}", e);
+            false
+        }
+    };
+
+    if let Some(after) = agent_doc_cycle_state_io::load(file)?
+        && after.is_open()
+    {
+        let marker_note = if matches!(after.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
+            effects
+                .detect_bypassed_response_write(file)?
+                .map(|marker| format!("; found likely direct response patchback: {}", marker))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let ipc_hint = agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(file)?
+            .map(|hint| format!("; {hint}"))
+            .unwrap_or_default();
+        anyhow::bail!(
+            "previous cycle `{}` is still `{}` after recovery/commit ({}){}{}",
+            after.cycle_id,
+            match after.phase {
+                agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+                agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+                agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+                agent_doc_turn::CyclePhase::Committed => "committed",
+                agent_doc_turn::CyclePhase::Abandoned => "abandoned",
+            },
+            after.last_event,
+            marker_note,
+            ipc_hint
+        );
+    }
+
+    if matches!(state.phase, agent_doc_turn::CyclePhase::WriteApplied) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("resume_commit_success file={}", file.display()),
+        );
+    }
+
+    Ok((recovered || ipc_dogfood_note_appended, committed))
+}
+
 /// Resolve the live finalize-pipeline view surfaced in preflight output
 /// (`#fmrunid-wire`). Cycle-state is authoritative; the document
 /// `agent_doc_pipeline:` frontmatter block is only a fallback hint when no live

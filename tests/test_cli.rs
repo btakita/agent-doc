@@ -6368,6 +6368,8 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
     );
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let repair_source =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     for (path, source, required) in [
@@ -6377,13 +6379,13 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
             "agent_doc_ops_log_io::latest_ipc_proof_diagnostic(",
         ),
         (
-            "agent-doc-orchestration/src/preflight.rs",
-            preflight_source.as_str(),
+            "agent-doc-preflight-io/src/lib.rs",
+            preflight_io_source.as_str(),
             "agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(",
         ),
         (
-            "agent-doc-orchestration/src/preflight.rs",
-            preflight_source.as_str(),
+            "agent-doc-preflight-io/src/lib.rs",
+            preflight_io_source.as_str(),
             "agent_doc_ops_log_io::detect_write_completed_commit_missing(",
         ),
         (
@@ -11052,6 +11054,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
             "Split `RepairCoordinatorEffects` into replay-write, closeout, session-check, pending/capture source selection, and empty-response recovery ports",
+        ),
+        (
+            "Preflight cycle-completion coordinator IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Split `PreflightCycleCompletionEffects` into repair, commit, session-inspection, bypassed-response evidence, and dogfood-note ports",
         ),
         (
             "Codex hook user-prompt-submit tracking IO graph",
@@ -19293,6 +19301,74 @@ fn test_agent_doc_preflight_io_owns_debounce_wait_graph() {
             "agent-doc-preflight-io debounce module should own preflight debounce IO: {required}"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_runtime = orchestration_preflight
+        .split("\n#[cfg(test)]")
+        .next()
+        .unwrap_or(&orchestration_preflight);
+    let preflight_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+
+    for required in [
+        "pub trait PreflightCycleCompletionEffects",
+        "fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome>;",
+        "fn commit(&self, file: &Path) -> Result<bool>;",
+        "fn session_interruption(&self, file: &Path) -> Result<Option<String>>;",
+        "fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>>;",
+        "fn append_latest_ipc_dogfood_note(&self, file: &Path) -> Result<bool>;",
+        "pub fn enforce_cycle_completion(",
+        "detect_write_completed_commit_missing(file)?",
+        "interrupted_cycle_detected file=",
+        "resume_commit_attempt file=",
+        "resume_commit_success file=",
+        "resume_commit_blocked_drift file=",
+        "previous cycle `{}` is still `{}` after recovery/commit",
+        ".detect_bypassed_response_write(file)?",
+    ] {
+        assert!(
+            preflight_io.contains(required),
+            "agent-doc-preflight-io must own preflight cycle-completion coordinator marker: {required}"
+        );
+    }
+
+    for forbidden in [
+        "detect_write_completed_commit_missing(file)?",
+        "interrupted_cycle_detected file=",
+        "resume_commit_success file=",
+        "resume_commit_blocked_drift file=",
+        "previous cycle `{}` is still `{}` after recovery/commit",
+        ".detect_bypassed_response_write(file)?",
+    ] {
+        assert!(
+            !orchestration_preflight_runtime.contains(forbidden),
+            "orchestration preflight.rs must not re-own cycle-completion coordinator marker: {forbidden}"
+        );
+    }
+
+    assert!(
+        orchestration_preflight.contains("agent_doc_preflight_io::enforce_cycle_completion(")
+            && orchestration_preflight
+                .contains("struct OrchestrationPreflightCycleCompletionEffects")
+            && orchestration_preflight.contains(
+                "impl PreflightCycleCompletionEffects for OrchestrationPreflightCycleCompletionEffects",
+            )
+            && orchestration_preflight.contains("agent_doc_session_check_io::inspect(")
+            && orchestration_preflight
+                .contains("agent_doc_session_check_io::detect_bypassed_response_write(file)"),
+        "orchestration preflight.rs should only adapt concrete repair, commit, and session-check effects"
+    );
+    assert!(
+        !preflight_manifest.contains("agent-doc-session-check-io"),
+        "preflight IO cycle completion must use callbacks instead of depending on session-check IO"
+    );
 }
 
 #[test]

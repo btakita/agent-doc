@@ -11,6 +11,7 @@ name = "agent_doc_repair_io"
 
 [dependencies]
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.67" }
+agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }

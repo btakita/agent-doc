@@ -2,6 +2,11 @@
 
 pub mod pending;
 
+use agent_doc_turn::{
+    closeout_recovery::visible_response_recovery_is_adoptable, repair::RepairOutcome,
+    response_replay,
+};
+use agent_doc_workflow::capture::capture_state_is_repairable;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -75,6 +80,321 @@ pub trait RepairTemplateWriteEffects {
         file: &Path,
         prompt_input: Option<&str>,
     ) -> Result<String>;
+}
+
+pub struct RepairCoordinatorEffects<
+    'a,
+    R: RepairIoEffects + RepairTemplateWriteEffects,
+    W: RepairReplayWriteEffects,
+> {
+    pub repair_io_effects: &'a R,
+    pub replay_write_effects: &'a W,
+    pub complete_required_closeout: fn(&Path) -> Result<bool>,
+    pub inspect_session: fn(&Path) -> Result<agent_doc_session_check_io::SessionCheckStatus>,
+    pub recover_missing_committed_head_response: fn(&Path) -> Result<bool>,
+    pub recover_dedupe_only_drift: fn(&Path) -> Result<bool>,
+}
+
+impl<'a, R, W> Copy for RepairCoordinatorEffects<'a, R, W>
+where
+    R: RepairIoEffects + RepairTemplateWriteEffects,
+    W: RepairReplayWriteEffects,
+{
+}
+
+impl<'a, R, W> Clone for RepairCoordinatorEffects<'a, R, W>
+where
+    R: RepairIoEffects + RepairTemplateWriteEffects,
+    W: RepairReplayWriteEffects,
+{
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+pub fn recover_empty_response_for_strict_closeout<
+    R: RepairIoEffects + RepairTemplateWriteEffects,
+    W: RepairReplayWriteEffects,
+>(
+    effects: RepairCoordinatorEffects<'_, R, W>,
+    file: &Path,
+    strict_closeout: bool,
+    has_pending_mutation: bool,
+) -> Result<bool> {
+    if strict_closeout {
+        let outcome = run(effects, file)?;
+        if (effects.recover_missing_committed_head_response)(file)? {
+            return Ok(true);
+        }
+        if outcome.repaired() {
+            eprintln!(
+                "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
+                outcome
+            );
+            return Ok(true);
+        }
+        if (effects.recover_dedupe_only_drift)(file)? {
+            return Ok(true);
+        }
+    }
+    if has_pending_mutation {
+        eprintln!(
+            "[write] empty response stdin; committing pending mutations without a response body"
+        );
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Check for a pending response and apply it if found.
+pub fn run<R: RepairIoEffects + RepairTemplateWriteEffects, W: RepairReplayWriteEffects>(
+    effects: RepairCoordinatorEffects<'_, R, W>,
+    file: &Path,
+) -> Result<RepairOutcome> {
+    run_with_queue_completion_ids(effects, file, &[])
+}
+
+pub fn run_with_queue_completion_ids<
+    R: RepairIoEffects + RepairTemplateWriteEffects,
+    W: RepairReplayWriteEffects,
+>(
+    effects: RepairCoordinatorEffects<'_, R, W>,
+    file: &Path,
+    queue_completion_ids: &[String],
+) -> Result<RepairOutcome> {
+    // Canonicalize first to handle CWD drift (e.g., when CWD is in a submodule).
+    let canonical = file
+        .canonicalize()
+        .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
+
+    let pending_path = agent_doc_fs::pending_response_path_for(&canonical)?;
+    let capture = agent_doc_capture_io::load_active(&canonical)?
+        .filter(|capture| capture_state_is_repairable(capture.state));
+    let doc_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read document for repair {}", file.display()))?;
+    let cycle_state = agent_doc_cycle_state_io::load(file)?;
+    let historical_capture = if !pending_path.exists() && capture.is_none() {
+        historical_committed_capture_replay(&canonical, &doc_content)?
+    } else {
+        None
+    };
+    let visible_response_recovery = if !pending_path.exists()
+        && capture.is_none()
+        && historical_capture.is_none()
+        && visible_response_recovery_is_adoptable(
+            cycle_state.as_ref().map(|state| state.phase),
+            agent_doc_codex_hook_io::load_active_session_for_current_file(file)
+                .ok()
+                .flatten()
+                .is_some(),
+        )
+        && agent_doc_git_io::status::is_in_git_repo(file)
+        && !head_already_matches_current_doc(file, &doc_content)?
+    {
+        visible_response_patch_from_document(file, &doc_content)?
+    } else {
+        None
+    };
+    if !pending_path.exists()
+        && capture.is_none()
+        && historical_capture.is_none()
+        && visible_response_recovery.is_none()
+    {
+        let outcome = repair_stale_preflight_started_cycle(effects.repair_io_effects, file)?;
+        if outcome != RepairOutcome::Noop {
+            let refreshed_content = std::fs::read_to_string(file).with_context(|| {
+                format!(
+                    "failed to read document after stale preflight repair {}",
+                    file.display()
+                )
+            })?;
+            let response_prefix_repaired_doc = repair_response_body_prompt_prefixes_if_needed(
+                effects.repair_io_effects,
+                file,
+                &refreshed_content,
+            )?;
+            if response_prefix_repaired_doc != refreshed_content {
+                return Ok(RepairOutcome::TemplateNormalized);
+            }
+            return Ok(outcome);
+        }
+        if recover_missing_commit_boundary(
+            effects.repair_io_effects,
+            file,
+            "repair_commit_boundary_recovered",
+        )?
+        .is_some()
+        {
+            return Ok(RepairOutcome::CommitBoundaryRecovered);
+        }
+        let scaffold_repaired_doc = repair_duplicate_exchange_scaffold_if_needed(
+            effects.repair_io_effects,
+            file,
+            &doc_content,
+        )?;
+        if scaffold_repaired_doc != doc_content {
+            return Ok(RepairOutcome::TemplateNormalized);
+        }
+        let response_prefix_repaired_doc = repair_response_body_prompt_prefixes_if_needed(
+            effects.repair_io_effects,
+            file,
+            &doc_content,
+        )?;
+        if response_prefix_repaired_doc != doc_content {
+            return Ok(RepairOutcome::TemplateNormalized);
+        }
+        let has_live_prompt =
+            agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?.is_some();
+        if !has_live_prompt {
+            let repaired_doc =
+                repair_template_doc_if_needed(effects.repair_io_effects, file, &doc_content, None)?;
+            if repaired_doc != doc_content {
+                return Ok(RepairOutcome::TemplateNormalized);
+            }
+        }
+        return repair_completed_backlog_items(effects.repair_io_effects, file);
+    }
+
+    let pending_response = if pending_path.exists() {
+        Some(std::fs::read_to_string(&pending_path).with_context(|| {
+            format!("failed to read pending response {}", pending_path.display())
+        })?)
+    } else {
+        None
+    };
+    let response = capture
+        .as_ref()
+        .map(|r| r.response_body.clone())
+        .or_else(|| historical_capture.as_ref().map(|r| r.response_body.clone()))
+        .or_else(|| visible_response_recovery.clone())
+        .or(pending_response.clone())
+        .unwrap_or_default();
+
+    if response.trim().is_empty() {
+        // Empty pending file: just clean up.
+        let _ = std::fs::remove_file(&pending_path);
+        let _ = agent_doc_capture_io::mark_discarded(&canonical);
+        return Ok(RepairOutcome::Noop);
+    }
+
+    // Dedup guard: check if the response content is already present in the document.
+    // This prevents double-apply when the pending file was left behind after a successful
+    // IPC write (e.g., IPC timeout path exits with code 75 without calling clear_pending,
+    // but the plugin already applied the content via the IPC patch file).
+    let response_already_present =
+        response_replay::response_already_applied(&doc_content, &response)
+            || response_replay::response_already_applied_after_prefix_strip(
+                &doc_content,
+                &response,
+            );
+    if response_already_present {
+        if let Some(ref capture) = capture {
+            agent_doc_capture_io::validate_replay(&canonical, capture)?;
+        }
+        eprintln!(
+            "[repair] Response already present in document; skipping apply, cleaning up pending file"
+        );
+        let repaired_doc = repair_template_doc_if_needed(
+            effects.repair_io_effects,
+            file,
+            &doc_content,
+            Some(&response),
+        )?;
+        let state_is_open = agent_doc_cycle_state_io::load(file)?
+            .map(|state| state.is_open())
+            .unwrap_or(true);
+        let snapshot_missing_response = agent_doc_snapshot_io::load(file)?
+            .as_deref()
+            .map(|snapshot_doc| {
+                !response_replay::response_already_applied(snapshot_doc, &response)
+                    && !response_replay::response_already_applied_after_prefix_strip(
+                        snapshot_doc,
+                        &response,
+                    )
+            })
+            .unwrap_or(true);
+        if (state_is_open || visible_response_recovery.is_some()) && snapshot_missing_response {
+            agent_doc_snapshot_io::save(file, &repaired_doc, agent_doc_ops_log_io::log_op)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "repair_adopt_existing_response file={} reason=snapshot_missing_response",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[repair] advanced snapshot to the already-present response for {}",
+                file.display()
+            );
+        }
+        if state_is_open
+            && let Err(e) = agent_doc_cycle_state_io::mark_write_applied(
+                file,
+                "repair_already_applied",
+                Some(&repaired_doc),
+                Some(&repaired_doc),
+            )
+        {
+            eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
+        }
+        pending::clear_pending(&canonical)?;
+        return Ok(RepairOutcome::AlreadyApplied);
+    }
+
+    if let Some(ref capture) = capture {
+        if respect_manual_exchange_tail_removal_if_safe(
+            effects.repair_io_effects,
+            &canonical,
+            &doc_content,
+            capture,
+        )? {
+            return Ok(RepairOutcome::ManualTailRemovalRespected);
+        }
+        if retire_stale_capture_if_drifted(
+            effects.repair_io_effects,
+            &canonical,
+            &doc_content,
+            capture,
+        )? {
+            return Ok(RepairOutcome::StaleCaptureRetired);
+        }
+        agent_doc_capture_io::validate_replay(&canonical, capture)?;
+    }
+
+    replay_orphaned_response(
+        effects.replay_write_effects,
+        &canonical,
+        file,
+        &doc_content,
+        &response,
+        queue_completion_ids,
+        historical_capture.is_some(),
+    )
+}
+
+pub fn repair<R: RepairIoEffects + RepairTemplateWriteEffects, W: RepairReplayWriteEffects>(
+    effects: RepairCoordinatorEffects<'_, R, W>,
+    file: &Path,
+) -> Result<RepairOutcome> {
+    let outcome = run(effects, file)?;
+    if outcome.repaired()
+        && outcome != RepairOutcome::StalePreflightCycleAbandoned
+        && agent_doc_git_io::status::is_in_git_repo(file)
+    {
+        (effects.complete_required_closeout)(file)?;
+    } else if !outcome.repaired()
+        && let agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) =
+            (effects.inspect_session)(file)?
+    {
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
+            file,
+            agent_doc_flow::types::FlowStage::SessionCheck,
+            agent_doc_flow::types::FlowOutcome::FailedClosed,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::SessionCheckInterrupted,
+        );
+        anyhow::bail!(message);
+    }
+    Ok(outcome)
 }
 
 #[derive(Debug, Serialize)]

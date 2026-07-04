@@ -61,16 +61,31 @@
 //! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
-use agent_doc_turn::{
-    closeout_recovery::visible_response_recovery_is_adoptable, repair::RepairOutcome,
-    response_replay,
-};
-use anyhow::{Context, Result};
+use agent_doc_turn::repair::RepairOutcome;
+use anyhow::Result;
 use std::path::Path;
 
-use agent_doc_workflow::capture::capture_state_is_repairable;
-
 use crate::write;
+
+fn repair_coordinator_effects() -> agent_doc_repair_io::RepairCoordinatorEffects<
+    'static,
+    crate::OrchestrationRepairIoEffects,
+    crate::OrchestrationRepairReplayWriteEffects,
+> {
+    agent_doc_repair_io::RepairCoordinatorEffects {
+        repair_io_effects: &crate::REPAIR_IO_EFFECTS,
+        replay_write_effects: &crate::REPAIR_REPLAY_WRITE_EFFECTS,
+        complete_required_closeout: crate::write::complete_required_closeout,
+        inspect_session: repair_inspect_session,
+        recover_missing_committed_head_response:
+            crate::write::recover_missing_committed_head_response,
+        recover_dedupe_only_drift: crate::write::recover_dedupe_only_drift,
+    }
+}
+
+fn repair_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
+    agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
+}
 
 pub fn run_write_command_with_empty_response_recovery(
     options: write::CommandOptions,
@@ -88,283 +103,32 @@ pub(crate) fn recover_empty_response_for_strict_closeout(
     strict_closeout: bool,
     has_pending_mutation: bool,
 ) -> Result<bool> {
-    if strict_closeout {
-        let outcome = run(file)?;
-        if write::recover_missing_committed_head_response(file)? {
-            return Ok(true);
-        }
-        if outcome.repaired() {
-            eprintln!(
-                "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
-                outcome
-            );
-            return Ok(true);
-        }
-        if write::recover_dedupe_only_drift(file)? {
-            return Ok(true);
-        }
-    }
-    if has_pending_mutation {
-        eprintln!(
-            "[write] empty response stdin; committing pending mutations without a response body"
-        );
-        return Ok(true);
-    }
-    Ok(false)
+    agent_doc_repair_io::recover_empty_response_for_strict_closeout(
+        repair_coordinator_effects(),
+        file,
+        strict_closeout,
+        has_pending_mutation,
+    )
 }
 
 /// Check for a pending response and apply it if found.
 pub fn run(file: &Path) -> Result<RepairOutcome> {
-    run_with_queue_completion_ids(file, &[])
+    agent_doc_repair_io::run(repair_coordinator_effects(), file)
 }
 
 pub(crate) fn run_with_queue_completion_ids(
     file: &Path,
     queue_completion_ids: &[String],
 ) -> Result<RepairOutcome> {
-    // Canonicalize first to handle CWD drift (e.g., when CWD is in a submodule)
-    let canonical = file
-        .canonicalize()
-        .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
-
-    let pending_path = agent_doc_fs::pending_response_path_for(&canonical)?;
-    let capture = agent_doc_capture_io::load_active(&canonical)?
-        .filter(|capture| capture_state_is_repairable(capture.state));
-    let doc_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read document for repair {}", file.display()))?;
-    let cycle_state = agent_doc_cycle_state_io::load(file)?;
-    let historical_capture = if !pending_path.exists() && capture.is_none() {
-        agent_doc_repair_io::historical_committed_capture_replay(&canonical, &doc_content)?
-    } else {
-        None
-    };
-    let visible_response_recovery = if !pending_path.exists()
-        && capture.is_none()
-        && historical_capture.is_none()
-        && visible_response_recovery_is_adoptable(
-            cycle_state.as_ref().map(|state| state.phase),
-            agent_doc_codex_hook_io::load_active_session_for_current_file(file)
-                .ok()
-                .flatten()
-                .is_some(),
-        )
-        && agent_doc_git_io::status::is_in_git_repo(file)
-        && !agent_doc_repair_io::head_already_matches_current_doc(file, &doc_content)?
-    {
-        agent_doc_repair_io::visible_response_patch_from_document(file, &doc_content)?
-    } else {
-        None
-    };
-    if !pending_path.exists()
-        && capture.is_none()
-        && historical_capture.is_none()
-        && visible_response_recovery.is_none()
-    {
-        let outcome = agent_doc_repair_io::repair_stale_preflight_started_cycle(
-            &crate::REPAIR_IO_EFFECTS,
-            file,
-        )?;
-        if outcome != RepairOutcome::Noop {
-            let refreshed_content = std::fs::read_to_string(file).with_context(|| {
-                format!(
-                    "failed to read document after stale preflight repair {}",
-                    file.display()
-                )
-            })?;
-            let response_prefix_repaired_doc =
-                agent_doc_repair_io::repair_response_body_prompt_prefixes_if_needed(
-                    &crate::REPAIR_IO_EFFECTS,
-                    file,
-                    &refreshed_content,
-                )?;
-            if response_prefix_repaired_doc != refreshed_content {
-                return Ok(RepairOutcome::TemplateNormalized);
-            }
-            return Ok(outcome);
-        }
-        if agent_doc_repair_io::recover_missing_commit_boundary(
-            &crate::REPAIR_IO_EFFECTS,
-            file,
-            "repair_commit_boundary_recovered",
-        )?
-        .is_some()
-        {
-            return Ok(RepairOutcome::CommitBoundaryRecovered);
-        }
-        let scaffold_repaired_doc =
-            agent_doc_repair_io::repair_duplicate_exchange_scaffold_if_needed(
-                &crate::REPAIR_IO_EFFECTS,
-                file,
-                &doc_content,
-            )?;
-        if scaffold_repaired_doc != doc_content {
-            return Ok(RepairOutcome::TemplateNormalized);
-        }
-        let response_prefix_repaired_doc =
-            agent_doc_repair_io::repair_response_body_prompt_prefixes_if_needed(
-                &crate::REPAIR_IO_EFFECTS,
-                file,
-                &doc_content,
-            )?;
-        if response_prefix_repaired_doc != doc_content {
-            return Ok(RepairOutcome::TemplateNormalized);
-        }
-        let has_live_prompt =
-            agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?.is_some();
-        if !has_live_prompt {
-            let repaired_doc = agent_doc_repair_io::repair_template_doc_if_needed(
-                &crate::REPAIR_IO_EFFECTS,
-                file,
-                &doc_content,
-                None,
-            )?;
-            if repaired_doc != doc_content {
-                return Ok(RepairOutcome::TemplateNormalized);
-            }
-        }
-        return agent_doc_repair_io::repair_completed_backlog_items(
-            &crate::REPAIR_IO_EFFECTS,
-            file,
-        );
-    }
-
-    let pending_response = if pending_path.exists() {
-        Some(std::fs::read_to_string(&pending_path).with_context(|| {
-            format!("failed to read pending response {}", pending_path.display())
-        })?)
-    } else {
-        None
-    };
-    let response = capture
-        .as_ref()
-        .map(|r| r.response_body.clone())
-        .or_else(|| historical_capture.as_ref().map(|r| r.response_body.clone()))
-        .or_else(|| visible_response_recovery.clone())
-        .or(pending_response.clone())
-        .unwrap_or_default();
-
-    if response.trim().is_empty() {
-        // Empty pending file — just clean up
-        let _ = std::fs::remove_file(&pending_path);
-        let _ = agent_doc_capture_io::mark_discarded(&canonical);
-        return Ok(RepairOutcome::Noop);
-    }
-
-    // Dedup guard: check if the response content is already present in the document.
-    // This prevents double-apply when the pending file was left behind after a successful
-    // IPC write (e.g., IPC timeout path exits with code 75 without calling clear_pending,
-    // but the plugin already applied the content via the IPC patch file).
-    let response_already_present =
-        response_replay::response_already_applied(&doc_content, &response)
-            || response_replay::response_already_applied_after_prefix_strip(
-                &doc_content,
-                &response,
-            );
-    if response_already_present {
-        if let Some(ref capture) = capture {
-            agent_doc_capture_io::validate_replay(&canonical, capture)?;
-        }
-        eprintln!(
-            "[repair] Response already present in document — skipping apply, cleaning up pending file"
-        );
-        let repaired_doc = agent_doc_repair_io::repair_template_doc_if_needed(
-            &crate::REPAIR_IO_EFFECTS,
-            file,
-            &doc_content,
-            Some(&response),
-        )?;
-        let state_is_open = agent_doc_cycle_state_io::load(file)?
-            .map(|state| state.is_open())
-            .unwrap_or(true);
-        let snapshot_missing_response = agent_doc_snapshot_io::load(file)?
-            .as_deref()
-            .map(|snapshot_doc| {
-                !response_replay::response_already_applied(snapshot_doc, &response)
-                    && !response_replay::response_already_applied_after_prefix_strip(
-                        snapshot_doc,
-                        &response,
-                    )
-            })
-            .unwrap_or(true);
-        if (state_is_open || visible_response_recovery.is_some()) && snapshot_missing_response {
-            agent_doc_snapshot_io::save(file, &repaired_doc, agent_doc_ops_log_io::log_op)?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "repair_adopt_existing_response file={} reason=snapshot_missing_response",
-                    file.display()
-                ),
-            );
-            eprintln!(
-                "[repair] advanced snapshot to the already-present response for {}",
-                file.display()
-            );
-        }
-        if state_is_open
-            && let Err(e) = agent_doc_cycle_state_io::mark_write_applied(
-                file,
-                "repair_already_applied",
-                Some(&repaired_doc),
-                Some(&repaired_doc),
-            )
-        {
-            eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
-        }
-        agent_doc_repair_io::pending::clear_pending(&canonical)?;
-        return Ok(RepairOutcome::AlreadyApplied);
-    }
-
-    if let Some(ref capture) = capture {
-        if agent_doc_repair_io::respect_manual_exchange_tail_removal_if_safe(
-            &crate::REPAIR_IO_EFFECTS,
-            &canonical,
-            &doc_content,
-            capture,
-        )? {
-            return Ok(RepairOutcome::ManualTailRemovalRespected);
-        }
-        if agent_doc_repair_io::retire_stale_capture_if_drifted(
-            &crate::REPAIR_IO_EFFECTS,
-            &canonical,
-            &doc_content,
-            capture,
-        )? {
-            return Ok(RepairOutcome::StaleCaptureRetired);
-        }
-        agent_doc_capture_io::validate_replay(&canonical, capture)?;
-    }
-
-    agent_doc_repair_io::replay_orphaned_response(
-        &crate::REPAIR_REPLAY_WRITE_EFFECTS,
-        &canonical,
+    agent_doc_repair_io::run_with_queue_completion_ids(
+        repair_coordinator_effects(),
         file,
-        &doc_content,
-        &response,
         queue_completion_ids,
-        historical_capture.is_some(),
     )
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
-    let outcome = run(file)?;
-    if outcome.repaired()
-        && outcome != RepairOutcome::StalePreflightCycleAbandoned
-        && agent_doc_git_io::status::is_in_git_repo(file)
-    {
-        crate::write::complete_required_closeout(file)?;
-    } else if !outcome.repaired()
-        && let agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) =
-            agent_doc_session_check_io::inspect(file, &crate::session_check_effects())?
-    {
-        agent_doc_flow_io::closeout::log_closeout_guard_event(
-            file,
-            agent_doc_flow::types::FlowStage::SessionCheck,
-            agent_doc_flow::types::FlowOutcome::FailedClosed,
-            agent_doc_turn::closeout_guard::CloseoutGuardReason::SessionCheckInterrupted,
-        );
-        anyhow::bail!(message);
-    }
-    Ok(outcome)
+    agent_doc_repair_io::repair(repair_coordinator_effects(), file)
 }
 
 #[cfg(test)]

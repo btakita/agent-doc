@@ -3362,6 +3362,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     let repair_io_dependencies = repair_io_manifest["dependencies"].as_table().unwrap();
     for required in [
         "agent-doc-capture-io",
+        "agent-doc-codex-hook-io",
         "agent-doc-cycle-state-io",
         "agent-doc-document",
         "agent-doc-document-realtime",
@@ -3415,7 +3416,12 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "pub fn head_already_matches_current_doc(",
         "pub fn retire_stale_capture_if_drifted(",
         "pub fn respect_manual_exchange_tail_removal_if_safe(",
+        "pub struct RepairCoordinatorEffects",
+        "pub fn recover_empty_response_for_strict_closeout<",
+        "pub fn run_with_queue_completion_ids<",
+        "pub fn repair<",
         "pub trait RepairIoEffects",
+        "pub trait RepairReplayWriteEffects",
         "fn apply_closeout_recovery_mutation(",
         "struct BlockedRepairPayloadRecord",
         ".agent-doc/repair-blocked",
@@ -3428,6 +3434,9 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "agent_doc_session_check_io::first_unstarted_prompt_bearing_change(",
         "agent_doc_flow_io::closeout::log_closeout_guard_event(",
         "agent_doc_frontmatter::frontmatter::parse(",
+        "visible_response_recovery_is_adoptable(",
+        "response_replay::response_already_applied(",
+        "repair_adopt_existing_response file=",
         "agent_doc_workflow::capture::decide_stale_capture_retirement(",
         "agent_doc_capture_io::replay_baseline_drifted(",
         "agent_doc_template::strip_conversation_tail_outside_exchange(",
@@ -3484,6 +3493,9 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "fn repair_completed_backlog_items(",
         "fn retire_stale_capture_if_drifted(",
         "fn respect_manual_exchange_tail_removal_if_safe(",
+        "visible_response_recovery_is_adoptable(",
+        "response_replay::response_already_applied(",
+        "repair_adopt_existing_response file=",
         "fn discard_pending_capture_for_manual_repair(",
         "agent_doc_capture_io::replay_baseline_drifted(",
         "agent_doc_template::strip_conversation_tail_outside_exchange(",
@@ -3501,33 +3513,16 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     );
     assert!(
         repair_io.contains("pub fn save_blocked_repair_payload(")
-            && repair.contains("agent_doc_repair_io::replay_orphaned_response("),
-        "repair.rs should route replay repair through focused repair IO"
-    );
-    assert!(
-        repair.contains("agent_doc_repair_io::recover_missing_commit_boundary(")
-            && repair.contains("agent_doc_repair_io::repair_completed_backlog_items(")
-            && repair.contains("agent_doc_repair_io::repair_stale_preflight_started_cycle("),
-        "repair.rs should route recovery repair graphs through focused repair IO"
-    );
-    assert!(
-        repair.contains("agent_doc_repair_io::historical_committed_capture_replay(")
-            && repair.contains("agent_doc_repair_io::visible_response_patch_from_document(")
-            && repair.contains("agent_doc_repair_io::head_already_matches_current_doc(")
-            && repair
-                .contains("agent_doc_repair_io::respect_manual_exchange_tail_removal_if_safe(")
-            && repair.contains("agent_doc_repair_io::retire_stale_capture_if_drifted("),
-        "repair.rs should call focused repair IO for replay/recovery helper graphs"
+            && repair_io.contains("pub fn run_with_queue_completion_ids<")
+            && repair.contains("agent_doc_repair_io::run_with_queue_completion_ids(")
+            && repair.contains("agent_doc_repair_io::RepairCoordinatorEffects"),
+        "repair.rs should only adapt into the focused repair IO coordinator"
     );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
         orchestration_lib.contains("agent_doc_repair_io::cancel_preflight_cycle("),
         "orchestration closeout effects should route preflight cancel repair through focused repair IO"
-    );
-    assert!(
-        repair.contains("agent_doc_repair_io::pending::clear_pending(&canonical)"),
-        "repair.rs should clear pending response sidecars through focused repair IO"
     );
     for relative in [
         "agent-doc-orchestration/src/codex_hook.rs",
@@ -3557,10 +3552,12 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
 }
 
 #[test]
-fn test_orchestration_repair_owns_strict_empty_response_recovery() {
+fn test_repair_io_owns_strict_empty_response_recovery() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    let repair_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     let write =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let write_run_entry =
@@ -3569,8 +3566,12 @@ fn test_orchestration_repair_owns_strict_empty_response_recovery() {
     let main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
 
     assert!(
-        repair.contains("pub(crate) fn recover_empty_response_for_strict_closeout("),
-        "repair.rs should own strict empty-response closeout recovery coordination"
+        repair_io.contains("pub fn recover_empty_response_for_strict_closeout<"),
+        "agent-doc-repair-io should own strict empty-response closeout recovery coordination"
+    );
+    assert!(
+        repair.contains("agent_doc_repair_io::recover_empty_response_for_strict_closeout("),
+        "repair.rs should delegate strict empty-response closeout recovery to repair IO"
     );
     assert!(
         repair.contains("pub fn run_write_command_with_empty_response_recovery("),
@@ -3580,6 +3581,28 @@ fn test_orchestration_repair_owns_strict_empty_response_recovery() {
         !write.contains("fn recover_empty_response_for_strict_closeout("),
         "write.rs must not re-own strict empty-response closeout recovery coordination"
     );
+    for required in [
+        "run(effects, file)?",
+        "recover_missing_committed_head_response",
+        "recover_dedupe_only_drift",
+        "committing pending mutations without a response body",
+    ] {
+        assert!(
+            repair_io.contains(required),
+            "agent-doc-repair-io must own strict empty-response recovery marker: {required}"
+        );
+    }
+    for forbidden in [
+        "let outcome = run(file)?;",
+        "write::recover_missing_committed_head_response(file)?",
+        "write::recover_dedupe_only_drift(file)?",
+        "committing pending mutations without a response body",
+    ] {
+        assert!(
+            !repair.contains(forbidden),
+            "orchestration repair must not duplicate strict empty-response recovery marker: {forbidden}"
+        );
+    }
     assert_source_mentions_all(
         &main,
         "src/main.rs",
@@ -11023,6 +11046,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/git.rs",
             "agent-doc-commit-io/src/lib.rs",
             "Split `CommitCoordinatorPorts` into commit admission, snapshot/head drift guard, pre-stage normalization, transaction, and post-commit cleanup ports",
+        ),
+        (
+            "Repair recovery coordinator IO graph",
+            "agent-doc-orchestration/src/repair.rs",
+            "agent-doc-repair-io/src/lib.rs",
+            "Split `RepairCoordinatorEffects` into replay-write, closeout, session-check, pending/capture source selection, and empty-response recovery ports",
         ),
         (
             "Codex hook user-prompt-submit tracking IO graph",
@@ -20225,6 +20254,7 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
         "fn retire_superseded_captured_only_orphan_if_drifted(",
         "fn retire_stale_capture_if_drifted(",
         "fn decide_stale_capture_retirement(",
+        "capture_state_is_repairable(",
         "agent_doc_capture_io::replay_baseline_drifted(",
         "if duplicate_opener_changed",
         "if duplicate_close_changed",
@@ -20240,11 +20270,11 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
         );
     }
     assert!(
-        repair.contains("capture_state_is_repairable(")
+        repair_io.contains("capture_state_is_repairable(")
             && !repair.contains("RepairTemplateChanges {")
             && !repair.contains("template_changes.should_persist()")
             && !repair.contains("template_changes.changed_kinds()"),
-        "repair.rs should no longer own repair-template aggregation policy"
+        "agent-doc-repair-io should own capture repairability while repair.rs no longer owns repair-template aggregation policy"
     );
     assert!(
         repair_io.contains("agent_doc_workflow::capture::RepairTemplateChanges {")
@@ -24206,8 +24236,6 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             .unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
-    let repair_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
     let repair_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     let git_post_commit_cleanup =
@@ -24226,7 +24254,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             && commit_io_source.contains("agent_doc_git_io::revision::show_head(file)?")
             && write_source.contains("agent_doc_git_io::revision::show_head(file)")
             && write_source.contains("agent_doc_git_io::status::is_in_git_repo(file)")
-            && repair_source.contains("agent_doc_git_io::status::is_in_git_repo(file)")
+            && repair_io_source.contains("agent_doc_git_io::status::is_in_git_repo(file)")
             && repair_io_source.contains("agent_doc_git_io::revision::show_head(file)?")
             && graph_source.contains("agent_doc_git_io::status::is_in_git_repo(&path)")
             && graph_source.contains("agent_doc_git_io::revision::show_head(&canonical)")

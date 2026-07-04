@@ -1458,6 +1458,7 @@ name = "agent-doc-repair-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-capture-io",
+ "agent-doc-codex-hook-io",
  "agent-doc-cycle-state-io",
  "agent-doc-diff",
  "agent-doc-document",

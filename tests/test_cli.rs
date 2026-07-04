@@ -1209,6 +1209,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-write-ipc-io/src/transport.rs",
         "agent-doc-template-io/src/write_normalize.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-session-check-io/src/write_pending_checks.rs",
@@ -1720,6 +1721,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the same shared `reason=stale_source_buffer` table outcome so an old ACK
         // sidecar cannot overwrite a newer live operator edit.
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 15,
+        // #write-ipc-transport-graph: the production socket-first/file-IPC
+        // transport graph moved from orchestration into the focused write IPC
+        // crate. These are the existing snapshot-adoption, visible-repair, and
+        // post-delivery proof guard names, not newly introduced flow boundaries.
+        ("agent-doc-write-ipc-io/src/transport.rs", "guard_") => 11,
+        ("agent-doc-write-ipc-io/src/transport.rs", "reason=") => 3,
         // +2 (#docdriftgrace): the stale-snapshot reset regression tests call the
         // existing `guard_no_stale_snapshot_reset_drift` boundary for the safe
         // visible rebase and fail-closed active-driver cases. +2 (#docdriftfinalize):
@@ -10222,6 +10229,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/ipc/transport.rs",
             "agent-doc-write-converge-io::write_file_ipc_and_poll_delivery",
             "Extract the post-delivery repair graph next",
+        ),
+        (
+            "Write IPC transport graph",
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "agent-doc-write-ipc-io/src/transport.rs",
+            "Move remaining write IPC transport tests and the orchestration wrapper",
         ),
         (
             "Write IPC repair decision model extraction",
@@ -21433,7 +21446,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
-        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-write-ipc-io/src/transport.rs",
         "agent-doc-compact-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -21529,6 +21542,8 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     }
 
     let write_ipc_transport_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/transport.rs")).unwrap();
+    let orchestration_write_ipc_transport_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
             .unwrap();
     let write_ipc_io_source =
@@ -21541,6 +21556,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && write_ipc_transport_source.contains("is_already_applied_ack_error_message")
             && write_ipc_transport_source.contains("is_socket_ack_timeout_error"),
         "write IPC transport should import remaining IPC protocol vocabulary from the focused protocol crate"
+    );
+    assert!(
+        orchestration_write_ipc_transport_source
+            .contains("agent_doc_write_ipc_io::try_ipc_with_effects("),
+        "orchestration write IPC transport should only adapt try_ipc through the focused transport crate"
     );
     assert!(
         write_ipc_io_source.contains("use agent_doc_ipc_protocol::{")
@@ -22364,8 +22384,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         "write/ipc.rs should not keep IPC snapshot/CRDT persistence helpers after they move to write-converge IO"
     );
     let write_ipc_transport =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/transport.rs")).unwrap();
     assert!(
         write_ipc_transport.contains("save_ipc_snapshot_and_crdt_nonfatal(")
             && !write_ipc_transport.contains("agent_doc_merge_io::save_document_crdt("),
@@ -23503,8 +23522,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     );
 
     let write_ipc_transport =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/transport.rs")).unwrap();
     let write_ipc_io =
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
     let realtime_write_policy =
@@ -24205,8 +24223,7 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
     let write_converge =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     let write_ipc_transport =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/transport.rs")).unwrap();
     let write_ipc_io =
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
     let preflight_run =
@@ -24245,11 +24262,11 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "write IPC paths should route snapshot/live-drift adoption decisions through the focused write-converge owner"
     );
     assert!(
-        write_ipc_transport.contains("use agent_doc_write_ipc_io::{")
+        write_ipc_transport.contains("use crate::{")
             && write_ipc_transport.contains("build_ipc_patches_json")
             && write_ipc_io
                 .contains("agent_doc_document_realtime::write_policy::normalize_patch_content("),
-        "write/ipc/transport.rs should call focused write IPC payload synthesis, which imports realtime patch normalization directly"
+        "focused write IPC transport should call focused write IPC payload synthesis, which imports realtime patch normalization directly"
     );
     for forbidden_snippet in [
         "fn new_agent_response_headings(",
@@ -25192,8 +25209,7 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         );
     }
     let transport_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/transport.rs")).unwrap();
     assert!(
         transport_source
             .contains("agent_doc_template_io::response_materialization_probe_from_ipc_payload"),
@@ -25224,7 +25240,7 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
     let focused_callers = [
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
-        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-write-ipc-io/src/transport.rs",
         "agent-doc-write-ipc-io/src/lib.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-template-io/src/write_normalize.rs",
@@ -26164,8 +26180,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
     let write_ipc_transport =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/transport.rs")).unwrap();
     let idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
             .unwrap();

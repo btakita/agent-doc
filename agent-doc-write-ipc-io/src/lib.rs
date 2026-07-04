@@ -1,5 +1,9 @@
 //! High-level write IPC transport adapters.
 
+mod transport;
+
+pub use transport::try_ipc_with_effects;
+
 use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;

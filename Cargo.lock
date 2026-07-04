@@ -2185,10 +2185,13 @@ name = "agent-doc-write-ipc-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-cycle-state-io",
+ "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-boundary",
  "agent-doc-element-exchange",
+ "agent-doc-element-exchange-io",
+ "agent-doc-flow",
  "agent-doc-flow-io",
  "agent-doc-fs",
  "agent-doc-hash",
@@ -2199,7 +2202,9 @@ dependencies = [
  "agent-doc-run-context-io",
  "agent-doc-snapshot-io",
  "agent-doc-template",
+ "agent-doc-template-io",
  "agent-doc-test-support",
+ "agent-doc-turn",
  "agent-doc-write-converge-io",
  "anyhow",
  "serde_json",

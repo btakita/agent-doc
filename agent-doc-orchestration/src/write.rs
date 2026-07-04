@@ -800,22 +800,32 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceE
         atomic_write_if_current_pub(file, content, expected_current, source)
     }
 
-    fn write_file_ipc_and_poll_convergence(
+    fn cycle_already_committed(&self, file: &Path) -> Option<String> {
+        cycle_already_committed(file)
+    }
+
+    fn log_file_ipc_already_committed(&self, file: &Path, _cycle_id: &str) {
+        log_closeout_guard(
+            file,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
+        );
+    }
+
+    fn cleanup_fallback_patch_files(&self, file: &Path) {
+        cleanup_fallback_patch_files(file);
+    }
+
+    fn log_file_ipc_proof_failure(
         &self,
-        patch_file: &Path,
-        payload: &serde_json::Value,
-        doc_file: &Path,
-        patch_count: usize,
-        project_root: &Path,
-        target: &str,
-    ) -> Result<bool> {
-        write_ipc_and_poll(
-            patch_file,
-            payload,
-            doc_file,
-            patch_count,
-            IpcPollOptions::convergence(project_root, Some(target)),
-        )
+        file: &Path,
+        patch_id: Option<&str>,
+        invariant: &str,
+        recovery: &str,
+        detail: &str,
+    ) {
+        log_ipc_proof_failure(file, "file_ipc", patch_id, invariant, recovery, detail);
     }
 }
 

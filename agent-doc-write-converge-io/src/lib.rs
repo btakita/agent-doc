@@ -29,7 +29,7 @@ fn log_flow_event(file: &Path, event: agent_doc_flow::types::FlowEvent) {
 }
 
 /// Effects still owned by the orchestration command crate while the write
-/// authority queue and file-IPC poller are being extracted.
+/// authority queue is being extracted.
 pub trait EditorConvergenceEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
 
@@ -41,15 +41,130 @@ pub trait EditorConvergenceEffects {
         source: &str,
     ) -> Result<()>;
 
-    fn write_file_ipc_and_poll_convergence(
+    fn cycle_already_committed(&self, file: &Path) -> Option<String>;
+
+    fn log_file_ipc_already_committed(&self, file: &Path, cycle_id: &str);
+
+    fn cleanup_fallback_patch_files(&self, file: &Path);
+
+    fn log_file_ipc_proof_failure(
         &self,
-        patch_file: &Path,
-        payload: &serde_json::Value,
-        doc_file: &Path,
-        patch_count: usize,
-        project_root: &Path,
-        target: &str,
-    ) -> Result<bool>;
+        file: &Path,
+        patch_id: Option<&str>,
+        invariant: &str,
+        recovery: &str,
+        detail: &str,
+    );
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileIpcDeliveryOptions {
+    pub guard_committed_cycle: bool,
+}
+
+impl FileIpcDeliveryOptions {
+    pub fn guard_committed_cycle() -> Self {
+        Self {
+            guard_committed_cycle: true,
+        }
+    }
+}
+
+/// Write a file-IPC patch and prove the plugin consumed it.
+///
+/// This owns the durable delivery loop: atomic patch write, committed-cycle
+/// fence, negative-ack sidecar handling, and no-ack timeout proof logging. The
+/// caller remains responsible for post-consumption snapshot/response validation.
+pub fn write_file_ipc_and_poll_delivery(
+    effects: &dyn EditorConvergenceEffects,
+    patch_file: &Path,
+    payload: &serde_json::Value,
+    doc_file: &Path,
+    patch_count: usize,
+    options: FileIpcDeliveryOptions,
+) -> Result<bool> {
+    let patch_id_for_diagnostics = payload.get("patch_id").and_then(|value| value.as_str());
+
+    effects.atomic_write(patch_file, &serde_json::to_string_pretty(payload)?)?;
+
+    eprintln!(
+        "[write] IPC patch written to {} ({} components)",
+        patch_file.display(),
+        patch_count
+    );
+
+    let timeout = std::time::Duration::from_secs(2);
+    let poll_interval = std::time::Duration::from_millis(100);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        if options.guard_committed_cycle
+            && let Some(ref cycle_id) = effects.cycle_already_committed(doc_file)
+        {
+            eprintln!(
+                "[write] IPC poll skipped: cycle {} already committed for {}",
+                cycle_id,
+                doc_file.display()
+            );
+            effects.log_file_ipc_already_committed(doc_file, cycle_id);
+            agent_doc_ops_log_io::log_op(
+                doc_file,
+                &format!(
+                    "file_ipc_poll_skip file={} cycle_id={} reason=already_committed",
+                    doc_file.display(),
+                    cycle_id
+                ),
+            );
+            effects.cleanup_fallback_patch_files(doc_file);
+            return Ok(false);
+        }
+
+        let nack_file = patch_file.with_extension("nack");
+        if nack_file.exists() {
+            let detail = std::fs::read_to_string(&nack_file).unwrap_or_default();
+            let _ = std::fs::remove_file(&nack_file);
+            let _ = std::fs::remove_file(patch_file);
+            eprintln!(
+                "[write] IPC negative-ack: plugin rejected patch {} — refusing direct document write",
+                patch_file.display()
+            );
+            effects.log_file_ipc_proof_failure(
+                doc_file,
+                patch_id_for_diagnostics,
+                "nack",
+                "retry_without_disk_write",
+                &format!(
+                    "nack_detail={} patch_file={}",
+                    detail.trim(),
+                    patch_file.display()
+                ),
+            );
+            return Ok(false);
+        }
+
+        if !patch_file.exists() {
+            return Ok(true);
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+
+    eprintln!(
+        "[write] IPC timeout ({}s) — leaving patch for editor retry; refusing direct document write",
+        timeout.as_secs()
+    );
+    effects.log_file_ipc_proof_failure(
+        doc_file,
+        patch_id_for_diagnostics,
+        "no_ack",
+        "retry_without_disk_write",
+        &format!(
+            "timeout_secs={} patch_file={}",
+            timeout.as_secs(),
+            patch_file.display()
+        ),
+    );
+    Ok(false)
 }
 
 /// `#exch-intermix`: auto-recover the `live_prompt_drift_after_preflight`
@@ -769,7 +884,6 @@ pub fn try_editor_converge(
                     project_root: &project_root,
                     payload: &payload,
                     patch_id: &patch_id,
-                    target,
                     source,
                     reason: "listener_degraded",
                 },
@@ -985,7 +1099,6 @@ pub fn try_editor_converge(
                         project_root: &project_root,
                         payload: &payload,
                         patch_id: &patch_id,
-                        target,
                         source,
                         reason: "socket_status_error",
                     },
@@ -1028,7 +1141,6 @@ struct FileIpcConvergenceRequest<'a> {
     project_root: &'a Path,
     payload: &'a serde_json::Value,
     patch_id: &'a str,
-    target: &'a str,
     source: &'a str,
     reason: &'a str,
 }
@@ -1042,7 +1154,6 @@ fn try_editor_converge_file_ipc(
         project_root,
         payload,
         patch_id,
-        target,
         source,
         reason,
     } = request;
@@ -1079,13 +1190,13 @@ fn try_editor_converge_file_ipc(
             patch_count
         ),
     );
-    if effects.write_file_ipc_and_poll_convergence(
+    if write_file_ipc_and_poll_delivery(
+        effects,
         &patch_file,
         payload,
         file,
         patch_count,
-        project_root,
-        target,
+        FileIpcDeliveryOptions::guard_committed_cycle(),
     )? {
         agent_doc_ops_log_io::log_op(
             file,

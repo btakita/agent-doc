@@ -9672,7 +9672,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         })
         .collect();
     assert!(
-        coverage_lines.len() >= 37,
+        coverage_lines.len() >= 38,
         "coarse extraction commit coverage should include prior large-chunk rounds and current rounds; found {} rows",
         coverage_lines.len()
     );
@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 64,
+        ledger_rows.len() >= 65,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -25908,7 +25908,9 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn live_buffer_delivery_missing_operator_text_authority_after_refresh(",
         "fn try_editor_converge_file_ipc(",
         "fn try_detached_disk_write(",
-        "write_file_ipc_and_poll_convergence",
+        "pub struct FileIpcDeliveryOptions",
+        "pub fn write_file_ipc_and_poll_delivery(",
+        "fn log_file_ipc_proof_failure(",
     ] {
         assert!(
             write_converge_io.contains(required_snippet),
@@ -25953,7 +25955,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
             && write_source.contains(
                 "impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceEffects",
             )
-            && write_source.contains("write_file_ipc_and_poll_convergence")
+            && write_source.contains("fn log_file_ipc_proof_failure(")
             && converge.contains("Test-only write convergence coverage")
             && !converge.contains("fn try_detached_disk_write(")
             && !converge.contains("fn try_editor_converge_file_ipc(")

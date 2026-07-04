@@ -228,6 +228,166 @@ impl IpcDiskRepairReason {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EditorBadStateFingerprint {
+    pub content: String,
+    pub len: usize,
+    pub hash: String,
+}
+
+impl EditorBadStateFingerprint {
+    pub fn new(content: String) -> Self {
+        let len = content.len();
+        let hash = agent_doc_hash::content_hash(&content);
+        Self { content, len, hash }
+    }
+
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IpcRepairDecision {
+    pub snapshot_content: String,
+    pub snap_source: IpcSnapshotSource,
+    pub disk_repair_reason: Option<IpcDiskRepairReason>,
+    pub editor_bad_state: Option<EditorBadStateFingerprint>,
+    pub normalize_prefix_lines: Vec<String>,
+    pub redeliver_editor: bool,
+}
+
+impl IpcRepairDecision {
+    pub fn ack_content(snapshot_content: String) -> Self {
+        Self {
+            snapshot_content,
+            snap_source: IpcSnapshotSource::AckContentSidecar,
+            disk_repair_reason: None,
+            editor_bad_state: None,
+            normalize_prefix_lines: Vec::new(),
+            redeliver_editor: false,
+        }
+    }
+
+    pub fn content_ours(snapshot_content: String) -> Self {
+        Self {
+            snapshot_content,
+            snap_source: IpcSnapshotSource::ContentOurs,
+            disk_repair_reason: None,
+            editor_bad_state: None,
+            normalize_prefix_lines: Vec::new(),
+            redeliver_editor: false,
+        }
+    }
+
+    fn prefix_repair(
+        snapshot_content: String,
+        bad_state: String,
+        normalize_prefix_lines: &[String],
+        snap_source: IpcSnapshotSource,
+    ) -> Self {
+        Self {
+            snapshot_content,
+            snap_source,
+            disk_repair_reason: Some(IpcDiskRepairReason::PrefixDivergence),
+            editor_bad_state: Some(EditorBadStateFingerprint::new(bad_state)),
+            normalize_prefix_lines: normalize_prefix_lines.to_vec(),
+            redeliver_editor: true,
+        }
+    }
+
+    pub fn ack_content_prefix_repair(
+        snapshot_content: String,
+        bad_state: String,
+        normalize_prefix_lines: &[String],
+    ) -> Self {
+        Self::prefix_repair(
+            snapshot_content,
+            bad_state,
+            normalize_prefix_lines,
+            IpcSnapshotSource::AckContentSidecar,
+        )
+    }
+
+    pub fn file_read_prefix_repair(
+        snapshot_content: String,
+        bad_state: String,
+        normalize_prefix_lines: &[String],
+    ) -> Self {
+        Self::prefix_repair(
+            snapshot_content,
+            bad_state,
+            normalize_prefix_lines,
+            IpcSnapshotSource::FileRead,
+        )
+    }
+
+    pub fn file_read(snapshot_content: String) -> Self {
+        Self {
+            snapshot_content,
+            snap_source: IpcSnapshotSource::FileRead,
+            disk_repair_reason: None,
+            editor_bad_state: None,
+            normalize_prefix_lines: Vec::new(),
+            redeliver_editor: false,
+        }
+    }
+
+    pub fn apply_ipc_dedupe(
+        mut self,
+        snapshot_content: String,
+        bad_state_before_dedupe: String,
+    ) -> Self {
+        self.snapshot_content = snapshot_content;
+        self.disk_repair_reason = Some(match self.disk_repair_reason {
+            Some(reason) => reason.merge_with_ipc_dedupe(),
+            None => IpcDiskRepairReason::IpcDedupe,
+        });
+        if self.editor_bad_state.is_none() {
+            self.editor_bad_state = Some(EditorBadStateFingerprint::new(bad_state_before_dedupe));
+        }
+        self.redeliver_editor = self.editor_bad_state.is_some();
+        self
+    }
+
+    pub fn ack_content_proven(&self) -> bool {
+        self.snap_source.is_ack_content_proven()
+    }
+
+    pub fn replace_snapshot_with_content_ours_for_live_prompt_drift(
+        &mut self,
+        content_ours: &str,
+        visible_repair_required: bool,
+    ) {
+        let bad_state = self.snapshot_content.clone();
+        self.snapshot_content = content_ours.to_string();
+        self.snap_source = IpcSnapshotSource::ContentOurs;
+        self.normalize_prefix_lines.clear();
+        if visible_repair_required {
+            self.disk_repair_reason = Some(IpcDiskRepairReason::LivePromptDrift);
+            self.editor_bad_state = Some(EditorBadStateFingerprint::new(bad_state));
+            self.redeliver_editor = true;
+        } else {
+            self.disk_repair_reason = None;
+            self.editor_bad_state = None;
+            self.redeliver_editor = false;
+        }
+    }
+
+    pub fn replace_snapshot_with_content_ours_for_prompt_duplication(
+        &mut self,
+        content_ours: &str,
+        bad_state: String,
+    ) {
+        self.snapshot_content = content_ours.to_string();
+        self.snap_source = IpcSnapshotSource::ContentOurs;
+        self.disk_repair_reason = Some(IpcDiskRepairReason::IpcDedupe);
+        self.editor_bad_state = Some(EditorBadStateFingerprint::new(bad_state));
+        self.normalize_prefix_lines.clear();
+        self.redeliver_editor = true;
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlreadyAppliedSnapshotOutcome {
     Persisted,
@@ -722,18 +882,18 @@ impl FullContentIpcMode {
 #[cfg(test)]
 mod tests {
     use super::{
-        AckClassification, AlreadyAppliedSnapshotOutcome, FullContentIpcMode,
-        FullContentRepairRedelivery, IpcDiskRepairReason, IpcSnapshotSource,
-        build_ipc_node_patches_json, callback_request, callback_request_is_expired,
-        callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
-        classify_ack, early_ack_line, early_ack_ops_marker, early_ack_tagged_message,
-        effective_unmatched_for_patch_payload, existing_patch_is_reposition_only,
-        ipc_accept_thread_ops_marker, is_already_applied_ack_error_message,
-        is_socket_ack_timeout_error, is_socket_status_error, message_requests_early_ack,
-        normalization_repair_patch_message, patch_message, pending_callback_from_request,
-        publish_live_buffer_message, queue_convergence_message, refresh_content_message,
-        reload_lib_message, reposition_message, save_document_message, vcs_refresh_message,
-        vcs_refresh_probe_message,
+        AckClassification, AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint,
+        FullContentIpcMode, FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision,
+        IpcSnapshotSource, build_ipc_node_patches_json, callback_request,
+        callback_request_is_expired, callback_response, callback_response_matches_request,
+        callback_urgency_for_elapsed, classify_ack, early_ack_line, early_ack_ops_marker,
+        early_ack_tagged_message, effective_unmatched_for_patch_payload,
+        existing_patch_is_reposition_only, ipc_accept_thread_ops_marker,
+        is_already_applied_ack_error_message, is_socket_ack_timeout_error, is_socket_status_error,
+        message_requests_early_ack, normalization_repair_patch_message, patch_message,
+        pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
+        refresh_content_message, reload_lib_message, reposition_message, save_document_message,
+        vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]
@@ -1236,6 +1396,50 @@ mod tests {
             FullContentRepairRedelivery::NormalizationFallback
                 .failed_message("boom")
                 .contains("boom")
+        );
+    }
+
+    #[test]
+    fn editor_bad_state_fingerprint_records_content_len_and_hash() {
+        let fingerprint = EditorBadStateFingerprint::new("bad editor state\n".to_string());
+
+        assert_eq!(fingerprint.content(), "bad editor state\n");
+        assert_eq!(fingerprint.len, "bad editor state\n".len());
+        assert_eq!(
+            fingerprint.hash,
+            agent_doc_hash::content_hash("bad editor state\n")
+        );
+    }
+
+    #[test]
+    fn ipc_repair_decision_dedupe_merges_prefix_repair_state() {
+        let decision = IpcRepairDecision::ack_content_prefix_repair(
+            "prefix repaired\n".to_string(),
+            "bad prefix\n".to_string(),
+            &["normalize me".to_string()],
+        )
+        .apply_ipc_dedupe(
+            "deduped\n".to_string(),
+            "ignored later bad state\n".to_string(),
+        );
+
+        assert_eq!(decision.snapshot_content, "deduped\n");
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe)
+        );
+        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert!(decision.redeliver_editor);
+        assert_eq!(
+            decision
+                .editor_bad_state
+                .as_ref()
+                .map(|state| state.content()),
+            Some("bad prefix\n")
+        );
+        assert_eq!(
+            decision.normalize_prefix_lines,
+            ["normalize me".to_string()]
         );
     }
 }

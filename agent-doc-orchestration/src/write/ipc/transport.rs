@@ -11,9 +11,9 @@ use agent_doc_ipc_io::editor_target::{
     live_editor_delivery_has_operator_authority, target_payload_to_live_editor,
 };
 use agent_doc_ipc_protocol::{
-    FullContentIpcMode, build_ipc_node_patches_json, effective_unmatched_for_patch_payload,
-    existing_patch_is_reposition_only, is_already_applied_ack_error_message,
-    is_socket_ack_timeout_error,
+    FullContentIpcMode, IpcRepairDecision, IpcSnapshotSource, build_ipc_node_patches_json,
+    effective_unmatched_for_patch_payload, existing_patch_is_reposition_only,
+    is_already_applied_ack_error_message, is_socket_ack_timeout_error,
 };
 use agent_doc_write_converge_io::{
     cleanup_legacy_ipc_degraded, clear_ipc_socket_ack_timeouts, ipc_direct_disk_degraded,
@@ -3991,13 +3991,14 @@ Can you preserve the second paragraph too?
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
     use super::{
-        IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, WriteFlags,
-        cleanup_fallback_patch_files, cycle_already_committed, recover_dedupe_only_drift,
-        recover_empty_response_for_strict_closeout, redeliver_ipc_dedupe_to_editor,
-        repair_ipc_decision_visible_state, try_ipc, try_ipc_full_content,
-        try_ipc_full_content_operator_mutation_from_source,
+        WriteFlags, cleanup_fallback_patch_files, cycle_already_committed,
+        recover_dedupe_only_drift, recover_empty_response_for_strict_closeout,
+        redeliver_ipc_dedupe_to_editor, repair_ipc_decision_visible_state, try_ipc,
+        try_ipc_full_content, try_ipc_full_content_operator_mutation_from_source,
     };
-    use crate::write::ipc::EditorBadStateFingerprint;
+    use agent_doc_ipc_protocol::{
+        EditorBadStateFingerprint, IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource,
+    };
     use std::fs;
     use std::path::Path;
     use tempfile::TempDir;

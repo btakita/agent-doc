@@ -816,9 +816,11 @@ fn consume_queue_prompts_for_done_ids_closeout(
     }
 }
 
-pub(crate) struct QueueConsumeWritebackEffects;
+#[doc(hidden)]
+pub struct QueueConsumeWritebackEffects;
 
-pub(crate) static QUEUE_CONSUME_WRITEBACK_EFFECTS: QueueConsumeWritebackEffects =
+#[doc(hidden)]
+pub static QUEUE_CONSUME_WRITEBACK_EFFECTS: QueueConsumeWritebackEffects =
     QueueConsumeWritebackEffects;
 
 pub struct WriteConvergenceEffects;

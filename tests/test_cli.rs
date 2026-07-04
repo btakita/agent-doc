@@ -2928,7 +2928,7 @@ fn test_turn_scope_io_extraction_stays_first_class_and_facade_free() {
     );
     for relative_path in [
         "agent-doc-run-io/src/lib.rs",
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "tests/run_integration.rs",
@@ -3470,6 +3470,8 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
     let git = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden in [
         "struct BlockedRepairPayloadRecord",
         "fn save_blocked_repair_payload(",
@@ -3507,8 +3509,9 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     }
     assert!(
         !git.contains("pub fn repair_committed_historical_snapshot_drift(")
-            && git.contains("agent_doc_repair_io::repair_committed_historical_snapshot_drift("),
-        "git.rs must call focused repair IO for committed historical snapshot drift repair"
+            && commit_io
+                .contains("agent_doc_repair_io::repair_committed_historical_snapshot_drift("),
+        "commit lifecycle must call focused repair IO for committed historical snapshot drift repair"
     );
     assert!(
         repair_io.contains("pub fn save_blocked_repair_payload(")
@@ -4439,6 +4442,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
     let orchestration_git =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let orchestration_git_tests =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/git.rs")).unwrap();
     let orchestration_preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let orchestration_preflight_maintenance =
@@ -4483,7 +4488,7 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         queue_io_consume.contains("pub fn strike_answered_free_text_heads_at_commit_seam(")
             && queue_io_consume.contains("fn capture_response_body_for_commit(")
             && queue_io_consume.contains("agent_doc_capture_io::load_by_id(")
-            && orchestration_git
+            && orchestration_git_tests
                 .contains("queue_consume::strike_answered_free_text_heads_at_commit_seam(")
             && !orchestration_git.contains("fn strike_answered_free_text_heads_at_commit_seam(")
             && !orchestration_git.contains("fn capture_response_body_for("),
@@ -11068,6 +11073,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/git.rs",
             "agent-doc-commit-io/src/lib.rs",
             "Split `CommitCoordinatorPorts` into commit admission, snapshot/head drift guard, pre-stage normalization, transaction, and post-commit cleanup ports",
+        ),
+        (
+            "Git commit boundary test-suite relocation",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-orchestration/tests/git.rs",
+            "Move the remaining commit-boundary tests into `agent-doc-commit-io` and focused `agent-doc-git-io` fixtures",
         ),
         (
             "Repair recovery coordinator IO graph",
@@ -26584,7 +26595,8 @@ fn test_agent_doc_template_owns_stale_baseline_policy() {
         "write.rs should import focused stale-baseline policy directly"
     );
 
-    let git = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let git =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/git.rs")).unwrap();
     assert!(
         git.contains("agent_doc_template::stale_baseline::is_stale_baseline"),
         "git write-path tests should call focused stale-baseline policy directly"

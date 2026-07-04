@@ -6,14 +6,15 @@
 
 use agent_doc_document::write_normalization::{
     AGENT_RESPONSE_COMPONENT, convergence_recovered_editor_wins_for_payload,
-    convergence_recovered_editor_wins_outside_response,
+    convergence_recovered_editor_wins_outside_response, strip_boundary_for_dedup,
 };
 use agent_doc_document_realtime::write_policy::{
-    AckMismatchRecovery, OperatorReconcileStep, WholeBufferAuthority, WholeBufferAuthorityFacts,
-    WholeBufferDelivery, WholeBufferDeliveryAction, classify_ack_mismatch_recovery,
-    decide_whole_buffer_delivery, exchange_change_is_safe_historical_reduction,
-    live_prompt_drift_recovery_target, normalize_visible_recovery_compare, operator_reconcile_step,
-    should_refuse_disk_fallback, snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
+    AckMismatchRecovery, FullContentSourceProof, OperatorReconcileStep, WholeBufferAuthority,
+    WholeBufferAuthorityFacts, WholeBufferDelivery, WholeBufferDeliveryAction,
+    classify_ack_mismatch_recovery, decide_whole_buffer_delivery,
+    exchange_change_is_safe_historical_reduction, live_prompt_drift_recovery_target,
+    normalize_visible_recovery_compare, operator_reconcile_step, should_refuse_disk_fallback,
+    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
@@ -1171,6 +1172,366 @@ fn wait_for_operator_text_authority_refresh(
         }
     }
     Some(latest_missing)
+}
+
+fn content_matches_recent_committed_blob(file: &Path, content: &str, limit: usize) -> bool {
+    let lines = match agent_doc_git_io::revision::recent_commit_lines(file, None, limit) {
+        agent_doc_git_io::revision::RecentCommitLog::Lines(lines) => lines,
+        _ => return false,
+    };
+    for line in lines {
+        let Some(sha) = line.split_whitespace().next() else {
+            continue;
+        };
+        if let Ok(Some(blob)) = agent_doc_git_io::revision::show_rev(file, sha)
+            && blob == content
+        {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn redelivery_missing_operator_text_authority(
+    file: &Path,
+    expected_bad_state: &str,
+    label: &str,
+    source_patch_id: Option<&str>,
+) -> bool {
+    let Some(live) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
+        file,
+        expected_bad_state,
+        label,
+    ) else {
+        return false;
+    };
+    let editor_id = live.editor_id.as_deref().unwrap_or("unknown");
+    // The capability gate exists to avoid clobbering a live buffer that may hold
+    // unsaved operator edits. If the stale buffer byte-matches a recent
+    // committed blob, it is recoverable, so refresh the editor from disk instead
+    // of blocking the write.
+    if content_matches_recent_committed_blob(file, expected_bad_state, 15) {
+        let stale_hash = agent_doc_hash::content_hash(expected_bad_state);
+        if let Ok(canonical) = file.canonicalize() {
+            let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+            let disk = std::fs::read_to_string(&canonical).unwrap_or_default();
+            let refresh_target = if disk.is_empty() {
+                expected_bad_state
+            } else {
+                &disk
+            };
+            let _ = agent_doc_ipc_io::send_refresh_content(
+                &project_root,
+                &canonical.to_string_lossy(),
+                refresh_target,
+                &stale_hash,
+                expected_bad_state.len(),
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{label}_editor_authority_autoheal file={} action=refresh_editor_from_disk reason=stale_behind_committed_blob editor_id={} stale_len={} stale_hash={}",
+                file.display(),
+                editor_id,
+                expected_bad_state.len(),
+                &stale_hash[..stale_hash.len().min(12)],
+            ),
+        );
+        return false;
+    }
+    eprintln!(
+        "[write] {label} editor repair skipped: live editor buffer {editor_id} lacks required capability {}",
+        agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{label}_editor_redelivery_skipped file={} patch_id={} skip=editor_capability_missing capability={} editor_id={} live_len={} live_hash={}",
+            file.display(),
+            source_patch_id.unwrap_or("-"),
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            editor_id,
+            live.len,
+            live.hash
+        ),
+    );
+    true
+}
+
+pub fn verify_normalization_repair_observed(
+    file: &Path,
+    project_root: &Path,
+    patch_id: &str,
+    repaired_content: &str,
+    transport: &str,
+) -> bool {
+    let observed = match poll_ack_content_sidecar(
+        project_root,
+        patch_id,
+        std::time::Duration::from_millis(200),
+        std::time::Duration::from_millis(25),
+    ) {
+        Ok(Some(content)) => content,
+        Ok(None) => std::fs::read_to_string(file).unwrap_or_default(),
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "sidecar_normalization_fallback_narrow_repair_ack_read_failed file={} patch_id={} transport={} error={}",
+                    file.display(),
+                    patch_id,
+                    transport,
+                    e
+                ),
+            );
+            std::fs::read_to_string(file).unwrap_or_default()
+        }
+    };
+
+    let observed_matches =
+        strip_boundary_for_dedup(&observed) == strip_boundary_for_dedup(repaired_content);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "sidecar_normalization_fallback_narrow_repair_observed file={} patch_id={} transport={} observed_len={} observed_hash={} expected_len={} expected_hash={} matched={}",
+            file.display(),
+            patch_id,
+            transport,
+            observed.len(),
+            agent_doc_hash::content_hash(&observed),
+            repaired_content.len(),
+            agent_doc_hash::content_hash(repaired_content),
+            observed_matches
+        ),
+    );
+    observed_matches
+}
+
+pub fn try_ipc_normalization_repair_patch(
+    file: &Path,
+    repaired_content: &str,
+    expected_bad_state: &str,
+    normalize_prefix_lines: &[String],
+    source_patch_id: Option<&str>,
+) -> Result<bool> {
+    if !agent_doc_document_realtime::write_policy::normalization_repair_candidate_matches(
+        expected_bad_state,
+        repaired_content,
+        normalize_prefix_lines,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "sidecar_normalization_fallback_narrow_repair_ineligible file={} patch_id={} skip=normalization_only_patch_not_equivalent normalize_targets={}",
+                file.display(),
+                source_patch_id.unwrap_or("-"),
+                normalize_prefix_lines.len()
+            ),
+        );
+        return Ok(false);
+    }
+
+    let current_content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to read {} before normalization repair",
+            file.display()
+        )
+    })?;
+    if current_content != expected_bad_state {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "sidecar_normalization_fallback_narrow_repair_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={}",
+                file.display(),
+                source_patch_id.unwrap_or("-"),
+                expected_bad_state.len(),
+                agent_doc_hash::content_hash(expected_bad_state),
+                current_content.len(),
+                agent_doc_hash::content_hash(&current_content)
+            ),
+        );
+        return Ok(false);
+    }
+
+    if redelivery_missing_operator_text_authority(
+        file,
+        expected_bad_state,
+        "sidecar_normalization_fallback_narrow_repair",
+        source_patch_id,
+    ) {
+        return Ok(false);
+    }
+
+    let canonical = file.canonicalize()?;
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let canonical_path = canonical.to_string_lossy();
+    let proof = FullContentSourceProof::from_content(expected_bad_state);
+    let payload = agent_doc_ipc_protocol::normalization_repair_patch_message(
+        canonical_path.as_ref(),
+        &patch_id,
+        normalize_prefix_lines,
+        &proof.expected_content_hash,
+        proof.expected_content_len,
+        true,
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "sidecar_normalization_fallback_narrow_repair_attempt file={} patch_id={} source_patch_id={} normalize_targets={} expected_bad_len={} expected_bad_hash={} repaired_len={} repaired_hash={}",
+            file.display(),
+            patch_id,
+            source_patch_id.unwrap_or("-"),
+            normalize_prefix_lines.len(),
+            expected_bad_state.len(),
+            agent_doc_hash::content_hash(expected_bad_state),
+            repaired_content.len(),
+            agent_doc_hash::content_hash(repaired_content)
+        ),
+    );
+
+    if agent_doc_ipc_io::is_listener_active(&project_root) {
+        match agent_doc_ipc_io::send_message(&project_root, &payload) {
+            Ok(Some(_)) => {
+                if verify_normalization_repair_observed(
+                    file,
+                    &project_root,
+                    &patch_id,
+                    repaired_content,
+                    "socket",
+                ) {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "sidecar_normalization_fallback_narrow_repaired_editor file={} patch_id={} transport=socket",
+                            file.display(),
+                            patch_id
+                        ),
+                    );
+                    return Ok(true);
+                }
+                return Ok(false);
+            }
+            Ok(None) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "sidecar_normalization_fallback_narrow_repair_not_consumed file={} patch_id={} transport=socket",
+                        file.display(),
+                        patch_id
+                    ),
+                );
+            }
+            Err(e) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "sidecar_normalization_fallback_narrow_repair_failed file={} patch_id={} transport=socket error={}",
+                        file.display(),
+                        patch_id,
+                        e
+                    ),
+                );
+            }
+        }
+    }
+
+    let patches_dir = project_root.join(".agent-doc/patches");
+    if !patches_dir.exists() {
+        return Ok(false);
+    }
+
+    let hash = agent_doc_fs::document_state_hash(file)?;
+    let patch_file = patches_dir.join(format!("{hash}.json"));
+    let payload = agent_doc_ipc_protocol::normalization_repair_patch_message(
+        canonical_path.as_ref(),
+        &patch_id,
+        normalize_prefix_lines,
+        &proof.expected_content_hash,
+        proof.expected_content_len,
+        false,
+    );
+    atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
+
+    let timeout = std::time::Duration::from_secs(2);
+    let poll_interval = std::time::Duration::from_millis(100);
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if !patch_file.exists() {
+            if verify_normalization_repair_observed(
+                file,
+                &project_root,
+                &patch_id,
+                repaired_content,
+                "file",
+            ) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "sidecar_normalization_fallback_narrow_repaired_editor file={} patch_id={} transport=file",
+                        file.display(),
+                        patch_id
+                    ),
+                );
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        std::thread::sleep(poll_interval);
+    }
+    let _ = std::fs::remove_file(&patch_file);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "sidecar_normalization_fallback_narrow_repair_not_consumed file={} patch_id={} transport=file",
+            file.display(),
+            patch_id
+        ),
+    );
+    Ok(false)
+}
+
+pub fn redeliver_normalization_fallback_to_editor(
+    file: &Path,
+    repaired_content: &str,
+    expected_bad_state: &str,
+    normalize_prefix_lines: &[String],
+    source_patch_id: Option<&str>,
+    full_content_fallback: impl FnOnce(&Path, &str, &str, Option<&str>) -> bool,
+) -> bool {
+    if redelivery_missing_operator_text_authority(
+        file,
+        expected_bad_state,
+        "sidecar_normalization_fallback_narrow_repair",
+        source_patch_id,
+    ) {
+        return false;
+    }
+
+    match try_ipc_normalization_repair_patch(
+        file,
+        repaired_content,
+        expected_bad_state,
+        normalize_prefix_lines,
+        source_patch_id,
+    ) {
+        Ok(true) => return true,
+        Ok(false) => {}
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "sidecar_normalization_fallback_narrow_repair_failed file={} patch_id={} error={}",
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    e
+                ),
+            );
+        }
+    }
+
+    full_content_fallback(file, repaired_content, expected_bad_state, source_patch_id)
 }
 
 pub fn try_editor_converge(

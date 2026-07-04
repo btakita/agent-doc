@@ -2142,6 +2142,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
+ "agent-doc-git-io",
  "agent-doc-hash",
  "agent-doc-ipc-io",
  "agent-doc-ipc-protocol",

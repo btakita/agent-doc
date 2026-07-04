@@ -9696,7 +9696,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 68,
+        ledger_rows.len() >= 69,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10161,6 +10161,36 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/converge.rs",
             "agent-doc-write-converge-io/src/lib.rs",
             "Move the file-IPC poller and its ACK/NACK/content validation",
+        ),
+        (
+            "Write file-IPC delivery proof loop",
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Move the remaining post-consumption ack-content snapshot repair",
+        ),
+        (
+            "Write IPC transport delivery-loop delegation",
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "agent-doc-write-converge-io::write_file_ipc_and_poll_delivery",
+            "Extract the post-delivery repair graph next",
+        ),
+        (
+            "Write IPC repair decision model extraction",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-ipc-protocol/src/lib.rs",
+            "Extract the post-delivery repair effect graph",
+        ),
+        (
+            "Write ack-content write-through IO graph",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Move the remaining post-delivery IPC repair orchestration",
+        ),
+        (
+            "Write IPC normalization redelivery IO graph",
+            "agent-doc-orchestration/src/write/ipc.rs",
+            "agent-doc-write-converge-io/src/lib.rs",
+            "Split the remaining full-content visible repair redelivery",
         ),
         (
             "Tracked-work command and done-archive IO",
@@ -24342,6 +24372,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     );
     let write_ipc_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let write_converge_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     let ipc_protocol_source =
         fs::read_to_string(manifest_dir.join("agent-doc-ipc-protocol/src/lib.rs")).unwrap();
     assert!(
@@ -24349,20 +24381,22 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "agent-doc-ipc-protocol must own normalization-repair IPC payload construction"
     );
     assert!(
-        write_ipc_source
-            .contains("agent_doc_document_realtime::write_policy::FullContentSourceProof"),
+        write_converge_io_source.contains("FullContentSourceProof::from_content"),
         "normalization repair payloads should use the focused source-proof type directly"
     );
     assert!(
-        write_ipc_source.contains(
+        write_converge_io_source.contains(
             "agent_doc_document_realtime::write_policy::normalization_repair_candidate_matches"
-        ) && write_ipc_source
+        ) && write_converge_io_source
             .contains("agent_doc_ipc_protocol::normalization_repair_patch_message("),
-        "write/ipc.rs should call focused normalization repair policy and protocol builders directly"
+        "agent-doc-write-converge-io should call focused normalization repair policy and protocol builders directly"
     );
     for forbidden_snippet in [
         "pub(crate) fn normalization_repair_candidate_matches(",
         "pub(crate) fn normalization_repair_payload(",
+        "agent_doc_document_realtime::write_policy::FullContentSourceProof",
+        "agent_doc_document_realtime::write_policy::normalization_repair_candidate_matches",
+        "agent_doc_ipc_protocol::normalization_repair_patch_message(",
     ] {
         assert!(
             !write_ipc_source.contains(forbidden_snippet),
@@ -25912,6 +25946,10 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub struct FileIpcDeliveryOptions",
         "pub fn write_file_ipc_and_poll_delivery(",
         "fn log_file_ipc_proof_failure(",
+        "pub fn redelivery_missing_operator_text_authority(",
+        "pub fn verify_normalization_repair_observed(",
+        "pub fn try_ipc_normalization_repair_patch(",
+        "pub fn redeliver_normalization_fallback_to_editor(",
     ] {
         assert!(
             write_converge_io.contains(required_snippet),
@@ -25973,6 +26011,10 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub(crate) fn record_ipc_socket_ack_timeout",
         "pub(crate) fn ipc_direct_disk_degraded",
         "pub(crate) const IPC_DEWEDGE_TIMEOUT_THRESHOLD",
+        "fn redelivery_missing_operator_text_authority(",
+        "pub(crate) fn verify_normalization_repair_observed(",
+        "pub(crate) fn try_ipc_normalization_repair_patch(",
+        "pub(crate) fn redeliver_normalization_fallback_to_editor(",
     ] {
         assert!(
             !converge.contains(forbidden_snippet) && !write_ipc.contains(forbidden_snippet),

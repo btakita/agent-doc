@@ -21,6 +21,7 @@ agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.67" }
 agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.67" }

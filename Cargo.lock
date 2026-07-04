@@ -1786,6 +1786,7 @@ dependencies = [
  "agent-doc-project-config-io",
  "agent-doc-session-registry-io",
  "agent-doc-supervisor",
+ "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
  "agent-doc-turn-executor-tmux",
  "anyhow",

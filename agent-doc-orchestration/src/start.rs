@@ -151,7 +151,7 @@ use agent_doc_supervisor::crash_policy::{
     supervisor_clean_exit_before_prompt_seen, supervisor_clean_exit_resolution,
     supervisor_policy_exit_code, supervisor_resume_handoff_failed,
 };
-use agent_doc_supervisor::input::{normalize_supervisor_inject_bytes, prompt_input_summary};
+use agent_doc_supervisor::input::prompt_input_summary;
 use agent_doc_supervisor::ipc_protocol::submit_bytes;
 use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
 use agent_doc_supervisor::session_owner::{

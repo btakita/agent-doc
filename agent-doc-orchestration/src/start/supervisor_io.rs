@@ -43,48 +43,23 @@ impl agent_doc_supervisor_process::io_threads::StdinForwardObserver for Supervis
     }
 }
 
-/// Shared delivery for injected text (pane submit or PTY write). Used by both
-/// the gated [`IpcMethod::Inject`] path and the gate-exempt
-/// [`IpcMethod::Clear`] path; the gate decision is made by the caller.
-pub(crate) fn deliver_ipc_inject(
-    shared: &SupervisorShared,
-    bytes: &str,
-    diag_op: &str,
-) -> Result<(), String> {
-    if let Some(pane_id) = shared.inject_pane.as_deref() {
-        let profile =
-            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
-        agent_doc_tmux_io::input_diag::log_text_submit(
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
-            &format!("supervisor.{diag_op}"),
-            &format!("pane:{pane_id}"),
-            bytes,
-            Some(&shared.harness_binary),
-            profile.transform(),
-            profile.submit_key(),
-        );
-        dispatch_submit_text_to_pane(pane_id, bytes, &shared.harness_binary)
-            .map_err(|e| e.to_string())
-    } else {
-        let guard = shared.inject_writer.lock().unwrap();
+impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorShared {
+    fn inject_pane_id(&self) -> Option<String> {
+        self.inject_pane.clone()
+    }
+
+    fn harness_binary(&self) -> &str {
+        &self.harness_binary
+    }
+
+    fn write_child_pty(&self, bytes: &[u8]) -> Result<(), String> {
+        let guard = self.inject_writer.lock().unwrap();
         match guard.as_ref() {
             Some(writer_arc) => {
-                let mut w = writer_arc.lock().unwrap();
-                let normalized = normalize_supervisor_inject_bytes(bytes);
-                agent_doc_tmux_io::input_diag::log_transform_event(
-                    agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                        None,
-                        agent_doc_ops_log_io::log_op,
-                    ),
-                    &format!("supervisor.{diag_op}"),
-                    "child_pty",
-                    "normalize_lf_to_cr",
-                    bytes.as_bytes(),
-                    &normalized,
-                    Some(&shared.harness_binary),
-                );
-                w.write_all_blocking(&normalized)
-                    .map_err(|e| format!("write error: {e}"))
+                let mut writer = writer_arc.lock().unwrap();
+                writer
+                    .write_all_blocking(bytes)
+                    .map_err(|err| format!("write error: {err}"))
             }
             None => Err("no active session".to_string()),
         }
@@ -142,7 +117,7 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShare
     }
 
     fn deliver_ipc_inject(&self, bytes: &str, diag_op: &str) -> Result<(), String> {
-        deliver_ipc_inject(self, bytes, diag_op)
+        agent_doc_supervisor_io::ipc::deliver_supervisor_inject(self, bytes, diag_op)
     }
 
     fn mark_inject_dispatched(&self) {

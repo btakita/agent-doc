@@ -42,6 +42,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use agent_doc_supervisor::input::normalize_supervisor_inject_bytes;
 use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
@@ -172,6 +173,56 @@ pub trait SupervisorIpcHandlerState {
         awareness_b64: &str,
     ) -> IpcResponse;
 }
+
+pub trait SupervisorInjectDeliveryState {
+    fn inject_pane_id(&self) -> Option<String>;
+    fn harness_binary(&self) -> &str;
+    fn write_child_pty(&self, bytes: &[u8]) -> Result<(), String>;
+}
+
+pub fn deliver_supervisor_inject<S>(state: &S, bytes: &str, diag_op: &str) -> Result<(), String>
+where
+    S: SupervisorInjectDeliveryState + ?Sized,
+{
+    let harness = state.harness_binary();
+    let source = format!("supervisor.{diag_op}");
+    if let Some(pane_id) = state.inject_pane_id() {
+        let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness);
+        agent_doc_tmux_io::input_diag::log_text_submit(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, noop_input_diag_log),
+            &source,
+            &format!("pane:{pane_id}"),
+            bytes,
+            Some(harness),
+            profile.transform(),
+            profile.submit_key(),
+        );
+        let tmux = tmux_router::Tmux::default_server();
+        agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+            &tmux,
+            &pane_id,
+            bytes,
+            harness,
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, noop_input_diag_log),
+            "sessions.send_submitted_text_for_harness",
+        )
+        .map_err(|err| err.to_string())
+    } else {
+        let normalized = normalize_supervisor_inject_bytes(bytes);
+        agent_doc_tmux_io::input_diag::log_transform_event(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, noop_input_diag_log),
+            &source,
+            "child_pty",
+            "normalize_lf_to_cr",
+            bytes.as_bytes(),
+            &normalized,
+            Some(harness),
+        );
+        state.write_child_pty(&normalized)
+    }
+}
+
+fn noop_input_diag_log(_file: &Path, _message: &str) {}
 
 /// Handle one decoded supervisor IPC method against a concrete supervisor
 /// runtime state adapter.

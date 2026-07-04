@@ -21,6 +21,7 @@ agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.67" }
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.67" }
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }

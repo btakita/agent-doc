@@ -9697,7 +9697,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ledger_rows.push(line.trim_matches('|').split('|').map(str::trim).collect());
     }
     assert!(
-        ledger_rows.len() >= 57,
+        ledger_rows.len() >= 58,
         "coarse extraction ledger should include prior large-chunk rounds and current rounds; found {} rows",
         ledger_rows.len()
     );
@@ -10234,6 +10234,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/start/supervisor_io.rs",
             "agent-doc-supervisor-io/src/ipc.rs",
             "Split the `SupervisorIpcHandlerState` adapter",
+        ),
+        (
+            "Supervisor IPC inject delivery adapter graph",
+            "agent-doc-orchestration/src/start/supervisor_io.rs",
+            "agent-doc-supervisor-io/src/ipc.rs",
+            "Split the `SupervisorInjectDeliveryState` adapter",
         ),
         (
             "Supervisor live detection adapter graph",
@@ -16638,8 +16644,15 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
                 .contains("agent_doc_supervisor_crdt_io::handle_replica_awareness(")
             && orchestration_supervisor_io.contains(
                 "impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShared"
+            )
+            && orchestration_supervisor_io.contains(
+                "impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorShared"
             ),
-        "orchestration supervisor IPC dispatch should call the focused CRDT adapter crate directly"
+        "orchestration supervisor IPC dispatch should call focused adapter crates directly"
+    );
+    assert!(
+        !orchestration_supervisor_io.contains("pub(crate) fn deliver_ipc_inject("),
+        "orchestration supervisor IPC dispatch must not re-own the inject delivery adapter"
     );
     for required_snippet in [
         "use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};",
@@ -16649,6 +16662,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub struct SupervisorIpc",
         "pub struct SupervisorIpcStateSnapshot",
         "pub trait SupervisorIpcHandlerState",
+        "pub trait SupervisorInjectDeliveryState",
+        "pub fn deliver_supervisor_inject",
         "pub fn handle_supervisor_ipc",
         "pub enum SocketLiveness",
         "pub fn probe_socket(",
@@ -17062,9 +17077,11 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     assert!(
-        start_source.contains("agent_doc_supervisor::input::{")
-            && start_source.contains("normalize_supervisor_inject_bytes")
+        start_source.contains("use agent_doc_supervisor::input::prompt_input_summary;")
             && start_source.contains("prompt_input_summary")
+            && supervisor_io_ipc
+                .contains("use agent_doc_supervisor::input::normalize_supervisor_inject_bytes;")
+            && supervisor_io_ipc.contains("normalize_supervisor_inject_bytes(bytes)")
             && supervisor_io_threads
                 .contains("agent_doc_supervisor::input::strip_stale_ctrl_d_before_prompt"),
         "start/supervisor process paths should call focused supervisor input byte policy directly"
@@ -21435,6 +21452,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/supervisor_io.rs",
+        "agent-doc-supervisor-io/src/ipc.rs",
         "agent-doc-supervisor-process/src/io_threads.rs",
         "agent-doc-supervisor-process/src/pty.rs",
     ] {
@@ -21458,7 +21476,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-sync-io/src/sync/pane_repair.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
-        "agent-doc-orchestration/src/start/supervisor_io.rs",
+        "agent-doc-supervisor-io/src/ipc.rs",
         "agent-doc-supervisor-process/src/io_threads.rs",
         "agent-doc-supervisor-process/src/pty.rs",
     ] {

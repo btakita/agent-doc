@@ -7344,7 +7344,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
     for relative in [
         "src/orchestrate.rs",
         "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-run-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -7520,13 +7520,12 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
             .exists(),
         "orchestration must not keep a prompt_context facade module"
     );
-    let run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let run_source = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     let stream_source =
         fs::read_to_string(manifest_dir.join("agent-doc-stream-io/src/lib.rs")).unwrap();
     let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
     for (relative, source) in [
-        ("agent-doc-orchestration/src/run.rs", run_source.as_str()),
+        ("agent-doc-run-io/src/lib.rs", run_source.as_str()),
         ("agent-doc-stream-io/src/lib.rs", stream_source.as_str()),
         ("src/orchestrate.rs", orchestrate_source.as_str()),
     ] {
@@ -7641,7 +7640,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
 
     for (path, required_snippet, forbidden_snippets) in [
         (
-            "agent-doc-orchestration/src/run.rs",
+            "agent-doc-run-io/src/lib.rs",
             "agent_doc_prompt_context::format_active_format_requirements",
             [
                 "agent_doc_orchestration::prompt_contract::format_active_format_requirements",
@@ -9699,6 +9698,90 @@ fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
 }
 
 #[test]
+fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-run-io")),
+        "agent-doc-run-io must stay a first-class workspace crate"
+    );
+
+    let run_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub enum RunMode",
+        "pub struct RunCycleOutcome",
+        "pub enum AutoQueueContinuation",
+        "pub enum ActiveQueuePromptState",
+        "pub fn compute_run_diff",
+        "pub fn active_queue_prompt_diff",
+        "pub fn active_queue_prompt_state",
+        "pub fn should_continue_auto_queue",
+        "pub fn build_prompt",
+        "pub fn prompt_cache_routing_affinity",
+        "PromptCacheBlocks::new",
+        "agent_doc_controller_io::project_controller::load_state_event_ledger",
+    ] {
+        assert!(
+            run_io_source.contains(required),
+            "agent-doc-run-io must own the direct-run prompt/queue graph: {required}"
+        );
+    }
+    for forbidden in ["agent_doc_orchestration::", "crate::write", "crate::git"] {
+        assert!(
+            !run_io_source.contains(forbidden),
+            "agent-doc-run-io must not route through orchestration command internals: {forbidden}"
+        );
+    }
+
+    let orchestration_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    for forbidden in [
+        "enum RunMode",
+        "struct RunCycleOutcome",
+        "enum AutoQueueContinuation",
+        "enum ActiveQueuePromptState",
+        "fn compute_run_diff(",
+        "fn active_queue_prompt_state(file",
+        "fn should_continue_auto_queue(",
+        "fn build_prompt(",
+        "fn prompt_cache_routing_affinity(",
+    ] {
+        assert!(
+            !orchestration_source.contains(forbidden),
+            "orchestration run.rs must not re-own the focused direct-run graph: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_source.contains("agent_doc_run_io::{")
+            && orchestration_source.contains("build_prompt")
+            && orchestration_source.contains("should_continue_auto_queue"),
+        "orchestration run.rs should call the focused direct-run IO crate directly"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    assert!(
+        orchestration_manifest["dependencies"]
+            .as_table()
+            .unwrap()
+            .contains_key("agent-doc-run-io"),
+        "orchestration should depend on the focused direct-run IO crate"
+    );
+
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-run-io"),
+        "the CLI should expose the focused direct-run IO crate in the workspace dependency set"
+    );
+}
+
+#[test]
 fn test_coarse_orchestration_extractions_are_tracked() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tracker =
@@ -10235,6 +10318,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write/ipc/transport.rs",
             "agent-doc-write-ipc-io/src/transport.rs",
             "Move remaining write IPC transport tests and the orchestration wrapper",
+        ),
+        (
+            "Direct-run prompt and auto-queue IO graph",
+            "agent-doc-orchestration/src/run.rs",
+            "agent-doc-run-io/src/lib.rs",
+            "Move remaining direct-run prompt and queue tests into `agent-doc-run-io`",
         ),
         (
             "Write IPC repair decision model extraction",

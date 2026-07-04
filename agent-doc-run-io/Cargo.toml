@@ -1,0 +1,34 @@
+[package]
+name = "agent-doc-run-io"
+version = "0.34.67"
+edition = "2024"
+description = "Direct-run prompt, diff, and auto-queue IO graph for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_run_io"
+
+[dependencies]
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
+agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.34.67" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.67" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
+agent-doc-prompt-cache = { path = "../agent-doc-prompt-cache", version = "0.34.67" }
+agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.34.67" }
+agent-doc-prompt-context-io = { path = "../agent-doc-prompt-context-io", version = "0.34.67" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.67" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.67" }
+agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.34.67" }
+agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.34.67" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
+anyhow = "1"

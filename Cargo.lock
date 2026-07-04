@@ -92,6 +92,7 @@ dependencies = [
  "agent-doc-response-toc-io",
  "agent-doc-route-io",
  "agent-doc-run-context-io",
+ "agent-doc-run-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
@@ -1088,6 +1089,7 @@ dependencies = [
  "agent-doc-response-toc-io",
  "agent-doc-route-io",
  "agent-doc-run-context-io",
+ "agent-doc-run-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
@@ -1514,6 +1516,34 @@ dependencies = [
  "lazily 0.21.1",
  "tempfile",
  "tmux-router",
+]
+
+[[package]]
+name = "agent-doc-run-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-controller-io",
+ "agent-doc-diff",
+ "agent-doc-diff-io",
+ "agent-doc-document",
+ "agent-doc-element",
+ "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
+ "agent-doc-fs",
+ "agent-doc-markdown-ast",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-root-io",
+ "agent-doc-prompt-cache",
+ "agent-doc-prompt-context",
+ "agent-doc-prompt-context-io",
+ "agent-doc-queue",
+ "agent-doc-queue-io",
+ "agent-doc-run-context-io",
+ "agent-doc-session-accretion",
+ "agent-doc-session-accretion-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-state-backbone",
+ "anyhow",
 ]
 
 [[package]]

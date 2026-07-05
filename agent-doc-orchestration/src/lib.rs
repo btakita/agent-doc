@@ -208,48 +208,13 @@ impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplay
             agent_doc_write_command_io::CommitMode::None
         };
         crate::write::run_command_with_response(
-            agent_doc_write_command_io::CommandOptions {
-                file: file.to_path_buf(),
-                baseline_file: None,
+            agent_doc_write_command_io::CommandOptions::repair_replay(
+                file,
                 is_template,
                 is_stream,
-                is_ipc: false,
                 force_disk,
-                origin: Some("repair_replay".to_string()),
-                pending_add: Vec::new(),
-                pending_add_to: Vec::new(),
-                pending_add_gated: Vec::new(),
-                pending_add_after: Vec::new(),
-                pending_add_before: Vec::new(),
-                pending_add_back: Vec::new(),
-                icebox_add: Vec::new(),
-                icebox_add_after: Vec::new(),
-                icebox_add_before: Vec::new(),
-                icebox_add_back: Vec::new(),
-                icebox_edit: Vec::new(),
-                icebox_clear: false,
-                icebox_reorder: None,
-                pending_done: Vec::new(),
-                pending_edit: Vec::new(),
-                pending_clear: false,
-                pending_reorder: None,
-                pending_gate: Vec::new(),
-                pending_ungate: Vec::new(),
-                pending_resolve_gate: Vec::new(),
-                pending_set_gate_type: Vec::new(),
-                pending_set_verify: Vec::new(),
-                review_add: Vec::new(),
-                review_edit: Vec::new(),
-                review_remove: Vec::new(),
-                review_resolve: Vec::new(),
-                queue_completion_ids: queue_completion_ids.to_vec(),
-                allow_replace_pending: false,
-                pending_only: false,
-                status: None,
-                lint_override: None,
-                commit_sibling: Vec::new(),
-                commit_sibling_message: Vec::new(),
-            },
+                queue_completion_ids,
+            ),
             commit_mode,
             response.to_string(),
         )
@@ -264,7 +229,7 @@ impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplay
         crate::write::apply_template_from_string_with_options(
             file,
             response,
-            crate::write::TemplateApplyOptions { force_disk },
+            agent_doc_write_command_io::TemplateApplyOptions { force_disk },
         )
     }
 

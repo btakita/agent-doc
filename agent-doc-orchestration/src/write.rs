@@ -267,7 +267,7 @@ use agent_doc_template::stale_baseline::{
     exchange_append_patch_can_rebase_to_head, is_stale_baseline, patch_touches_exchange,
 };
 use agent_doc_turn::response_replay::response_materialized_in_content;
-use agent_doc_write_command_io::{CommandOptions, CommitMode};
+use agent_doc_write_command_io::{CommandOptions, CommitMode, TemplateApplyOptions};
 
 thread_local! {
     static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };

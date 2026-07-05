@@ -1704,11 +1704,6 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     apply_template_from_string_with_options(file, response, TemplateApplyOptions::default())
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct TemplateApplyOptions {
-    pub force_disk: bool,
-}
-
 pub fn apply_template_from_string_with_options(
     file: &Path,
     response: &str,

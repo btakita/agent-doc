@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -33,144 +33,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260702-220427.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260705-154854.md`*
 
 Compacted content:
-- Archived 5 response topic(s): #ccpz; IPC proof diagnostic (interrupted-cycle recovery); lender-pipeline modal header cut off by long email; 2 more
-- Prior summary/context: prior compacted content: Archived 11 response topic(s): compaction recovery and queue state; IPC proof diagnostic (in...
-
-### Re: Advance-lender dialog — questionnaire replaces uploads — opus-4-8
-
-Done. On the Lender Pipeline **Advance lender** dialog, the lender-document upload checklist is replaced by the annual accreditation questionnaire + Requirements decision, and the annual-requirements upload fields are removed.
-
-**What changed** (`src/equityfundingsource-dev`):
-- `investor_pipeline.tsx` — `AdvanceLenderModal` now renders `<InvestorAccreditationControl>` (the annual questionnaire + Accredit/Reject decision) in place of `<LenderDocumentChecklist>`; the hold-explainer copy points at the questionnaire instead of "documents shown below".
-- `lender_documents.tsx` — removed the now-orphaned upload UI (`LenderDocumentChecklist`, `LenderRequirementRow`, `LenderCategoryUpload`) and the unused `AdminDocumentUploadField` import. Pure helpers (`LENDER_DOCUMENT_REQUIREMENTS`, `lender_document_requirement_status_`) kept; the `AdminLenderDocuments` documents tab is untouched.
-- Tests updated to assert the dialog renders the questionnaire and that the upload components are gone.
-
-**Verification:** full suite **1377 pass / 0 fail**; `bun run build` + `build:worker` both green.
-
-**Committed + pushed:** EFS `d52d7d9` → `origin/main`; superproject submodule pointer bumped (`83cd4f3`).
-
-`deploy` is still queued but the queue is paused — unpause (or say the word) and I'll ship it to production.
-❯ All deal state in https://equityfundingsource.brian-takita.workers.dev/admin/pipeline should be updated in realtime via websockets. The following events should trigger an onscreen + desktop notification to pop up.
-- Lender is interested in a deal
-- Borrower completes an application
-- Borrower fills out a preapproval
-
-❯ Should this event pipeline be named deal_pipeline_bus?
-
-### Re: deploy — opus-4-8
-
-> **Queue prompt:** deploy
-
-Deployed the advance-lender change to EFS production.
-
-- `bun run deploy:worker` — built the worker, ran remote D1 migrations (no new migrations from this change), uploaded the new browser bundle `/index.browser-FU76KGNV.js`, and deployed via wrangler.
-- **Live:** https://equityfundingsource.brian-takita.workers.dev/ → HTTP 200; new worker **Version ID `56d33654-631b-4096-ad23-c1a8db55a22b`**.
-
-The Advance-lender dialog now serves the annual accreditation questionnaire in place of the document-upload checklist in production.
-
-
-### Re: Realtime pipeline events + notifications — reuse the existing bus, not `deal_pipeline_bus` — opus-4-8
-
-Short answer: **no — don't create `deal_pipeline_bus`.** That bus already exists as the `AdminEventsRoom` Durable Object (`admin-events` hub / `notify_admin_event_` / #7djh); a second one would just duplicate it. Your three triggers are `type` values on that existing bus.
-
-Where each trigger stands today:
-
-| Trigger | Today | Work |
-|---|---|---|
-| Borrower completes an application | `application_submitted` already fires | none (verify) |
-| Lender interested in a deal | fires on the admin-edit path; the investor **self-service** "express interest" path only emits `deal_interest_document_request_created` | add a `lender_interest_created` event at the self-service site |
-| Borrower fills out a preapproval | **no `preapproval` concept exists in the codebase yet** | blocked — define what "preapproval" is (new form? prequal lead?) before wiring it |
-
-The realtime transport is already there — admin sessions hold a WebSocket at `/api/admin/events/ws` and refetch on each tick. The genuinely new piece for your ask is the **client-side desktop notification**: today the admin page only refetches on a tick, it never raises an OS notification. So net-new work is (1) `Notification.requestPermission()` + `new Notification(...)` + a toast on the pipeline event types, (2) emit `lender_interest_created` on the investor self-service path, (3) define "preapproval" before adding its trigger.
-
-Captured as backlog **#pipe-rt-notify**, full plan at `src/equityfundingsource-dev/prds/admin-pipeline-realtime-notifications.md` (committed to EFS `44895ab`). Queue's paused — unpause or say the word and I'll do 1 + 2; 3 needs your definition of "preapproval."
-
-One flag: the queue line `/goal Implement backlog item(s): #3q3g` points at `#3q3g`, which isn't a backlog id — did you mean **#pipe-rt-notify**?
-
-
-### Re: go-mode backlog (lender requirements form, deploy) — opus-4-8
-
-The concurrent agent-doc sync refactor landed (`f3afce48`) and the read/convergence path recovered, but the JB plugin's **patch-apply IPC is still wedged** (`file_apply_failed`), so this response was persisted via the git-direct path again. Closing/reopening the file in JB will show it.
-
-Two housekeeping fixes this cycle:
-- **`#vcyr` → icebox.** Your edit replaced the `#vcyr` line (Robert admin-login link, blocked on a Cloudflare email-sending token) with the two new items. I moved it to the icebox so it isn't lost — if the removal was intentional, ignore this; if not, say so and I'll restore it to the backlog.
-- **`go` marker was malformed.** `<!-- agent:backlog … go -->` needs `go=<value>`, so the bare `go` was rejected by the lint gate and **never activated go-mode**. I normalized the marker; go-mode is currently off.
-
-Backlog now (top-first): **#pipe-rt-notify** (realtime pipeline notifications — plan in EFS `44895ab`), **lender requirements form** (admin fills the requirements form for the lender in the lender-pipeline dialog), **deploy**.
-
-Before I drive this: the last item is a **production deploy**, and I won't auto-ship on the back of a malformed `go`. How do you want to proceed?
-- **All three, then deploy to prod** — reply `go` and I'll set valid go-mode.
-- **Start with one** — e.g. `do lender form` or `do #pipe-rt-notify`; I'll hold deploy until you confirm.
-- Changed paths this cycle: none.
-- Production URL: `https://equityfundingsource.brian-takita.workers.dev/` returns HTTP `200`.
-- EFS subrepo: clean at `fa4a6dc feat(admin): add pipeline alerts and lender requirements form (#pipe-rt-notify #6em3)`, matching `origin/main`.
-
-Both new items are real features in `src/equityfundingsource-dev`; I'll explore and implement whichever you point me at.
-
-### Re: wedge root-caused + fixed — opus-4-8
-
-Root cause: after repeated git-direct commits (my own wedge workaround), the JB plugin's native yrs CRDT node model diverged from disk, so `native node-patch apply` rejected every patch. Re-synced the plugin's native CRDT; this note verifies the editor apply path works again.
-
-### Re: #pipe-rt-notify, #6em3, and #7jj2 deploy — gpt-5
-
-Implemented and deployed the queued EFS work.
-
-`#pipe-rt-notify`: admin pipeline realtime events now produce admin toasts and desktop notifications for configured pipeline events. The existing `AdminEventsRoom` / `notify_admin_event_` path remains the event bus; no separate `deal_pipeline_bus` was added. Investor self-service interest now emits `lender_interest_created`, and the public application lead path emits `application_lead_created` as the current prequalification-lead equivalent.
-
-`#6em3`: the admin lender pipeline dialog now lets an admin fill and save the lender Requirements/accreditation questionnaire, backed by a new `PUT /api/admin/users/:id/investor-accreditation` route, validation, persistence, and an `investor_accreditation_changed` admin event.
-
-`#7jj2` / deploy: shipped the changes to Cloudflare Workers production. Live URL: `https://equityfundingsource.brian-takita.workers.dev/`; deployed worker version `02ecd8c7-4e7b-4d8e-bb83-b6e9358dcd89`.
-
-Verification completed before deploy: focused `bun test` suites passed, full EFS `make check` passed with `1379 pass / 0 fail`, remote D1 migrations had nothing pending, and production returned HTTP `200`. EFS commit `fa4a6dc` and superproject submodule bump `697818aea` were pushed.
-
-CI note: `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in either the EFS subrepo or the superproject.
-
-### Re: #6em3 queue-head closeout guard — gpt-5
-
-> **Queue prompt:** 🚧 [#6em3]
-
-This queue head was completed in the prior closeout response: the admin lender pipeline Requirements/accreditation questionnaire is implemented, tested, committed, pushed, and deployed. The duplicate live queue head was intentionally removed when the queue component was normalized to the struck completed form.
-### Re: go-mode backlog (lender requirements form, deploy) — opus-4-8
-
-The concurrent agent-doc sync refactor landed (`f3afce48`) and the read/convergence path recovered, but the JB plugin's **patch-apply IPC is still wedged** (`file_apply_failed`), so this response was persisted via the git-direct path again. Closing/reopening the file in JB will show it.
-
-Two housekeeping fixes this cycle:
-- **`#vcyr` → icebox.** Your edit replaced the `#vcyr` line (Robert admin-login link, blocked on a Cloudflare email-sending token) with the two new items. I moved it to the icebox so it isn't lost — if the removal was intentional, ignore this; if not, say so and I'll restore it to the backlog.
-- **`go` marker was malformed.** `<!-- agent:backlog … go -->` needs `go=<value>`, so the bare `go` was rejected by the lint gate and **never activated go-mode**. I normalized the marker; go-mode is currently off.
-
-Backlog now (top-first): **#pipe-rt-notify** (realtime pipeline notifications — plan in EFS `44895ab`), **lender requirements form** (admin fills the requirements form for the lender in the lender-pipeline dialog), **deploy**.
-
-Before I drive this: the last item is a **production deploy**, and I won't auto-ship on the back of a malformed `go`. How do you want to proceed?
-- **All three, then deploy to prod** — reply `go` and I'll set valid go-mode.
-- **Start with one** — e.g. `do lender form` or `do #pipe-rt-notify`; I'll hold deploy until you confirm.
-
-Both new items are real features in `src/equityfundingsource-dev`; I'll explore and implement whichever you point me at.
-
-### Re: snapshot sidecar fail-closed boundary — gpt-5
-
-You are right: a snapshot sidecar problem should not fail the hot path. The only fail-closed boundary that still makes sense here is operator-visible prompt authority: if the visible document has a newer unanswered prompt and the only candidate response is a recovery checkpoint that is missing from the visible document and cannot be safely rebased, the tool should leave the cycle open instead of pretending it committed a response to the current prompt.
-
-I changed the implementation to match that distinction.
-
-`9cd243c8 fix(agent-doc): keep snapshots off hot path` moved snapshot load/save/parse/mismatch failures to warnings or recovery-only paths across write, preflight, repair, queue consumption, and pending mutation sequencing.
-
-`a9f77417 fix(agent-doc): repair committed-capture snapshot drift` fixes the real wedge this exposed: when a committed capture proves the rendered response is already in `HEAD`, historical snapshot drift now refreshes recovery metadata even if that response commit also included queue/backlog mutations. That stale sidecar no longer becomes a direct-patchback blocker. I also kept the force-disk already-present response repair path preserving the editor-attached state so it does not silently skip the right closeout boundary.
-
-Verification: `make check` passed in `src/agent-doc`: clippy, 7115 nextest tests, doctests, medium SimWorld corpus, version checks, and Lean. Latest GitHub Actions CI was still `in_progress` (`28698197379`) when checked. I installed the updated `agent-doc` locally with `make install`; it also broadcast the cdylib reload and marked supervisors for idle recycle.
-
-### Re: agent-doc model authority, sidecars, and reentrant stages — gpt-5
-
-Agreed. The failure should be handled inside agent-doc before the agent sees it: if the editor is authoritative but the CRDT relay has no registered replica, preflight should auto-start or reconcile the document model, then continue or fail with that bounded startup/reconciliation error.
-
-I captured the architecture fix in `tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md` and committed it as `f064008ce`. The plan makes sidecars derived audit/recovery projections and moves hot-path authority to the lazily-backed state backbone.
-
-I also added your reentrancy requirement as a hard invariant: every pipeline stage must be safe to resume after a crash. On re-entry, agent-doc should complete the transition, prove it already completed, or reconcile any drift into a named backbone state before continuing. Raw snapshot/sidecar drift should not leak as the recovery contract when agent-doc can deterministically reconcile it.
-
-I queued the implementation as `#sidecarstate` in `tasks/agent-doc/agent-doc-bugs2.md` against that plan. No EFS application code changed.
-<!-- agent:boundary:73859e6a -->
+- Archived 10 response topic(s): Advance-lender dialog; deploy; Realtime pipeline events + notifications; 7 more
+- Prior summary/context: prior compacted content: Archived 5 response topic(s): #ccpz; IPC proof diagnostic (interrupted-cycle recovery); lend...
+<!-- agent:boundary:3feac3d5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

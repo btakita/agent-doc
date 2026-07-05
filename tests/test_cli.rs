@@ -11184,6 +11184,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split `RouteCommandEffects` into document-write, closeout-drain, route-dispatch, queue-writeback, diagnostics, and startup ports",
         ),
         (
+            "Route test-only invocation facade deletion",
+            "retained `#[cfg(test)] pub fn run*` wrappers",
+            "agent-doc-route-io/src/invocation.rs",
+            "Move the remaining route startup and pane-resolution tests into `agent-doc-route-io`",
+        ),
+        (
             "Repair orphaned response replay/writeback IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
@@ -28789,10 +28795,14 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
             && !route_source.contains("pub use agent_doc_route_io::command::RouteMode;")
             && route_source.contains("pub fn runtime_route_command_effects() -> RouteCommandEffects")
             && route_source.contains("route_command_effects(route_repair_closeout)")
-            && route_source.contains("#[cfg(test)]\npub fn run(")
-            && route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub fn run_with_force_disk(")
-            && route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub fn run_with_tmux(")
-            && route_source.contains("agent_doc_route_io::invocation::run_with_tmux_with_options(")
+            && route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\nfn run_with_tmux(")
+            && !route_source.contains("#[cfg(test)]\npub fn run(")
+            && !route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub fn run_with_force_disk(")
+            && !route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub fn run_with_tmux(")
+            && !route_source.contains("#[cfg(test)]\nfn run(")
+            && !route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\nfn run_with_force_disk(")
+            && !route_source.contains("fn run_with_tmux_with_options(")
+            && route_source.contains("agent_doc_route_io::invocation::run_with_tmux(")
             && main_source.contains("agent_doc_route_io::invocation::run_with_force_disk(")
             && main_source
                 .contains("agent_doc_orchestration::route::runtime_route_command_effects()")

@@ -273,55 +273,8 @@ pub fn runtime_route_command_effects() -> RouteCommandEffects {
 }
 
 #[cfg(test)]
-pub fn run(
-    file: &Path,
-    pane: Option<&str>,
-    debounce_ms: u64,
-    col_args: &[String],
-    mode: RouteMode,
-    plain_trigger: bool,
-    wait_for_ready: Option<Duration>,
-) -> Result<()> {
-    agent_doc_route_io::invocation::run(
-        file,
-        pane,
-        debounce_ms,
-        col_args,
-        mode,
-        plain_trigger,
-        wait_for_ready,
-        runtime_route_command_effects(),
-    )
-}
-
-#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
-pub fn run_with_force_disk(
-    file: &Path,
-    pane: Option<&str>,
-    debounce_ms: u64,
-    col_args: &[String],
-    mode: RouteMode,
-    plain_trigger: bool,
-    wait_for_ready: Option<Duration>,
-    force_disk: bool,
-) -> Result<()> {
-    agent_doc_route_io::invocation::run_with_force_disk(
-        file,
-        pane,
-        debounce_ms,
-        col_args,
-        mode,
-        plain_trigger,
-        wait_for_ready,
-        force_disk,
-        runtime_route_command_effects(),
-    )
-}
-
-#[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-pub fn run_with_tmux(
+fn run_with_tmux(
     file: &Path,
     tmux: &Tmux,
     pane: Option<&str>,
@@ -340,33 +293,6 @@ pub fn run_with_tmux(
         mode,
         plain_trigger,
         wait_for_ready,
-        runtime_route_command_effects(),
-    )
-}
-
-#[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-pub fn run_with_tmux_with_options(
-    file: &Path,
-    tmux: &Tmux,
-    pane: Option<&str>,
-    debounce_ms: u64,
-    col_args: &[String],
-    mode: RouteMode,
-    plain_trigger: bool,
-    wait_for_ready: Option<Duration>,
-    force_disk: bool,
-) -> Result<()> {
-    agent_doc_route_io::invocation::run_with_tmux_with_options(
-        file,
-        tmux,
-        pane,
-        debounce_ms,
-        col_args,
-        mode,
-        plain_trigger,
-        wait_for_ready,
-        force_disk,
         runtime_route_command_effects(),
     )
 }

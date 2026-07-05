@@ -262,13 +262,7 @@ use agent_doc_session_registry_io::registration as sessions;
 
 #[cfg(test)]
 fn route_repair_closeout(file: &Path) -> Result<String> {
-    agent_doc_repair_io::repair(
-        agent_doc_repair_runtime_io::repair_coordinator_effects(
-            &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
-        ),
-        file,
-    )
-    .map(|outcome| format!("{outcome:?}"))
+    agent_doc_orchestration::repair::repair(file).map(|outcome| format!("{outcome:?}"))
 }
 
 #[cfg(test)]
@@ -302,11 +296,13 @@ fn run_with_tmux(
 }
 
 #[cfg(test)]
+#[path = "route/pane_resolution.rs"]
 mod pane_resolution;
 #[cfg(test)]
 pub(crate) use pane_resolution::*;
 
 #[cfg(test)]
+#[path = "route/startup.rs"]
 mod startup;
 
 #[cfg(test)]
@@ -500,6 +496,7 @@ mod tests {
 
     #[test]
     fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
+        let _env_guard = env_lock();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
@@ -562,6 +559,7 @@ mod tests {
 
     #[test]
     fn route_enqueue_bare_exchange_slash_command_for_idle_drain() {
+        let _env_guard = env_lock();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");

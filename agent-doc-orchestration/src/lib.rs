@@ -38,7 +38,5 @@
 pub mod codex_hook;
 pub mod preflight;
 pub mod repair;
-#[cfg(test)]
-pub mod route;
 pub mod start;
 pub mod write;

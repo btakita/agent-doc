@@ -16344,7 +16344,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_pane_resolution_io_source.contains("pub fn rescue_from_stash(")
             && route_pane_resolution_io_source.contains("DispatchOnlyRouteEffects")
             && route_command_source.contains("crate::pane_resolution::resolve_or_create_pane(")
-            && route_source.contains("#[cfg(test)]\nmod pane_resolution;")
+            && route_source.contains(
+                "#[cfg(test)]\n#[path = \"route/pane_resolution.rs\"]\nmod pane_resolution;"
+            )
             && route_pane_resolution_io_source.contains("dispatch_only_send_reopen(")
             && route_pane_resolution_io_source.contains("pub fn optimistic_busy_pane_dispatch(")
             && route_pane_resolution_io_source.contains("pub struct RouteBusyPaneRetryEffects")

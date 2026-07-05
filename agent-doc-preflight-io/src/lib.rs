@@ -99,6 +99,260 @@ pub struct RelatedDocChange {
     pub exists: bool,
 }
 
+/// Resolve the links cache directory, creating it if needed.
+pub fn links_cache_dir(file: &Path) -> Option<std::path::PathBuf> {
+    let mut search = file.parent();
+    while let Some(d) = search {
+        let candidate = d.join(".agent-doc");
+        if candidate.is_dir() {
+            let cache = candidate.join("links_cache");
+            std::fs::create_dir_all(&cache).ok()?;
+            return Some(cache);
+        }
+        search = d.parent();
+    }
+    None
+}
+
+/// Fetch a URL and compare against cached content. Returns a change entry if content differs.
+pub fn check_url_link(url: &str, cache_dir: &Path) -> RelatedDocChange {
+    let cache_path = agent_doc_workflow::preflight_policy::url_cache_path(cache_dir, url);
+    let cached = std::fs::read_to_string(&cache_path).ok();
+
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .build()
+        .into();
+    let response = agent.get(url).call();
+
+    match response {
+        Ok(mut resp) => {
+            let content_type = resp
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let body = match resp.body_mut().read_to_string() {
+                Ok(b) => b,
+                Err(e) => {
+                    return RelatedDocChange {
+                        path: url.to_string(),
+                        summary: format!("fetch error: {}", e),
+                        exists: false,
+                    };
+                }
+            };
+
+            let content = if agent_doc_workflow::preflight_policy::is_html_content(&content_type) {
+                agent_doc_workflow::preflight_policy::html_to_markdown(&body)
+            } else {
+                body
+            };
+
+            match cached {
+                Some(ref old) if old == &content => RelatedDocChange {
+                    path: url.to_string(),
+                    summary: String::new(),
+                    exists: true,
+                },
+                Some(_) => {
+                    let _ = std::fs::write(&cache_path, &content);
+                    RelatedDocChange {
+                        path: url.to_string(),
+                        summary: format!("content changed ({} bytes)", content.len()),
+                        exists: true,
+                    }
+                }
+                None => {
+                    let _ = std::fs::write(&cache_path, &content);
+                    RelatedDocChange {
+                        path: url.to_string(),
+                        summary: format!("initial fetch ({} bytes)", content.len()),
+                        exists: true,
+                    }
+                }
+            }
+        }
+        Err(e) => RelatedDocChange {
+            path: url.to_string(),
+            summary: format!("fetch failed: {}", e),
+            exists: false,
+        },
+    }
+}
+
+pub fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let fm = match frontmatter::parse(&content) {
+        Ok((fm, _)) => fm,
+        Err(_) => return vec![],
+    };
+    if fm.links.is_empty() {
+        return vec![];
+    }
+
+    let our_snapshot_mtime = agent_doc_fs::snapshot_path_for(file)
+        .ok()
+        .and_then(|p| std::fs::metadata(&p).ok())
+        .and_then(|m| m.modified().ok());
+
+    let doc_dir = match file.parent() {
+        Some(d) => d,
+        None => return vec![],
+    };
+
+    let cache_dir = links_cache_dir(file);
+
+    let mut changes = Vec::new();
+    for link in &fm.links {
+        if agent_doc_workflow::preflight_policy::is_url(link) {
+            if let Some(ref cache) = cache_dir {
+                let change = check_url_link(link, cache);
+                if !change.summary.is_empty() {
+                    changes.push(change);
+                }
+            } else {
+                eprintln!(
+                    "[preflight] warning: cannot resolve links cache for URL: {}",
+                    link
+                );
+            }
+            continue;
+        }
+
+        let resolved = doc_dir.join(link);
+        if !resolved.exists() {
+            changes.push(RelatedDocChange {
+                path: link.clone(),
+                summary: "file not found".to_string(),
+                exists: false,
+            });
+            continue;
+        }
+
+        let related_mtime = match agent_doc_git_io::revision::last_commit_mtime(&resolved) {
+            Ok(Some(t)) => t,
+            _ => continue,
+        };
+
+        let is_newer = match our_snapshot_mtime {
+            Some(snap_time) => related_mtime > snap_time,
+            None => true,
+        };
+
+        if !is_newer {
+            continue;
+        }
+
+        let summary = recent_commit_summary(&resolved, our_snapshot_mtime);
+        changes.push(RelatedDocChange {
+            path: link.clone(),
+            summary,
+            exists: true,
+        });
+    }
+
+    changes
+}
+
+/// Get a human-readable summary of recent commits for a file.
+pub fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> String {
+    match agent_doc_git_io::revision::recent_commit_lines(file, since, 5) {
+        agent_doc_git_io::revision::RecentCommitLog::Lines(lines) => lines.join("; "),
+        agent_doc_git_io::revision::RecentCommitLog::Empty => "changed".to_string(),
+        agent_doc_git_io::revision::RecentCommitLog::GitUnavailable => {
+            "changed (git unavailable)".to_string()
+        }
+        agent_doc_git_io::revision::RecentCommitLog::LogFailed => {
+            "changed (git log failed)".to_string()
+        }
+    }
+}
+
+pub fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {
+    let canonical = file.canonicalize().ok()?;
+    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
+
+    Some(root.join(".agent-doc/claims.log"))
+}
+
+/// Read the claims log without mutating it. Returns non-empty lines.
+pub fn read_claims(file: &Path) -> Vec<String> {
+    let Some(log_path) = claims_log_path(file) else {
+        return vec![];
+    };
+
+    let contents = match std::fs::read_to_string(&log_path) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    if contents.is_empty() {
+        return vec![];
+    }
+
+    contents
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect()
+}
+
+/// Read the claims log and truncate it. Returns non-empty lines.
+pub fn read_and_truncate_claims(file: &Path) -> Vec<String> {
+    let Some(log_path) = claims_log_path(file) else {
+        return vec![];
+    };
+
+    let claims = read_claims(file);
+    if claims.is_empty() {
+        return claims;
+    }
+
+    if let Err(e) = std::fs::write(&log_path, "") {
+        eprintln!("[preflight] failed to truncate claims log: {}", e);
+    }
+
+    claims
+}
+
+pub fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
+    let baseline_path = match agent_doc_fs::baseline_path_for(file) {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("[preflight] failed to resolve baseline path: {}", e);
+            return None;
+        }
+    };
+    if let Some(parent) = baseline_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(&baseline_path, content) {
+        Ok(()) => {
+            eprintln!("[preflight] baseline saved: {}", baseline_path.display());
+            if agent_doc_snapshot_io::mps_enabled() {
+                match agent_doc_snapshot_io::save_baseline_model(
+                    file,
+                    content,
+                    agent_doc_ops_log_io::log_op,
+                ) {
+                    Ok(()) => {}
+                    Err(e) => eprintln!("[preflight] #mps baseline model pin failed: {}", e),
+                }
+            }
+            Some(baseline_path.to_string_lossy().to_string())
+        }
+        Err(e) => {
+            eprintln!("[preflight] failed to save baseline: {}", e);
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
     /// Non-blocking warnings the skill should surface before responding.
@@ -4022,6 +4276,45 @@ mod tests {
             .ok();
 
         dir
+    }
+
+    #[test]
+    fn links_cache_dir_creates_directory() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        let cache = links_cache_dir(&doc);
+        assert!(cache.is_some());
+        let cache_path = cache.unwrap();
+        assert!(cache_path.exists());
+        assert!(cache_path.ends_with("links_cache"));
+    }
+
+    #[test]
+    fn preflight_claims_read_and_truncated() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        let log_path = dir.path().join(".agent-doc/claims.log");
+        std::fs::write(&log_path, "claim A\nclaim B\n").unwrap();
+
+        let claims = read_and_truncate_claims(&doc);
+        assert_eq!(claims, vec!["claim A", "claim B"]);
+
+        let after = std::fs::read_to_string(&log_path).unwrap();
+        assert!(after.is_empty(), "claims log should be empty after read");
+    }
+
+    #[test]
+    fn preflight_no_claims_log_returns_empty() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        let claims = read_and_truncate_claims(&doc);
+        assert!(claims.is_empty());
     }
 
     fn write_optverify_doc(dir: &TempDir, predicate_annotation: &str) -> PathBuf {

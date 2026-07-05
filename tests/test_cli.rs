@@ -11350,6 +11350,24 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split linked-document change detection and output assembly",
         ),
         (
+            "Preflight linked-document change detection IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Move output assembly callers onto the focused linked-change detector",
+        ),
+        (
+            "Preflight claims-log IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Split claim-log path discovery from destructive truncation",
+        ),
+        (
+            "Preflight baseline content IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Split baseline path resolution from disk/model writes",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
@@ -12716,6 +12734,130 @@ fn test_preflight_output_uses_user_intent_prompt_changes_json_surface() {
         !preflight_run_source.contains("\n        prompt_bearing_changes,\n"),
         "preflight run must not populate the removed prompt_bearing_changes JSON field"
     );
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_linked_doc_change_detection_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let preflight_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    let preflight_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+
+    for forbidden in [
+        "fn links_cache_dir(",
+        "fn check_url_link(",
+        "fn check_linked_docs(",
+        "fn recent_commit_summary(",
+        "ureq::Agent",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight must not own linked-doc change detection IO: {forbidden}"
+        );
+    }
+    assert!(
+        !orchestration_manifest.contains("ureq =") && !orchestration_manifest.contains("htmd ="),
+        "orchestration should not carry linked-doc URL fetch/HTML conversion deps"
+    );
+    for required in [
+        "pub fn links_cache_dir(",
+        "pub fn check_url_link(",
+        "pub fn check_linked_docs(",
+        "pub fn recent_commit_summary(",
+        "agent_doc_frontmatter::frontmatter",
+        "agent_doc_git_io::revision::last_commit_mtime",
+        "agent_doc_git_io::revision::recent_commit_lines",
+        "agent_doc_workflow::preflight_policy::url_cache_path",
+        "ureq::Agent",
+    ] {
+        assert!(
+            preflight_io.contains(required),
+            "agent-doc-preflight-io must own linked-doc change detection IO: {required}"
+        );
+    }
+    assert!(
+        preflight_io_manifest.contains("ureq ="),
+        "agent-doc-preflight-io should own URL fetch dependency for linked-doc detection"
+    );
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_claims_log_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let preflight_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+
+    for forbidden in [
+        "fn claims_log_path(",
+        "fn read_claims(",
+        "fn read_and_truncate_claims(",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight must not own claims-log IO: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_preflight_run.contains("read_claims(file)")
+            && orchestration_preflight_run.contains("read_and_truncate_claims(file)"),
+        "preflight/run should call focused claims-log IO helpers directly"
+    );
+    for required in [
+        "pub fn claims_log_path(",
+        "pub fn read_claims(",
+        "pub fn read_and_truncate_claims(",
+        "agent_doc_project_root_io::project_root_containing",
+        ".agent-doc/claims.log",
+    ] {
+        assert!(
+            preflight_io.contains(required),
+            "agent-doc-preflight-io must own claims-log IO: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_baseline_content_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let preflight_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+
+    assert!(
+        !orchestration_preflight.contains("fn save_baseline_content("),
+        "orchestration preflight must not own baseline content IO"
+    );
+    assert!(
+        orchestration_preflight_run.contains("save_baseline_content(file,")
+            && orchestration_preflight_run.contains("save_baseline_content(&doc,"),
+        "preflight/run should call focused baseline content IO directly"
+    );
+    for required in [
+        "pub fn save_baseline_content(",
+        "agent_doc_fs::baseline_path_for(file)",
+        "agent_doc_snapshot_io::mps_enabled()",
+        "agent_doc_snapshot_io::save_baseline_model(",
+        "agent_doc_ops_log_io::log_op",
+    ] {
+        assert!(
+            preflight_io.contains(required),
+            "agent-doc-preflight-io must own baseline content IO: {required}"
+        );
+    }
 }
 
 #[test]
@@ -23791,7 +23933,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
     }
     for relative in [
         "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-preflight-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -24560,7 +24702,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         );
     }
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     assert!(
         preflight_source.contains("agent_doc_git_io::revision::recent_commit_lines("),
         "preflight linked-doc checks should call focused git revision IO"
@@ -24697,8 +24839,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/detect.rs")).unwrap();
     let session_check_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
-    let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let preflight_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
@@ -24733,7 +24875,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             && detect_source.contains("agent_doc_git_io::submodule::submodule_pointer_drift(file)")
             && session_check_source
                 .contains("agent_doc_git_io::status::tracked_side_effect_note(file)?")
-            && preflight_source
+            && preflight_io_source
                 .contains("agent_doc_git_io::revision::last_commit_mtime(&resolved)")
             && preflight_run_source
                 .contains("agent_doc_git_io::revision::last_commit_mtime(&doc_path)"),

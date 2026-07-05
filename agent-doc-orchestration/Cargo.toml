@@ -135,7 +135,6 @@ serde_json = "1"
 serde_yaml = "0.9"
 similar = "3"
 toml = "1.1"
-ureq = { version = "3", features = ["json"] }
 tempfile = "3"
 zip = "8"
 uuid = { version = "1", features = ["v4"] }
@@ -145,7 +144,6 @@ tmux-router = { path = "../../tmux-router", version = "0.3.13" }
 base64 = "0.22"
 regex = "1"
 interprocess = { version = "2", default-features = false }
-htmd = "0.5.3"
 indexmap = { version = "2", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

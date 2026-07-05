@@ -1218,7 +1218,6 @@ dependencies = [
  "clap",
  "filetime",
  "fs2",
- "htmd",
  "indexmap",
  "instruction-files",
  "interprocess",
@@ -1241,7 +1240,6 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "tsift-memory",
- "ureq",
  "uuid",
  "zip",
 ]
@@ -1331,6 +1329,7 @@ dependencies = [
  "tempfile",
  "tmux-router",
  "tracing",
+ "ureq",
 ]
 
 [[package]]

@@ -60,3 +60,9 @@ anyhow = "1"
 fs2 = "0.4"
 libc = "0.2"
 tmux-router = { path = "../../tmux-router", version = "0.3.13" }
+
+[dev-dependencies]
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-run-runtime-io = { path = "../agent-doc-run-runtime-io", version = "0.34.67" }
+tempfile = "3"

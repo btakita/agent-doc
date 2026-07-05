@@ -350,6 +350,7 @@ name = "agent-doc-commit-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-capture-io",
+ "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
@@ -358,6 +359,7 @@ dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
  "agent-doc-element",
+ "agent-doc-element-boundary",
  "agent-doc-flow",
  "agent-doc-flow-io",
  "agent-doc-frontmatter-io",
@@ -366,6 +368,7 @@ dependencies = [
  "agent-doc-git-io",
  "agent-doc-hooks-io",
  "agent-doc-ipc-io",
+ "agent-doc-merge",
  "agent-doc-merge-io",
  "agent-doc-ops-log-io",
  "agent-doc-plugin-owner",
@@ -383,6 +386,8 @@ dependencies = [
  "agent-doc-write-converge-io",
  "agent-doc-write-ipc-io",
  "anyhow",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1798,6 +1803,7 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
+ "agent-doc-element",
  "agent-doc-element-backlog-io",
  "agent-doc-element-backlog-runtime-io",
  "agent-doc-flow",
@@ -1815,6 +1821,7 @@ dependencies = [
  "agent-doc-project-root-io",
  "agent-doc-queue",
  "agent-doc-queue-io",
+ "agent-doc-repair-command-io",
  "agent-doc-run-context-io",
  "agent-doc-secret-redact",
  "agent-doc-session-actor-io",
@@ -1829,10 +1836,12 @@ dependencies = [
  "agent-doc-sync",
  "agent-doc-sync-io",
  "agent-doc-template",
+ "agent-doc-test-support",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
  "agent-doc-turn",
+ "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
  "agent-doc-write-converge-io",
  "anyhow",
@@ -1876,6 +1885,7 @@ dependencies = [
  "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
+ "agent-doc-debounce",
  "agent-doc-diff",
  "agent-doc-diff-io",
  "agent-doc-document",
@@ -1886,6 +1896,7 @@ dependencies = [
  "agent-doc-fs",
  "agent-doc-git-io",
  "agent-doc-harness",
+ "agent-doc-hash",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
  "agent-doc-merge-io",
@@ -1901,6 +1912,7 @@ dependencies = [
  "agent-doc-queue-io",
  "agent-doc-repair-io",
  "agent-doc-run-context-io",
+ "agent-doc-run-runtime-io",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
  "agent-doc-session-actor-io",
@@ -1920,6 +1932,7 @@ dependencies = [
  "anyhow",
  "fs2",
  "libc",
+ "tempfile",
  "tmux-router",
 ]
 

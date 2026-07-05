@@ -597,7 +597,7 @@ pub fn enforce_cycle_completion(
     file: &Path,
     effects: &impl PreflightCycleCompletionEffects,
 ) -> Result<(bool, bool)> {
-    let state = agent_doc_cycle_state_io::load(file)?;
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let missing_commit_event = if state.as_ref().map(|state| state.is_open()).unwrap_or(false) {
         None
     } else {
@@ -749,7 +749,7 @@ pub fn enforce_cycle_completion(
         }
     };
 
-    if let Some(after) = agent_doc_cycle_state_io::load(file)?
+    if let Some(after) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
         && after.is_open()
     {
         let marker_note = if matches!(after.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
@@ -837,7 +837,7 @@ pub fn append_ipc_dogfood_note_for_diagnostic(file: &Path, diagnostic: &str) -> 
 pub fn resolve_pipeline_state(
     file: &Path,
 ) -> Result<Option<agent_doc_frontmatter::frontmatter::AgentDocPipeline>> {
-    if let Some(state) = agent_doc_cycle_state_io::load(file)? {
+    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
         return Ok(Some(state.to_pipeline()));
     }
     let current = std::fs::read_to_string(file).unwrap_or_default();
@@ -4297,6 +4297,32 @@ mod tests {
         ) -> Result<()> {
             std::fs::write(file, target_content)?;
             Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct TestPreflightCycleCompletionEffects {
+        repair_calls: std::cell::Cell<usize>,
+        commit_calls: std::cell::Cell<usize>,
+    }
+
+    impl PreflightCycleCompletionEffects for TestPreflightCycleCompletionEffects {
+        fn repair(&self, _file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome> {
+            self.repair_calls.set(self.repair_calls.get() + 1);
+            Ok(agent_doc_turn::repair::RepairOutcome::Noop)
+        }
+
+        fn commit(&self, _file: &Path) -> Result<bool> {
+            self.commit_calls.set(self.commit_calls.get() + 1);
+            Ok(false)
+        }
+
+        fn session_interruption(&self, _file: &Path) -> Result<Option<String>> {
+            Ok(None)
+        }
+
+        fn detect_bypassed_response_write(&self, _file: &Path) -> Result<Option<String>> {
+            Ok(None)
         }
     }
 
@@ -8291,6 +8317,54 @@ mod tests {
         assert_eq!(p.step.as_deref(), Some("preflight_started"));
         assert_eq!(p.turn_id.as_deref(), Some("#fmrunid-wire"));
         assert_ne!(p.run_id.as_deref(), Some("stale-mirror"));
+    }
+
+    #[test]
+    fn enforce_cycle_completion_prefers_lazily_projection_over_stale_open_sidecar() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        let effects = TestPreflightCycleCompletionEffects::default();
+        let result = enforce_cycle_completion(&doc, &effects).unwrap();
+        assert_eq!(result, (false, false));
+        assert_eq!(
+            effects.repair_calls.get(),
+            0,
+            "stale open JSON must not force repair when lazily says committed"
+        );
+        assert_eq!(
+            effects.commit_calls.get(),
+            0,
+            "stale open JSON must not force commit when lazily says committed"
+        );
     }
 
     #[test]

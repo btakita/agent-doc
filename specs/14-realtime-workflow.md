@@ -282,6 +282,15 @@ forwarded operator prompt queues for the next turn instead of double-appending
 into an in-flight response. The plugin never drives a turn-state transition; the
 CPC is authoritative for every transition (`transition_authority`).
 
+`TurnProjection` also carries optional `realtime_steering` while a turn is in
+flight. The CPC computes this from the current realtime document model compared
+with the immutable turn baseline: prompt-target additions, document edits,
+prompt deletion, and prompt reduction are projected as named steering states
+with a short preview. These states do not make disk authoritative and they do not
+turn the baseline into a document source; they are operator steering signals that
+the editor must surface on the active turn banner/status label so a deleted or
+changed prompt is visible before the old response is persisted blindly.
+
 ### Editor Parity Requirement
 
 All editor-facing behavior in this section — `ReplicaPull` application, the
@@ -298,8 +307,9 @@ per-editor** because the two IDE platforms do not paint the same widgets
 reliably. Both frontends map `TurnProjection` through the identical
 `buildTurnStatePresentation` / `TurnStateBridge.presentation` logic (show
 `⟳ agent-doc: persisting` / `⟳ agent-doc: awaiting response` while the CPC turn is
-in flight, hide when idle) and poll the `agent_doc_turn_projection` FFI on the same
-cadence. They differ only in the native surface that renders it:
+in flight, append realtime steering such as `prompt deleted` when present, hide
+when idle) and poll the `agent_doc_turn_projection` FFI on the same cadence. They
+differ only in the native surface that renders it:
 
 - **VS Code** renders it in a **status-bar item** (`turnStatusBarItem`), which
   paints reliably, with a tooltip and attention background while in flight.

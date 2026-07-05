@@ -19,7 +19,7 @@
 //!    ops scoped to one component, never a whole-component (or whole-document)
 //!    replace.
 //! 3. Drives a reactive [`CellTree`]/[`CellMap`] representation
-//!    ([`CellDocTree`]) so an edit to one item invalidates only that item's
+//!    ([`DocumentCellTree`]) so an edit to one item invalidates only that item's
 //!    value cell — the core anti-corruption property that the eventual
 //!    per-cell merge needs.
 //!
@@ -41,6 +41,7 @@
 use lazily::{
     CellMap, CellTree, Context, DiffOp, SemTree, TextCrdt, apply_to_map, apply_to_tree, reconcile,
 };
+use std::fmt;
 
 use crate::crdt::{
     EditorOp, PREAMBLE_KEY, is_list_component, replay_editor_ops, split_exchange_children,
@@ -58,7 +59,7 @@ pub const CELL_MERGE_ENV: &str = "AGENT_DOC_CELL_MERGE";
 
 /// Process-global serialization lock for tests that mutate the
 /// `AGENT_DOC_CELL_MERGE` env var. The env var is process-wide, so flag-toggling
-/// tests across modules (`cell_doc`, `crdt`) must serialize through this single
+/// tests across modules (`document_cell`, `crdt`) must serialize through this single
 /// lock to avoid racing each other. `pub(crate)` so sibling test modules share it.
 #[cfg(test)]
 pub(crate) static CELL_MERGE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -233,6 +234,149 @@ impl ComponentDiff {
     }
 }
 
+/// A focused mutation against one semantic document cell.
+///
+/// The identity is the reorder-stable cell identity returned by
+/// [`node_key_identity`], for example `queue:0:id:alpha` or
+/// `status:0:body`. Values are exact source slices for that cell; the renderer
+/// only replaces/reorders the targeted component occurrence's item sequence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocumentCellMutation {
+    Set {
+        component: String,
+        occurrence: usize,
+        identity: String,
+        value: ItemValue,
+    },
+    Insert {
+        component: String,
+        occurrence: usize,
+        identity: String,
+        value: ItemValue,
+        index: usize,
+    },
+    Remove {
+        component: String,
+        occurrence: usize,
+        identity: String,
+    },
+    Move {
+        component: String,
+        occurrence: usize,
+        identity: String,
+        to: usize,
+    },
+}
+
+impl DocumentCellMutation {
+    pub fn component(&self) -> &str {
+        match self {
+            Self::Set { component, .. }
+            | Self::Insert { component, .. }
+            | Self::Remove { component, .. }
+            | Self::Move { component, .. } => component,
+        }
+    }
+
+    pub fn occurrence(&self) -> usize {
+        match self {
+            Self::Set { occurrence, .. }
+            | Self::Insert { occurrence, .. }
+            | Self::Remove { occurrence, .. }
+            | Self::Move { occurrence, .. } => *occurrence,
+        }
+    }
+
+    pub fn identity(&self) -> &str {
+        match self {
+            Self::Set { identity, .. }
+            | Self::Insert { identity, .. }
+            | Self::Remove { identity, .. }
+            | Self::Move { identity, .. } => identity,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocumentCellMutationError {
+    Parse(String),
+    ComponentNotFound {
+        component: String,
+        occurrence: usize,
+    },
+    CellNotFound {
+        component: String,
+        occurrence: usize,
+        identity: String,
+    },
+    CellAlreadyExists {
+        component: String,
+        occurrence: usize,
+        identity: String,
+    },
+    DuplicateCellIdentity {
+        component: String,
+        occurrence: usize,
+        identity: String,
+    },
+    InvalidIndex {
+        component: String,
+        occurrence: usize,
+        index: usize,
+        len: usize,
+    },
+}
+
+impl fmt::Display for DocumentCellMutationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse(err) => write!(f, "failed to parse document components: {err}"),
+            Self::ComponentNotFound {
+                component,
+                occurrence,
+            } => write!(
+                f,
+                "component `{component}` occurrence {occurrence} was not found"
+            ),
+            Self::CellNotFound {
+                component,
+                occurrence,
+                identity,
+            } => write!(
+                f,
+                "cell `{identity}` was not found in component `{component}` occurrence {occurrence}"
+            ),
+            Self::CellAlreadyExists {
+                component,
+                occurrence,
+                identity,
+            } => write!(
+                f,
+                "cell `{identity}` already exists in component `{component}` occurrence {occurrence}"
+            ),
+            Self::DuplicateCellIdentity {
+                component,
+                occurrence,
+                identity,
+            } => write!(
+                f,
+                "duplicate cell identity `{identity}` in component `{component}` occurrence {occurrence}"
+            ),
+            Self::InvalidIndex {
+                component,
+                occurrence,
+                index,
+                len,
+            } => write!(
+                f,
+                "cell index {index} is out of range for component `{component}` occurrence {occurrence} with {len} cells"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DocumentCellMutationError {}
+
 /// Project a parsed document body into ordered keyed item sequences, one per
 /// component occurrence.
 ///
@@ -257,6 +401,142 @@ pub fn project_document(doc: &str) -> Vec<ComponentOccurrence> {
         out.push(project_component(doc, comp, occurrence));
     }
     out
+}
+
+/// Apply one focused semantic-cell mutation and render the resulting markdown
+/// projection.
+///
+/// This is the string boundary for the per-cell document model: callers name one
+/// cell, while this function replaces only the owning component occurrence's
+/// item sequence and preserves surrounding document text and markers verbatim.
+pub fn apply_document_cell_mutation(
+    doc: &str,
+    mutation: &DocumentCellMutation,
+) -> Result<String, DocumentCellMutationError> {
+    let comps =
+        element::parse(doc).map_err(|err| DocumentCellMutationError::Parse(err.to_string()))?;
+    let mut occurrence_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+
+    for comp in &comps {
+        let occurrence = occurrence_counts.entry(comp.name.clone()).or_insert(0);
+        let current_occurrence = *occurrence;
+        *occurrence += 1;
+
+        if comp.name == mutation.component() && current_occurrence == mutation.occurrence() {
+            let occurrence = project_component(doc, comp, current_occurrence);
+            let mut items = occurrence
+                .items
+                .iter()
+                .map(|(key, value)| (node_key_identity(key).to_string(), value.clone()))
+                .collect::<Vec<_>>();
+            ensure_unique_cell_identities(mutation.component(), mutation.occurrence(), &items)?;
+            apply_document_cell_mutation_to_items(&mut items, mutation)?;
+            let body = items
+                .into_iter()
+                .map(|(_, value)| value)
+                .collect::<String>();
+            return Ok(comp.replace_content(doc, &body));
+        }
+    }
+
+    Err(DocumentCellMutationError::ComponentNotFound {
+        component: mutation.component().to_string(),
+        occurrence: mutation.occurrence(),
+    })
+}
+
+fn ensure_unique_cell_identities(
+    component: &str,
+    occurrence: usize,
+    items: &[(String, ItemValue)],
+) -> Result<(), DocumentCellMutationError> {
+    let mut seen = std::collections::HashSet::new();
+    for (identity, _) in items {
+        if !seen.insert(identity.clone()) {
+            return Err(DocumentCellMutationError::DuplicateCellIdentity {
+                component: component.to_string(),
+                occurrence,
+                identity: identity.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn apply_document_cell_mutation_to_items(
+    items: &mut Vec<(String, ItemValue)>,
+    mutation: &DocumentCellMutation,
+) -> Result<(), DocumentCellMutationError> {
+    let component = mutation.component().to_string();
+    let occurrence = mutation.occurrence();
+    match mutation {
+        DocumentCellMutation::Set {
+            identity, value, ..
+        } => {
+            let Some((_, existing)) = items.iter_mut().find(|(id, _)| id == identity) else {
+                return Err(DocumentCellMutationError::CellNotFound {
+                    component,
+                    occurrence,
+                    identity: identity.clone(),
+                });
+            };
+            *existing = value.clone();
+        }
+        DocumentCellMutation::Insert {
+            identity,
+            value,
+            index,
+            ..
+        } => {
+            if items.iter().any(|(id, _)| id == identity) {
+                return Err(DocumentCellMutationError::CellAlreadyExists {
+                    component,
+                    occurrence,
+                    identity: identity.clone(),
+                });
+            }
+            if *index > items.len() {
+                return Err(DocumentCellMutationError::InvalidIndex {
+                    component,
+                    occurrence,
+                    index: *index,
+                    len: items.len(),
+                });
+            }
+            items.insert(*index, (identity.clone(), value.clone()));
+        }
+        DocumentCellMutation::Remove { identity, .. } => {
+            let Some(index) = items.iter().position(|(id, _)| id == identity) else {
+                return Err(DocumentCellMutationError::CellNotFound {
+                    component,
+                    occurrence,
+                    identity: identity.clone(),
+                });
+            };
+            items.remove(index);
+        }
+        DocumentCellMutation::Move { identity, to, .. } => {
+            let Some(index) = items.iter().position(|(id, _)| id == identity) else {
+                return Err(DocumentCellMutationError::CellNotFound {
+                    component,
+                    occurrence,
+                    identity: identity.clone(),
+                });
+            };
+            if *to >= items.len() {
+                return Err(DocumentCellMutationError::InvalidIndex {
+                    component,
+                    occurrence,
+                    index: *to,
+                    len: items.len(),
+                });
+            }
+            let item = items.remove(index);
+            items.insert(*to, item);
+        }
+    }
+    Ok(())
 }
 
 /// Project a single component occurrence into ordered keyed items.
@@ -1620,17 +1900,17 @@ fn reconstruct_theirs_from_ops(
 /// The tree id scheme: the root id is `""`, a component-occurrence node id is
 /// `component:occurrence`, and an item leaf id is its reorder-stable node-key
 /// identity (`component:occurrence:item-id`). Applying [`ComponentDiff`] ops via
-/// [`CellDocTree::apply`] mutates only the touched item cells / order signals —
+/// [`DocumentCellTree::apply`] mutates only the touched item cells / order signals —
 /// a single-item edit invalidates exactly that leaf's value cell and nothing
 /// else (per-cell isolation).
-pub struct CellDocTree {
+pub struct DocumentCellTree {
     root: CellTree<String, String>,
     /// Per component-occurrence ordered item map (parallel to the tree's item
     /// children) so ops apply via the LIS-driven [`CellMap`] path.
     occurrences: std::collections::HashMap<(String, usize), CellMap<String, String>>,
 }
 
-impl CellDocTree {
+impl DocumentCellTree {
     /// Build a reactive tree from a document revision.
     pub fn from_document(ctx: &Context, doc: &str) -> Self {
         let root: CellTree<String, String> = CellTree::leaf(ctx, String::new(), String::new());
@@ -1771,6 +2051,81 @@ agent_doc_format: template
         assert_eq!(keys[0], "queue:0:id:alpha:0");
         assert_eq!(keys[1], "queue:0:id:beta:1");
         assert_eq!(keys[2], "queue:0:id:gamma:2");
+    }
+
+    #[test]
+    fn document_cell_mutations_render_only_target_component() {
+        let updated = apply_document_cell_mutation(
+            DOC,
+            &DocumentCellMutation::Set {
+                component: "queue".into(),
+                occurrence: 0,
+                identity: "queue:0:id:alpha".into(),
+                value: "- do [#alpha] updated task\n".into(),
+            },
+        )
+        .unwrap();
+        assert!(updated.contains("- do [#alpha] updated task\n"));
+        assert!(updated.contains("agent_doc_format: template"));
+        assert!(updated.contains("- [#one] backlog item one\n"));
+
+        let inserted = apply_document_cell_mutation(
+            &updated,
+            &DocumentCellMutation::Insert {
+                component: "queue".into(),
+                occurrence: 0,
+                identity: "queue:0:id:delta".into(),
+                value: "- do [#delta] inserted task\n".into(),
+                index: 1,
+            },
+        )
+        .unwrap();
+        let queue = project_document(&inserted)
+            .into_iter()
+            .find(|occ| occ.component == "queue")
+            .unwrap();
+        let ids = queue
+            .items
+            .iter()
+            .map(|(key, _)| node_key_identity(key).to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                "queue:0:id:alpha",
+                "queue:0:id:delta",
+                "queue:0:id:beta",
+                "queue:0:id:gamma"
+            ]
+        );
+
+        let moved = apply_document_cell_mutation(
+            &inserted,
+            &DocumentCellMutation::Move {
+                component: "queue".into(),
+                occurrence: 0,
+                identity: "queue:0:id:gamma".into(),
+                to: 0,
+            },
+        )
+        .unwrap();
+        assert!(
+            moved.find("[#gamma]").unwrap() < moved.find("[#alpha]").unwrap(),
+            "move should only reorder keyed queue cells"
+        );
+
+        let removed = apply_document_cell_mutation(
+            &moved,
+            &DocumentCellMutation::Remove {
+                component: "queue".into(),
+                occurrence: 0,
+                identity: "queue:0:id:delta".into(),
+            },
+        )
+        .unwrap();
+        assert!(!removed.contains("[#delta]"));
+        assert!(removed.contains("<!-- agent:backlog -->\n"));
+        assert!(removed.contains("- [#two] backlog item two\n"));
     }
 
     #[test]
@@ -1920,7 +2275,7 @@ agent_doc_format: template
     #[test]
     fn reactive_tree_single_edit_spares_sibling_cell() {
         let ctx = Context::new();
-        let mut tree = CellDocTree::from_document(&ctx, DOC);
+        let mut tree = DocumentCellTree::from_document(&ctx, DOC);
 
         // A reader of the STABLE sibling alpha's value.
         let alpha_view = {
@@ -1967,7 +2322,7 @@ agent_doc_format: template
     #[test]
     fn reactive_tree_reorder_keeps_membership_cached() {
         let ctx = Context::new();
-        let mut tree = CellDocTree::from_document(&ctx, DOC);
+        let mut tree = DocumentCellTree::from_document(&ctx, DOC);
         let occ_node = tree.root().child(&"queue:0".to_string()).unwrap();
         let len_view = {
             let node = occ_node.clone();
@@ -2002,7 +2357,7 @@ agent_doc_format: template
 
     type TreeSnapshot = Vec<(String, usize, Vec<(String, String)>)>;
 
-    fn tree_snapshot(ctx: &Context, tree: &CellDocTree) -> TreeSnapshot {
+    fn tree_snapshot(ctx: &Context, tree: &DocumentCellTree) -> TreeSnapshot {
         let mut occurrences: Vec<(String, usize)> = tree.occurrences.keys().cloned().collect();
         occurrences.sort();
         occurrences
@@ -2042,8 +2397,8 @@ agent_doc_format: template
             .collect()
     }
 
-    fn assert_incremental_matches_rebuild(ctx: &Context, tree: &CellDocTree, doc: &str) {
-        let rebuilt = CellDocTree::from_document(ctx, doc);
+    fn assert_incremental_matches_rebuild(ctx: &Context, tree: &DocumentCellTree, doc: &str) {
+        let rebuilt = DocumentCellTree::from_document(ctx, doc);
         assert_eq!(tree_snapshot(ctx, tree), tree_snapshot(ctx, &rebuilt));
     }
 
@@ -2058,7 +2413,7 @@ agent_doc_format: template
     #[test]
     fn update_to_matches_rebuild_across_revisions() {
         let ctx = Context::new();
-        let mut tree = CellDocTree::from_document(&ctx, DOC);
+        let mut tree = DocumentCellTree::from_document(&ctx, DOC);
         let mut old = DOC.to_string();
 
         let rev1 = old.replace(
@@ -2099,7 +2454,7 @@ agent_doc_format: template
         use std::rc::Rc;
 
         let ctx = Context::new();
-        let mut tree = CellDocTree::from_document(&ctx, DOC);
+        let mut tree = DocumentCellTree::from_document(&ctx, DOC);
         let counts = tree.unresolved_prompt_counts(&ctx);
         assert_eq!(counts.value(&ctx), eager_unresolved_prompt_count(DOC));
         assert_eq!(counts.node_value(&ctx, &"queue:0".to_string()), Some(3));

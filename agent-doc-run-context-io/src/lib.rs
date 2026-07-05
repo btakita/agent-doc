@@ -32,10 +32,11 @@ use agent_doc_frontmatter_io::session::ResolvedSshContext;
 use lazily::{CellHandle, Context, SlotHandle};
 
 use agent_doc_cycle_state_io::CycleState;
+use agent_doc_document_realtime::{CurrentDocument, reconcile_current_doc};
 use agent_doc_project_config_io as project_config_io;
 
 pub type FilePathCell = CellHandle<PathBuf>;
-pub type DocContentCell = CellHandle<String>;
+pub type CurrentDocumentCell = CellHandle<Option<CurrentDocument>>;
 pub type CanonicalPathSlot = SlotHandle<PathBuf>;
 pub type ProjectRootSlot = SlotHandle<Option<PathBuf>>;
 pub type ConfigPathSlot = SlotHandle<Option<PathBuf>>;
@@ -72,7 +73,7 @@ pub type SessionRegistrySlot = SlotHandle<Arc<tmux_router::Registry>>;
 pub struct RunContext {
     ctx: Context,
     file_path: FilePathCell,
-    doc_content: DocContentCell,
+    current_document: CurrentDocumentCell,
     canonical_path: CanonicalPathSlot,
     project_root: ProjectRootSlot,
     config_path: ConfigPathSlot,
@@ -170,13 +171,16 @@ impl RunContext {
             }
         });
 
-        let doc_content = ctx.cell(String::new());
+        let current_document = ctx.cell(None::<CurrentDocument>);
 
         let frontmatter = ctx.slot({
-            let dc = doc_content;
+            let cd = current_document;
             let sc = ssh_context;
             move |ctx: &Context| -> Arc<Frontmatter> {
-                let content: String = ctx.get_cell(&dc);
+                let content = ctx
+                    .get_cell(&cd)
+                    .map(|doc| doc.into_content())
+                    .unwrap_or_default();
                 let ssh: Arc<ResolvedSshContext> = ctx.get(&sc);
                 let resolver = ssh.as_resolver_context(&ssh.doc_relative);
                 let fm = frontmatter::parse_with_ssh_resolver(&content, &resolver)
@@ -187,9 +191,12 @@ impl RunContext {
         });
 
         let components = ctx.slot({
-            let dc = doc_content;
+            let cd = current_document;
             move |ctx: &Context| -> Arc<Vec<Component>> {
-                let content: String = ctx.get_cell(&dc);
+                let content = ctx
+                    .get_cell(&cd)
+                    .map(|doc| doc.into_content())
+                    .unwrap_or_default();
                 Arc::new(element::parse(&content).unwrap_or_default())
             }
         });
@@ -325,7 +332,7 @@ impl RunContext {
         Self {
             ctx,
             file_path: file_path_cell,
-            doc_content,
+            current_document,
             canonical_path,
             project_root,
             config_path,
@@ -387,11 +394,26 @@ impl RunContext {
     }
 
     pub fn doc_content(&self) -> String {
-        self.ctx.get_cell(&self.doc_content)
+        self.current_document()
+            .map(CurrentDocument::into_content)
+            .unwrap_or_default()
     }
 
     pub fn set_doc_content(&self, content: String) {
-        self.ctx.set_cell(&self.doc_content, content);
+        let current = CurrentDocument::new(self.file_path(), reconcile_current_doc(&content, None));
+        self.set_current_document(current);
+    }
+
+    pub fn current_document(&self) -> Option<CurrentDocument> {
+        self.ctx.get_cell(&self.current_document)
+    }
+
+    pub fn set_current_document(&self, current: CurrentDocument) {
+        self.ctx.set_cell(&self.current_document, Some(current));
+    }
+
+    pub fn clear_current_document(&self) {
+        self.ctx.set_cell(&self.current_document, None);
     }
 
     pub fn frontmatter(&self) -> Arc<Frontmatter> {
@@ -540,7 +562,7 @@ impl RunContext {
     }
 
     pub fn invalidate_doc_content(&self) {
-        self.doc_content.clear_dependents(&self.ctx);
+        self.current_document.clear_dependents(&self.ctx);
     }
 
     pub fn snapshot_path_for(&self) -> Option<PathBuf> {
@@ -966,6 +988,36 @@ mod tests {
         let comps = rc.components();
         assert_eq!(comps.len(), 1);
         assert_eq!(comps[0].name, "exchange");
+    }
+
+    #[test]
+    fn run_context_current_document_is_authoritative_document_cell() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "disk replica\n").unwrap();
+
+        let rc = RunContext::new(doc.clone());
+        let current = CurrentDocument::new(
+            doc.clone(),
+            reconcile_current_doc(
+                "disk replica\n",
+                Some(&agent_doc_document_realtime::BufferState::new(
+                    "editor buffer\n",
+                    true,
+                    7,
+                )),
+            ),
+        );
+        rc.set_current_document(current);
+
+        let stored = rc.current_document().expect("current document seeded");
+        assert_eq!(stored.key().as_path(), doc.as_path());
+        assert_eq!(
+            stored.authority(),
+            agent_doc_document_realtime::DocAuthority::EditorBuffer
+        );
+        assert_eq!(rc.doc_content(), "editor buffer\n");
     }
 
     #[test]

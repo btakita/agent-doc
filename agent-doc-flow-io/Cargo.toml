@@ -17,6 +17,7 @@ agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
@@ -29,6 +30,7 @@ agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.6
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
 agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.67" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.67" }
 agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.34.67" }

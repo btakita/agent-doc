@@ -124,6 +124,19 @@ impl agent_doc_preflight_io::PreflightMaintenanceWriteEffects
     }
 }
 
+pub fn resolve_current_preflight_document(file: &Path, source: &str) -> Result<String> {
+    Ok(
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)
+            .with_context(|| {
+                format!(
+                    "preflight {source}: resolve current document {}",
+                    file.display()
+                )
+            })?
+            .content,
+    )
+}
+
 pub fn enforce_no_uncommitted_closeout_drift(
     file: &Path,
     rc: &agent_doc_run_context_io::RunContext,
@@ -282,8 +295,9 @@ pub fn relocate_out_of_exchange_prompt_before_diff(
 }
 
 pub fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> Result<bool> {
+    let current = resolve_current_preflight_document(file, "duplicate_answered_prompt_tail")?;
     let Some(cleaned_doc) = agent_doc_template::remove_duplicate_answered_exchange_prompt_tail(
-        &std::fs::read_to_string(file)?,
+        &current,
     ) else {
         return Ok(false);
     };
@@ -307,7 +321,7 @@ pub fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
     file: &Path,
     rc: &agent_doc_run_context_io::RunContext,
 ) -> Result<bool> {
-    let current = std::fs::read_to_string(file)?;
+    let current = resolve_current_preflight_document(file, "duplicate_prompt_comments")?;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     let head_doc = rc.head_content();
     let mut preserve_docs = Vec::new();
@@ -536,12 +550,7 @@ pub fn recover_ipc_truncated_worktree_from_editor_buffer(
         }
     }
 
-    let flushed = std::fs::read_to_string(&canonical).with_context(|| {
-        format!(
-            "ipc-truncation recover: re-read failed {}",
-            canonical.display()
-        )
-    })?;
+    let flushed = resolve_current_preflight_document(&canonical, "ipc_truncation_recover")?;
     if !editor_buffer_preserved_head_exchange(&flushed, &head) {
         agent_doc_ops_log_io::log_op(
             file,

@@ -468,7 +468,7 @@ interface AgentDocLib : Library {
 
     /**
      * Read the CPC→plugin turn-state projection JSON for a document path:
-     * `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"cpc"}`.
+     * `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"cpc","realtime_steering":{...}}`.
      * The plugin observes this to render turn-in-flight UI and to decide whether a
      * forwarded operator prompt starts a fresh turn or would collide with an
      * in-flight response (the double-append guard). Defaults to the idle

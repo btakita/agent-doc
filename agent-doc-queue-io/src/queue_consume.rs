@@ -31,6 +31,8 @@ use agent_doc_queue::{
 };
 
 pub trait QueueConsumeWriteEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
+
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
 
     fn converge_document_or_disk(
@@ -157,8 +159,7 @@ pub fn consume_queue_prompts_with_outcome(
     // Hold the document lock for the entire read-parse-write cycle to prevent
     // concurrent edits from invalidating parsed offsets (TOCTOU fix).
     let _lock = acquire_doc_lock(file)?;
-    let content =
-        std::fs::read_to_string(file).context("queue consume: failed to read document")?;
+    let content = effects.current_document_content(file, "queue_consume")?;
     let Some(plan) = plan_queue_prompt_consumption(file, &content, done_ids)? else {
         return Ok(None);
     };
@@ -271,20 +272,20 @@ fn now_millis() -> u64 {
 }
 
 pub fn should_consume_queue_prompt_for_diff(file: &Path, diff_text: Option<&str>) -> Result<bool> {
-    let content =
-        std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
+    let content = std::fs::read_to_string(file)
+        .context("queue consume guard: failed to read detached disk document")?;
     should_consume_queue_prompt_for_diff_content(file, &content, diff_text)
 }
 
 pub fn queue_skip_diagnostic_for_file(file: &Path) -> Result<String> {
-    let content =
-        std::fs::read_to_string(file).context("queue skip diagnostic: failed to read document")?;
+    let content = std::fs::read_to_string(file)
+        .context("queue skip diagnostic: failed to read detached disk document")?;
     agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content(&content)
 }
 
 pub fn response_explicitly_targets_active_queue_head(file: &Path, response: &str) -> Result<bool> {
-    let content =
-        std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
+    let content = std::fs::read_to_string(file)
+        .context("queue consume guard: failed to read detached disk document")?;
     let Some(queue_head) = active_queue_head_text(&content)? else {
         return Ok(false);
     };
@@ -312,8 +313,7 @@ pub fn strike_answered_free_text_queue_heads(
         return Ok(0);
     }
     let _lock = acquire_doc_lock(file)?;
-    let content =
-        std::fs::read_to_string(file).context("free-text strike: failed to read document")?;
+    let content = effects.current_document_content(file, "free_text_queue_strike")?;
     let (fm, _) = frontmatter::parse(&content)?;
     if fm.queue_active != Some(true) {
         return Ok(0);
@@ -489,7 +489,7 @@ pub fn prune_noise_queue_heads(
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
     let _lock = acquire_doc_lock(file)?;
-    let content = std::fs::read_to_string(file).context("noise prune: failed to read document")?;
+    let content = effects.current_document_content(file, "queue_noise_prune")?;
     let (fm, _) = frontmatter::parse(&content)?;
     if fm.queue_active != Some(true) {
         return Ok(0);
@@ -561,8 +561,7 @@ pub fn strike_orphan_id_backed_queue_head(
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<bool> {
     let _lock = acquire_doc_lock(file)?;
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("orphan strike: failed to read {}", file.display()))?;
+    let content = effects.current_document_content(file, "orphan_queue_head_strike")?;
     let target_id =
         agent_doc_element_backlog::backlog::normalize_pending_id(id).to_ascii_lowercase();
     if target_id.is_empty() {
@@ -648,8 +647,7 @@ pub fn acknowledge_open_id_backed_queue_head(
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<bool> {
     let _lock = acquire_doc_lock(file)?;
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("open-id ack: failed to read {}", file.display()))?;
+    let content = effects.current_document_content(file, "open_id_head_ack")?;
     let target_id =
         agent_doc_element_backlog::backlog::normalize_pending_id(id).to_ascii_lowercase();
     if target_id.is_empty() {
@@ -730,8 +728,7 @@ pub fn mark_completed_queue_prompts_for_done_ids(
     }
 
     let _lock = acquire_doc_lock(file)?;
-    let content =
-        std::fs::read_to_string(file).context("queue done-id mark: failed to read document")?;
+    let content = effects.current_document_content(file, "queue_done_id_mark")?;
     let components = element::parse(&content)?;
     let Some(queue_component) = components
         .iter()
@@ -1255,6 +1252,11 @@ mod core_tests {
     static TEST_EFFECTS: TestQueueConsumeEffects = TestQueueConsumeEffects;
 
     impl QueueConsumeWriteEffects for TestQueueConsumeEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read test document {}", file.display()))
+        }
+
         fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
             agent_doc_fs::write_atomic(file, content.as_bytes())
         }

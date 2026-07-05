@@ -199,17 +199,21 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
 
     let pending_path = agent_doc_fs::pending_response_path_for(&canonical)?;
+    let pending_response = pending::load_pending_response_with_projection_backup(&canonical)?;
+    let has_pending_response = pending_response.is_some();
     let capture = agent_doc_capture_io::load_active(&canonical)?
         .filter(|capture| capture_state_is_repairable(capture.state));
-    let doc_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read document for repair {}", file.display()))?;
-    let cycle_state = agent_doc_cycle_state_io::load(file)?;
-    let historical_capture = if !pending_path.exists() && capture.is_none() {
+    let doc_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "repair_current_document",
+    )?;
+    let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let historical_capture = if !has_pending_response && capture.is_none() {
         historical_committed_capture_replay(&canonical, &doc_content)?
     } else {
         None
     };
-    let visible_response_recovery = if !pending_path.exists()
+    let visible_response_recovery = if !has_pending_response
         && capture.is_none()
         && historical_capture.is_none()
         && visible_response_recovery_is_adoptable(
@@ -226,19 +230,18 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     } else {
         None
     };
-    if !pending_path.exists()
+    if !has_pending_response
         && capture.is_none()
         && historical_capture.is_none()
         && visible_response_recovery.is_none()
     {
         let outcome = repair_stale_preflight_started_cycle(effects.repair_io_effects, file)?;
         if outcome != RepairOutcome::Noop {
-            let refreshed_content = std::fs::read_to_string(file).with_context(|| {
-                format!(
-                    "failed to read document after stale preflight repair {}",
-                    file.display()
-                )
-            })?;
+            let refreshed_content =
+                agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    file,
+                    "repair_after_stale_preflight",
+                )?;
             let response_prefix_repaired_doc = repair_response_body_prompt_prefixes_if_needed(
                 effects.repair_io_effects,
                 file,
@@ -275,7 +278,7 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             return Ok(RepairOutcome::TemplateNormalized);
         }
         let has_live_prompt =
-            agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?.is_some();
+            agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?.is_present();
         if !has_live_prompt {
             let repaired_doc =
                 repair_template_doc_if_needed(effects.repair_io_effects, file, &doc_content, None)?;
@@ -286,13 +289,6 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         return repair_completed_backlog_items(effects.repair_io_effects, file);
     }
 
-    let pending_response = if pending_path.exists() {
-        Some(std::fs::read_to_string(&pending_path).with_context(|| {
-            format!("failed to read pending response {}", pending_path.display())
-        })?)
-    } else {
-        None
-    };
     let response = capture
         .as_ref()
         .map(|r| r.response_body.clone())
@@ -331,7 +327,7 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             &doc_content,
             Some(&response),
         )?;
-        let state_is_open = agent_doc_cycle_state_io::load(file)?
+        let state_is_open = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
             .map(|state| state.is_open())
             .unwrap_or(true);
         let snapshot_missing_response = agent_doc_snapshot_io::load(file)?
@@ -710,8 +706,11 @@ fn materialize_replayed_response(
     response_to_write: &str,
     historical_capture_present: bool,
 ) -> Result<()> {
-    let final_doc_after_write = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read recovered document {}", file.display()))?;
+    let final_doc_after_write =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "repair_replayed_response_after_write",
+        )?;
     ensure_repair_materialized_response(file, &final_doc_after_write, response_to_write)?;
 
     pending::clear_pending(canonical)?;
@@ -726,8 +725,10 @@ fn materialize_replayed_response(
         "[repair] Response repaired and written to {}",
         file.display()
     );
-    let final_doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read recovered document {}", file.display()))?;
+    let final_doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "repair_replayed_response_final",
+    )?;
     if let Err(e) = agent_doc_cycle_state_io::mark_write_applied(
         file,
         "repair_applied",
@@ -1042,7 +1043,7 @@ fn repair_answered_stale_boundary_if_safe(
     let tail_after_boundary = &exchange_body[marker_idx + marker.len()..];
     if tail_after_boundary.trim().is_empty()
         || !agent_doc_diff::prompt_change_is_already_answered(tail_after_boundary)
-        || agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?.is_some()
+        || agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?.is_present()
     {
         return Ok(None);
     }
@@ -1275,7 +1276,7 @@ pub fn cancel_preflight_cycle(
     effects: &impl RepairIoEffects,
     file: &Path,
 ) -> Result<agent_doc_turn::repair::CancelOutcome> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(agent_doc_turn::repair::CancelOutcome::NoOpenCycle);
     };
     if !state.is_open() {
@@ -1288,7 +1289,11 @@ pub fn cancel_preflight_cycle(
         return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
     }
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
-    let file_content = std::fs::read_to_string(file).ok();
+    let file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "cancel_preflight_cycle",
+    )
+    .ok();
     effects.mark_abandoned_frontmatter(
         file,
         "cancel_preflight_cycle_abandoned",
@@ -1315,19 +1320,17 @@ pub fn repair_stale_preflight_started_cycle(
     effects: &impl RepairIoEffects,
     file: &Path,
 ) -> Result<agent_doc_turn::repair::RepairOutcome> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
     };
     if state.phase != agent_doc_turn::CyclePhase::PreflightStarted {
         return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
     }
 
-    let file_content = std::fs::read_to_string(file).with_context(|| {
-        format!(
-            "failed to read {} for stale preflight repair",
-            file.display()
-        )
-    })?;
+    let file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "stale_preflight_repair",
+    )?;
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let current_file_hash = agent_doc_hash::content_hash(&file_content);
     let current_snapshot_hash = snapshot_content
@@ -1445,19 +1448,15 @@ pub fn repair_stale_preflight_started_cycle(
         state.updated_at,
         now_secs(),
     );
-    if !cycle_capture_exists
-        && let Some(change) =
-            agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?
-        && !agent_doc_turn::closeout_recovery::prompt_change_is_orchestration_handoff_marker(
-            &change.text,
-        )
-    {
-        let preview = change
-            .text
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or(change.text.as_str())
-            .trim();
+    if !cycle_capture_exists && {
+        let steering = agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?;
+        steering.is_present()
+            && !agent_doc_turn::closeout_recovery::prompt_change_is_orchestration_handoff_marker(
+                steering.preview().unwrap_or_default(),
+            )
+    } {
+        let steering = agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?;
+        let preview = steering.preview().unwrap_or_default();
         if age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS {
             effects.mark_abandoned_frontmatter(
                 file,
@@ -1544,7 +1543,10 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     let Some(snapshot_doc) = agent_doc_snapshot_io::load(file)? else {
         return Ok(None);
     };
-    let current_doc = match std::fs::read_to_string(file) {
+    let current_doc = match agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "committed_historical_snapshot_drift",
+    ) {
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
@@ -1572,7 +1574,7 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
         turn_scope.as_ref(),
     );
     let historical_response_marker =
-        agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+        agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
             &snapshot_doc,
             &head_doc,
         );
@@ -1612,7 +1614,7 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
         return Ok(Some(reason));
     }
 
-    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+    if agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
         &head_doc,
         &current_doc,
     )
@@ -1691,13 +1693,24 @@ pub fn recover_missing_commit_boundary(
     file: &Path,
     event: &str,
 ) -> Result<Option<&'static str>> {
-    let state = agent_doc_cycle_state_io::load(file)?;
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let closeout_projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
     let has_open_commit_boundary = state.as_ref().is_some_and(|state| {
         matches!(
             state.phase,
             agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
         )
-    });
+    }) || (state.is_none()
+        && closeout_projection
+            .as_ref()
+            .and_then(|projection| projection.phase)
+            .is_some_and(|phase| {
+                matches!(
+                    phase,
+                    agent_doc_turn::CyclePhase::ResponseCaptured
+                        | agent_doc_turn::CyclePhase::WriteApplied
+                )
+            }));
     let has_missing_commit_event = if has_open_commit_boundary {
         false
     } else {
@@ -1707,18 +1720,16 @@ pub fn recover_missing_commit_boundary(
         return Ok(None);
     }
 
-    let current_doc = std::fs::read_to_string(file).with_context(|| {
-        format!(
-            "failed to read {} for commit-boundary recovery",
-            file.display()
-        )
-    })?;
+    let current_doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "commit_boundary_recovery",
+    )?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
     let reason = match agent_doc_snapshot_io::verify_snapshot_committed(file)? {
         agent_doc_snapshot_io::SnapshotCommitStatus::Committed => head_doc
             .as_deref()
             .filter(|head| {
-                agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+                agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
                     head,
                     &current_doc,
                 )
@@ -1762,12 +1773,10 @@ pub fn repair_completed_backlog_items(
     effects: &impl RepairIoEffects,
     file: &Path,
 ) -> Result<agent_doc_turn::repair::RepairOutcome> {
-    let content = std::fs::read_to_string(file).with_context(|| {
-        format!(
-            "failed to read {} for completed backlog reap repair",
-            file.display()
-        )
-    })?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "completed_backlog_reap_repair",
+    )?;
     let components = agent_doc_element::element::parse(&content).with_context(|| {
         format!(
             "failed to parse {} for completed backlog reap repair",
@@ -1896,6 +1905,50 @@ fn now_millis() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    #[derive(Default)]
+    struct TestRepairIoEffects {
+        committed_calls: Cell<usize>,
+        abandoned_calls: Cell<usize>,
+    }
+
+    impl RepairIoEffects for TestRepairIoEffects {
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            std::fs::write(file, content)?;
+            Ok(())
+        }
+
+        fn mark_committed_frontmatter(
+            &self,
+            file: &Path,
+            event: &str,
+            snapshot_content: Option<&str>,
+            file_content: Option<&str>,
+        ) -> Result<agent_doc_cycle_state_io::CycleState> {
+            self.committed_calls.set(self.committed_calls.get() + 1);
+            agent_doc_cycle_state_io::mark_committed(file, event, snapshot_content, file_content)
+        }
+
+        fn mark_abandoned_frontmatter(
+            &self,
+            file: &Path,
+            event: &str,
+            snapshot_content: Option<&str>,
+            file_content: Option<&str>,
+        ) -> Result<agent_doc_cycle_state_io::CycleState> {
+            self.abandoned_calls.set(self.abandoned_calls.get() + 1);
+            agent_doc_cycle_state_io::mark_abandoned(file, event, snapshot_content, file_content)
+        }
+
+        fn apply_closeout_recovery_mutation(
+            &self,
+            _file: &Path,
+            _mutation: agent_doc_flow_io::closeout::CloseoutRecoveryMutation<'_>,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
 
     fn tempdir_without_agent_doc_ancestor() -> tempfile::TempDir {
         for base in [
@@ -1933,6 +1986,53 @@ mod tests {
         assert!(json.contains("\"reason\": \"agent markers\""));
         assert!(json.contains("\"response_body\": \"response body\""));
         assert!(json.contains("\"payload_sha256\""));
+    }
+
+    #[test]
+    fn stale_preflight_repair_prefers_lazily_projection_over_stale_open_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("task.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        let effects = TestRepairIoEffects::default();
+        let outcome = repair_stale_preflight_started_cycle(&effects, &doc).unwrap();
+        assert_eq!(outcome, agent_doc_turn::repair::RepairOutcome::Noop);
+        assert_eq!(
+            effects.committed_calls.get(),
+            0,
+            "stale open JSON must not trigger stale-preflight repair after lazily commit"
+        );
+        assert_eq!(effects.abandoned_calls.get(), 0);
     }
 
     #[test]

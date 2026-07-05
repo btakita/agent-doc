@@ -6,7 +6,7 @@ use agent_doc_turn::response_replay::{
     classify_jb_cache_conflict_accept_duplicate_replay, classify_late_ipc_response_overapplication,
 };
 use agent_doc_workflow::session_check::GuardResult;
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 /// Detect the late JetBrains File Cache Conflict "accept" replay shape.
 ///
@@ -27,8 +27,8 @@ pub fn detect_jb_cache_conflict_accept_duplicate_replay_with_context(
     file: &Path,
     rc: &RunContext,
 ) -> Result<Option<JbCacheConflictAcceptDuplicateReplay>> {
-    let current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let current =
+        crate::resolve_current_document_content(file, "jb_cache_conflict_accept_duplicate")?;
     let Some(head) = rc.head_content() else {
         return Ok(None);
     };
@@ -54,10 +54,8 @@ pub fn detect_late_ipc_response_overapplication_with_context(
     file: &Path,
     rc: &RunContext,
 ) -> Result<Option<LateIpcResponseOverapplication>> {
-    let current = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(_) => return Ok(None),
-    };
+    let current =
+        crate::resolve_current_document_content(file, "late_ipc_response_overapplication")?;
     let Some(head) = rc.head_content() else {
         return Ok(None);
     };
@@ -104,7 +102,7 @@ pub fn detect_jb_cache_conflict_cancel_recoverable_with_context(
     file: &Path,
     rc: &RunContext,
 ) -> Result<bool> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);
     };
     if !matches!(
@@ -119,8 +117,8 @@ pub fn detect_jb_cache_conflict_cancel_recoverable_with_context(
     ) {
         return Ok(false);
     }
-    let doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let doc =
+        crate::resolve_current_document_content(file, "jb_cache_conflict_cancel_recoverable")?;
     let Some(snapshot) = rc.snapshot_content() else {
         return Ok(false);
     };

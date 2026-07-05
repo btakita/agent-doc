@@ -336,6 +336,24 @@ pub enum StateFact {
         cycle_id: String,
         reason: String,
     },
+    SemanticMergeAckRecorded {
+        document_hash: String,
+        cycle_id: String,
+        component: String,
+        id: String,
+        reason: String,
+        detail: String,
+    },
+    SemanticMergeAckCarriedForward {
+        document_hash: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_cycle_id: Option<String>,
+        target_cycle_id: String,
+        component: String,
+        id: String,
+        reason: String,
+        detail: String,
+    },
     OwnerGenerationChanged {
         document_hash: String,
         owner: StateOwner,
@@ -390,6 +408,52 @@ pub enum StateFact {
         patch_id: String,
         actor_generation: u64,
         reason: String,
+    },
+    TerminalCloseoutProofRecorded {
+        document_hash: String,
+        cycle_id: String,
+        last_event: String,
+        did_commit: bool,
+        file_hash: String,
+        snapshot_hash: String,
+        head_hash: String,
+        state_file_hash_matches: bool,
+        state_snapshot_hash_matches: bool,
+        agreement: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capture_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response_sha256: Option<String>,
+        recorded_at_ms: u64,
+    },
+    CloseoutRecoveryEvidenceRecorded {
+        document_hash: String,
+        evidence_key: String,
+        visible_markdown_hash: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_hash: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_cycle_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_cycle_phase: Option<CyclePhase>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_capture_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_capture_cycle_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_capture_state: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_capture_response_sha256: Option<String>,
+        response_body: CloseoutRecoveryResponseBodyEvidence,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        queue_only_drift: Option<CloseoutRecoveryQueueOnlyDriftEvidence>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_head_drift: Option<CloseoutRecoveryDriftEvidence>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_visible_drift: Option<CloseoutRecoveryDriftEvidence>,
+        editor_ipc: CloseoutRecoveryEditorIpcEvidence,
+        binary_freshness: CloseoutRecoveryBinaryFreshnessEvidence,
+        recorded_at_ms: u64,
     },
     ActorLifecycleObserved {
         document_hash: String,
@@ -456,6 +520,8 @@ impl StateFact {
             | Self::CommitObserved { document_hash, .. }
             | Self::SessionCheckPassed { document_hash, .. }
             | Self::CycleAbandoned { document_hash, .. }
+            | Self::SemanticMergeAckRecorded { document_hash, .. }
+            | Self::SemanticMergeAckCarriedForward { document_hash, .. }
             | Self::OwnerGenerationChanged { document_hash, .. }
             | Self::EditorPatchQueued { document_hash, .. }
             | Self::EditorPatchApplied { document_hash, .. }
@@ -465,6 +531,8 @@ impl StateFact {
             | Self::IpcProofInsufficient { document_hash, .. }
             | Self::EditorPatchRetryRequested { document_hash, .. }
             | Self::ForceDiskFallbackRecorded { document_hash, .. }
+            | Self::TerminalCloseoutProofRecorded { document_hash, .. }
+            | Self::CloseoutRecoveryEvidenceRecorded { document_hash, .. }
             | Self::ActorLifecycleObserved { document_hash, .. }
             | Self::AgentRestartPerformed { document_hash, .. }
             | Self::CapabilityProofObserved { document_hash, .. }
@@ -493,7 +561,9 @@ impl StateFact {
             | Self::WriteApplied { .. }
             | Self::CommitObserved { .. }
             | Self::SessionCheckPassed { .. }
-            | Self::CycleAbandoned { .. } => StateDomain::Closeout,
+            | Self::CycleAbandoned { .. }
+            | Self::SemanticMergeAckRecorded { .. }
+            | Self::SemanticMergeAckCarriedForward { .. } => StateDomain::Closeout,
             Self::BaselineSaved { .. }
             | Self::FileWatchChangeObserved { .. }
             | Self::DocumentAuthorityObserved { .. } => StateDomain::Document,
@@ -527,9 +597,10 @@ impl StateFact {
             | Self::RouteSubmitStarted { .. }
             | Self::RouteSubmitSettled { .. }
             | Self::RouteSubmitBlocked { .. } => StateDomain::Route,
-            Self::ProofMarkerObserved { .. } | Self::ProofMarkerDisproved { .. } => {
-                StateDomain::Proof
-            }
+            Self::ProofMarkerObserved { .. }
+            | Self::ProofMarkerDisproved { .. }
+            | Self::TerminalCloseoutProofRecorded { .. }
+            | Self::CloseoutRecoveryEvidenceRecorded { .. } => StateDomain::Proof,
         }
     }
 
@@ -560,6 +631,8 @@ impl StateFact {
             Self::CommitObserved { .. } => "commit_observed",
             Self::SessionCheckPassed { .. } => "session_check_passed",
             Self::CycleAbandoned { .. } => "cycle_abandoned",
+            Self::SemanticMergeAckRecorded { .. } => "semantic_merge_ack_recorded",
+            Self::SemanticMergeAckCarriedForward { .. } => "semantic_merge_ack_carried_forward",
             Self::OwnerGenerationChanged { .. } => "owner_generation_changed",
             Self::EditorPatchQueued { .. } => "editor_patch_queued",
             Self::EditorPatchApplied { .. } => "editor_patch_applied",
@@ -573,6 +646,8 @@ impl StateFact {
             Self::IpcProofInsufficient { .. } => "ipc_proof_insufficient",
             Self::EditorPatchRetryRequested { .. } => "editor_patch_retry_requested",
             Self::ForceDiskFallbackRecorded { .. } => "force_disk_fallback_recorded",
+            Self::TerminalCloseoutProofRecorded { .. } => "terminal_closeout_proof_recorded",
+            Self::CloseoutRecoveryEvidenceRecorded { .. } => "closeout_recovery_evidence_recorded",
             Self::ActorLifecycleObserved { .. } => "actor_lifecycle_observed",
             Self::AgentRestartPerformed { .. } => "agent_restart_performed",
             Self::CapabilityProofObserved { .. } => "capability_proof_observed",
@@ -1081,17 +1156,20 @@ impl DocumentStateProjection {
                 reason,
                 ..
             } => {
-                let should_clear = self
-                    .closeout
-                    .pending_response
-                    .as_ref()
-                    .is_some_and(|pending| {
-                        pending.cycle_id == *cycle_id
-                            && capture_id
-                                .as_ref()
-                                .is_none_or(|id| pending.capture_id == *id)
-                    });
-                if should_clear {
+                if self.closeout.cycle_id.as_deref() != Some(cycle_id) {
+                    self.closeout.cycle_id = Some(cycle_id.clone());
+                }
+                let pending_matches =
+                    self.closeout
+                        .pending_response
+                        .as_ref()
+                        .is_none_or(|pending| {
+                            pending.cycle_id == *cycle_id
+                                && capture_id
+                                    .as_ref()
+                                    .is_none_or(|id| pending.capture_id == *id)
+                        });
+                if pending_matches {
                     self.closeout.pending_response = None;
                     self.closeout.pending_response_clear_reason = Some(reason.clone());
                 }
@@ -1127,6 +1205,46 @@ impl DocumentStateProjection {
                 self.closeout.abandoned_reason = Some(reason.clone());
                 self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "abandoned");
+            }
+            StateFact::SemanticMergeAckRecorded {
+                cycle_id,
+                component,
+                id,
+                reason,
+                detail,
+                ..
+            } => {
+                self.closeout.apply_semantic_merge_ack(
+                    component,
+                    id,
+                    reason,
+                    detail,
+                    Some(cycle_id),
+                    false,
+                );
+            }
+            StateFact::SemanticMergeAckCarriedForward {
+                source_cycle_id,
+                target_cycle_id,
+                component,
+                id,
+                reason,
+                detail,
+                ..
+            } => {
+                if self.closeout.cycle_id.as_deref() != Some(target_cycle_id) {
+                    self.closeout.cycle_id = Some(target_cycle_id.clone());
+                    self.closeout.phase = Some(CyclePhase::PreflightStarted);
+                    self.closeout.session_check_passed = false;
+                }
+                self.closeout.apply_semantic_merge_ack(
+                    component,
+                    id,
+                    reason,
+                    detail,
+                    source_cycle_id.as_deref(),
+                    true,
+                );
             }
             StateFact::OwnerGenerationChanged {
                 owner, generation, ..
@@ -1438,6 +1556,76 @@ impl DocumentStateProjection {
             StateFact::ProofMarkerDisproved { marker, source, .. } => {
                 self.proof
                     .apply(marker, source, ProofGateEvent::MarkerDisproved);
+            }
+            StateFact::TerminalCloseoutProofRecorded {
+                cycle_id,
+                last_event,
+                did_commit,
+                file_hash,
+                snapshot_hash,
+                head_hash,
+                state_file_hash_matches,
+                state_snapshot_hash_matches,
+                agreement,
+                capture_id,
+                response_sha256,
+                recorded_at_ms,
+                ..
+            } => {
+                self.proof
+                    .apply_terminal_closeout(TerminalCloseoutProofProjection {
+                        cycle_id: cycle_id.clone(),
+                        last_event: last_event.clone(),
+                        did_commit: *did_commit,
+                        file_hash: file_hash.clone(),
+                        snapshot_hash: snapshot_hash.clone(),
+                        head_hash: head_hash.clone(),
+                        state_file_hash_matches: *state_file_hash_matches,
+                        state_snapshot_hash_matches: *state_snapshot_hash_matches,
+                        agreement: agreement.clone(),
+                        capture_id: capture_id.clone(),
+                        response_sha256: response_sha256.clone(),
+                        recorded_at_ms: *recorded_at_ms,
+                    });
+            }
+            StateFact::CloseoutRecoveryEvidenceRecorded {
+                evidence_key,
+                visible_markdown_hash,
+                snapshot_hash,
+                active_cycle_id,
+                active_cycle_phase,
+                active_capture_id,
+                active_capture_cycle_id,
+                active_capture_state,
+                active_capture_response_sha256,
+                response_body,
+                queue_only_drift,
+                snapshot_head_drift,
+                snapshot_visible_drift,
+                editor_ipc,
+                binary_freshness,
+                recorded_at_ms,
+                ..
+            } => {
+                self.proof
+                    .apply_closeout_recovery_evidence(CloseoutRecoveryEvidenceProjection {
+                        evidence_key: evidence_key.clone(),
+                        visible_markdown_hash: visible_markdown_hash.clone(),
+                        snapshot_hash: snapshot_hash.clone(),
+                        active_cycle_id: active_cycle_id.clone(),
+                        active_cycle_phase: *active_cycle_phase,
+                        active_capture_id: active_capture_id.clone(),
+                        active_capture_cycle_id: active_capture_cycle_id.clone(),
+                        active_capture_state: active_capture_state.clone(),
+                        active_capture_response_sha256: active_capture_response_sha256.clone(),
+                        response_body: response_body.clone(),
+                        queue_only_drift: queue_only_drift.clone(),
+                        snapshot_head_drift: *snapshot_head_drift,
+                        snapshot_visible_drift: *snapshot_visible_drift,
+                        editor_ipc: editor_ipc.clone(),
+                        binary_freshness: binary_freshness.clone(),
+                        recorded_at_ms: *recorded_at_ms,
+                    });
             }
         }
     }
@@ -2077,6 +2265,8 @@ pub struct CloseoutProjection {
     pub pending_response: Option<PendingResponseProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_response_clear_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_semantic_merge_acks: Vec<SemanticMergeAckProjection>,
 }
 
 impl CloseoutProjection {
@@ -2090,6 +2280,7 @@ impl CloseoutProjection {
             self.cycle_id = Some(cycle_id.to_string());
             self.phase = Some(CyclePhase::PreflightStarted);
             self.session_check_passed = false;
+            self.pending_semantic_merge_acks.clear();
         }
         let current = self.phase.unwrap_or(CyclePhase::PreflightStarted);
         if let Some(next) = CyclePhaseMachine::transition(current, event) {
@@ -2098,14 +2289,47 @@ impl CloseoutProjection {
     }
 
     fn clear_pending_response_for_cycle(&mut self, cycle_id: &str, reason: &str) {
-        if self
-            .pending_response
-            .as_ref()
-            .is_some_and(|pending| pending.cycle_id == cycle_id)
+        if self.cycle_id.as_deref() == Some(cycle_id)
+            && self
+                .pending_response
+                .as_ref()
+                .is_none_or(|pending| pending.cycle_id == cycle_id)
         {
             self.pending_response = None;
             self.pending_response_clear_reason = Some(reason.to_string());
         }
+    }
+
+    fn apply_semantic_merge_ack(
+        &mut self,
+        component: &str,
+        id: &str,
+        reason: &str,
+        detail: &str,
+        recorded_cycle_id: Option<&str>,
+        surfaced: bool,
+    ) {
+        if let Some(existing) = self
+            .pending_semantic_merge_acks
+            .iter_mut()
+            .find(|existing| {
+                existing.component == component && existing.id == id && existing.reason == reason
+            })
+        {
+            existing.detail = detail.to_string();
+            existing.recorded_cycle_id = recorded_cycle_id.map(str::to_string);
+            existing.surfaced = surfaced;
+            return;
+        }
+        self.pending_semantic_merge_acks
+            .push(SemanticMergeAckProjection {
+                component: component.to_string(),
+                id: id.to_string(),
+                reason: reason.to_string(),
+                detail: detail.to_string(),
+                recorded_cycle_id: recorded_cycle_id.map(str::to_string),
+                surfaced,
+            });
     }
 }
 
@@ -2115,6 +2339,18 @@ pub struct PendingResponseProjection {
     pub capture_id: String,
     pub response_sha256: String,
     pub response_body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticMergeAckProjection {
+    pub component: String,
+    pub id: String,
+    pub reason: String,
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_cycle_id: Option<String>,
+    #[serde(default)]
+    pub surfaced: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2748,6 +2984,14 @@ pub fn transition_route_submit(
 pub struct ProofProjection {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub markers: BTreeMap<String, ProofMarkerProjection>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub terminal_closeouts: BTreeMap<String, TerminalCloseoutProofProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_terminal_closeout_cycle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub closeout_recovery_evidence: BTreeMap<String, CloseoutRecoveryEvidenceProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_closeout_recovery_evidence_key: Option<String>,
 }
 
 impl ProofProjection {
@@ -2764,6 +3008,18 @@ impl ProofProjection {
             projection.phase = next;
         }
     }
+
+    fn apply_terminal_closeout(&mut self, proof: TerminalCloseoutProofProjection) {
+        self.latest_terminal_closeout_cycle_id = Some(proof.cycle_id.clone());
+        self.terminal_closeouts
+            .insert(proof.cycle_id.clone(), proof);
+    }
+
+    fn apply_closeout_recovery_evidence(&mut self, evidence: CloseoutRecoveryEvidenceProjection) {
+        self.latest_closeout_recovery_evidence_key = Some(evidence.evidence_key.clone());
+        self.closeout_recovery_evidence
+            .insert(evidence.evidence_key.clone(), evidence);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2771,6 +3027,106 @@ pub struct ProofMarkerProjection {
     pub phase: ProofGatePhase,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub sources: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalCloseoutProofProjection {
+    pub cycle_id: String,
+    pub last_event: String,
+    pub did_commit: bool,
+    pub file_hash: String,
+    pub snapshot_hash: String,
+    pub head_hash: String,
+    pub state_file_hash_matches: bool,
+    pub state_snapshot_hash_matches: bool,
+    pub agreement: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_sha256: Option<String>,
+    pub recorded_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloseoutRecoveryEvidenceProjection {
+    pub evidence_key: String,
+    pub visible_markdown_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_cycle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_cycle_phase: Option<CyclePhase>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_capture_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_capture_cycle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_capture_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_capture_response_sha256: Option<String>,
+    pub response_body: CloseoutRecoveryResponseBodyEvidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_only_drift: Option<CloseoutRecoveryQueueOnlyDriftEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_head_drift: Option<CloseoutRecoveryDriftEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_visible_drift: Option<CloseoutRecoveryDriftEvidence>,
+    pub editor_ipc: CloseoutRecoveryEditorIpcEvidence,
+    pub binary_freshness: CloseoutRecoveryBinaryFreshnessEvidence,
+    pub recorded_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CloseoutRecoveryResponseBodyEvidence {
+    NoActiveCapture,
+    EmptyCapture { capture_id: String },
+    PresentInVisible { capture_id: String },
+    SupersededByVisibleExchange { capture_id: String, proof: String },
+    MissingFromVisible { capture_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloseoutRecoveryQueueOnlyDriftEvidence {
+    pub file_hash_mismatch: bool,
+    pub snapshot_hash_mismatch: bool,
+    pub proven_queue_only: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloseoutRecoveryDriftEvidence {
+    BoundaryOnly,
+    MetadataOnly,
+    Content,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CloseoutRecoveryEditorIpcEvidence {
+    NoLiveBuffer {
+        socket_degraded: bool,
+    },
+    FreshLiveBuffer {
+        live_buffer_count: usize,
+        socket_degraded: bool,
+    },
+    DivergedLiveBuffer {
+        live_buffer_count: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        editor_id: Option<String>,
+        live_len: usize,
+        live_hash: String,
+        socket_degraded: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CloseoutRecoveryBinaryFreshnessEvidence {
+    NoStaleWarning,
+    Stale { warning: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -3622,6 +3978,273 @@ mod tests {
             projected.closeout.pending_response_clear_reason.as_deref(),
             Some("write_applied")
         );
+    }
+
+    #[test]
+    fn pending_response_clear_projection_survives_without_capture_event() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "p1",
+            StateFact::PreflightStarted {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                session_id: Some("session-1".into()),
+            },
+        ));
+        ledger.append(state_event(
+            "p2",
+            StateFact::WriteApplied {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                patch_id: Some("patch-1".into()),
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(projected.closeout.pending_response, None);
+        assert_eq!(
+            projected.closeout.pending_response_clear_reason.as_deref(),
+            Some("write_applied")
+        );
+
+        let mut explicit_clear = EventLedger::new();
+        explicit_clear.append(state_event(
+            "clear",
+            StateFact::PendingResponseCleared {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                capture_id: None,
+                reason: "repair_cleanup".into(),
+            },
+        ));
+        let projected = explicit_clear.project_document("doc-a").unwrap();
+        assert_eq!(projected.closeout.cycle_id.as_deref(), Some("cycle-1"));
+        assert_eq!(
+            projected.closeout.pending_response_clear_reason.as_deref(),
+            Some("repair_cleanup")
+        );
+    }
+
+    #[test]
+    fn semantic_merge_ack_projection_carries_forward_for_one_cycle() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "cycle-1-start",
+            StateFact::PreflightStarted {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                session_id: None,
+            },
+        ));
+        ledger.append(state_event(
+            "cycle-1-ack",
+            StateFact::SemanticMergeAckRecorded {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                component: "exchange".into(),
+                id: "node-1".into(),
+                reason: "same_node_operator_override".into(),
+                detail: "operator value won".into(),
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(projected.closeout.pending_semantic_merge_acks.len(), 1);
+        assert!(!projected.closeout.pending_semantic_merge_acks[0].surfaced);
+
+        ledger.append(state_event(
+            "cycle-2-start",
+            StateFact::PreflightStarted {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-2".into(),
+                session_id: None,
+            },
+        ));
+        ledger.append(state_event(
+            "cycle-2-carry",
+            StateFact::SemanticMergeAckCarriedForward {
+                document_hash: "doc-a".into(),
+                source_cycle_id: Some("cycle-1".into()),
+                target_cycle_id: "cycle-2".into(),
+                component: "exchange".into(),
+                id: "node-1".into(),
+                reason: "same_node_operator_override".into(),
+                detail: "operator value won".into(),
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(projected.closeout.cycle_id.as_deref(), Some("cycle-2"));
+        let ack = &projected.closeout.pending_semantic_merge_acks[0];
+        assert!(ack.surfaced);
+        assert_eq!(ack.recorded_cycle_id.as_deref(), Some("cycle-1"));
+
+        ledger.append(state_event(
+            "cycle-3-start",
+            StateFact::PreflightStarted {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-3".into(),
+                session_id: None,
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert!(projected.closeout.pending_semantic_merge_acks.is_empty());
+    }
+
+    #[test]
+    fn terminal_closeout_proof_projects_hash_agreement_payload() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "cycle-1-start",
+            StateFact::PreflightStarted {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                session_id: None,
+            },
+        ));
+        ledger.append(state_event(
+            "cycle-1-commit",
+            StateFact::CommitObserved {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                commit: "abc123".into(),
+            },
+        ));
+        ledger.append(state_event(
+            "cycle-1-proof",
+            StateFact::TerminalCloseoutProofRecorded {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                last_event: "commit_success".into(),
+                did_commit: true,
+                file_hash: "file-sha".into(),
+                snapshot_hash: "head-sha".into(),
+                head_hash: "head-sha".into(),
+                state_file_hash_matches: false,
+                state_snapshot_hash_matches: true,
+                agreement: "snapshot_head_visible_drift".into(),
+                capture_id: Some("capture-1".into()),
+                response_sha256: Some("response-sha".into()),
+                recorded_at_ms: 42,
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(
+            projected.proof.latest_terminal_closeout_cycle_id.as_deref(),
+            Some("cycle-1")
+        );
+        let proof = projected
+            .proof
+            .terminal_closeouts
+            .get("cycle-1")
+            .expect("terminal proof projection");
+        assert_eq!(proof.last_event, "commit_success");
+        assert_eq!(proof.snapshot_hash, "head-sha");
+        assert_eq!(proof.head_hash, "head-sha");
+        assert_eq!(proof.file_hash, "file-sha");
+        assert!(!proof.state_file_hash_matches);
+        assert!(proof.state_snapshot_hash_matches);
+        assert_eq!(proof.agreement, "snapshot_head_visible_drift");
+        assert_eq!(proof.capture_id.as_deref(), Some("capture-1"));
+        assert_eq!(proof.response_sha256.as_deref(), Some("response-sha"));
+        assert_eq!(proof.recorded_at_ms, 42);
+    }
+
+    #[test]
+    fn closeout_recovery_evidence_projects_sidecar_recovery_payload() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "cycle-1-recovery-evidence",
+            StateFact::CloseoutRecoveryEvidenceRecorded {
+                document_hash: "doc-a".into(),
+                evidence_key: "evidence-sha".into(),
+                visible_markdown_hash: "visible-sha".into(),
+                snapshot_hash: Some("snapshot-sha".into()),
+                active_cycle_id: Some("cycle-1".into()),
+                active_cycle_phase: Some(CyclePhase::ResponseCaptured),
+                active_capture_id: Some("capture-1".into()),
+                active_capture_cycle_id: Some("cycle-1".into()),
+                active_capture_state: Some("captured".into()),
+                active_capture_response_sha256: Some("response-sha".into()),
+                response_body: CloseoutRecoveryResponseBodyEvidence::SupersededByVisibleExchange {
+                    capture_id: "capture-1".into(),
+                    proof: "heading is answered".into(),
+                },
+                queue_only_drift: Some(CloseoutRecoveryQueueOnlyDriftEvidence {
+                    file_hash_mismatch: true,
+                    snapshot_hash_mismatch: false,
+                    proven_queue_only: true,
+                }),
+                snapshot_head_drift: Some(CloseoutRecoveryDriftEvidence::MetadataOnly),
+                snapshot_visible_drift: Some(CloseoutRecoveryDriftEvidence::BoundaryOnly),
+                editor_ipc: CloseoutRecoveryEditorIpcEvidence::DivergedLiveBuffer {
+                    live_buffer_count: 1,
+                    editor_id: Some("editor-1".into()),
+                    live_len: 128,
+                    live_hash: "live-sha".into(),
+                    socket_degraded: true,
+                },
+                binary_freshness: CloseoutRecoveryBinaryFreshnessEvidence::Stale {
+                    warning: "binary stale".into(),
+                },
+                recorded_at_ms: 42,
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(
+            projected
+                .proof
+                .latest_closeout_recovery_evidence_key
+                .as_deref(),
+            Some("evidence-sha")
+        );
+        let evidence = projected
+            .proof
+            .closeout_recovery_evidence
+            .get("evidence-sha")
+            .expect("closeout recovery evidence projection");
+        assert_eq!(evidence.visible_markdown_hash, "visible-sha");
+        assert_eq!(evidence.snapshot_hash.as_deref(), Some("snapshot-sha"));
+        assert_eq!(evidence.active_cycle_id.as_deref(), Some("cycle-1"));
+        assert_eq!(
+            evidence.active_cycle_phase,
+            Some(CyclePhase::ResponseCaptured)
+        );
+        assert_eq!(evidence.active_capture_id.as_deref(), Some("capture-1"));
+        assert_eq!(
+            evidence.active_capture_response_sha256.as_deref(),
+            Some("response-sha")
+        );
+        assert_eq!(
+            evidence
+                .queue_only_drift
+                .as_ref()
+                .map(|drift| drift.proven_queue_only),
+            Some(true)
+        );
+        assert_eq!(
+            evidence.snapshot_head_drift,
+            Some(CloseoutRecoveryDriftEvidence::MetadataOnly)
+        );
+        assert_eq!(
+            evidence.snapshot_visible_drift,
+            Some(CloseoutRecoveryDriftEvidence::BoundaryOnly)
+        );
+        assert!(matches!(
+            evidence.response_body,
+            CloseoutRecoveryResponseBodyEvidence::SupersededByVisibleExchange { .. }
+        ));
+        assert!(matches!(
+            evidence.editor_ipc,
+            CloseoutRecoveryEditorIpcEvidence::DivergedLiveBuffer { .. }
+        ));
+        assert!(matches!(
+            evidence.binary_freshness,
+            CloseoutRecoveryBinaryFreshnessEvidence::Stale { .. }
+        ));
+        assert_eq!(evidence.recorded_at_ms, 42);
     }
 
     #[test]

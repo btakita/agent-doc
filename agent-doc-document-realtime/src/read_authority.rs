@@ -28,7 +28,7 @@ impl DocAuthority {
 /// `dirty` is the authority signal: `true` means the buffer holds edits not yet
 /// flushed to disk. `generation` orders successive snapshots from the same
 /// source; it is not compared against disk mtime.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BufferState {
     pub content: String,
     pub dirty: bool,
@@ -46,7 +46,7 @@ impl BufferState {
 }
 
 /// The resolved read authority for one cycle read.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reconciliation {
     pub authority: DocAuthority,
     /// The authoritative content the cycle should read.

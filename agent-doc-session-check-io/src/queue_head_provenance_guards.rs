@@ -13,7 +13,7 @@ pub fn check_expect_done_or_gate_guard(file: &Path, rc: &RunContext) -> Result<G
         return Ok(GuardResult::None);
     }
 
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     if state.expect_done_or_gate_ids.is_empty() {
@@ -26,8 +26,10 @@ pub fn check_expect_done_or_gate_guard(file: &Path, rc: &RunContext) -> Result<G
         return Ok(GuardResult::None);
     };
 
-    let content = std::fs::read_to_string(file)?;
-    let open_backlog_ids = agent_doc_document::tracked_work_projection::open_backlog_ids(&content);
+    let doc = crate::resolve_current_document(file, "expect_done_or_gate_guard")?;
+    let file = doc.key().as_path();
+    let open_backlog_ids =
+        agent_doc_document::tracked_work_projection::open_backlog_ids(doc.content());
     let unresolved = match agent_doc_turn::closeout_signal::expect_done_or_gate_decision(
         agent_doc_turn::closeout_signal::ExpectDoneOrGateEvidence {
             cycle_open: state.is_open(),
@@ -84,7 +86,7 @@ pub fn check_queue_head_removal_guard(file: &Path, rc: &RunContext) -> Result<Gu
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     if state.active_queue_heads.is_empty() {
@@ -95,16 +97,16 @@ pub fn check_queue_head_removal_guard(file: &Path, rc: &RunContext) -> Result<Gu
     if state.is_open() {
         return Ok(GuardResult::None);
     }
-    // Phase 6 (#lr-content-6): cached document content.
-    let content = rc.doc_content();
+    let doc = crate::resolve_current_document(file, "queue_head_removal_guard")?;
+    let file = doc.key().as_path();
+    let content = doc.content();
     // Explicit user removal already reconciled — do not second-guess it.
     if content.contains("<!-- no-queue-removal-guard -->") {
         return Ok(GuardResult::None);
     }
 
-    let content = std::fs::read_to_string(file)?;
     let open_backlog: std::collections::HashSet<String> =
-        agent_doc_document::tracked_work_projection::open_backlog_ids(&content)
+        agent_doc_document::tracked_work_projection::open_backlog_ids(content)
             .into_iter()
             .collect();
     // Lifecycle proof: ids the cycle explicitly resolved (done/reaped/gated) or
@@ -183,7 +185,7 @@ pub fn check_free_text_queue_head_provenance(file: &Path, rc: &RunContext) -> Re
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     if state.active_free_text_queue_heads.is_empty() {

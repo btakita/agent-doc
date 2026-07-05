@@ -72,7 +72,7 @@ use agent_doc_turn::op_log::{
     PREFLIGHT_START_EVENT, event_name, is_write_completed_commit_missing_event,
 };
 use agent_doc_workflow::session_check::{BlockedCloseoutMessage, GuardResult};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::Path;
 
 use crate::{
@@ -300,7 +300,7 @@ pub fn run_with_options(
                 // the next preflight can emit `queue_stall_detected` if the loop neither
                 // continued nor recorded a valid stop reason (the prose no-stall
                 // guidance is advisory; this makes the violation a hard signal).
-                let stall_cycle_id = agent_doc_cycle_state_io::load(file)
+                let stall_cycle_id = agent_doc_cycle_state_io::load_with_closeout_projection(file)
                     .ok()
                     .flatten()
                     .map(|s| s.cycle_id)
@@ -337,7 +337,8 @@ pub fn run_with_options(
                 // (`[clean-session]` under live IPC, or `[operator-verify]`),
                 // surface a one-line deferred-heads note so the idle queue reads
                 // as deferred work, not a silent stall.
-                let content = std::fs::read_to_string(file).ok();
+                let content =
+                    crate::resolve_current_document_content(file, "deferred_queue_head_count").ok();
                 let deferred = content
                     .as_deref()
                     .map(agent_doc_queue::queue_continuation::deferred_head_count)
@@ -421,16 +422,18 @@ pub fn run_with_options(
             // recoverable — adopt the visible response idempotently instead of
             // blocking.
             if codex_final_gate
-                && let Some(cycle) = agent_doc_cycle_state_io::load(file).ok().flatten()
+                && let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+                    .ok()
+                    .flatten()
                 && matches!(cycle.phase, agent_doc_turn::CyclePhase::Abandoned)
                 && cycle
                     .last_event
-                    .starts_with("recursive_direct_invocation_blocked")
+                    .contains("recursive_direct_invocation_blocked")
                 && cycle.capture_id.is_none()
                 && cycle.response_sha256.is_none()
             {
                 let has_visible_response = crate::unresolved_exchange_prompt(file)?.is_none()
-                    && crate::exchange_tail_has_response_heading(file);
+                    && crate::exchange_tail_has_response_heading(file)?;
                 if has_visible_response {
                     eprintln!(
                         "[session-check] codex-final-gate: recursive direct invocation was blocked for {} but the response is already visible in agent:exchange — adopting the manual patchback idempotently.",
@@ -476,18 +479,16 @@ pub fn inspect_with_warnings(
         warnings: Vec::new(),
     };
     if matches!(report.status, SessionCheckStatus::Ok(_)) {
-        // Phase 6 (#lr-content-6): build one RunContext for the whole guard
-        // sweep. `set_doc_content` populates `DocContentCell` once; every guard
-        // that needs the document, its frontmatter, or its parsed components
-        // reads from the cached `FrontmatterSlot` / `ComponentsSlot` instead of
-        // independently re-reading + re-parsing the file (previously ~20 reads
-        // and ~10 parses per `inspect` call).
+        // Build one RunContext for the guard sweep and seed it with the resolved
+        // CurrentDocument. Guards that need content, frontmatter, or components
+        // read from that lazily graph instead of independently resolving and
+        // parsing the current document.
         let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
         // #rtwwire (rung 3): seed the guard-sweep cache from the authoritative
         // current document. Active editors resolve through the CRDT relay; disk
         // is consulted only when no editor is attached.
-        rc.set_doc_content(
-            agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content,
+        rc.set_current_document(
+            agent_doc_document_realtime_io::try_resolve_current_document(file)?,
         );
         match crate::check_dropped_exchange_prompt_guard(file, &rc)? {
             GuardResult::None => {}
@@ -1053,16 +1054,20 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
             }
         }
         let latest_head_response_missing = match agent_doc_git_io::revision::show_head(file)? {
-            Some(head) => match std::fs::read_to_string(file) {
-                Ok(working) => {
-                    let heading =
+            Some(head) => {
+                match crate::resolve_current_document_content(file, "latest_head_response_missing")
+                {
+                    Ok(working) => {
+                        let heading =
                         agent_doc_document::write_normalization::latest_response_heading_missing_from_current(
                             &head, &working,
                         );
-                    heading.filter(|heading| !operator_live_buffer_contains_heading(file, heading))
+                        heading
+                            .filter(|heading| !operator_live_buffer_contains_heading(file, heading))
+                    }
+                    Err(_) => None,
                 }
-                Err(_) => None,
-            },
+            }
             None => None,
         };
         if let Some(heading) = latest_head_response_missing {
@@ -1190,7 +1195,7 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
             if let Some(reason) = effects
                 .recover_missing_commit_boundary(file, "session_check_commit_boundary_recovered")?
             {
-                let repaired_cycle = agent_doc_cycle_state_io::load(file)?;
+                let repaired_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(
                         "[session-check] INTERRUPTED: last ops.log entry was `{}`, recovered the missing commit boundary from {}, but the document still has unresolved prompt-bearing user changes with no newer agent-doc cycle started: {}",
@@ -1326,7 +1331,6 @@ fn blocked_closeout_editor_authority_note(
 }
 
 fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = crate::resolve_current_document_content(file, "duplicate_response_patchback")?;
     Ok(agent_doc_turn::response_replay::first_duplicate_response_heading(&content))
 }

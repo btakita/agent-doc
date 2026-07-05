@@ -445,7 +445,7 @@ dependencies = [
  "anyhow",
  "fs2",
  "interprocess",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "libc",
  "rusqlite",
  "serde",
@@ -574,7 +574,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "serde",
  "sha2 0.11.0",
  "similar 3.1.1",
@@ -716,7 +716,7 @@ name = "agent-doc-element-queue"
 version = "0.34.67"
 dependencies = [
  "agent-doc-element",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "serde",
 ]
 
@@ -800,6 +800,7 @@ dependencies = [
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
+ "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-flow",
  "agent-doc-fs",
@@ -813,6 +814,7 @@ dependencies = [
  "agent-doc-project-root-io",
  "agent-doc-run-context-io",
  "agent-doc-snapshot-io",
+ "agent-doc-state-backbone",
  "agent-doc-turn",
  "agent-doc-workflow",
  "agent-doc-workflow-io",
@@ -1068,7 +1070,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-markdown-ast",
  "anyhow",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "serde",
  "serde_json",
  "similar 3.1.1",
@@ -1255,7 +1257,7 @@ dependencies = [
  "indexmap",
  "instruction-files",
  "interprocess",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "libc",
  "notify",
  "portable-pty",
@@ -1451,7 +1453,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-hash",
  "agent-doc-session-accretion",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "serde",
  "serde_json",
 ]
@@ -1566,6 +1568,7 @@ dependencies = [
  "agent-doc-diff",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",
@@ -1658,6 +1661,7 @@ dependencies = [
  "agent-doc-controller-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
+ "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
  "agent-doc-element-backlog-io",
  "agent-doc-element-backlog-runtime-io",
@@ -1710,6 +1714,7 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-config",
  "agent-doc-cycle-state-io",
+ "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
@@ -1722,7 +1727,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "anyhow",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "tempfile",
  "tmux-router",
 ]
@@ -1864,6 +1869,7 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-diff",
  "agent-doc-document",
+ "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-element-backlog",
@@ -1994,7 +2000,7 @@ name = "agent-doc-state-backbone"
 version = "0.34.67"
 dependencies = [
  "agent-doc-turn",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "serde",
  "serde_json",
 ]
@@ -2086,7 +2092,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-tmux-commands",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "serde",
  "serde_json",
 ]
@@ -2293,7 +2299,7 @@ dependencies = [
 name = "agent-doc-tmux"
 version = "0.34.67"
 dependencies = [
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "serde",
  "tempfile",
 ]
@@ -2335,7 +2341,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-template",
- "lazily 0.21.2",
+ "lazily 0.21.5",
  "proptest",
  "regex",
  "serde",
@@ -3786,12 +3792,22 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.21.2"
+version = "0.21.5"
 dependencies = [
  "arc-swap",
+ "lazily-macros",
  "parking_lot",
  "serde",
  "smallvec",
+]
+
+[[package]]
+name = "lazily-macros"
+version = "0.21.5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

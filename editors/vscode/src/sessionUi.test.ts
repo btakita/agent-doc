@@ -255,4 +255,23 @@ describe('buildTurnStatePresentation (CPC turn-state coordination)', () => {
         assert.ok(p.label.includes('persisting'));
         assert.strictEqual(p.guardPromptForwarding, true);
     });
+
+    it('projects realtime steering onto the turn banner label', () => {
+        const deleted: TurnProjection = {
+            state: 'awaiting_response',
+            turn_in_flight: true,
+            transition_authority: 'cpc',
+            realtime_steering: {
+                state: 'prompt_deleted',
+                preview: 'removed prompt',
+            },
+        };
+
+        const presentation = buildTurnStatePresentation(deleted);
+        assert.strictEqual(
+            presentation.label,
+            '⟳ agent-doc: awaiting response · prompt deleted',
+        );
+        assert.strictEqual(presentation.guardPromptForwarding, true);
+    });
 });

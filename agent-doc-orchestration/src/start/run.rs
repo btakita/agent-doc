@@ -244,7 +244,7 @@ pub fn run_with_reap_policy(
     // Crash policy state machine
     let mut policy = CrashPolicy::new();
     let route_owned_cycle_baseline = if route_owned {
-        agent_doc_cycle_state_io::load(file).unwrap_or(None)
+        agent_doc_cycle_state_io::load_with_closeout_projection(file).unwrap_or(None)
     } else {
         None
     };
@@ -304,14 +304,15 @@ pub fn run_with_reap_policy(
     // already-consumed checkpoint, or a non-recycle boot all resume nothing.
     {
         let is_recycle_boot = pending_adopt.is_some();
-        let cycle_open = agent_doc_cycle_state_io::load(file)
+        let cycle_checkpoint = agent_doc_cycle_state_io::load_with_closeout_projection(file)
             .ok()
-            .flatten()
+            .flatten();
+        let cycle_open = cycle_checkpoint
+            .as_ref()
             .map(|state| state.is_open())
             .unwrap_or(false);
-        let already_consumed = agent_doc_cycle_state_io::load(file)
-            .ok()
-            .flatten()
+        let already_consumed = cycle_checkpoint
+            .as_ref()
             .map(|state| state.recycle_resume_consumed)
             .unwrap_or(false);
         let child_survived = pending_adopt
@@ -330,7 +331,7 @@ pub fn run_with_reap_policy(
                 // adopt) and re-trigger the same turn on the first iteration. Mark the
                 // checkpoint consumed so a second boot reading the same still-open
                 // checkpoint cannot re-dispatch the turn again (idempotency).
-                let checkpoint = agent_doc_cycle_state_io::load(file).ok().flatten();
+                let checkpoint = cycle_checkpoint;
                 let target = checkpoint
                     .as_ref()
                     .and_then(|s| {

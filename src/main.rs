@@ -734,6 +734,10 @@ pub(crate) static CLI_QUEUE_CONSUME_WRITE_EFFECTS: CliQueueConsumeWriteEffects =
     CliQueueConsumeWriteEffects;
 
 impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for CliQueueConsumeWriteEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
     fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
         agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
@@ -814,6 +818,26 @@ fn queue_command_consume_outcome(
 }
 
 impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        agent_doc_write_converge_io::converge_document_or_disk(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            target_content,
+            source_content,
+            reason,
+        )
+    }
+
     fn consume_queue_prompt_force_disk(
         &self,
         file: &Path,
@@ -5066,7 +5090,10 @@ fn try_main() -> anyhow::Result<()> {
                 max_git_versions,
                 restore_patch,
             } => queue_recovery::run(&file, json, max_git_versions, restore_patch.as_deref()),
-            QueueAction::Sync { file } => agent_doc_queue_io::queue_cmd::sync(&file),
+            QueueAction::Sync { file } => {
+                let queue_effects = CliQueueCommandEffects;
+                agent_doc_queue_io::queue_cmd::sync_with_effects(&queue_effects, &file)
+            }
             QueueAction::Consume {
                 file,
                 count,

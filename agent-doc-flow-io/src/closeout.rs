@@ -5,10 +5,11 @@ use agent_doc_flow::{
 use agent_doc_turn::closeout_guard::CloseoutGuardReason;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryCommandInput, CloseoutRecoveryCycleInput, CloseoutRecoveryDecision,
-    CloseoutRecoveryDecisionInput, CloseoutRecoveryMutationReason, CloseoutRecoveryState,
-    CloseoutRecoveryStateInput, MetadataDriftAuthority, OpenCycleRecoveryCommandInput,
-    classify_closeout_recovery_state_from_input, classify_snapshot_head_drift,
-    classify_snapshot_visible_drift, closeout_recovery_command as render_closeout_recovery_command,
+    CloseoutRecoveryDecisionInput, CloseoutRecoveryDrift, CloseoutRecoveryMutationReason,
+    CloseoutRecoveryState, CloseoutRecoveryStateInput, MetadataDriftAuthority,
+    OpenCycleRecoveryCommandInput, classify_closeout_recovery_state_from_input,
+    classify_snapshot_head_drift, classify_snapshot_visible_drift,
+    closeout_recovery_command as render_closeout_recovery_command,
     closeout_recovery_decision_from_state, metadata_drift_authority,
 };
 use anyhow::{Context, Result};
@@ -30,6 +31,19 @@ pub trait CloseoutEffects {
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool>;
 
     fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>>;
+
+    fn resolve_current_document(
+        &self,
+        file: &Path,
+        source: &str,
+    ) -> Result<agent_doc_document_realtime::CurrentDocument>;
+
+    fn write_current_document(
+        &self,
+        doc: &agent_doc_document_realtime::CurrentDocument,
+        content: &str,
+        source: &str,
+    ) -> Result<()>;
 
     fn mark_committed_frontmatter(
         &self,
@@ -174,7 +188,7 @@ pub fn complete_required_closeout(file: &Path, effects: &dyn CloseoutEffects) ->
     timer.mark("session_check");
     agent_doc_controller_io::project_controller::persist_session_actor_closeout(file)?;
     timer.mark("session_actor_closeout");
-    record_terminal_closeout_proof(file, did_commit)?;
+    record_terminal_closeout_proof(file, did_commit, effects)?;
     timer.mark("terminal_proof");
     cleanup_fallback_patch_files(file);
     timer.mark("fallback_cleanup");
@@ -183,7 +197,7 @@ pub fn complete_required_closeout(file: &Path, effects: &dyn CloseoutEffects) ->
 }
 
 pub fn cycle_already_committed(file: &Path) -> Option<String> {
-    match agent_doc_cycle_state_io::load(file) {
+    match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
         Ok(Some(state)) if state.phase == agent_doc_turn::CyclePhase::Committed => {
             Some(state.cycle_id)
         }
@@ -215,7 +229,7 @@ pub struct StuckCapturedCycleInfo {
 /// captured response body is absent from both `HEAD` and HEAD-referenced
 /// compact archives.
 pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
-    let state = match agent_doc_cycle_state_io::load(file) {
+    let state = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
         Ok(Some(state)) => state,
         Ok(None) => return None,
         Err(err) => {
@@ -301,7 +315,7 @@ pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
 /// loaded by the cycle's own `capture_id`, so this only ever discards the
 /// capture this cycle owns. Returns `true` when a capture was reconciled.
 pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);
     };
     if state.phase != agent_doc_turn::CyclePhase::Committed {
@@ -440,7 +454,7 @@ pub fn write_claimed_patch_sentinel(project_root: &Path, patch_id: &str) {
 }
 
 fn ensure_cycle_committed(file: &Path) -> Result<()> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         log_closeout_guard_event(
             file,
             FlowStage::TerminalGuard,
@@ -466,7 +480,11 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<()> {
+pub fn record_terminal_closeout_proof(
+    file: &Path,
+    did_commit: bool,
+    effects: &dyn CloseoutEffects,
+) -> Result<()> {
     let canonical = file
         .canonicalize()
         .with_context(|| format!("terminal proof: failed to canonicalize {}", file.display()))?;
@@ -477,7 +495,7 @@ pub fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<(
         );
         return Ok(());
     };
-    let Some(state) = agent_doc_cycle_state_io::load(&canonical)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(&canonical)? else {
         anyhow::bail!(
             "terminal proof cannot record closeout for {}: missing cycle state",
             file.display()
@@ -491,8 +509,8 @@ pub fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<(
             state.phase.as_str()
         );
     }
-    let file_content = std::fs::read_to_string(&canonical)
-        .with_context(|| format!("terminal proof: read {}", canonical.display()))?;
+    let current_doc = effects.resolve_current_document(&canonical, "terminal_closeout_proof")?;
+    let file_content = current_doc.content();
     let snapshot_content = agent_doc_snapshot_io::load(&canonical)?.with_context(|| {
         format!(
             "terminal proof: missing snapshot for {}",
@@ -501,7 +519,7 @@ pub fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<(
     })?;
     let head_content = agent_doc_git_io::revision::show_head(&canonical)?
         .with_context(|| format!("terminal proof: missing HEAD for {}", canonical.display()))?;
-    let file_hash = agent_doc_hash::content_hash(&file_content);
+    let file_hash = agent_doc_hash::content_hash(file_content);
     let snapshot_hash = agent_doc_hash::content_hash(&snapshot_content);
     let head_hash = agent_doc_hash::content_hash(&head_content);
     if snapshot_hash != head_hash {
@@ -534,6 +552,7 @@ pub fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<(
         state_snapshot_hash_matches,
         agreement
     ));
+    let recorded_at_ms = now_millis();
     let record = agent_doc_workflow_io::proof_ledger::OperationProofRecord::new(
         agent_doc_workflow_io::proof_ledger::OperationProofInput {
             operation_id: format!("terminal_closeout:{}", state.cycle_id),
@@ -557,13 +576,30 @@ pub fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<(
                 state.response_sha256.as_deref().unwrap_or("<none>"),
                 agreement
             ),
-            recorded_at_ms: now_millis(),
+            recorded_at_ms,
         },
     )?;
     let path = agent_doc_workflow_io::proof_ledger::append_operation_proof(
         &project_root,
         &canonical,
         &record,
+    )?;
+    agent_doc_cycle_state_io::append_terminal_closeout_proof(
+        &canonical,
+        agent_doc_cycle_state_io::TerminalCloseoutProofInput {
+            cycle_id: &state.cycle_id,
+            last_event: &state.last_event,
+            did_commit,
+            file_hash: &file_hash,
+            snapshot_hash: &snapshot_hash,
+            head_hash: &head_hash,
+            state_file_hash_matches,
+            state_snapshot_hash_matches,
+            agreement,
+            capture_id: state.capture_id.as_deref(),
+            response_sha256: state.response_sha256.as_deref(),
+            recorded_at_ms,
+        },
     )?;
     agent_doc_ops_log_io::log_op(
         file,
@@ -596,26 +632,96 @@ pub fn closeout_recovery_command_for_file(
 }
 
 fn open_cycle_recovery_command_input(file: &Path) -> Option<OpenCycleRecoveryCommandInput> {
-    let Ok(Some(state)) = agent_doc_cycle_state_io::load(file) else {
+    let Ok(Some(cycle)) = load_closeout_recovery_cycle_view(file) else {
         return None;
     };
-    let target = state
-        .queue_task_id
-        .clone()
-        .or_else(|| state.prompt_targets.first().cloned());
-    let has_pending_mutations = state.had_pending_mutations
-        || !state.pending_done_ids.is_empty()
-        || !state.pending_gated_ids.is_empty()
-        || !state.pending_kept_open_ids.is_empty()
-        || !state.reaped_pending_ids.is_empty();
-    Some(OpenCycleRecoveryCommandInput {
-        cycle_id: state.cycle_id,
-        phase: state.phase,
-        baseline_file: state.baseline_file,
-        target,
-        has_pending_mutations,
-        capture_id: state.capture_id,
-    })
+    cycle.open_cycle_recovery_command_input()
+}
+
+enum CloseoutRecoveryCycleView {
+    Sidecar(agent_doc_cycle_state_io::CycleState),
+    Projection(agent_doc_cycle_state_io::ProjectedCloseoutState),
+}
+
+impl CloseoutRecoveryCycleView {
+    fn recovery_cycle_input(&self) -> Option<CloseoutRecoveryCycleInput> {
+        match self {
+            Self::Sidecar(state) => Some(CloseoutRecoveryCycleInput {
+                phase: state.phase,
+                has_capture: state.capture_id.is_some(),
+                has_response_hash: state.response_sha256.is_some(),
+                had_pending_mutations: state.had_pending_mutations,
+            }),
+            Self::Projection(projection) => {
+                let phase = projection.phase?;
+                Some(CloseoutRecoveryCycleInput {
+                    phase,
+                    has_capture: projection.capture_id.is_some(),
+                    has_response_hash: projection.response_sha256.is_some(),
+                    // Projection-only preflight cannot prove the old JSON-only
+                    // pending-mutation queue was empty. Fail closed by surfacing
+                    // an open-cycle recovery instead of suggesting cancel.
+                    had_pending_mutations: matches!(
+                        phase,
+                        agent_doc_turn::CyclePhase::PreflightStarted
+                    ),
+                })
+            }
+        }
+    }
+
+    fn open_cycle_recovery_command_input(self) -> Option<OpenCycleRecoveryCommandInput> {
+        match self {
+            Self::Sidecar(state) => {
+                if !state.phase.is_open() {
+                    return None;
+                }
+                let target = state
+                    .queue_task_id
+                    .clone()
+                    .or_else(|| state.prompt_targets.first().cloned());
+                let has_pending_mutations = state.had_pending_mutations
+                    || !state.pending_done_ids.is_empty()
+                    || !state.pending_gated_ids.is_empty()
+                    || !state.pending_kept_open_ids.is_empty()
+                    || !state.reaped_pending_ids.is_empty();
+                Some(OpenCycleRecoveryCommandInput {
+                    cycle_id: state.cycle_id,
+                    phase: state.phase,
+                    baseline_file: state.baseline_file,
+                    target,
+                    has_pending_mutations,
+                    capture_id: state.capture_id,
+                })
+            }
+            Self::Projection(projection) => {
+                let phase = projection.phase?;
+                if !phase.is_open() {
+                    return None;
+                }
+                Some(OpenCycleRecoveryCommandInput {
+                    cycle_id: projection.cycle_id?,
+                    phase,
+                    baseline_file: None,
+                    target: None,
+                    has_pending_mutations: matches!(
+                        phase,
+                        agent_doc_turn::CyclePhase::PreflightStarted
+                    ),
+                    capture_id: projection.capture_id,
+                })
+            }
+        }
+    }
+}
+
+fn load_closeout_recovery_cycle_view(file: &Path) -> Result<Option<CloseoutRecoveryCycleView>> {
+    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
+        return Ok(Some(CloseoutRecoveryCycleView::Sidecar(state)));
+    }
+    Ok(agent_doc_cycle_state_io::load_closeout_projection(file)?
+        .filter(|projection| projection.cycle_id.is_some() && projection.phase.is_some())
+        .map(CloseoutRecoveryCycleView::Projection))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -626,6 +732,8 @@ pub struct CloseoutRecoveryEvidence {
     pub active_capture: Option<CloseoutCaptureEvidence>,
     pub response_body: CloseoutResponseBodyEvidence,
     pub queue_only_drift: Option<CloseoutQueueOnlyDriftEvidence>,
+    pub snapshot_head_drift: Option<CloseoutRecoveryDrift>,
+    pub snapshot_visible_drift: Option<CloseoutRecoveryDrift>,
     pub editor_ipc: CloseoutEditorIpcEvidence,
     pub binary_freshness: CloseoutBinaryFreshnessEvidence,
 }
@@ -638,6 +746,15 @@ impl CloseoutRecoveryEvidence {
             }
             _ => None,
         }
+    }
+
+    fn reports_missing_response_body(&self) -> bool {
+        matches!(
+            self.response_body,
+            CloseoutResponseBodyEvidence::EmptyCapture { .. }
+                | CloseoutResponseBodyEvidence::SupersededByVisibleExchange { .. }
+                | CloseoutResponseBodyEvidence::MissingFromVisible { .. }
+        )
     }
 }
 
@@ -699,16 +816,25 @@ pub fn gather_closeout_recovery_evidence(
     file: &Path,
     effects: &dyn CloseoutEffects,
 ) -> Result<CloseoutRecoveryEvidence> {
-    let visible = std::fs::read_to_string(file).with_context(|| {
-        format!(
-            "failed to read {} for closeout recovery evidence",
-            file.display()
-        )
-    })?;
-    let visible_markdown_hash = agent_doc_capture_io::replay_file_hash(&visible);
+    let visible_doc = effects.resolve_current_document(file, "closeout_recovery_evidence")?;
+    let visible = visible_doc.content();
+    let visible_markdown_hash = agent_doc_capture_io::replay_file_hash(visible);
     let snapshot = agent_doc_snapshot_io::load(file)?;
     let snapshot_hash = snapshot.as_deref().map(agent_doc_hash::content_hash);
-    let cycle = agent_doc_cycle_state_io::load(file)?;
+    let head = agent_doc_git_io::revision::show_head(file)?;
+    let snapshot_head_drift = match (snapshot.as_deref(), head.as_deref()) {
+        (Some(snapshot), Some(head)) if snapshot != head => {
+            Some(classify_snapshot_head_drift(snapshot, head))
+        }
+        _ => None,
+    };
+    let snapshot_visible_drift = match snapshot.as_deref() {
+        Some(snapshot) if snapshot != visible => {
+            Some(classify_snapshot_visible_drift(snapshot, visible))
+        }
+        _ => None,
+    };
+    let cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let active_cycle = cycle.as_ref().map(|state| CloseoutCycleEvidence {
         cycle_id: state.cycle_id.clone(),
         phase: state.phase,
@@ -720,15 +846,15 @@ pub fn gather_closeout_recovery_evidence(
         state: capture.state,
         response_sha256: capture.response_sha256.clone(),
     });
-    let response_body = closeout_response_body_evidence(&visible, capture.as_ref());
+    let response_body = closeout_response_body_evidence(visible, capture.as_ref());
     let queue_only_drift = closeout_queue_only_drift_evidence(
-        &visible,
+        visible,
         snapshot.as_deref(),
         visible_markdown_hash.as_str(),
         snapshot_hash.as_deref(),
         capture.as_ref(),
     )?;
-    let editor_ipc = closeout_editor_ipc_evidence(file, &visible, effects);
+    let editor_ipc = closeout_editor_ipc_evidence(file, visible, effects);
     let binary_freshness =
         match agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file) {
             Some(warning) => CloseoutBinaryFreshnessEvidence::Stale { warning },
@@ -742,9 +868,315 @@ pub fn gather_closeout_recovery_evidence(
         active_capture,
         response_body,
         queue_only_drift,
+        snapshot_head_drift,
+        snapshot_visible_drift,
         editor_ipc,
         binary_freshness,
     })
+}
+
+pub fn observe_closeout_recovery_evidence(
+    file: &Path,
+    effects: &dyn CloseoutEffects,
+) -> Result<CloseoutRecoveryEvidence> {
+    let evidence = gather_closeout_recovery_evidence(file, effects)?;
+    record_closeout_recovery_evidence(file, &evidence)?;
+    Ok(evidence)
+}
+
+pub fn load_current_observed_closeout_recovery_evidence(
+    file: &Path,
+    effects: &dyn CloseoutEffects,
+) -> Result<Option<CloseoutRecoveryEvidence>> {
+    let visible_doc =
+        effects.resolve_current_document(file, "observed_closeout_recovery_evidence")?;
+    let visible_markdown_hash = agent_doc_capture_io::replay_file_hash(visible_doc.content());
+    let Some(projection) = agent_doc_cycle_state_io::load_latest_closeout_recovery_evidence(file)?
+    else {
+        return Ok(None);
+    };
+    if projection.visible_markdown_hash != visible_markdown_hash {
+        return Ok(None);
+    }
+    Ok(projected_closeout_recovery_evidence(projection))
+}
+
+fn projected_closeout_recovery_evidence(
+    projection: agent_doc_state_backbone::CloseoutRecoveryEvidenceProjection,
+) -> Option<CloseoutRecoveryEvidence> {
+    let active_cycle = match (projection.active_cycle_id, projection.active_cycle_phase) {
+        (Some(cycle_id), Some(phase)) => Some(CloseoutCycleEvidence { cycle_id, phase }),
+        _ => None,
+    };
+    let active_capture = match (
+        projection.active_capture_id,
+        projection.active_capture_cycle_id,
+        projection.active_capture_state,
+        projection.active_capture_response_sha256,
+    ) {
+        (Some(capture_id), Some(cycle_id), Some(state), Some(response_sha256)) => {
+            Some(CloseoutCaptureEvidence {
+                capture_id,
+                cycle_id,
+                state: capture_state_from_label(&state)?,
+                response_sha256,
+            })
+        }
+        _ => None,
+    };
+    Some(CloseoutRecoveryEvidence {
+        visible_markdown_hash: projection.visible_markdown_hash,
+        snapshot_hash: projection.snapshot_hash,
+        active_cycle,
+        active_capture,
+        response_body: flow_response_body_evidence(projection.response_body),
+        queue_only_drift: projection
+            .queue_only_drift
+            .map(flow_queue_only_drift_evidence),
+        snapshot_head_drift: projection.snapshot_head_drift.map(flow_recovery_drift),
+        snapshot_visible_drift: projection.snapshot_visible_drift.map(flow_recovery_drift),
+        editor_ipc: flow_editor_ipc_evidence(projection.editor_ipc),
+        binary_freshness: flow_binary_freshness_evidence(projection.binary_freshness),
+    })
+}
+
+fn record_closeout_recovery_evidence(
+    file: &Path,
+    evidence: &CloseoutRecoveryEvidence,
+) -> Result<bool> {
+    let active_cycle = evidence.active_cycle.as_ref();
+    let active_capture = evidence.active_capture.as_ref();
+    agent_doc_cycle_state_io::append_closeout_recovery_evidence(
+        file,
+        agent_doc_cycle_state_io::CloseoutRecoveryEvidenceInput {
+            visible_markdown_hash: evidence.visible_markdown_hash.as_str(),
+            snapshot_hash: evidence.snapshot_hash.as_deref(),
+            active_cycle_id: active_cycle.map(|cycle| cycle.cycle_id.as_str()),
+            active_cycle_phase: active_cycle.map(|cycle| cycle.phase),
+            active_capture_id: active_capture.map(|capture| capture.capture_id.as_str()),
+            active_capture_cycle_id: active_capture.map(|capture| capture.cycle_id.as_str()),
+            active_capture_state: active_capture.map(|capture| capture_state_label(capture.state)),
+            active_capture_response_sha256: active_capture
+                .map(|capture| capture.response_sha256.as_str()),
+            response_body: backbone_response_body_evidence(&evidence.response_body),
+            queue_only_drift: evidence
+                .queue_only_drift
+                .as_ref()
+                .map(backbone_queue_only_drift_evidence),
+            snapshot_head_drift: evidence.snapshot_head_drift.map(backbone_recovery_drift),
+            snapshot_visible_drift: evidence.snapshot_visible_drift.map(backbone_recovery_drift),
+            editor_ipc: backbone_editor_ipc_evidence(&evidence.editor_ipc),
+            binary_freshness: backbone_binary_freshness_evidence(&evidence.binary_freshness),
+            recorded_at_ms: now_millis(),
+        },
+    )
+}
+
+fn backbone_response_body_evidence(
+    evidence: &CloseoutResponseBodyEvidence,
+) -> agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence {
+    match evidence {
+        CloseoutResponseBodyEvidence::NoActiveCapture => {
+            agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::NoActiveCapture
+        }
+        CloseoutResponseBodyEvidence::EmptyCapture { capture_id } => {
+            agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::EmptyCapture {
+                capture_id: capture_id.clone(),
+            }
+        }
+        CloseoutResponseBodyEvidence::PresentInVisible { capture_id } => {
+            agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::PresentInVisible {
+                capture_id: capture_id.clone(),
+            }
+        }
+        CloseoutResponseBodyEvidence::SupersededByVisibleExchange { capture_id, proof } => {
+            agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::SupersededByVisibleExchange {
+                capture_id: capture_id.clone(),
+                proof: proof.clone(),
+            }
+        }
+        CloseoutResponseBodyEvidence::MissingFromVisible { capture_id } => {
+            agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::MissingFromVisible {
+                capture_id: capture_id.clone(),
+            }
+        }
+    }
+}
+
+fn backbone_queue_only_drift_evidence(
+    evidence: &CloseoutQueueOnlyDriftEvidence,
+) -> agent_doc_state_backbone::CloseoutRecoveryQueueOnlyDriftEvidence {
+    agent_doc_state_backbone::CloseoutRecoveryQueueOnlyDriftEvidence {
+        file_hash_mismatch: evidence.file_hash_mismatch,
+        snapshot_hash_mismatch: evidence.snapshot_hash_mismatch,
+        proven_queue_only: evidence.proven_queue_only,
+    }
+}
+
+fn backbone_recovery_drift(
+    drift: CloseoutRecoveryDrift,
+) -> agent_doc_state_backbone::CloseoutRecoveryDriftEvidence {
+    match drift {
+        CloseoutRecoveryDrift::BoundaryOnly => {
+            agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::BoundaryOnly
+        }
+        CloseoutRecoveryDrift::MetadataOnly => {
+            agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::MetadataOnly
+        }
+        CloseoutRecoveryDrift::Content => {
+            agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::Content
+        }
+    }
+}
+
+fn backbone_editor_ipc_evidence(
+    evidence: &CloseoutEditorIpcEvidence,
+) -> agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence {
+    match evidence {
+        CloseoutEditorIpcEvidence::NoLiveBuffer { socket_degraded } => {
+            agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence::NoLiveBuffer {
+                socket_degraded: *socket_degraded,
+            }
+        }
+        CloseoutEditorIpcEvidence::FreshLiveBuffer {
+            live_buffer_count,
+            socket_degraded,
+        } => agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence::FreshLiveBuffer {
+            live_buffer_count: *live_buffer_count,
+            socket_degraded: *socket_degraded,
+        },
+        CloseoutEditorIpcEvidence::DivergedLiveBuffer {
+            live_buffer_count,
+            editor_id,
+            live_len,
+            live_hash,
+            socket_degraded,
+        } => agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence::DivergedLiveBuffer {
+            live_buffer_count: *live_buffer_count,
+            editor_id: editor_id.clone(),
+            live_len: *live_len,
+            live_hash: live_hash.clone(),
+            socket_degraded: *socket_degraded,
+        },
+    }
+}
+
+fn backbone_binary_freshness_evidence(
+    evidence: &CloseoutBinaryFreshnessEvidence,
+) -> agent_doc_state_backbone::CloseoutRecoveryBinaryFreshnessEvidence {
+    match evidence {
+        CloseoutBinaryFreshnessEvidence::NoStaleWarning => {
+            agent_doc_state_backbone::CloseoutRecoveryBinaryFreshnessEvidence::NoStaleWarning
+        }
+        CloseoutBinaryFreshnessEvidence::Stale { warning } => {
+            agent_doc_state_backbone::CloseoutRecoveryBinaryFreshnessEvidence::Stale {
+                warning: warning.clone(),
+            }
+        }
+    }
+}
+
+fn flow_response_body_evidence(
+    evidence: agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence,
+) -> CloseoutResponseBodyEvidence {
+    match evidence {
+        agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::NoActiveCapture => {
+            CloseoutResponseBodyEvidence::NoActiveCapture
+        }
+        agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::EmptyCapture {
+            capture_id,
+        } => CloseoutResponseBodyEvidence::EmptyCapture { capture_id },
+        agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::PresentInVisible {
+            capture_id,
+        } => CloseoutResponseBodyEvidence::PresentInVisible { capture_id },
+        agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::SupersededByVisibleExchange {
+            capture_id,
+            proof,
+        } => CloseoutResponseBodyEvidence::SupersededByVisibleExchange { capture_id, proof },
+        agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::MissingFromVisible {
+            capture_id,
+        } => CloseoutResponseBodyEvidence::MissingFromVisible { capture_id },
+    }
+}
+
+fn flow_queue_only_drift_evidence(
+    evidence: agent_doc_state_backbone::CloseoutRecoveryQueueOnlyDriftEvidence,
+) -> CloseoutQueueOnlyDriftEvidence {
+    CloseoutQueueOnlyDriftEvidence {
+        file_hash_mismatch: evidence.file_hash_mismatch,
+        snapshot_hash_mismatch: evidence.snapshot_hash_mismatch,
+        proven_queue_only: evidence.proven_queue_only,
+    }
+}
+
+fn flow_recovery_drift(
+    drift: agent_doc_state_backbone::CloseoutRecoveryDriftEvidence,
+) -> CloseoutRecoveryDrift {
+    match drift {
+        agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::BoundaryOnly => {
+            CloseoutRecoveryDrift::BoundaryOnly
+        }
+        agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::MetadataOnly => {
+            CloseoutRecoveryDrift::MetadataOnly
+        }
+        agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::Content => {
+            CloseoutRecoveryDrift::Content
+        }
+    }
+}
+
+fn flow_editor_ipc_evidence(
+    evidence: agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence,
+) -> CloseoutEditorIpcEvidence {
+    match evidence {
+        agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence::NoLiveBuffer {
+            socket_degraded,
+        } => CloseoutEditorIpcEvidence::NoLiveBuffer { socket_degraded },
+        agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence::FreshLiveBuffer {
+            live_buffer_count,
+            socket_degraded,
+        } => CloseoutEditorIpcEvidence::FreshLiveBuffer {
+            live_buffer_count,
+            socket_degraded,
+        },
+        agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence::DivergedLiveBuffer {
+            live_buffer_count,
+            editor_id,
+            live_len,
+            live_hash,
+            socket_degraded,
+        } => CloseoutEditorIpcEvidence::DivergedLiveBuffer {
+            live_buffer_count,
+            editor_id,
+            live_len,
+            live_hash,
+            socket_degraded,
+        },
+    }
+}
+
+fn flow_binary_freshness_evidence(
+    evidence: agent_doc_state_backbone::CloseoutRecoveryBinaryFreshnessEvidence,
+) -> CloseoutBinaryFreshnessEvidence {
+    match evidence {
+        agent_doc_state_backbone::CloseoutRecoveryBinaryFreshnessEvidence::NoStaleWarning => {
+            CloseoutBinaryFreshnessEvidence::NoStaleWarning
+        }
+        agent_doc_state_backbone::CloseoutRecoveryBinaryFreshnessEvidence::Stale { warning } => {
+            CloseoutBinaryFreshnessEvidence::Stale { warning }
+        }
+    }
+}
+
+fn capture_state_from_label(label: &str) -> Option<agent_doc_workflow::capture::CaptureState> {
+    match label {
+        "captured" => Some(agent_doc_workflow::capture::CaptureState::Captured),
+        "write_applied" => Some(agent_doc_workflow::capture::CaptureState::WriteApplied),
+        "replayed" => Some(agent_doc_workflow::capture::CaptureState::Replayed),
+        "committed" => Some(agent_doc_workflow::capture::CaptureState::Committed),
+        "discarded" => Some(agent_doc_workflow::capture::CaptureState::Discarded),
+        _ => None,
+    }
 }
 
 fn closeout_response_body_evidence(
@@ -845,7 +1277,16 @@ pub fn decide_closeout_recovery(
     effects: &dyn CloseoutEffects,
 ) -> CloseoutRecoveryDecision {
     let state = classify_closeout_recovery_state_for_file(file, effects);
-    let evidence = gather_closeout_recovery_evidence(file, effects).ok();
+    let evidence = load_current_observed_closeout_recovery_evidence(file, effects)
+        .ok()
+        .flatten()
+        .or_else(|| {
+            let evidence = gather_closeout_recovery_evidence(file, effects).ok();
+            if let Some(evidence) = evidence.as_ref() {
+                let _ = record_closeout_recovery_evidence(file, evidence);
+            }
+            evidence
+        });
     let stale_capture_supersession_proof = input.stale_capture_supersession_proof.or_else(|| {
         evidence
             .as_ref()
@@ -996,8 +1437,13 @@ pub fn apply_closeout_recovery_mutation(
             reason,
         } => {
             if write_visible_file {
-                std::fs::write(file, content)
-                    .with_context(|| format!("restore {} from recovery content", file.display()))?;
+                let doc =
+                    effects.resolve_current_document(file, "closeout_recovery_restore_visible")?;
+                effects.write_current_document(
+                    &doc,
+                    content,
+                    "closeout_recovery_restore_visible",
+                )?;
             }
             rebuild_sidecars_from_content(file, content)?;
             log_closeout_recovery_mutation(file, "rebuild_sidecars_from_content", reason);
@@ -1061,13 +1507,15 @@ fn apply_metadata_drift_recovery(
 ) -> Result<RecoveryApplication> {
     let head = agent_doc_git_io::revision::show_head(file)?;
     let snapshot = agent_doc_snapshot_io::load(file).ok().flatten();
-    let working = std::fs::read_to_string(file).ok();
+    let visible_doc = effects
+        .resolve_current_document(file, "closeout_metadata_drift_recovery")
+        .ok();
     // For QueueMetadataDrift the local (commit-candidate) side is the snapshot;
     // for SidecarVisibleDrift the snapshot already matches HEAD and the local side
     // is the visible/working file.
     let local = match state {
         CloseoutRecoveryState::QueueMetadataDrift => snapshot.as_deref(),
-        _ => working.as_deref(),
+        _ => visible_doc.as_ref().map(|doc| doc.content()),
     };
     let (Some(local), Some(head)) = (local, head.as_deref()) else {
         return Ok(RecoveryApplication::NotApplied {
@@ -1157,19 +1605,16 @@ pub fn classify_closeout_recovery_state_for_file(
     file: &Path,
     effects: &dyn CloseoutEffects,
 ) -> CloseoutRecoveryState {
-    let state = match agent_doc_cycle_state_io::load(file) {
-        Ok(Some(state)) => state,
+    let cycle = match load_closeout_recovery_cycle_view(file) {
+        Ok(Some(cycle)) => cycle,
         _ => {
             return classify_closeout_recovery_state_from_input(
                 CloseoutRecoveryStateInput::default(),
             );
         }
     };
-    let cycle = CloseoutRecoveryCycleInput {
-        phase: state.phase,
-        has_capture: state.capture_id.is_some(),
-        has_response_hash: state.response_sha256.is_some(),
-        had_pending_mutations: state.had_pending_mutations,
+    let Some(cycle) = cycle.recovery_cycle_input() else {
+        return classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput::default());
     };
     let mut input = CloseoutRecoveryStateInput {
         cycle: Some(cycle),
@@ -1179,11 +1624,17 @@ pub fn classify_closeout_recovery_state_for_file(
         return classify_closeout_recovery_state_from_input(input);
     }
 
+    let observed_evidence = load_current_observed_closeout_recovery_evidence(file, effects)
+        .ok()
+        .flatten();
     input.head_has_escaped_template_patch = head_exchange_has_escaped_markers(file);
     // A captured body that never materialized in HEAD, or a committed
     // response-write turn with no capture at all, are both the missing-body
     // shape recovered by `write --commit`.
-    input.missing_captured_response_body = stuck_captured_cycle(file).is_some();
+    input.missing_captured_response_body = observed_evidence
+        .as_ref()
+        .map(CloseoutRecoveryEvidence::reports_missing_response_body)
+        .unwrap_or_else(|| stuck_captured_cycle(file).is_some());
     // `#closeout-recovery-state-machine`: a visible `### Re:` / `## Assistant`
     // response was patched into the working document outside the binary write
     // path. Recover by absorbing it through `write --commit`. Checked before the
@@ -1204,6 +1655,13 @@ pub fn classify_closeout_recovery_state_for_file(
     // classify committed-cycle drift by *what* differs so the recovery names one
     // safe command. Order matters — narrowest/safest first, content drift last
     // (fail closed).
+    if let Some(snapshot_head_drift) = observed_evidence
+        .as_ref()
+        .and_then(|evidence| evidence.snapshot_head_drift)
+    {
+        input.snapshot_head_drift = Some(snapshot_head_drift);
+        return classify_closeout_recovery_state_from_input(input);
+    }
     let snapshot = agent_doc_snapshot_io::load(file).ok().flatten();
     let head = agent_doc_git_io::revision::show_head(file).ok().flatten();
     if let (Some(snapshot), Some(head)) = (snapshot.as_deref(), head.as_deref())
@@ -1215,10 +1673,20 @@ pub fn classify_closeout_recovery_state_for_file(
     // Snapshot matches HEAD but the visible/working file is stale relative to the
     // sidecars. Metadata-only visible drift → rebuild sidecars from the file;
     // content drift → preserve it through the normal response path.
-    if let (Some(snapshot), Ok(working)) = (snapshot.as_deref(), std::fs::read_to_string(file))
-        && snapshot != working
+    if let Some(snapshot_visible_drift) = observed_evidence
+        .as_ref()
+        .and_then(|evidence| evidence.snapshot_visible_drift)
     {
-        input.snapshot_visible_drift = Some(classify_snapshot_visible_drift(snapshot, &working));
+        input.snapshot_visible_drift = Some(snapshot_visible_drift);
+        return classify_closeout_recovery_state_from_input(input);
+    }
+    if let (Some(snapshot), Ok(visible)) = (
+        snapshot.as_deref(),
+        effects.resolve_current_document(file, "classify_closeout_recovery_snapshot_visible"),
+    ) && snapshot != visible.content()
+    {
+        input.snapshot_visible_drift =
+            Some(classify_snapshot_visible_drift(snapshot, visible.content()));
         return classify_closeout_recovery_state_from_input(input);
     }
     // `#closeout-recovery-state-machine`: the document itself is clean (snapshot

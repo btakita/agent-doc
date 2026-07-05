@@ -11,7 +11,7 @@ pub fn check_no_response_active_queue_head(file: &Path, rc: &RunContext) -> Resu
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed) {
@@ -100,7 +100,7 @@ pub fn check_reaped_queue_head_without_response(
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed) {

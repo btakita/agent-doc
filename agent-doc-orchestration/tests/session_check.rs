@@ -10,8 +10,9 @@
 use anyhow::Result;
 use std::path::Path;
 
+use agent_doc_document_realtime::baseline_comparison::RealtimeSteering;
 use agent_doc_session_check_io::{
-    SessionCheckReport, SessionCheckStatus, first_unstarted_prompt_bearing_change,
+    SessionCheckReport, SessionCheckStatus, realtime_steering_since_turn_baseline,
 };
 #[cfg(test)]
 use agent_doc_session_check_io::{
@@ -898,9 +899,9 @@ Body\n\
         fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
-        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        let change = realtime_steering_since_turn_baseline(&doc).unwrap();
         assert!(
-            change.is_none(),
+            matches!(change, RealtimeSteering::None),
             "frontmatter-only metadata drift must not become prompt-bearing"
         );
     }
@@ -961,13 +962,13 @@ Body\n\
             "precondition: fresh session has no snapshot"
         );
 
-        let change = first_unstarted_prompt_bearing_change(&doc)
-            .unwrap()
-            .expect("fresh exchange tail prompt must be detected via HEAD fallback");
+        let change = realtime_steering_since_turn_baseline(&doc).unwrap();
+        let RealtimeSteering::PromptTarget { preview } = change else {
+            panic!("fresh exchange tail prompt must be detected via HEAD fallback: {change:?}");
+        };
         assert!(
-            change.text.contains("Please fix the markdown parser."),
-            "detected change should be the new exchange prompt, got: {:?}",
-            change.text
+            preview.contains("Please fix the markdown parser."),
+            "detected change should be the new exchange prompt, got: {preview:?}"
         );
     }
     #[test]
@@ -1025,9 +1026,9 @@ Body\n\
             "precondition: fresh session has no snapshot"
         );
 
-        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        let change = realtime_steering_since_turn_baseline(&doc).unwrap();
         assert!(
-            change.is_none(),
+            matches!(change, RealtimeSteering::None),
             "a queue-only write must not become an exchange prompt-bearing change"
         );
     }
@@ -1068,9 +1069,9 @@ Body\n\
             ),
             "fixture block should be recognized as already answered"
         );
-        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        let change = realtime_steering_since_turn_baseline(&doc).unwrap();
         assert!(
-            change.is_none(),
+            matches!(change, RealtimeSteering::None),
             "answered prompt after a stale boundary must not stay actionable"
         );
     }
@@ -1107,9 +1108,9 @@ Body\n\
             "I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references\nI updated the repo-local references to the renamed GitHub repo.\n"
         ));
 
-        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        let change = realtime_steering_since_turn_baseline(&doc).unwrap();
         assert!(
-            change.is_none(),
+            matches!(change, RealtimeSteering::None),
             "raw assistant completion prose after a stale-boundary prompt must not stay actionable"
         );
     }
@@ -1152,9 +1153,9 @@ Body\n\
             agent_doc_diff::PromptBearingChangeKind::ContentEdit
         );
 
-        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        let change = realtime_steering_since_turn_baseline(&doc).unwrap();
         assert!(
-            change.is_none(),
+            matches!(change, RealtimeSteering::None),
             "session-check should not reopen a committed turn for plain content-edit drift"
         );
     }
@@ -1185,9 +1186,9 @@ Body\n\
         fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
-        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        let change = realtime_steering_since_turn_baseline(&doc).unwrap();
         assert!(
-            change.is_none(),
+            matches!(change, RealtimeSteering::None),
             "prefixed assistant response labels must not reopen a committed cycle"
         );
     }
@@ -1217,15 +1218,12 @@ Body\n\
         fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
-        let change = first_unstarted_prompt_bearing_change(&doc)
-            .unwrap()
-            .expect("plain exchange-tail prompt should remain actionable");
+        let change = realtime_steering_since_turn_baseline(&doc).unwrap();
+        let RealtimeSteering::PromptTarget { preview } = change else {
+            panic!("plain exchange-tail prompt should remain actionable: {change:?}");
+        };
         assert_eq!(
-            change.kind,
-            agent_doc_diff::PromptBearingChangeKind::PromptTarget
-        );
-        assert_eq!(
-            change.text,
+            preview,
             "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"
         );
     }
@@ -1258,9 +1256,9 @@ Body\n\
         fs::write(&doc, current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
-        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        let change = realtime_steering_since_turn_baseline(&doc).unwrap();
         assert!(
-            change.is_none(),
+            matches!(change, RealtimeSteering::None),
             "prompt-like text inside ordinary HTML comments must not reopen the cycle"
         );
     }

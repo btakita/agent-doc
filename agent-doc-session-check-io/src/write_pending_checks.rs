@@ -33,7 +33,7 @@ fn log_closeout_guard(
 }
 
 pub fn precommit_pending_capture_check(file: &Path) -> Result<()> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(());
     };
     if state.had_pending_mutations && state.required_backlog_targets.is_empty() {
@@ -215,7 +215,7 @@ pub fn prewrite_pending_capture_check(
         return Ok(());
     }
 
-    let state = agent_doc_cycle_state_io::load(file)?;
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let has_explicit_targets = state
         .as_ref()
         .is_some_and(|state| !state.required_backlog_targets.is_empty());
@@ -417,12 +417,11 @@ pub struct PendingDoneCheckOptions {
 }
 
 fn malformed_tracked_item_refs_completed_by_response(
-    file: &Path,
+    doc: &agent_doc_document_realtime_io::CurrentDocument,
     response_text: &str,
 ) -> Result<Vec<String>> {
-    let content = std::fs::read_to_string(file)?;
     Ok(
-        agent_doc_element_backlog::backlog::malformed_tracked_item_refs(&content)
+        agent_doc_element_backlog::backlog::malformed_tracked_item_refs(doc.content())
             .into_iter()
             .filter(|item| {
                 agent_doc_turn::closeout_signal::response_clearly_completes_pending_id(
@@ -449,7 +448,7 @@ pub fn precommit_pending_done_check_with_options(
         return Ok(());
     }
 
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(());
     };
 
@@ -462,7 +461,8 @@ pub fn precommit_pending_done_check_with_options(
 
     let response_text =
         agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
-    let malformed = malformed_tracked_item_refs_completed_by_response(file, &response_text)?;
+    let doc = crate::resolve_current_document(file, "precommit_pending_done_check")?;
+    let malformed = malformed_tracked_item_refs_completed_by_response(&doc, &response_text)?;
     if !malformed.is_empty() {
         log_closeout_guard(
             file,
@@ -477,9 +477,8 @@ pub fn precommit_pending_done_check_with_options(
             )
         );
     }
-    let content = std::fs::read_to_string(file)?;
     let open_tracked_work_ids =
-        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&content);
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(doc.content());
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids(
         &response_text,
         &state.pending_done_ids,
@@ -563,7 +562,7 @@ pub fn prewrite_pending_done_check(
         return Ok(());
     }
 
-    let state = agent_doc_cycle_state_io::load(file)?;
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let mut recorded_done_ids = state
         .as_ref()
         .map(|state| state.pending_done_ids.clone())
@@ -579,7 +578,9 @@ pub fn prewrite_pending_done_check(
     }
 
     let response_text = agent_doc_turn::closeout_signal::response_text_for_guards(response_body);
-    let malformed = malformed_tracked_item_refs_completed_by_response(file, &response_text)?;
+    let doc = crate::resolve_current_document(file, "prewrite_pending_done_check")?;
+    let file = doc.key().as_path();
+    let malformed = malformed_tracked_item_refs_completed_by_response(&doc, &response_text)?;
     if !malformed.is_empty() {
         log_closeout_guard(
             file,
@@ -597,9 +598,8 @@ pub fn prewrite_pending_done_check(
     if crate::resolve_auto_done(file)? {
         return Ok(());
     }
-    let content = std::fs::read_to_string(file)?;
     let open_tracked_work_ids =
-        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&content);
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(doc.content());
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids(
         &response_text,
         &recorded_done_ids,
@@ -663,7 +663,7 @@ pub fn auto_apply_pending_done_if_enabled(
         return Ok(());
     }
 
-    let state = agent_doc_cycle_state_io::load(file)?;
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let mut recorded_done_ids = state
         .as_ref()
         .map(|state| state.pending_done_ids.clone())
@@ -675,9 +675,10 @@ pub fn auto_apply_pending_done_if_enabled(
         .unwrap_or_default();
     kept_open_ids.extend(flags.pending_kept_open_ids.clone());
 
-    let content = std::fs::read_to_string(file)?;
+    let doc = crate::resolve_current_document(file, "auto_apply_pending_done_if_enabled")?;
+    let file = doc.key().as_path();
     let open_tracked_work_ids =
-        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&content);
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(doc.content());
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_decision(
         agent_doc_turn::closeout_signal::TrackedWorkCompletionEvidence {
             response_body,
@@ -707,7 +708,8 @@ pub fn auto_apply_pending_done_if_enabled(
     agent_doc_cycle_state_io::record_pending_done_ids(file, &missing)?;
     agent_doc_cycle_state_io::mark_pending_mutations(file)?;
     *current_content =
-        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
+        crate::resolve_current_document(file, "auto_apply_pending_done_if_enabled_refresh")?
+            .into_content();
     eprintln!(
         "[finalize] auto_done: recorded {}",
         missing
@@ -790,7 +792,7 @@ pub fn run_closeout_pending_maintenance(
 }
 
 fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
-    if let Some(state) = agent_doc_cycle_state_io::load(file)?
+    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
         && (state.had_pending_mutations
             || state.pending_added_this_cycle
             || !state.pending_done_ids.is_empty()
@@ -801,10 +803,8 @@ fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
         return Ok(true);
     }
 
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return Ok(false);
-    };
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
+    let doc = crate::resolve_current_document(file, "closeout_pending_maintenance_required")?;
+    let Ok(components) = agent_doc_element::element::parse(doc.content()) else {
         return Ok(false);
     };
 
@@ -813,7 +813,7 @@ fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
         .filter(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
         .any(|component| {
             let (_, items, _) =
-                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
+                agent_doc_element_backlog::backlog::parse_items(component.content(doc.content()));
             items.iter().any(|item| item.is_done())
         }))
 }

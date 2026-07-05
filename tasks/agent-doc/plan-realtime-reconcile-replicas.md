@@ -43,7 +43,7 @@ reconcile loop, and still reasons over flat text + the whole-document yrs
   whole-document `Y.Text`. Flat character sequence; structure is only marker
   comments, so concurrent edits to disjoint nodes can splice across
   component/item boundaries (the queue-text-in-exchange corruption class).
-- **Per-cell CRDT:** `lazily` 0.13.1 in `agent-doc-merge/src/cell_doc.rs` —
+- **Per-cell CRDT:** `lazily` 0.13.1 in `agent-doc-merge/src/document_cell.rs` —
   `CellTree`/`CellMap`/`SemTree` structure + `TextCrdt` op-level merge +
   `reconcile` keyed LIS diff. **Already the production merge default**
   (`cell_merge_enabled()` ON) for `crdt::merge_by_component`. NOT yet used by the
@@ -67,18 +67,23 @@ Work items:
 
 1. **Convergence predicate = per-cell state, not text bytes.** Add a realtime-model
    function that decides "in sync" from the per-cell model: project base /
-   candidate / operator-buffer into `cell_doc::project_document`, and treat the
+   candidate / operator-buffer into `document_cell::project_document`, and treat the
    turn as converged when the exchange node(s) reconcile with no pending op
    (operator wins same-node; disjoint nodes both land). Replace
    `response_converged_in_visible_target`'s heading heuristic (Phase 1) with this
    as the authority; keep the heading check as a cheap fast-path.
+   The realtime document graph should be a `RealtimeDocumentContext`: a typed
+   lazily `ThreadSafeContext` schema whose current-document, replica, receipt,
+   and convergence slots/cells cannot be mixed with the short-lived cycle graph.
+   Keep `CycleContext` for one-cycle IO/cache projections; use
+   `RealtimeDocumentContext` for cross-thread editor/watcher/actor authority.
 2. **One reconcile step, one stage.** Collapse the write-stage proof and the
    commit-stage `try_auto_recover_live_prompt_drift` into a single
    `reconcile_turn_against_live_buffer(file, base, candidate) -> Reconciled`
    entry in the realtime model, called once before the turn returns. It:
    - reads the newest operator-authoritative live buffer,
    - per-cell 3-way merges (base, candidate, operator-buffer) via
-     `cell_doc::merge_3way` (already the default),
+     `document_cell::merge_3way` (already the default),
    - **loops** re-reading the live buffer until the merge is a fixpoint (the
      operator stopped editing) or a bounded timeout,
    - returns the converged document to persist to disk + snapshot + CRDT.
@@ -115,7 +120,7 @@ Work items:
    sync (bounded).
 3. **VERIFY before retiring yrs — lazily `TextCrdt` sync semantics. → RESOLVED
    (2026-07-02): lazily HAS coordinator-free delta/frontier sync.**
-   `op_level_merge` (`cell_doc.rs:1026`) only uses the 3-way-with-common-base
+   `op_level_merge` (`document_cell.rs`) only uses the 3-way-with-common-base
    entry (`TextCrdt::from_str` + `fork`), but lazily 0.13.1 also ships the full
    anti-entropy layer that true replica sync needs:
    - `lazily::TextCrdt::merge(other)` is a **commutative/associative/idempotent**
@@ -158,7 +163,7 @@ before applying; documented decision on lazily-vs-yrs for persistence/transport.
   check.~~ **RESOLVED:** lazily ships `CrdtPlaneRuntime` (HLC + `StampFrontier` +
   `sync_frame_since`/`sync_reply`) and commutative `TextCrdt::merge`; convergence
   proven by `replica_sync.rs`. Phase 3 is unblocked.
-- Whether `cell_doc::project_document` node keys are stable enough to be the
+- Whether `document_cell::project_document` node keys are stable enough to be the
   convergence identity across a live operator edit that renames a heading.
 - Editor-side shadow reconcile: JetBrains Document API listener granularity vs
   the ack-sidecar round-trip latency budget.

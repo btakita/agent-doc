@@ -16,7 +16,7 @@ pub fn check_pending_capture_guard(file: &Path, rc: &RunContext) -> Result<Guard
         return Ok(GuardResult::None);
     }
 
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     if state.is_open() || state.had_pending_mutations {
@@ -131,7 +131,7 @@ pub fn check_pending_done_guard(file: &Path, rc: &RunContext) -> Result<GuardRes
         return Ok(GuardResult::None);
     }
 
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     if state.is_open() {
@@ -148,9 +148,9 @@ pub fn check_pending_done_guard(file: &Path, rc: &RunContext) -> Result<GuardRes
         return Ok(GuardResult::None);
     }
 
-    let content = std::fs::read_to_string(file)?;
+    let doc = crate::resolve_current_document(file, "pending_done_guard")?;
     let open_tracked_work_ids =
-        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&content);
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(doc.content());
     let missing = match agent_doc_turn::closeout_signal::tracked_work_completion_decision(
         agent_doc_turn::closeout_signal::TrackedWorkCompletionEvidence {
             response_body: &capture.response_body,
@@ -167,6 +167,6 @@ pub fn check_pending_done_guard(file: &Path, rc: &RunContext) -> Result<GuardRes
         } => missing_ids,
     };
 
-    let file_display = file.display().to_string();
+    let file_display = doc.key().display().to_string();
     Ok(agent_doc_workflow::session_check::pending_done_guard_result(&file_display, &missing, mode))
 }

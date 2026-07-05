@@ -4,7 +4,7 @@ use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 
 pub fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -14,7 +14,7 @@ pub fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
         return Ok(GuardResult::None);
     };
 
-    let content = std::fs::read_to_string(file)?;
+    let content = crate::resolve_current_document_content(file, "partial_closeout_state_guard")?;
     let open_backlog_ids = agent_doc_document::tracked_work_projection::open_backlog_ids(&content);
     let candidates = match agent_doc_turn::closeout_signal::partial_closeout_state_decision(
         agent_doc_turn::closeout_signal::PartialCloseoutStateEvidence {

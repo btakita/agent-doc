@@ -935,11 +935,12 @@ export function stateProjectionForFile(filePath: string, projectRoot?: string): 
 }
 /**
  * CPC→plugin turn-state projection for a document path:
- * `{state, turn_in_flight, transition_authority}`. Observe it to render
- * turn-in-flight UI and to decide whether a forwarded operator prompt starts a
- * fresh turn or would collide with an in-flight response (the double-append
- * guard). Returns null when the ABI is unavailable or on error — callers treat
- * null as "idle / unknown". Parity with the JB `agent_doc_turn_projection`.
+ * `{state, turn_in_flight, transition_authority, realtime_steering?}`. Observe it
+ * to render turn-in-flight UI, project realtime steering onto the banner/status
+ * label, and decide whether a forwarded operator prompt starts a fresh turn or
+ * would collide with an in-flight response (the double-append guard). Returns
+ * null when the ABI is unavailable or on error — callers treat null as
+ * "idle / unknown". Parity with the JB `agent_doc_turn_projection`.
  */
 export function turnProjectionForFile(filePath: string, projectRoot?: string): any | null {
     if (!ensureLoaded(projectRoot)) return null;

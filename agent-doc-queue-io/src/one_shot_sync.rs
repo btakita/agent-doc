@@ -33,11 +33,10 @@ pub enum OneShotQueueSyncResult {
 /// snapshot logging boundary.
 pub fn sync_one_shot_backlog_queue_with_snapshot(
     file: &Path,
+    content: &str,
+    write_document: impl FnOnce(&Path, &str, &str) -> Result<()>,
     save_snapshot: impl FnOnce(&Path, &str) -> Result<()>,
 ) -> Result<OneShotQueueSyncResult> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-
     let components = element::parse(&content)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
@@ -83,7 +82,7 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
     let new_body = document_queue::render(&synced);
     let new_content = qc.replace_content(&content, &new_body);
 
-    std::fs::write(file, &new_content)
+    write_document(file, content, &new_content)
         .with_context(|| format!("failed to write {}", file.display()))?;
 
     let report = backlog_sync::backlog_queue_sync_report(&entries, &ids, &synced);
@@ -129,11 +128,19 @@ mod tests {
         let snapshot_called = Rc::new(Cell::new(false));
         let snapshot_called_for_save = snapshot_called.clone();
 
-        let result = sync_one_shot_backlog_queue_with_snapshot(&doc, move |_path, new_content| {
-            snapshot_called_for_save.set(true);
-            assert!(new_content.contains("- do [#alpha]"));
-            Ok(())
-        })
+        let result = sync_one_shot_backlog_queue_with_snapshot(
+            &doc,
+            content,
+            |path, _current, target| {
+                std::fs::write(path, target)?;
+                Ok(())
+            },
+            move |_path, new_content| {
+                snapshot_called_for_save.set(true);
+                assert!(new_content.contains("- do [#alpha]"));
+                Ok(())
+            },
+        )
         .expect("enqueue marker should append to queue");
 
         let OneShotQueueSyncResult::Synced(applied) = result else {
@@ -174,9 +181,12 @@ mod tests {
         );
         std::fs::write(&doc, content).unwrap();
 
-        let result = sync_one_shot_backlog_queue_with_snapshot(&doc, |_path, _content| {
-            panic!("already-in-sync should not save snapshot")
-        })
+        let result = sync_one_shot_backlog_queue_with_snapshot(
+            &doc,
+            content,
+            |_path, _current, _target| panic!("already-in-sync should not write document"),
+            |_path, _content| panic!("already-in-sync should not save snapshot"),
+        )
         .expect("already-synced queue should be accepted");
 
         assert_eq!(

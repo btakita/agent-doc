@@ -176,7 +176,10 @@ impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
     }
 
     fn read_to_string(&self, file: &Path) -> Result<String> {
-        Ok(std::fs::read_to_string(file)?)
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "guard_marker_cleanup",
+        )
     }
 
     fn converge_or_disk_write(
@@ -242,7 +245,10 @@ impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
     }
 
     fn read_to_string(&self, file: &Path) -> Result<String> {
-        Ok(std::fs::read_to_string(file)?)
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "live_buffer_guard",
+        )
     }
 
     fn queue_file_ipc_reposition_boundary(
@@ -330,7 +336,10 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
     for RuntimePostCommitCleanupEffects
 {
     fn read_to_string(&self, file: &Path) -> Result<String> {
-        Ok(std::fs::read_to_string(file)?)
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "post_commit_cleanup",
+        )
     }
 
     fn load_snapshot(&self, file: &Path) -> Option<String> {
@@ -515,7 +524,11 @@ where
     let msg = agent_doc_commit_message_for_file(file, &timestamp);
 
     let mut snapshot_content = agent_doc_snapshot_io::load(file)?;
-    let mut file_content = std::fs::read_to_string(file).unwrap_or_default();
+    let mut file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "commit_initial_current",
+    )
+    .unwrap_or_default();
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
     let snapshot_matched_head_before_absorb = snapshot_content
         .as_deref()
@@ -568,7 +581,7 @@ where
                         )
                         .then_some("typed_component_drift")
                     }),
-                    agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+                    agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
                         snapshot, head,
                     ),
                 )
@@ -1076,7 +1089,11 @@ where
     if let Ok(Some(reloaded)) = agent_doc_snapshot_io::load(file) {
         snapshot_content = Some(reloaded);
     }
-    file_content = std::fs::read_to_string(file).unwrap_or_default();
+    file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "commit_after_boundary_reposition",
+    )
+    .unwrap_or_default();
     agent_doc_git_io::pre_stage_repair::dedupe_snapshot_and_worktree_before_commit(
         ports.pre_stage_repair,
         file,
@@ -1201,7 +1218,10 @@ where
             ports.guard_marker_cleanup,
             file,
         );
-        if let Ok(cleaned) = std::fs::read_to_string(file) {
+        if let Ok(cleaned) = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "commit_transient_cleanup",
+        ) {
             match agent_doc_git_io::transient_cleanup::repair_clean_head_if_only_transient_worktree_drift(
                 ports.transient_cleanup,
                 file,
@@ -1298,7 +1318,7 @@ fn live_prompt_drift_missing_response_with_unanswered_prompt_for_commit(
     current_doc: &str,
     active_response_target: Option<&str>,
 ) -> bool {
-    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+    if agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
         current_doc,
         snapshot_doc,
     )
@@ -1377,7 +1397,7 @@ fn response_bearing_exchange_drift_after_committed_head(head_doc: &str, current_
     if normalized_head == normalized_current {
         return false;
     }
-    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+    if agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
         &normalized_head,
         &normalized_current,
     )
@@ -1385,7 +1405,7 @@ fn response_bearing_exchange_drift_after_committed_head(head_doc: &str, current_
     {
         return true;
     }
-    agent_doc_turn::document_drift::exchange_has_new_appended_content(
+    agent_doc_document_realtime::baseline_comparison::exchange_has_new_appended_content(
         &normalized_head,
         &normalized_current,
     ) && !exchange_append_is_prompt_target_only(&normalized_head, &normalized_current)

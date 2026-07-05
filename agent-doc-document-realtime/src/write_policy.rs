@@ -849,11 +849,8 @@ pub fn snapshot_persist_mode(
         return SnapshotPersistMode::FinalContent;
     }
 
-    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
-        &ours_norm,
-        &final_norm,
-    )
-    .is_some()
+    if crate::baseline_comparison::detect_bypassed_response_write_between(&ours_norm, &final_norm)
+        .is_some()
     {
         return SnapshotPersistMode::FinalContent;
     }

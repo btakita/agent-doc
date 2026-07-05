@@ -1,3 +1,6 @@
+use anyhow::{Context, Result};
+use std::path::Path;
+
 pub mod backlog_guards;
 pub mod closeout_guards;
 pub mod command;
@@ -25,3 +28,19 @@ pub use queue_head_guards::*;
 pub use queue_head_provenance_guards::*;
 pub use response_guards::*;
 pub use write_pending_checks::*;
+
+pub(crate) fn resolve_current_document(
+    file: &Path,
+    source: &str,
+) -> Result<agent_doc_document_realtime_io::CurrentDocument> {
+    agent_doc_document_realtime_io::try_resolve_current_document(file).with_context(|| {
+        format!(
+            "session-check {source}: resolve current document {}",
+            file.display()
+        )
+    })
+}
+
+pub(crate) fn resolve_current_document_content(file: &Path, source: &str) -> Result<String> {
+    Ok(resolve_current_document(file, source)?.into_content())
+}

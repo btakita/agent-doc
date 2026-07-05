@@ -43,6 +43,19 @@ fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Resu
     }
 }
 
+fn projected_cycle_id_for_ipc_payload(file: &Path) -> Option<String> {
+    agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten()
+        .map(|state| state.cycle_id)
+        .or_else(|| {
+            agent_doc_cycle_state_io::load_closeout_projection(file)
+                .ok()
+                .flatten()
+                .and_then(|projection| projection.cycle_id)
+        })
+}
+
 /// Run the write command: append assistant response to document.
 ///
 /// `baseline` is the document content at the time the response was generated.
@@ -208,7 +221,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     }
     // #22a8: mirror the live pipeline phase into the document frontmatter now the
     // response is fully on disk (doc lock still held, so no writer races).
-    if let Ok(Some(st)) = agent_doc_cycle_state_io::load(file) {
+    if let Ok(Some(st)) = agent_doc_cycle_state_io::load_with_closeout_projection(file) {
         agent_doc_cycle_state_io::pipeline_frontmatter::mirror_pipeline_frontmatter(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             file,
@@ -547,7 +560,7 @@ pub(crate) fn run_template(
     }
     // #22a8: mirror the live pipeline phase into the document frontmatter now the
     // response is fully on disk (doc lock still held, so no writer races).
-    if let Ok(Some(st)) = agent_doc_cycle_state_io::load(file) {
+    if let Ok(Some(st)) = agent_doc_cycle_state_io::load_with_closeout_projection(file) {
         agent_doc_cycle_state_io::pipeline_frontmatter::mirror_pipeline_frontmatter(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             file,
@@ -1561,8 +1574,8 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
             ),
         ));
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
-    if let Ok(Some(ref cs)) = agent_doc_cycle_state_io::load(file) {
-        ipc_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
+    if let Some(cycle_id) = projected_cycle_id_for_ipc_payload(file) {
+        ipc_payload["cycle_id"] = serde_json::Value::String(cycle_id);
     }
 
     if let Some(ref yaml) = frontmatter_yaml {
@@ -1770,8 +1783,8 @@ fn retain_ipc_patch_for_editor_authority_retry(
     ));
     payload["patch_id"] = serde_json::Value::String(patch_id.clone());
     payload["recovery"] = serde_json::Value::String("retry_without_disk_write".to_string());
-    if let Ok(Some(ref cs)) = agent_doc_cycle_state_io::load(file) {
-        payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
+    if let Some(cycle_id) = projected_cycle_id_for_ipc_payload(file) {
+        payload["cycle_id"] = serde_json::Value::String(cycle_id);
     }
 
     atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
@@ -2154,6 +2167,33 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn ipc_payload_cycle_id_uses_lazily_projection_when_cycle_sidecar_missing() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "body").unwrap();
+
+        let opened = agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body"))
+            .expect("start preflight");
+        agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some("body"), Some("body"))
+            .expect("mark write applied");
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle sidecar path");
+        fs::remove_file(&sidecar_path).unwrap();
+
+        assert!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().is_none(),
+            "raw cycle sidecar should be absent for this regression"
+        );
+        assert_eq!(
+            projected_cycle_id_for_ipc_payload(&doc).as_deref(),
+            Some(opened.cycle_id.as_str()),
+            "IPC payload identity should come from the lazily closeout projection"
+        );
+    }
 
     #[test]
     fn stream_model_merge_preserves_response_and_operator_components() {

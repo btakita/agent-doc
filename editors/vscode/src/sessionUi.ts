@@ -53,6 +53,10 @@ export interface TurnProjection {
     state: 'idle' | 'awaiting_response' | 'persisting';
     turn_in_flight: boolean;
     transition_authority: string;
+    realtime_steering?: {
+        state?: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
+        preview?: string;
+    };
 }
 
 export interface TurnStatePresentation {
@@ -63,6 +67,8 @@ export interface TurnStatePresentation {
      * for the next turn instead of feeding it into the current exchange. */
     guardPromptForwarding: boolean;
 }
+
+type TurnSteeringState = NonNullable<TurnProjection['realtime_steering']>['state'];
 
 /**
  * Consume the CPC's authoritative turn-state projection into a plugin-facing
@@ -77,11 +83,28 @@ export function buildTurnStatePresentation(
     if (!projection || projection.state === 'idle' || !projection.turn_in_flight) {
         return { label: '', guardPromptForwarding: false };
     }
-    const label =
+    const phaseLabel =
         projection.state === 'awaiting_response'
             ? '⟳ agent-doc: awaiting response'
             : '⟳ agent-doc: persisting';
+    const steering = steeringLabel(projection.realtime_steering?.state);
+    const label = steering ? `${phaseLabel} · ${steering}` : phaseLabel;
     return { label, guardPromptForwarding: true };
+}
+
+function steeringLabel(state: TurnSteeringState | undefined): string | null {
+    switch (state) {
+        case 'prompt_target':
+            return 'new prompt';
+        case 'content_edit':
+            return 'document edited';
+        case 'prompt_deleted':
+            return 'prompt deleted';
+        case 'prompt_reduced':
+            return 'prompt reduced';
+        default:
+            return null;
+    }
 }
 
 export function buildSessionCommandArgs(

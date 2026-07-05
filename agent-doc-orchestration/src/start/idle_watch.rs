@@ -106,7 +106,7 @@ fn gather_convergence_facts(
     deferring_since: Option<std::time::Instant>,
     timeout_ms: u64,
 ) -> agent_doc_document_realtime::convergence_gate::ConvergenceFacts {
-    let committed = match agent_doc_cycle_state_io::load(file) {
+    let committed = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
         Ok(Some(state)) => matches!(state.phase, agent_doc_turn::CyclePhase::Committed),
         _ => true,
     };
@@ -203,7 +203,9 @@ fn record_convergence_gate_blocked(
     facts: &agent_doc_document_realtime::convergence_gate::ConvergenceFacts,
     unmet: &[&'static str],
 ) {
-    let state = agent_doc_cycle_state_io::load(file).ok().flatten();
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten();
     let cycle_id = state
         .as_ref()
         .map(|s| s.cycle_id.clone())
@@ -1509,7 +1511,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // true turn boundary; mid-turn, preserve the open checkpoint so a
                 // finalize/recycle race can still be resumed by the fresh supervisor.
                 let inflight = agent_doc_ipc_io::inflight_connection_handlers();
-                let cycle_open = match agent_doc_cycle_state_io::load(&path).ok().flatten() {
+                let cycle_open = match agent_doc_cycle_state_io::load_with_closeout_projection(&path)
+                    .ok()
+                    .flatten()
+                {
                     Some(state) if state.is_open() => {
                         let pre_response_cycle_stalled = turn_boundary
                             && state.stalled_pre_response_cycle(
@@ -3551,5 +3556,53 @@ mod tests {
             serde_json::from_str(&raw).expect("playback artifact must be loadable");
         assert_eq!(loaded.inflight, 5);
         assert!(loaded.unmet_proofs.iter().any(|p| p == "editor_converged"));
+    }
+
+    #[test]
+    fn convergence_facts_prefers_lazily_projection_over_stale_open_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(&doc, "body\n").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body\n", agent_doc_ops_log_io::log_op).unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n")).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some("body\n"),
+            Some("body\n"),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some("body\n"),
+            Some("body\n"),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            "codex",
+            None,
+            None,
+            Some("%25".to_string()),
+        );
+        let facts = gather_convergence_facts(&doc, &shared, None, CONVERGENCE_GATE_TIMEOUT_MS);
+        assert!(
+            facts.committed,
+            "stale open JSON must not make the convergence gate wait after lazily commit"
+        );
     }
 }

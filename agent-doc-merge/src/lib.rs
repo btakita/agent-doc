@@ -7,14 +7,14 @@
 
 pub mod ownership;
 
-pub mod cell_doc;
 pub mod crdt;
 pub mod crdt_sync;
+pub mod document_cell;
 pub mod exchange_node_merge;
 pub mod frontmatter_crdt;
 pub mod semantic_merge;
 
-pub use cell_doc::{
+pub use document_cell::{
     CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,
     merge_3way as cell_merge_3way,
 };
@@ -437,28 +437,28 @@ mod tests {
 
     #[test]
     fn cell_merge_is_exposed_as_a_pure_plan() {
-        let _guard = crate::cell_doc::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
         let prior_conflict_markers =
-            std::env::var(crate::cell_doc::CELL_MERGE_CONFLICT_MARKERS_ENV).ok();
+            std::env::var(crate::document_cell::CELL_MERGE_CONFLICT_MARKERS_ENV).ok();
         struct RestoreConflictMarkers(Option<String>);
         impl Drop for RestoreConflictMarkers {
             fn drop(&mut self) {
                 unsafe {
                     match self.0.take() {
                         Some(value) => std::env::set_var(
-                            crate::cell_doc::CELL_MERGE_CONFLICT_MARKERS_ENV,
+                            crate::document_cell::CELL_MERGE_CONFLICT_MARKERS_ENV,
                             value,
                         ),
-                        None => {
-                            std::env::remove_var(crate::cell_doc::CELL_MERGE_CONFLICT_MARKERS_ENV)
-                        }
+                        None => std::env::remove_var(
+                            crate::document_cell::CELL_MERGE_CONFLICT_MARKERS_ENV,
+                        ),
                     }
                 }
             }
         }
         let _restore_conflict_markers = RestoreConflictMarkers(prior_conflict_markers);
         unsafe {
-            std::env::set_var(crate::cell_doc::CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
+            std::env::set_var(crate::document_cell::CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
         }
 
         let agent = r#"<!-- agent:queue -->

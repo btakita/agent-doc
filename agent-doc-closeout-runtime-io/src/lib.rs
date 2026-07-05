@@ -171,6 +171,28 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
         agent_doc_session_check_io::detect_bypassed_response_write(file)
     }
 
+    fn resolve_current_document(
+        &self,
+        file: &Path,
+        _source: &str,
+    ) -> Result<agent_doc_document_realtime_io::CurrentDocument> {
+        agent_doc_document_realtime_io::try_resolve_current_document(file)
+    }
+
+    fn write_current_document(
+        &self,
+        doc: &agent_doc_document_realtime_io::CurrentDocument,
+        content: &str,
+        source: &str,
+    ) -> Result<()> {
+        agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+            doc.key().as_path(),
+            content,
+            doc.content(),
+            source,
+        )
+    }
+
     fn mark_committed_frontmatter(
         &self,
         file: &Path,

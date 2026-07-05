@@ -859,7 +859,7 @@ pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut 
 /// Get the CPC→plugin turn-state projection for a document, as JSON.
 ///
 /// Returns a NUL-terminated JSON string of `TurnProjection`:
-/// `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"cpc"}`.
+/// `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"cpc","realtime_steering":{"state":"...","preview":"..."}}`.
 /// The CPC owns the authoritative turn phase; the plugin observes this projection
 /// to render turn-in-flight UI and to decide whether a forwarded operator prompt
 /// starts a fresh turn (`turn_in_flight == false`) or would collide with an
@@ -891,11 +891,38 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
         .flatten()
         .map(|state| state.phase)
         .unwrap_or(agent_doc_turn::CyclePhase::Committed);
-    let proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(phase);
+    let mut proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(phase);
+    if proj.turn_in_flight {
+        let steering =
+            agent_doc_session_check_io::realtime_steering_since_turn_baseline(Path::new(path))
+                .ok()
+                .map(turn_steering_projection_from_realtime)
+                .unwrap_or_else(agent_doc_turn::cpc_projection::TurnSteeringProjection::none);
+        proj = proj.with_realtime_steering(steering);
+    }
     let json = serde_json::to_string(&proj).unwrap_or_else(|_| idle_json());
     CString::new(json)
         .unwrap_or_else(|_| CString::new(idle_json()).unwrap())
         .into_raw()
+}
+
+fn turn_steering_projection_from_realtime(
+    steering: agent_doc_document_realtime::baseline_comparison::RealtimeSteering,
+) -> agent_doc_turn::cpc_projection::TurnSteeringProjection {
+    use agent_doc_document_realtime::baseline_comparison::RealtimeSteering;
+    use agent_doc_turn::cpc_projection::{TurnSteeringProjection, TurnSteeringState};
+
+    let Some(preview) = steering.preview().map(ToOwned::to_owned) else {
+        return TurnSteeringProjection::none();
+    };
+    let state = match steering {
+        RealtimeSteering::None => return TurnSteeringProjection::none(),
+        RealtimeSteering::PromptTarget { .. } => TurnSteeringState::PromptTarget,
+        RealtimeSteering::ContentEdit { .. } => TurnSteeringState::ContentEdit,
+        RealtimeSteering::PromptDeleted { .. } => TurnSteeringState::PromptDeleted,
+        RealtimeSteering::PromptReduced { .. } => TurnSteeringState::PromptReduced,
+    };
+    TurnSteeringProjection::observed(state, Some(preview))
 }
 
 /// Check if any operation is in progress for a file (file-based).

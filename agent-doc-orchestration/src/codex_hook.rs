@@ -1158,7 +1158,7 @@ fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
 }
 
 fn open_cycle_started_from_unchanged_file(file: &Path) -> Result<bool> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);
     };
     if !state.is_open() {

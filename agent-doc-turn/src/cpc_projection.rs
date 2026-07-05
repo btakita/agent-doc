@@ -50,7 +50,54 @@ pub enum TransitionAuthority {
 }
 
 /// The plugin-facing projection of the authoritative turn phase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnSteeringState {
+    #[default]
+    None,
+    PromptTarget,
+    ContentEdit,
+    PromptDeleted,
+    PromptReduced,
+}
+
+fn turn_steering_state_is_none(state: &TurnSteeringState) -> bool {
+    matches!(state, TurnSteeringState::None)
+}
+
+/// Realtime steering that changed the session document relative to the active
+/// turn baseline while the CPC turn is still in flight.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TurnSteeringProjection {
+    #[serde(default, skip_serializing_if = "turn_steering_state_is_none")]
+    pub state: TurnSteeringState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+}
+
+impl TurnSteeringProjection {
+    pub const fn none() -> Self {
+        Self {
+            state: TurnSteeringState::None,
+            preview: None,
+        }
+    }
+
+    pub fn observed(state: TurnSteeringState, preview: Option<String>) -> Self {
+        Self { state, preview }
+    }
+
+    pub fn is_present(&self) -> bool {
+        !matches!(self.state, TurnSteeringState::None)
+    }
+}
+
+fn turn_steering_projection_is_none(steering: &TurnSteeringProjection) -> bool {
+    !steering.is_present()
+}
+
+/// The plugin-facing projection of the authoritative turn phase.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnProjection {
     /// Coarse state for UI + prompt-routing decisions.
     pub state: TurnState,
@@ -58,6 +105,11 @@ pub struct TurnProjection {
     pub turn_in_flight: bool,
     /// Who owns the transition into the current phase.
     pub transition_authority: TransitionAuthority,
+    /// Operator steering observed in the realtime document model during this
+    /// in-flight turn. Hidden from JSON when absent so older plugins remain able
+    /// to parse the projection.
+    #[serde(default, skip_serializing_if = "turn_steering_projection_is_none")]
+    pub realtime_steering: TurnSteeringProjection,
 }
 
 impl TurnProjection {
@@ -73,7 +125,13 @@ impl TurnProjection {
             turn_in_flight: phase.is_open(),
             // The CPC is authoritative for every turn-state transition today.
             transition_authority: TransitionAuthority::Cpc,
+            realtime_steering: TurnSteeringProjection::none(),
         }
+    }
+
+    pub fn with_realtime_steering(mut self, steering: TurnSteeringProjection) -> Self {
+        self.realtime_steering = steering;
+        self
     }
 
     /// Whether an operator prompt forwarded **right now** would start a clean
@@ -187,5 +245,20 @@ mod tests {
         let back: TurnProjection = serde_json::from_str(&json).unwrap();
         assert_eq!(proj, back);
         assert!(json.contains("persisting"));
+    }
+
+    #[test]
+    fn steering_projection_is_optional_but_round_trips_when_present() {
+        let proj = TurnProjection::from_phase(CyclePhase::PreflightStarted).with_realtime_steering(
+            TurnSteeringProjection::observed(
+                TurnSteeringState::PromptDeleted,
+                Some("removed prompt".to_string()),
+            ),
+        );
+        let json = serde_json::to_string(&proj).unwrap();
+        assert!(json.contains("prompt_deleted"));
+        assert!(json.contains("removed prompt"));
+        let back: TurnProjection = serde_json::from_str(&json).unwrap();
+        assert_eq!(proj, back);
     }
 }

@@ -18,7 +18,6 @@ use agent_doc_controller::dispatch::{
 use agent_doc_harness::HarnessConfig;
 use agent_doc_turn::cycle_ack::{
     CycleAckState, PromptBearingRouteContext, cycle_state_advances_start_ack,
-    prompt_bearing_route_context_from_change,
 };
 use tmux_router::Tmux;
 
@@ -281,14 +280,33 @@ pub fn pending_prompt_bearing_context_for_route(
     if baseline.is_some_and(|state| state.is_open()) {
         return Ok(None);
     }
-    let Some(change) = agent_doc_session_check_io::first_unstarted_prompt_bearing_change(file)?
-    else {
-        return Ok(None);
-    };
-    let Some(context) = prompt_bearing_route_context_from_change(&change) else {
+    let steering = agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?;
+    let Some(context) = prompt_bearing_route_context_from_steering(&steering) else {
         return Ok(None);
     };
     Ok(Some(context))
+}
+
+fn prompt_bearing_route_context_from_steering(
+    steering: &agent_doc_document_realtime::baseline_comparison::RealtimeSteering,
+) -> Option<PromptBearingRouteContext> {
+    let marker = steering.label()?;
+    let preview = steering.preview()?.trim();
+    if !matches!(
+        steering,
+        agent_doc_document_realtime::baseline_comparison::RealtimeSteering::PromptTarget { .. }
+            | agent_doc_document_realtime::baseline_comparison::RealtimeSteering::ContentEdit { .. }
+    ) {
+        return None;
+    }
+    let prompt_text = agent_doc_queue::route_dispatch::route_prompt_text_for_change(preview)
+        .unwrap_or_else(|| preview.trim_start_matches('❯').trim().to_string());
+    let slash_command = agent_doc_queue::queue_command::slash_command_text(&prompt_text);
+    Some(PromptBearingRouteContext {
+        marker: format!("{marker}: {preview}"),
+        prompt_text,
+        slash_command,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

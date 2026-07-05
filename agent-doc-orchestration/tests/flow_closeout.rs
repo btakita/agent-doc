@@ -31,6 +31,22 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
     )
 }
 
+pub fn observe_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecoveryEvidence> {
+    agent_doc_flow_io::closeout::observe_closeout_recovery_evidence(
+        file,
+        &agent_doc_orchestration::closeout_effects(),
+    )
+}
+
+pub fn load_current_observed_closeout_recovery_evidence(
+    file: &Path,
+) -> Result<Option<CloseoutRecoveryEvidence>> {
+    agent_doc_flow_io::closeout::load_current_observed_closeout_recovery_evidence(
+        file,
+        &agent_doc_orchestration::closeout_effects(),
+    )
+}
+
 pub fn classify_closeout_recovery_state_for_file(
     file: &Path,
 ) -> agent_doc_turn::closeout_recovery::CloseoutRecoveryState {
@@ -128,7 +144,7 @@ mod tests {
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:done -->\n<!-- /agent:done -->\n",
         );
-        let (dir, doc) = setup_git_project_with_doc(base);
+        let (_dir, doc) = setup_git_project_with_doc(base);
 
         // Committed response cycle (capture present), with the `[x]` already on
         // disk + in HEAD — exactly the exit-75 residual shape.
@@ -180,31 +196,15 @@ mod tests {
         .then_some(())
         .expect("session-check must accept the atomic-reap closeout");
 
-        let root = dir.path().canonicalize().unwrap();
-        let canonical_doc = doc.canonicalize().unwrap();
-        let ledger_path =
-            agent_doc_workflow_io::proof_ledger::proof_ledger_path(&root, &canonical_doc);
-        let records =
-            agent_doc_workflow_io::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
-        let terminal = records
-            .iter()
-            .find(|record| {
-                record.operation_kind
-                    == agent_doc_workflow_io::proof_ledger::ProofOperationKind::TerminalProof
-                    && record.subject_id.as_deref() == Some(state.cycle_id.as_str())
-            })
-            .expect("closeout must record a terminal proof row");
-        assert_eq!(
-            terminal.proof_kind,
-            agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::TerminalStateObserved
-        );
-        assert_eq!(
-            terminal.outcome,
-            agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded
-        );
-        assert!(terminal.proof.contains("phase=committed"));
-        assert!(terminal.proof.contains("session_check=ok"));
-        assert!(terminal.proof.contains("agreement=file_snapshot_head"));
+        let terminal = agent_doc_cycle_state_io::load_latest_terminal_closeout_proof(&doc)
+            .unwrap()
+            .expect("closeout must record a typed terminal proof projection");
+        assert_eq!(terminal.cycle_id, state.cycle_id);
+        assert!(terminal.last_event.contains("commit"));
+        assert!(terminal.did_commit);
+        assert_eq!(terminal.file_hash, terminal.snapshot_hash);
+        assert_eq!(terminal.snapshot_hash, terminal.head_hash);
+        assert_eq!(terminal.agreement, "file_snapshot_head");
     }
 
     #[test]
@@ -249,21 +249,11 @@ mod tests {
             state.cycle_id, abandoned.cycle_id,
             "new committed closeout should not reuse the stale abandoned cycle id"
         );
-        let root = doc.parent().unwrap().canonicalize().unwrap();
-        let canonical_doc = doc.canonicalize().unwrap();
-        let ledger_path =
-            agent_doc_workflow_io::proof_ledger::proof_ledger_path(&root, &canonical_doc);
-        let records =
-            agent_doc_workflow_io::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
-        assert!(
-            records.iter().any(|record| {
-                record.operation_kind
-                    == agent_doc_workflow_io::proof_ledger::ProofOperationKind::TerminalProof
-                    && record.subject_id.as_deref() == Some(state.cycle_id.as_str())
-                    && record.proof.contains("phase=committed")
-            }),
-            "terminal proof should be recorded for the new committed cycle: {records:?}"
-        );
+        let terminal = agent_doc_cycle_state_io::load_latest_terminal_closeout_proof(&doc)
+            .unwrap()
+            .expect("terminal proof should project for the new committed cycle");
+        assert_eq!(terminal.cycle_id, state.cycle_id);
+        assert_eq!(terminal.agreement, "file_snapshot_head");
     }
 
     #[test]
@@ -497,6 +487,33 @@ mod tests {
     }
 
     #[test]
+    fn open_cycle_recovery_uses_projection_when_cycle_sidecar_is_missing() {
+        let base = "---\nsession: test\n---\n\nHi\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        let started =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle sidecar path");
+        std::fs::remove_file(&sidecar_path).unwrap();
+        assert!(agent_doc_cycle_state_io::load(&doc).unwrap().is_none());
+
+        assert_eq!(
+            classify_closeout_recovery_state_for_file(&doc),
+            CloseoutRecoveryState::OpenCycle
+        );
+        let cmd =
+            closeout_recovery_command_for_file(&doc, CloseoutRecoveryState::OpenCycle).unwrap();
+        assert!(cmd.contains("resume durable checkpoint"), "{cmd}");
+        assert!(
+            cmd.contains(&format!("cycle={}", started.cycle_id)),
+            "{cmd}"
+        );
+        assert!(cmd.contains("phase=preflight_started"), "{cmd}");
+        assert!(cmd.contains("pending_mutations=true"), "{cmd}");
+    }
+
+    #[test]
     fn recovery_evidence_gathers_hash_cycle_capture_and_fresh_editor_state() {
         let base = "---\nsession: test\n---\n\n## Exchange\n\nUser prompt\n";
         let response = "### Re: user prompt — gpt-5\n\nDone.\n";
@@ -633,6 +650,106 @@ mod tests {
     }
 
     #[test]
+    fn observed_recovery_evidence_loads_from_projection_without_capture_sidecar() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier — gpt-5\n\nOlder.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = agent_doc_capture_io::capture_response(
+            &doc,
+            "### Re: repeated prompt — gpt-5\n\nCaptured but stale.\n",
+        )
+        .unwrap();
+        let visible = base.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: repeated prompt — gpt-5\n\nA later answer already landed.\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, visible).unwrap();
+
+        observe_closeout_recovery_evidence(&doc).unwrap();
+        std::fs::remove_file(
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
+        )
+        .unwrap();
+
+        let observed = load_current_observed_closeout_recovery_evidence(&doc)
+            .unwrap()
+            .expect("visible-hash-matching recovery evidence projection");
+        assert_eq!(
+            observed
+                .active_capture
+                .as_ref()
+                .map(|capture| capture.capture_id.as_str()),
+            Some(capture.capture_id.as_str())
+        );
+        match &observed.response_body {
+            CloseoutResponseBodyEvidence::SupersededByVisibleExchange { capture_id, proof } => {
+                assert_eq!(capture_id, &capture.capture_id);
+                assert!(proof.contains("repeated prompt"));
+            }
+            other => panic!("expected projected supersession proof, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_recovery_missing_response_body_uses_observed_projection_without_capture_sidecar() {
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nCaptured but never committed.\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
+
+        observe_closeout_recovery_evidence(&doc).unwrap();
+        std::fs::remove_file(
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            classify_closeout_recovery_state_for_file(&doc),
+            CloseoutRecoveryState::MissingResponseBody
+        );
+    }
+
+    #[test]
+    fn observed_recovery_evidence_requires_current_visible_hash() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "user prompt\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, "### Re: user prompt — gpt-5\n\nCaptured.\n")
+            .unwrap();
+        observe_closeout_recovery_evidence(&doc).unwrap();
+
+        std::fs::write(&doc, format!("{base}\noperator changed visible text\n")).unwrap();
+
+        assert!(
+            load_current_observed_closeout_recovery_evidence(&doc)
+                .unwrap()
+                .is_none(),
+            "stale visible hash must reject projected recovery evidence"
+        );
+    }
+
+    #[test]
     fn classify_recovery_clean_without_cycle_state() {
         let (_dir, doc) = setup_git_project_with_doc("---\nsession: test\n---\n\nHi\n");
         assert_eq!(
@@ -694,6 +811,40 @@ mod tests {
             Some(&snapshot),
         )
         .unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state_for_file(&doc),
+            CloseoutRecoveryState::QueueMetadataDrift
+        );
+    }
+
+    #[test]
+    fn classify_recovery_queue_metadata_drift_uses_observed_projection_without_snapshot_sidecar() {
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto go -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(&snapshot),
+            Some(&snapshot),
+        )
+        .unwrap();
+
+        let evidence = observe_closeout_recovery_evidence(&doc).unwrap();
+        assert_eq!(
+            evidence.snapshot_head_drift,
+            Some(agent_doc_turn::closeout_recovery::CloseoutRecoveryDrift::MetadataOnly)
+        );
+        std::fs::remove_file(agent_doc_fs::snapshot_path_for(&doc).unwrap()).unwrap();
+
         assert_eq!(
             classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::QueueMetadataDrift

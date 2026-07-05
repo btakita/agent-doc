@@ -270,6 +270,18 @@ thread_local! {
     static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
+fn resolve_current_document(
+    file: &Path,
+    source: &'static str,
+) -> Result<agent_doc_document_realtime::CurrentDocument> {
+    agent_doc_document_realtime_io::try_resolve_current_document(file).with_context(|| {
+        format!(
+            "{source}: failed to resolve current document {}",
+            file.display()
+        )
+    })
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct WriteFlags {
     pub(crate) allow_replace_pending: bool,
@@ -579,12 +591,8 @@ fn ensure_pending_add_target(target: &Path) -> Result<()> {
             target.display()
         );
     }
-    let content = std::fs::read_to_string(target).with_context(|| {
-        format!(
-            "failed to read --backlog-add-to target {}",
-            target.display()
-        )
-    })?;
+    let target_doc = resolve_current_document(target, "validate_backlog_add_to_target")?;
+    let content = target_doc.content();
     let components = agent_doc_element::element::parse(&content).with_context(|| {
         format!(
             "failed to parse --backlog-add-to target {}",
@@ -604,8 +612,8 @@ fn ensure_pending_add_target(target: &Path) -> Result<()> {
 }
 
 fn is_session_document(file: &Path) -> Result<bool> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let current = resolve_current_document(file, "is_session_document")?;
+    let content = current.content();
     let (fm, _) = frontmatter::parse(&content)?;
     Ok(fm
         .session
@@ -670,7 +678,7 @@ fn guard_no_exchange_compaction_request_between(
 ///    the content-level proof that a response is genuinely uncommitted, so a
 ///    pending/status-only bare write (no response placed) is never force-committed.
 fn bare_write_placed_response_body(file: &Path) -> Result<bool> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);
     };
     if !state.is_open() {
@@ -682,14 +690,16 @@ fn bare_write_placed_response_body(file: &Path) -> Result<bool> {
     ) {
         return Ok(false);
     }
-    let current = std::fs::read_to_string(file)
-        .context("failed to read document for bare-write response-body detection")?;
+    let current = resolve_current_document(file, "bare_write_response_body_detection")?;
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
     Ok(
-        agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, &current)
-            .is_some(),
+        agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
+            &head,
+            current.content(),
+        )
+        .is_some(),
     )
 }
 
@@ -1010,9 +1020,11 @@ fn run_command_inner(
     // head whose backlog item is still open. Best-effort: an absent cycle state
     // is a no-op, and a read failure is logged (the real write path below reads
     // the document again and surfaces any genuine I/O error).
-    match std::fs::read_to_string(file) {
+    match resolve_current_document(file, "observe_live_queue_heads") {
         Ok(live_doc) => {
-            if let Err(err) = agent_doc_cycle_state_io::observe_live_queue_heads(file, &live_doc) {
+            if let Err(err) =
+                agent_doc_cycle_state_io::observe_live_queue_heads(file, live_doc.content())
+            {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -1027,7 +1039,7 @@ fn run_command_inner(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "observe_live_queue_heads_read_failed file={} err={}",
+                    "observe_live_queue_heads_resolve_failed file={} err={}",
                     file.display(),
                     err
                 ),
@@ -1187,11 +1199,11 @@ fn run_command_inner(
         None => read_explicit_baseline(file, options.baseline_file.as_deref())?,
     };
 
-    let current_content =
-        std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;
-    guard_no_exchange_compaction_request_between(file, baseline.as_deref(), &current_content)?;
+    let current_doc = resolve_current_document(file, "pre_write_guards")?;
+    let current_content = current_doc.content();
+    guard_no_exchange_compaction_request_between(file, baseline.as_deref(), current_content)?;
     let current_resolved_mode = if options.is_template || (!options.is_ipc && !options.is_stream) {
-        let (fm, _) = frontmatter::parse(&current_content)?;
+        let (fm, _) = frontmatter::parse(current_content)?;
         Some(fm.resolve_mode())
     } else {
         None
@@ -1771,10 +1783,16 @@ fn log_exchange_write_diagnostic(
         .unwrap_or(0);
     let normalized_prefix_delta = after_prefix_count.saturating_sub(before_prefix_count);
     let prompt_text_normalized = normalized_prefix_delta > 0;
-    let cycle_id = agent_doc_cycle_state_io::load(file)
+    let cycle_id = agent_doc_cycle_state_io::load_with_closeout_projection(file)
         .ok()
         .flatten()
         .map(|state| state.cycle_id)
+        .or_else(|| {
+            agent_doc_cycle_state_io::load_closeout_projection(file)
+                .ok()
+                .flatten()
+                .and_then(|projection| projection.cycle_id)
+        })
         .unwrap_or_else(|| "-".to_string());
     let writer_pid = std::process::id();
     let writer_exe = std::env::current_exe()
@@ -1838,11 +1856,11 @@ fn verify_pane_ownership(file: &Path) -> Result<()> {
     if !agent_doc_tmux_io::in_tmux() {
         return Ok(());
     }
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
+    let current = match resolve_current_document(file, "verify_pane_ownership") {
+        Ok(current) => current,
         Err(_) => return Ok(()),
     };
-    let session_id = match frontmatter::parse(&content) {
+    let session_id = match frontmatter::parse(current.content()) {
         Ok((fm, _)) => match fm.session {
             Some(s) => s,
             None => return Ok(()),

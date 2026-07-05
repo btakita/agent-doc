@@ -291,26 +291,15 @@ fn read_cycle_state(file: &Path) -> cycle_state::CycleState {
         .expect("expected cycle state file")
 }
 
-fn assert_terminal_closeout_proof(root: &Path, doc: &Path) {
-    let canonical_doc = doc.canonicalize().unwrap();
-    let ledger_path = agent_doc_workflow_io::proof_ledger::proof_ledger_path(
-        &root.canonicalize().unwrap(),
-        &canonical_doc,
-    );
-    let records = agent_doc_workflow_io::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
-    assert!(
-        records.iter().any(|record| {
-            record.operation_kind
-                == agent_doc_workflow_io::proof_ledger::ProofOperationKind::TerminalProof
-                && record.proof_kind
-                    == agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::TerminalStateObserved
-                && record.outcome == agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded
-                && record.proof.contains("phase=committed")
-                && record.proof.contains("agreement=file_snapshot_head")
-        }),
-        "expected committed terminal closeout proof in {}",
-        ledger_path.display()
-    );
+fn assert_terminal_closeout_proof(_root: &Path, doc: &Path) {
+    let proof = cycle_state::load_latest_terminal_closeout_proof(doc)
+        .unwrap()
+        .expect("expected typed terminal closeout proof projection");
+    assert!(proof.last_event.contains("commit"));
+    assert!(proof.did_commit);
+    assert_eq!(proof.file_hash, proof.snapshot_hash);
+    assert_eq!(proof.snapshot_hash, proof.head_hash);
+    assert_eq!(proof.agreement, "file_snapshot_head");
 }
 
 fn seed_snapshot(root: &Path, doc: &Path) {

@@ -33,6 +33,7 @@ use agent_doc_document_realtime::{
     reconcile_current_doc,
     write_policy::{self, VisibleWriteReconcile},
 };
+pub use agent_doc_document_realtime::{CurrentDocument, DocumentKey};
 
 static DOCUMENT_AUTHORITY_EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -174,6 +175,10 @@ pub static RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS: RuntimeQueueConsumeWriteback
 impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects
     for RuntimeQueueConsumeWritebackEffects
 {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        try_resolve_current_document_content(file, source)
+    }
+
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
         atomic_write_through_authority(file, content)
     }
@@ -1004,6 +1009,25 @@ pub fn content_matches_recent_committed_blob(
 /// the editor is detached.
 pub fn try_resolve_current_doc_from_file(file: &std::path::Path) -> Result<Reconciliation> {
     try_resolve_current_doc_with_disk(file, None)
+}
+
+pub fn try_resolve_current_document(file: &std::path::Path) -> Result<CurrentDocument> {
+    try_resolve_current_doc_from_file(file)
+        .map(|reconciliation| CurrentDocument::new(file.to_path_buf(), reconciliation))
+}
+
+pub fn try_resolve_current_document_content(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<String> {
+    try_resolve_current_document(file)
+        .map(CurrentDocument::into_content)
+        .with_context(|| {
+            format!(
+                "{source}: failed to resolve current document {}",
+                file.display()
+            )
+        })
 }
 
 /// Resolve the authoritative current document when the caller already has a

@@ -12,7 +12,7 @@ use agent_doc_preflight_io::{
     sweep::{current_sweep_owner, log_and_skip_foreign_owned_sweep_if_needed, sweep_owner_for_doc},
 };
 use agent_doc_preflight_runtime_io::{
-    relocate_out_of_exchange_prompt_before_diff,
+    relocate_out_of_exchange_prompt_before_diff, resolve_current_preflight_document,
     remove_duplicate_answered_exchange_prompt_tail_for_preflight,
     remove_post_exchange_duplicate_prompt_comments_for_preflight,
 };
@@ -70,8 +70,13 @@ fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool)
     if let Err(err) = agent_doc_controller_io::project_controller::persist_session_actor_closeout(
         file,
     )
-    .and_then(|_| agent_doc_flow_io::closeout::record_terminal_closeout_proof(file, did_commit))
-    {
+    .and_then(|_| {
+        agent_doc_flow_io::closeout::record_terminal_closeout_proof(
+            file,
+            did_commit,
+            &agent_doc_closeout_runtime_io::closeout_effects(),
+        )
+    }) {
         eprintln!("[preflight] terminal proof warning: {err}");
     }
 }
@@ -84,7 +89,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // #rtwwire (rung 3): classify against the realtime document model. When an
     // editor is active, the CRDT relay is the authority and disk is not read as
     // a substitute; with no editor attached, disk is the fallback replica.
-    let content = agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
+    let content = resolve_current_preflight_document(file, "initial")?;
     let pre_mutation_unresolved_exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
     let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
@@ -180,11 +185,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // byte-precise hot path never re-serializes frontmatter through `write()`
     // (which would drop it). Strip it directly on disk + snapshot, but ONLY when
     // the canonical `queue:` control is present so no queue state is lost. Idempotent.
-    if !options.probe
-        && let Ok(current) = std::fs::read_to_string(file)
-    {
-        let migrated = frontmatter::strip_deprecated_queue_active_line(&current);
-        if migrated != current {
+    if !options.probe {
+        let migrated = frontmatter::strip_deprecated_queue_active_line(&content);
+        if migrated != content {
             match agent_doc_document_realtime_io::atomic_write_through_authority(file, &migrated) {
                 Ok(()) => {
                     if let Err(err) =
@@ -397,9 +400,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         maybe_record_preflight_terminal_closeout_proof(file, did_commit_this_preflight);
     }
 
+    let current_for_prompt_tail_relocation =
+        resolve_current_preflight_document(file, "prompt_tail_relocation")?;
     if !options.probe
         && let Some(repaired_doc) =
-            relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?
+            relocate_out_of_exchange_prompt_before_diff(file, &current_for_prompt_tail_relocation)?
     {
         agent_doc_document_realtime_io::atomic_write_through_authority(file, &repaired_doc)?;
         agent_doc_ops_log_io::log_op(
@@ -805,7 +810,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             eprintln!("[preflight] probe: skipping preflight_started cycle (inspection only)");
         } else {
             let snap = agent_doc_snapshot_io::load(file).unwrap_or(None);
-            let file_content = std::fs::read_to_string(file).unwrap_or_default();
+            let file_content = resolve_current_preflight_document(file, "start_preflight")?;
             let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
             let file_len = file_content.len();
             agent_doc_cycle_state_io::start_preflight(file, snap.as_deref(), Some(&file_content))?;
@@ -1030,37 +1035,29 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         frontmatter_env,
         frontmatter_model,
         frontmatter_prompt_presets,
-    ) = match std::fs::read_to_string(file) {
-        Ok(content) => {
-            let (source_fm, fm_tier, env_map, fm_model, prompt_presets) =
-                frontmatter::parse(&content)
-                    .ok()
-                    .map(|(fm, _)| {
-                        let resolved = fm.resolve_harness_model(&harness).map(|s| s.to_string());
-                        let fm_tier = fm.model_tier;
-                        let env_map = fm.env.clone();
-                        let prompt_presets = fm.prompt_presets.clone();
-                        (fm, fm_tier, env_map, resolved, prompt_presets)
-                    })
-                    .unwrap_or_default();
-            let comp_value = agent_doc_model_tier::extract_model_component(&content);
-            (
-                source_fm,
-                fm_tier,
-                comp_value,
-                env_map,
-                fm_model,
-                prompt_presets,
-            )
-        }
-        Err(_) => (
-            frontmatter::Frontmatter::default(),
-            None,
-            None,
-            Default::default(),
-            None,
-            Default::default(),
-        ),
+        model_source_content,
+    ) = {
+        let content = resolve_current_preflight_document(file, "model_tier_sources")?;
+        let (source_fm, fm_tier, env_map, fm_model, prompt_presets) = frontmatter::parse(&content)
+            .ok()
+            .map(|(fm, _)| {
+                let resolved = fm.resolve_harness_model(&harness).map(|s| s.to_string());
+                let fm_tier = fm.model_tier;
+                let env_map = fm.env.clone();
+                let prompt_presets = fm.prompt_presets.clone();
+                (fm, fm_tier, env_map, resolved, prompt_presets)
+            })
+            .unwrap_or_default();
+        let comp_value = agent_doc_model_tier::extract_model_component(&content);
+        (
+            source_fm,
+            fm_tier,
+            comp_value,
+            env_map,
+            fm_model,
+            prompt_presets,
+            content,
+        )
     };
     let component_tier = component_tier_value.as_deref().and_then(|v| {
         agent_doc_model_tier::component_value_to_tier(v, &harness, &global_config.model)
@@ -1083,15 +1080,13 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         );
     }
     let prompt_presets_requested = prompt_preset_resolution.requested;
-    if let Ok(content) = std::fs::read_to_string(file) {
-        for warning in agent_doc_preflight_io::warnings::content_and_staleness_warnings(
-            file,
-            &content,
-            &frontmatter_prompt_presets,
-        ) {
-            eprintln!("[preflight] warning: {}", warning.message);
-            warnings.push(warning);
-        }
+    for warning in agent_doc_preflight_io::warnings::content_and_staleness_warnings(
+        file,
+        &model_source_content,
+        &frontmatter_prompt_presets,
+    ) {
+        eprintln!("[preflight] warning: {}", warning.message);
+        warnings.push(warning);
     }
     let backlog_capture_required = agent_doc_prompt_contract::prompt_requests_backlog_work(
         &prompt_targets,
@@ -1139,14 +1134,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         if directive_target_ids.is_empty() {
             Vec::new()
         } else {
-            let open_backlog: std::collections::HashSet<String> = std::fs::read_to_string(file)
-                .ok()
-                .map(|content| {
-                    agent_doc_element_backlog::backlog::open_backlog_ids_in_content(&content)
-                        .into_iter()
-                        .collect()
-                })
-                .unwrap_or_default();
+            let open_backlog: std::collections::HashSet<String> =
+                agent_doc_element_backlog::backlog::open_backlog_ids_in_content(
+                    &model_source_content,
+                )
+                .into_iter()
+                .collect();
             let synced_queue_ids = queue_state
                 .synced_queue_ids
                 .iter()
@@ -1263,9 +1256,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                     || op_affectedness.as_ref().is_some_and(|affectedness| {
                         !affectedness.turn_affected && !affectedness.classified.is_empty()
                     })));
-        let current = std::fs::read_to_string(file).unwrap_or_default();
         match agent_doc_frontmatter_io::session::parse_for_file_with_context(
-            &current,
+            &model_source_content,
             file,
             &rc.ssh_context(),
         ) {
@@ -1295,11 +1287,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // `start_preflight` from the prior cycle's convergence semantic merge. Also
     // emit a companion warning so the existing "surface warnings" skill path
     // drives the acknowledgement without a SKILL.md change.
-    let semantic_merge_acks = agent_doc_cycle_state_io::load(file)
-        .ok()
-        .flatten()
-        .map(|state| state.pending_semantic_merge_acks)
-        .unwrap_or_default();
+    let semantic_merge_acks =
+        agent_doc_cycle_state_io::load_pending_semantic_merge_acks(file).unwrap_or_default();
     if let Some(warning) =
         agent_doc_preflight_io::warnings::semantic_merge_ack_warning(&semantic_merge_acks)
     {
@@ -3090,6 +3079,77 @@ mod tests {
             "preflight must drive validate_replay's baseline refresh path:\n{log}"
         );
     }
+
+    #[test]
+    fn stuck_capture_detection_prefers_lazily_committed_projection_over_stale_sidecar() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let original = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #stuckproj\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let opened =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original))
+                .unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: #stuckproj — gpt-5\n\n",
+            "This response never reached HEAD.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(original),
+            Some(original),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(original),
+            Some(original),
+        )
+        .unwrap();
+
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle sidecar path");
+        std::fs::write(sidecar_path, serde_json::to_string_pretty(&opened).unwrap()).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        let stuck = agent_doc_flow_io::closeout::stuck_captured_cycle(&doc)
+            .expect("committed lazily projection should drive stuck-capture detection");
+        assert_eq!(stuck.cycle_id, opened.cycle_id);
+        assert_eq!(stuck.capture_id, capture.capture_id);
+    }
+
     #[test]
     fn preflight_fails_closed_when_open_backlog_item_exists_only_in_shadow_copy() {
         let dir = setup_project();

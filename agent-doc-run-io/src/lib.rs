@@ -310,12 +310,13 @@ pub fn run_once(
     };
     effects.guard_no_exchange_compaction_request_for_diff(file, &the_diff)?;
 
-    let raw_content = std::fs::read_to_string(file)?;
+    let raw_content =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, "direct_run")?;
     agent_doc_frontmatter_io::session::require_agent_doc_document(&raw_content, file)?;
     let (mut content_original, session_id) =
         agent_doc_frontmatter_io::session::ensure_session_for_file(&raw_content, file)?;
     if content_original != raw_content {
-        std::fs::write(file, &content_original)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &content_original)?;
     }
     if !dry_run {
         let early_rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
@@ -477,9 +478,14 @@ pub fn run_once(
         }
         let wedge_count = agent_doc_owner_pane_io::record(file, &continuation.head_prompt)?;
         if owner_pane_wedge_threshold_reached(wedge_count) {
-            if let Ok(content) = std::fs::read_to_string(file)
+            if let Ok(content) =
+                agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    file,
+                    "owner_pane_wedge_stop_queue",
+                )
                 && let Ok(stopped) = frontmatter::merge_queue_state(&content, false)
-                && let Err(err) = std::fs::write(file, &stopped)
+                && let Err(err) =
+                    agent_doc_document_realtime_io::atomic_write_through_authority(file, &stopped)
             {
                 eprintln!(
                     "[recguard-wedge] WARNING: failed to halt wedged auto-queue for {}: {}",
@@ -685,7 +691,10 @@ pub fn apply_append_response(
     }
     content_ours.push_str("\n## User\n\n");
 
-    let content_current = std::fs::read_to_string(file)?;
+    let content_current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "direct_run_append_current",
+    )?;
     let final_content = if content_current == baseline {
         content_ours
     } else {
@@ -708,8 +717,10 @@ pub fn apply_template_response(
     use_crdt: bool,
 ) -> Result<()> {
     let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
-    let current_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let current_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "direct_run_template_current",
+    )?;
     let (mut patches, unmatched) =
         template::parse_patches(response).context("failed to parse patch blocks from response")?;
     agent_doc_template::sanitize::sanitize_patches(&mut patches);
@@ -746,7 +757,10 @@ pub fn apply_template_response(
         &content_ours,
     )?;
 
-    let content_current = std::fs::read_to_string(file)?;
+    let content_current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "direct_run_template_merge_current",
+    )?;
     let (final_content, crdt_state) = if content_current == baseline {
         let state = if use_crdt {
             Some(agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours).encode_state())
@@ -859,7 +873,10 @@ pub fn update_resume_id(
     file: &Path,
     session_id: &str,
 ) -> Result<()> {
-    let current = std::fs::read_to_string(file)?;
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "direct_run_update_resume_id",
+    )?;
     let updated = frontmatter::set_resume_id(&current, session_id)?;
     agent_doc_document_realtime_io::guard_visible_write_idle(file, "direct_run_update_resume_id")?;
     direct_run_atomic_write(effects, file, &updated)?;
@@ -1101,8 +1118,10 @@ pub fn record_run_progress(file: &Path, phase: &str, agent_name: &str, timeout: 
 }
 
 pub fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
-    let file_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {} after run write", file.display()))?;
+    let file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "mark_run_write_applied",
+    )?;
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
     agent_doc_cycle_state_io::mark_write_applied(
         file,
@@ -1151,7 +1170,11 @@ pub fn abandon_run_recursive_cycle(
     let compact = diagnostic.split_whitespace().collect::<Vec<_>>().join(" ");
     let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
-    let file_content = std::fs::read_to_string(file).ok();
+    let file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "abandon_run_recursive_cycle",
+    )
+    .ok();
     agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
         effects,
         file,
@@ -1450,8 +1473,10 @@ pub fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
 }
 
 pub fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "active_queue_prompt_state",
+    )?;
     let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
     let (fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,

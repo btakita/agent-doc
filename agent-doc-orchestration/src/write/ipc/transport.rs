@@ -2389,6 +2389,37 @@ mod late_fallback_patch_guard_tests {
     }
 
     #[test]
+    fn cycle_already_committed_prefers_lazily_projection_over_stale_sidecar() {
+        let tmp = TempDir::new().unwrap();
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let doc = doc_in_agent_doc_project(&tmp, content);
+
+        let opened =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
+            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle sidecar path");
+        fs::write(sidecar_path, serde_json::to_string_pretty(&opened).unwrap()).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        assert_eq!(cycle_already_committed(&doc), Some(opened.cycle_id));
+    }
+
+    #[test]
     fn cycle_already_committed_returns_none_for_open_cycle() {
         let tmp = TempDir::new().unwrap();
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";

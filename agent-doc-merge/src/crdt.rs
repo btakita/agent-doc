@@ -204,9 +204,10 @@ fn merge_inner(
     // to the legacy path.
     if let Some(ops) = theirs_editor_ops
         && !ops.is_empty()
-        && crate::cell_doc::cell_merge_enabled()
+        && crate::document_cell::cell_merge_enabled()
     {
-        let outcome = crate::cell_doc::merge_3way_with_ops(&base_text, ours_text, theirs_text, ops);
+        let outcome =
+            crate::document_cell::merge_3way_with_ops(&base_text, ours_text, theirs_text, ops);
         if !outcome.fell_back {
             if !outcome.conflicts.is_empty() {
                 eprintln!(
@@ -470,14 +471,14 @@ fn segment_into_nodes(text: &str) -> Result<Vec<Node>> {
 /// caller should return that text and, on the persistence path, rebuild its
 /// advanced state from the SAME text). Returns `None` on `fell_back`, so the
 /// caller runs its existing legacy merge path unchanged. The caller is
-/// responsible for gating this behind [`cell_doc::cell_merge_enabled`].
+/// responsible for gating this behind [`document_cell::cell_merge_enabled`].
 fn try_cell_merge_text(
     base_text: &str,
     ours_text: &str,
     theirs_text: &str,
     site: &str,
 ) -> Option<String> {
-    let outcome = crate::cell_doc::merge_3way(base_text, ours_text, theirs_text);
+    let outcome = crate::document_cell::merge_3way(base_text, ours_text, theirs_text);
     if outcome.fell_back {
         eprintln!("[crdt] cell_merge: fell back to legacy {site} path");
         return None;
@@ -520,7 +521,7 @@ pub fn merge_by_component(
     // based per-cell 3-way merge first. It signals `fell_back` for any structural
     // divergence; on fallback (or the explicit kill-switch) the existing
     // whole-doc / per-node path below runs unchanged.
-    if crate::cell_doc::cell_merge_enabled() {
+    if crate::document_cell::cell_merge_enabled() {
         let base_text = match base_state {
             Some(bytes) => CrdtDoc::decode_state(bytes)
                 .map(|d| d.to_text())
@@ -1534,7 +1535,7 @@ impl MultiNodeState {
         // cell-merge winner, not the legacy per-node winner). On `fell_back` (or
         // the explicit kill-switch) the existing per-node path below runs
         // byte-identically to legacy behavior.
-        if crate::cell_doc::cell_merge_enabled() {
+        if crate::document_cell::cell_merge_enabled() {
             let base_text = match base {
                 Some(b) => b.to_text().unwrap_or_default(),
                 None => String::new(),
@@ -3126,10 +3127,10 @@ Second answer line three.
         // With the cell-merge kill-switch off, the legacy keyed-child fallback must
         // still treat an operator-side queue delete as authoritative. The stale
         // agent side may have updated/struck the item, but it must not resurrect it.
-        let _guard = crate::cell_doc::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
         // SAFETY: serialized under the lock and restored before assertions.
         unsafe {
-            std::env::set_var(crate::cell_doc::CELL_MERGE_ENV, "0");
+            std::env::set_var(crate::document_cell::CELL_MERGE_ENV, "0");
         }
 
         let base = doc_with_exchange_queue("Q.", "- do [#a1] keep\n- do [#b2] delete me");
@@ -3140,7 +3141,7 @@ Second answer line three.
 
         // SAFETY: still holding the lock.
         unsafe {
-            std::env::remove_var(crate::cell_doc::CELL_MERGE_ENV);
+            std::env::remove_var(crate::document_cell::CELL_MERGE_ENV);
         }
 
         let merged = result.unwrap();
@@ -3492,18 +3493,18 @@ Second answer line three.
 
     /// Scoped guard: set `AGENT_DOC_CELL_MERGE=1` for the duration, restore on
     /// drop. Serialized through the shared crate lock so it can't race the
-    /// `cell_doc` flag tests.
+    /// `document_cell` flag tests.
     struct CellMergeFlagOn {
         _guard: std::sync::MutexGuard<'static, ()>,
     }
     impl CellMergeFlagOn {
         fn on() -> Self {
-            let guard = crate::cell_doc::CELL_MERGE_ENV_LOCK.lock().unwrap();
+            let guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
             // SAFETY: single-threaded under the lock; restored on drop.
             unsafe {
-                std::env::set_var(crate::cell_doc::CELL_MERGE_ENV, "1");
+                std::env::set_var(crate::document_cell::CELL_MERGE_ENV, "1");
             }
-            assert!(crate::cell_doc::cell_merge_enabled());
+            assert!(crate::document_cell::cell_merge_enabled());
             CellMergeFlagOn { _guard: guard }
         }
     }
@@ -3511,7 +3512,7 @@ Second answer line three.
         fn drop(&mut self) {
             // SAFETY: still holding the lock.
             unsafe {
-                std::env::remove_var(crate::cell_doc::CELL_MERGE_ENV);
+                std::env::remove_var(crate::document_cell::CELL_MERGE_ENV);
             }
         }
     }
@@ -3630,12 +3631,12 @@ Second answer line three.
         // strict no-op). We compute the legacy result by constructing the same
         // per-node merge the function would run without the seam. Per-cell merge is
         // default-ON, so the legacy path is exercised via the explicit kill-switch.
-        let _guard = crate::cell_doc::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
         // SAFETY: serialized under the lock.
         unsafe {
-            std::env::set_var(crate::cell_doc::CELL_MERGE_ENV, "0");
+            std::env::set_var(crate::document_cell::CELL_MERGE_ENV, "0");
         }
-        assert!(!crate::cell_doc::cell_merge_enabled(), "must be OFF");
+        assert!(!crate::document_cell::cell_merge_enabled(), "must be OFF");
 
         let base = doc_with_exchange_queue("Existing prompt.", "- do [#a1]");
         let base_state = MultiNodeState::from_text(&base).unwrap();
@@ -3662,7 +3663,7 @@ Second answer line three.
         // tests that read the master gate without holding the lock.
         // SAFETY: still holding the lock.
         unsafe {
-            std::env::remove_var(crate::cell_doc::CELL_MERGE_ENV);
+            std::env::remove_var(crate::document_cell::CELL_MERGE_ENV);
         }
     }
 

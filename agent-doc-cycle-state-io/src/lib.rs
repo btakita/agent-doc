@@ -345,6 +345,7 @@ pub struct ProjectedCloseoutState {
     pub commit: Option<String>,
     pub session_check_passed: bool,
     pub abandoned_reason: Option<String>,
+    pub pending_semantic_merge_acks: Vec<PendingSemanticMergeAck>,
 }
 
 impl ProjectedCloseoutState {
@@ -397,11 +398,30 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
             commit: projection.commit,
             session_check_passed: projection.session_check_passed,
             abandoned_reason: projection.abandoned_reason,
+            pending_semantic_merge_acks: projection
+                .pending_semantic_merge_acks
+                .into_iter()
+                .map(|ack| PendingSemanticMergeAck {
+                    component: ack.component,
+                    id: ack.id,
+                    reason: ack.reason,
+                    detail: ack.detail,
+                    recorded_cycle_id: ack.recorded_cycle_id,
+                    surfaced: ack.surfaced,
+                })
+                .collect(),
         }
     }
 }
 
 pub fn load_closeout_projection(file: &Path) -> Result<Option<ProjectedCloseoutState>> {
+    Ok(load_document_projection(file)?
+        .map(|document| ProjectedCloseoutState::from(document.closeout)))
+}
+
+fn load_document_projection(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let Some(document_hash) = cycle_document_hash(file)? else {
         return Ok(None);
@@ -425,9 +445,7 @@ pub fn load_closeout_projection(file: &Path) -> Result<Option<ProjectedCloseoutS
         ledger.append(event);
     }
 
-    Ok(ledger
-        .project_document(&document_hash)
-        .map(|document| ProjectedCloseoutState::from(document.closeout)))
+    Ok(ledger.project_document(&document_hash))
 }
 
 pub fn apply_closeout_projection_to_cycle_state(
@@ -463,6 +481,218 @@ pub fn load_with_closeout_projection(file: &Path) -> Result<Option<CycleState>> 
         apply_closeout_projection_to_cycle_state(&mut state, &projection);
     }
     Ok(Some(state))
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TerminalCloseoutProofInput<'a> {
+    pub cycle_id: &'a str,
+    pub last_event: &'a str,
+    pub did_commit: bool,
+    pub file_hash: &'a str,
+    pub snapshot_hash: &'a str,
+    pub head_hash: &'a str,
+    pub state_file_hash_matches: bool,
+    pub state_snapshot_hash_matches: bool,
+    pub agreement: &'a str,
+    pub capture_id: Option<&'a str>,
+    pub response_sha256: Option<&'a str>,
+    pub recorded_at_ms: u64,
+}
+
+pub fn append_terminal_closeout_proof(
+    file: &Path,
+    proof: TerminalCloseoutProofInput<'_>,
+) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let event_id = format!(
+        "terminal-closeout-proof:{document_hash}:{}:{}:{}:{}:{}",
+        proof.cycle_id, proof.file_hash, proof.snapshot_hash, proof.head_hash, proof.recorded_at_ms
+    );
+    append_state_fact(
+        file,
+        event_id,
+        agent_doc_state_backbone::StateFact::TerminalCloseoutProofRecorded {
+            document_hash,
+            cycle_id: proof.cycle_id.to_string(),
+            last_event: proof.last_event.to_string(),
+            did_commit: proof.did_commit,
+            file_hash: proof.file_hash.to_string(),
+            snapshot_hash: proof.snapshot_hash.to_string(),
+            head_hash: proof.head_hash.to_string(),
+            state_file_hash_matches: proof.state_file_hash_matches,
+            state_snapshot_hash_matches: proof.state_snapshot_hash_matches,
+            agreement: proof.agreement.to_string(),
+            capture_id: proof.capture_id.map(str::to_string),
+            response_sha256: proof.response_sha256.map(str::to_string),
+            recorded_at_ms: proof.recorded_at_ms,
+        },
+    )
+}
+
+pub fn load_latest_terminal_closeout_proof(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::TerminalCloseoutProofProjection>> {
+    let Some(document) = load_document_projection(file)? else {
+        return Ok(None);
+    };
+    let Some(cycle_id) = document.proof.latest_terminal_closeout_cycle_id else {
+        return Ok(None);
+    };
+    Ok(document.proof.terminal_closeouts.get(&cycle_id).cloned())
+}
+
+pub struct CloseoutRecoveryEvidenceInput<'a> {
+    pub visible_markdown_hash: &'a str,
+    pub snapshot_hash: Option<&'a str>,
+    pub active_cycle_id: Option<&'a str>,
+    pub active_cycle_phase: Option<CyclePhase>,
+    pub active_capture_id: Option<&'a str>,
+    pub active_capture_cycle_id: Option<&'a str>,
+    pub active_capture_state: Option<&'a str>,
+    pub active_capture_response_sha256: Option<&'a str>,
+    pub response_body: agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence,
+    pub queue_only_drift: Option<agent_doc_state_backbone::CloseoutRecoveryQueueOnlyDriftEvidence>,
+    pub snapshot_head_drift: Option<agent_doc_state_backbone::CloseoutRecoveryDriftEvidence>,
+    pub snapshot_visible_drift: Option<agent_doc_state_backbone::CloseoutRecoveryDriftEvidence>,
+    pub editor_ipc: agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence,
+    pub binary_freshness: agent_doc_state_backbone::CloseoutRecoveryBinaryFreshnessEvidence,
+    pub recorded_at_ms: u64,
+}
+
+pub fn append_closeout_recovery_evidence(
+    file: &Path,
+    evidence: CloseoutRecoveryEvidenceInput<'_>,
+) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let evidence_key = closeout_recovery_evidence_key(&evidence)?;
+    let event_id = format!("closeout-recovery-evidence:{document_hash}:{evidence_key}");
+    append_state_fact(
+        file,
+        event_id,
+        agent_doc_state_backbone::StateFact::CloseoutRecoveryEvidenceRecorded {
+            document_hash,
+            evidence_key,
+            visible_markdown_hash: evidence.visible_markdown_hash.to_string(),
+            snapshot_hash: evidence.snapshot_hash.map(str::to_string),
+            active_cycle_id: evidence.active_cycle_id.map(str::to_string),
+            active_cycle_phase: evidence.active_cycle_phase,
+            active_capture_id: evidence.active_capture_id.map(str::to_string),
+            active_capture_cycle_id: evidence.active_capture_cycle_id.map(str::to_string),
+            active_capture_state: evidence.active_capture_state.map(str::to_string),
+            active_capture_response_sha256: evidence
+                .active_capture_response_sha256
+                .map(str::to_string),
+            response_body: evidence.response_body,
+            queue_only_drift: evidence.queue_only_drift,
+            snapshot_head_drift: evidence.snapshot_head_drift,
+            snapshot_visible_drift: evidence.snapshot_visible_drift,
+            editor_ipc: evidence.editor_ipc,
+            binary_freshness: evidence.binary_freshness,
+            recorded_at_ms: evidence.recorded_at_ms,
+        },
+    )
+}
+
+pub fn load_latest_closeout_recovery_evidence(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::CloseoutRecoveryEvidenceProjection>> {
+    let Some(document) = load_document_projection(file)? else {
+        return Ok(None);
+    };
+    let Some(key) = document.proof.latest_closeout_recovery_evidence_key else {
+        return Ok(None);
+    };
+    Ok(document.proof.closeout_recovery_evidence.get(&key).cloned())
+}
+
+fn closeout_recovery_evidence_key(evidence: &CloseoutRecoveryEvidenceInput<'_>) -> Result<String> {
+    let payload = serde_json::to_string(&serde_json::json!({
+        "visible_markdown_hash": evidence.visible_markdown_hash,
+        "snapshot_hash": evidence.snapshot_hash,
+        "active_cycle_id": evidence.active_cycle_id,
+        "active_cycle_phase": evidence.active_cycle_phase,
+        "active_capture_id": evidence.active_capture_id,
+        "active_capture_cycle_id": evidence.active_capture_cycle_id,
+        "active_capture_state": evidence.active_capture_state,
+        "active_capture_response_sha256": evidence.active_capture_response_sha256,
+        "response_body": &evidence.response_body,
+        "queue_only_drift": &evidence.queue_only_drift,
+        "snapshot_head_drift": &evidence.snapshot_head_drift,
+        "snapshot_visible_drift": &evidence.snapshot_visible_drift,
+        "editor_ipc": &evidence.editor_ipc,
+        "binary_freshness": &evidence.binary_freshness,
+    }))
+    .context("serialize closeout recovery evidence key")?;
+    Ok(agent_doc_hash::content_hash(&payload))
+}
+
+pub fn load_pending_semantic_merge_acks(file: &Path) -> Result<Vec<PendingSemanticMergeAck>> {
+    Ok(load_semantic_merge_ack_queue_source(file)?
+        .map(|source| source.pending_semantic_merge_acks())
+        .unwrap_or_default())
+}
+
+fn semantic_merge_acks_to_carry(file: &Path) -> Result<Vec<PendingSemanticMergeAck>> {
+    Ok(load_semantic_merge_ack_queue_source(file)?
+        .map(|source| source.semantic_merge_acks_to_carry())
+        .unwrap_or_default())
+}
+
+enum SemanticMergeAckQueueSource {
+    Projection(ProjectedCloseoutState),
+    Cycle(CycleState),
+}
+
+impl SemanticMergeAckQueueSource {
+    fn pending_semantic_merge_acks(&self) -> Vec<PendingSemanticMergeAck> {
+        self.semantic_merge_ack_queue().to_vec()
+    }
+
+    fn semantic_merge_acks_to_carry(&self) -> Vec<PendingSemanticMergeAck> {
+        carry_forward_unsurfaced_semantic_merge_acks(self.semantic_merge_ack_queue())
+    }
+
+    fn semantic_merge_ack_queue(&self) -> &[PendingSemanticMergeAck] {
+        match self {
+            Self::Projection(projection) => &projection.pending_semantic_merge_acks,
+            Self::Cycle(state) => &state.pending_semantic_merge_acks,
+        }
+    }
+}
+
+fn load_semantic_merge_ack_queue_source(
+    file: &Path,
+) -> Result<Option<SemanticMergeAckQueueSource>> {
+    let raw = load(file)?;
+    let Some(projection) = load_closeout_projection(file)? else {
+        return Ok(raw.map(SemanticMergeAckQueueSource::Cycle));
+    };
+    if !projection.pending_semantic_merge_acks.is_empty() {
+        return Ok(Some(SemanticMergeAckQueueSource::Projection(projection)));
+    }
+    if let Some(raw) = raw
+        && projection.matches_cycle(&raw.cycle_id)
+    {
+        return Ok(Some(SemanticMergeAckQueueSource::Cycle(raw)));
+    }
+    Ok(Some(SemanticMergeAckQueueSource::Projection(projection)))
+}
+
+fn carry_forward_unsurfaced_semantic_merge_acks(
+    acks: &[PendingSemanticMergeAck],
+) -> Vec<PendingSemanticMergeAck> {
+    acks.iter()
+        .filter(|ack| !ack.surfaced)
+        .cloned()
+        .map(|mut ack| {
+            ack.surfaced = true;
+            ack
+        })
+        .collect()
 }
 
 pub fn admit_with_current_resolver<R, S, L>(
@@ -543,21 +773,7 @@ pub fn start_preflight_with_task(
     // ack the prior cycle itself carried IN was already surfaced there, so it
     // drops. Driven by the `surfaced` flag rather than a cycle-id comparison
     // because `cycle_id` is millisecond-derived and can collide across cycles.
-    let carried_semantic_merge_acks = load(file)
-        .ok()
-        .flatten()
-        .map(|prior| {
-            prior
-                .pending_semantic_merge_acks
-                .into_iter()
-                .filter(|ack| !ack.surfaced)
-                .map(|mut ack| {
-                    ack.surfaced = true;
-                    ack
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let carried_semantic_merge_acks = semantic_merge_acks_to_carry(file).unwrap_or_default();
     let phase = CyclePhaseMachine::transition(CyclePhase::Committed, CycleEvent::StartPreflight)
         .unwrap_or(CyclePhase::PreflightStarted);
     let state = CycleState {
@@ -604,6 +820,11 @@ pub fn start_preflight_with_task(
     };
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::PreflightStarted)?;
+    append_semantic_merge_ack_carried_forward_events(
+        file,
+        &state.cycle_id,
+        &state.pending_semantic_merge_acks,
+    )?;
     append_phase_event_to_session_log(file, &state);
     Ok(state)
 }
@@ -1214,28 +1435,46 @@ pub fn record_semantic_merge_acks(
     file: &Path,
     acks: &[agent_doc_merge::semantic_merge::AckRequest],
 ) -> Result<Option<CycleState>> {
-    let Some(mut state) = load(file)? else {
+    let Some(mut state) = load_with_closeout_projection(file)? else {
+        if let Some(projection) = load_closeout_projection(file)?
+            && let Some(cycle_id) = projection.cycle_id.as_deref()
+        {
+            for ack in acks {
+                append_semantic_merge_ack_recorded_event(
+                    file,
+                    cycle_id,
+                    &PendingSemanticMergeAck {
+                        component: ack.component.clone(),
+                        id: ack.id.clone(),
+                        reason: ack.reason.token().to_string(),
+                        detail: ack.detail.clone(),
+                        recorded_cycle_id: Some(cycle_id.to_string()),
+                        surfaced: false,
+                    },
+                )?;
+            }
+        }
         return Ok(None);
     };
     let cycle_id = state.cycle_id.clone();
     let mut changed = false;
     for ack in acks {
         let reason = ack.reason.token().to_string();
+        let pending_ack = PendingSemanticMergeAck {
+            component: ack.component.clone(),
+            id: ack.id.clone(),
+            reason: reason.clone(),
+            detail: ack.detail.clone(),
+            recorded_cycle_id: Some(cycle_id.clone()),
+            surfaced: false,
+        };
+        append_semantic_merge_ack_recorded_event(file, &cycle_id, &pending_ack)?;
         if !state.pending_semantic_merge_acks.iter().any(|existing| {
             existing.component == ack.component
                 && existing.id == ack.id
                 && existing.reason == reason
         }) {
-            state
-                .pending_semantic_merge_acks
-                .push(PendingSemanticMergeAck {
-                    component: ack.component.clone(),
-                    id: ack.id.clone(),
-                    reason,
-                    detail: ack.detail.clone(),
-                    recorded_cycle_id: Some(cycle_id.clone()),
-                    surfaced: false,
-                });
+            state.pending_semantic_merge_acks.push(pending_ack);
             changed = true;
         }
     }
@@ -1416,11 +1655,9 @@ fn append_closeout_projection_event(
     state: &CycleState,
     event: CloseoutProjectionEvent,
 ) -> Result<bool> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let Some(document_hash) = cycle_document_hash(file)? else {
         return Ok(false);
     };
-    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
     let fact = match event {
         CloseoutProjectionEvent::PreflightStarted => {
             agent_doc_state_backbone::StateFact::PreflightStarted {
@@ -1465,8 +1702,18 @@ fn append_closeout_projection_event(
             reason: state.last_event.clone(),
         },
     };
-    let fact_label = fact.label();
     let event_id = closeout_projection_event_id(&document_hash, state, event);
+    append_state_fact(file, event_id, fact)
+}
+
+fn append_state_fact(
+    file: &Path,
+    event_id: String,
+    fact: agent_doc_state_backbone::StateFact,
+) -> Result<bool> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    let fact_label = fact.label();
     let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
     let payload_json = serde_json::to_string(&event).context("serialize closeout state event")?;
@@ -1480,6 +1727,64 @@ fn append_closeout_projection_event(
             payload_json: &payload_json,
         },
     )
+}
+
+fn append_semantic_merge_ack_recorded_event(
+    file: &Path,
+    cycle_id: &str,
+    ack: &PendingSemanticMergeAck,
+) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let event_id = format!(
+        "semantic-merge-ack-recorded:{document_hash}:{cycle_id}:{}:{}:{}",
+        ack.component, ack.id, ack.reason
+    );
+    append_state_fact(
+        file,
+        event_id,
+        agent_doc_state_backbone::StateFact::SemanticMergeAckRecorded {
+            document_hash,
+            cycle_id: cycle_id.to_string(),
+            component: ack.component.clone(),
+            id: ack.id.clone(),
+            reason: ack.reason.clone(),
+            detail: ack.detail.clone(),
+        },
+    )
+}
+
+fn append_semantic_merge_ack_carried_forward_events(
+    file: &Path,
+    target_cycle_id: &str,
+    acks: &[PendingSemanticMergeAck],
+) -> Result<()> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(());
+    };
+    for ack in acks {
+        let source_cycle_id = ack.recorded_cycle_id.clone();
+        let source = source_cycle_id.as_deref().unwrap_or("unknown");
+        let event_id = format!(
+            "semantic-merge-ack-carried:{document_hash}:{target_cycle_id}:{source}:{}:{}:{}",
+            ack.component, ack.id, ack.reason
+        );
+        append_state_fact(
+            file,
+            event_id,
+            agent_doc_state_backbone::StateFact::SemanticMergeAckCarriedForward {
+                document_hash: document_hash.clone(),
+                source_cycle_id,
+                target_cycle_id: target_cycle_id.to_string(),
+                component: ack.component.clone(),
+                id: ack.id.clone(),
+                reason: ack.reason.clone(),
+                detail: ack.detail.clone(),
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn cycle_document_hash(file: &Path) -> Result<Option<String>> {
@@ -1813,6 +2118,42 @@ mod tests {
             !recorded.surfaced,
             "freshly recorded ack is not yet surfaced"
         );
+    }
+
+    #[test]
+    fn semantic_merge_acks_survive_missing_cycle_sidecar_via_projection() {
+        use agent_doc_merge::semantic_merge::AckReason;
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        record_semantic_merge_acks(
+            &doc,
+            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
+        )
+        .unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle sidecar path");
+        fs::remove_file(&sidecar_path).unwrap();
+        assert!(load(&doc).unwrap().is_none());
+
+        let pending = load_pending_semantic_merge_acks(&doc).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(!pending[0].surfaced);
+
+        let cycle2 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        assert_eq!(cycle2.pending_semantic_merge_acks.len(), 1);
+        assert!(cycle2.pending_semantic_merge_acks[0].surfaced);
+
+        fs::remove_file(&sidecar_path).unwrap();
+        let surfaced = load_pending_semantic_merge_acks(&doc).unwrap();
+        assert_eq!(surfaced.len(), 1);
+        assert!(surfaced[0].surfaced);
+
+        let cycle3 = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        assert!(cycle3.pending_semantic_merge_acks.is_empty());
     }
 
     #[test]
@@ -2184,6 +2525,126 @@ mod tests {
                 .as_deref()
                 .is_some_and(|commit| commit.starts_with("content:"))
         );
+    }
+
+    #[test]
+    fn terminal_closeout_proof_feeds_state_backbone_projection() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+
+        append_terminal_closeout_proof(
+            &doc,
+            TerminalCloseoutProofInput {
+                cycle_id: &started.cycle_id,
+                last_event: "commit_success",
+                did_commit: true,
+                file_hash: "file-sha",
+                snapshot_hash: "head-sha",
+                head_hash: "head-sha",
+                state_file_hash_matches: false,
+                state_snapshot_hash_matches: true,
+                agreement: "snapshot_head_visible_drift",
+                capture_id: Some("capture-1"),
+                response_sha256: Some("response-sha"),
+                recorded_at_ms: 42,
+            },
+        )
+        .unwrap();
+
+        let proof = load_latest_terminal_closeout_proof(&doc)
+            .unwrap()
+            .expect("terminal closeout proof");
+        assert_eq!(proof.cycle_id, started.cycle_id);
+        assert_eq!(proof.file_hash, "file-sha");
+        assert_eq!(proof.snapshot_hash, "head-sha");
+        assert_eq!(proof.head_hash, "head-sha");
+        assert_eq!(proof.agreement, "snapshot_head_visible_drift");
+        assert_eq!(proof.capture_id.as_deref(), Some("capture-1"));
+        assert_eq!(proof.response_sha256.as_deref(), Some("response-sha"));
+        assert_eq!(proof.recorded_at_ms, 42);
+    }
+
+    #[test]
+    fn closeout_recovery_evidence_feeds_state_backbone_projection() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        append_closeout_recovery_evidence(
+            &doc,
+            CloseoutRecoveryEvidenceInput {
+                visible_markdown_hash: "visible-sha",
+                snapshot_hash: Some("snapshot-sha"),
+                active_cycle_id: Some(&started.cycle_id),
+                active_cycle_phase: Some(CyclePhase::ResponseCaptured),
+                active_capture_id: Some("capture-1"),
+                active_capture_cycle_id: Some(&started.cycle_id),
+                active_capture_state: Some("captured"),
+                active_capture_response_sha256: Some("response-sha"),
+                response_body: agent_doc_state_backbone::CloseoutRecoveryResponseBodyEvidence::PresentInVisible {
+                    capture_id: "capture-1".into(),
+                },
+                queue_only_drift: Some(
+                    agent_doc_state_backbone::CloseoutRecoveryQueueOnlyDriftEvidence {
+                        file_hash_mismatch: true,
+                        snapshot_hash_mismatch: false,
+                        proven_queue_only: true,
+                    },
+                ),
+                snapshot_head_drift: Some(
+                    agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::MetadataOnly,
+                ),
+                snapshot_visible_drift: Some(
+                    agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::BoundaryOnly,
+                ),
+                editor_ipc: agent_doc_state_backbone::CloseoutRecoveryEditorIpcEvidence::FreshLiveBuffer {
+                    live_buffer_count: 1,
+                    socket_degraded: false,
+                },
+                binary_freshness: agent_doc_state_backbone::CloseoutRecoveryBinaryFreshnessEvidence::NoStaleWarning,
+                recorded_at_ms: 42,
+            },
+        )
+        .unwrap();
+
+        let evidence = load_latest_closeout_recovery_evidence(&doc)
+            .unwrap()
+            .expect("closeout recovery evidence projection");
+        assert_eq!(evidence.visible_markdown_hash, "visible-sha");
+        assert_eq!(evidence.snapshot_hash.as_deref(), Some("snapshot-sha"));
+        assert_eq!(
+            evidence.active_cycle_id.as_deref(),
+            Some(started.cycle_id.as_str())
+        );
+        assert_eq!(
+            evidence.active_cycle_phase,
+            Some(CyclePhase::ResponseCaptured)
+        );
+        assert_eq!(evidence.active_capture_id.as_deref(), Some("capture-1"));
+        assert_eq!(
+            evidence.active_capture_response_sha256.as_deref(),
+            Some("response-sha")
+        );
+        assert_eq!(
+            evidence
+                .queue_only_drift
+                .as_ref()
+                .map(|drift| drift.proven_queue_only),
+            Some(true)
+        );
+        assert_eq!(
+            evidence.snapshot_head_drift,
+            Some(agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::MetadataOnly)
+        );
+        assert_eq!(
+            evidence.snapshot_visible_drift,
+            Some(agent_doc_state_backbone::CloseoutRecoveryDriftEvidence::BoundaryOnly)
+        );
+        assert_eq!(evidence.recorded_at_ms, 42);
     }
 
     #[test]

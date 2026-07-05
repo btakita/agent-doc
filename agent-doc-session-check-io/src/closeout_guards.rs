@@ -1,10 +1,7 @@
 use std::path::Path;
 
+use agent_doc_document_realtime::baseline_comparison::BaselineComparison;
 use agent_doc_run_context_io::RunContext;
-use agent_doc_turn::document_drift::{
-    active_session_drift_is_only_exchange_or_backlog_metadata, exchange_has_new_appended_content,
-    exchange_only_promptless_content_drift, promptless_comment_only_drift,
-};
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 
@@ -15,7 +12,7 @@ pub fn check_blocked_closeout_followup_guard(file: &Path, rc: &RunContext) -> Re
         return Ok(GuardResult::None);
     }
 
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -24,10 +21,12 @@ pub fn check_blocked_closeout_followup_guard(file: &Path, rc: &RunContext) -> Re
     let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    let content = std::fs::read_to_string(file)?;
-    let mut still_gated = agent_doc_document::tracked_work_projection::open_review_ids(&content)
-        .into_iter()
-        .collect::<Vec<_>>();
+    let doc = crate::resolve_current_document(file, "blocked_closeout_followup_guard")?;
+    let file = doc.key().as_path();
+    let mut still_gated =
+        agent_doc_document::tracked_work_projection::open_review_ids(doc.content())
+            .into_iter()
+            .collect::<Vec<_>>();
     still_gated.sort();
 
     let unresolved = match agent_doc_turn::closeout_signal::blocked_closeout_followup_decision(
@@ -83,7 +82,7 @@ pub fn check_blocked_closeout_followup_guard(file: &Path, rc: &RunContext) -> Re
 /// Warn-first advisory only — it never blocks closeout. Suppressible via a
 /// `<!-- no-gated-phase-split-guard -->` response marker.
 pub fn check_gated_phase_split_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -167,7 +166,7 @@ pub fn check_gated_phase_split_guard(file: &Path, rc: &RunContext) -> Result<Gua
 /// so the binary only flags the unambiguous collapse rather than trying to
 /// classify free-text rows itself.
 pub fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardResult> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -208,31 +207,26 @@ pub fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<Str
     let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
         return Ok(None);
     };
-    let current = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(_) => return Ok(None),
-    };
-    if current == snapshot {
+    let current =
+        crate::resolve_current_document_content(file, "active_session_post_commit_drift")?;
+    let comparison = BaselineComparison::new(&snapshot, &current);
+    if comparison.is_equal() {
         return Ok(None);
     }
-    if agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&current)
-        == agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
-            &snapshot,
-        )
-    {
+    if comparison.normalized_exchange_equal() {
         return Ok(None);
     }
 
     let prompt_marker = crate::detect_unstarted_prompt_bearing_diff(file)?;
     if prompt_marker.is_none()
-        && active_session_drift_is_only_exchange_or_backlog_metadata(&snapshot, &current)
+        && comparison.active_session_delta_is_only_exchange_or_backlog_metadata()
     {
         return Ok(None);
     }
-    if prompt_marker.is_none() && promptless_comment_only_drift(&snapshot, &current) {
+    if prompt_marker.is_none() && comparison.promptless_comment_only_delta() {
         return Ok(None);
     }
-    if prompt_marker.is_none() && exchange_only_promptless_content_drift(&snapshot, &current) {
+    if prompt_marker.is_none() && comparison.exchange_only_promptless_content_delta() {
         return Ok(None);
     }
     let prompt_preview = session
@@ -259,21 +253,15 @@ pub fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> 
     let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
         return Ok(None);
     };
-    let current = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(_) => return Ok(None),
-    };
-    if current == snapshot {
+    let current = crate::resolve_current_document_content(file, "uncommitted_exchange_drift")?;
+    let comparison = BaselineComparison::new(&snapshot, &current);
+    if comparison.is_equal() {
         return Ok(None);
     }
-    let norm_current =
-        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&current);
-    let norm_snapshot =
-        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&snapshot);
-    if norm_current == norm_snapshot {
+    if comparison.normalized_exchange_equal() {
         return Ok(None);
     }
-    if !exchange_has_new_appended_content(&norm_snapshot, &norm_current) {
+    if !comparison.exchange_has_new_appended_content() {
         return Ok(None);
     }
     let prompt_marker = crate::detect_unstarted_prompt_bearing_diff(file)?;
@@ -333,11 +321,12 @@ pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
     let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
         return Ok(None);
     };
-    let current = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(_) => return Ok(None),
-    };
-    Ok(agent_doc_turn::document_drift::detect_bypassed_response_write_between(&snapshot, &current))
+    let current = crate::resolve_current_document_content(file, "bypassed_response_write")?;
+    Ok(
+        agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
+            &snapshot, &current,
+        ),
+    )
 }
 
 /// `#prompt-preempts-auto-queue`: snapshot-independent detection of a live
@@ -349,13 +338,64 @@ pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
 /// bookkeeping). Returns the joined prompt text, or `None` when the tail is
 /// empty or already answered.
 pub fn unresolved_exchange_prompt(file: &Path) -> Result<Option<String>> {
-    let content = std::fs::read_to_string(file)?;
+    let content = crate::resolve_current_document_content(file, "unresolved_exchange_prompt")?;
     Ok(agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content))
 }
 
-pub fn exchange_tail_has_response_heading(file: &Path) -> bool {
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return false;
-    };
-    agent_doc_turn::exchange_tail::exchange_tail_has_response_heading(&content)
+pub fn exchange_tail_has_response_heading(file: &Path) -> Result<bool> {
+    let content =
+        crate::resolve_current_document_content(file, "exchange_tail_has_response_heading")?;
+    Ok(agent_doc_turn::exchange_tail::exchange_tail_has_response_heading(&content))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn queue_audit_guard_prefers_lazily_projection_over_stale_open_sidecar() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\n";
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = fs::read(&sidecar_path).unwrap();
+        let response = "### Re: which queue items are complete?\n\nNone of the six queue items are complete. Same-day QA is complete and the URL validate-only check was clean, but each row still has at least one remaining action.";
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        let result = check_queue_audit_partial_completion_guard(&doc).unwrap();
+        assert!(
+            matches!(result, GuardResult::Warn(_)),
+            "lazily committed projection should make the guard evaluate despite stale open JSON: {result:?}"
+        );
+    }
 }

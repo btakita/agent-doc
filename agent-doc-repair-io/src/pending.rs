@@ -8,6 +8,13 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PendingResponseState {
+    Active(String),
+    Cleared,
+    Missing,
+}
+
 /// Save a response to the pending store before attempting write-back.
 /// This makes the response durable across context compaction.
 pub fn save_pending(file: &Path, response: &str) -> Result<()> {
@@ -47,9 +54,35 @@ pub fn clear_pending(file: &Path) -> Result<()> {
 
 /// Load the active pending response from the lazily state-backbone projection.
 pub fn load_active_pending_response(file: &Path) -> Result<Option<String>> {
+    Ok(match load_pending_response_state(file)? {
+        PendingResponseState::Active(response) => Some(response),
+        PendingResponseState::Cleared | PendingResponseState::Missing => None,
+    })
+}
+
+/// Load the active pending response for repair, importing the legacy file only
+/// when no durable pending/clear state exists for the document. When durable
+/// state says the response is cleared, retire any stale backup file without
+/// replaying it.
+pub(crate) fn load_pending_response_with_projection_backup(file: &Path) -> Result<Option<String>> {
+    Ok(match load_pending_response_state(file)? {
+        PendingResponseState::Active(response) => Some(response),
+        PendingResponseState::Cleared => {
+            if let Err(err) = remove_pending_projection_file(file) {
+                eprintln!(
+                    "[repair] warning: failed to retire stale pending response backup projection: {err}"
+                );
+            }
+            None
+        }
+        PendingResponseState::Missing => load_pending_projection_file(file)?,
+    })
+}
+
+pub(crate) fn load_pending_response_state(file: &Path) -> Result<PendingResponseState> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let Some(document_hash) = agent_doc_fs::document_state_hash(&canonical).ok() else {
-        return Ok(None);
+        return Ok(PendingResponseState::Missing);
     };
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
     let ledger = load_state_event_ledger(&project_root).with_context(|| {
@@ -58,10 +91,16 @@ pub fn load_active_pending_response(file: &Path) -> Result<Option<String>> {
             canonical.display()
         )
     })?;
-    Ok(ledger
-        .project_document(&document_hash)
-        .and_then(|projection| projection.closeout.pending_response)
-        .map(|pending| pending.response_body))
+    let Some(projection) = ledger.project_document(&document_hash) else {
+        return Ok(PendingResponseState::Missing);
+    };
+    if let Some(pending) = projection.closeout.pending_response {
+        return Ok(PendingResponseState::Active(pending.response_body));
+    }
+    if projection.closeout.pending_response_clear_reason.is_some() {
+        return Ok(PendingResponseState::Cleared);
+    }
+    Ok(PendingResponseState::Missing)
 }
 
 /// Load the crash-recovery backup projection. Do not call this from the normal
@@ -110,19 +149,30 @@ fn append_pending_response_captured(
 fn append_pending_response_cleared(file: &Path, reason: &str) -> Result<()> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let document_hash = agent_doc_fs::document_state_hash(&canonical)?;
-    let cycle_state = agent_doc_cycle_state_io::load(&canonical)?;
+    let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(&canonical)?;
+    let closeout_projection = agent_doc_cycle_state_io::load_closeout_projection(&canonical)?;
     let active_capture = agent_doc_capture_io::load_active(&canonical)?;
     let cycle_id = active_capture
         .as_ref()
         .map(|capture| capture.cycle_id.clone())
-        .or_else(|| cycle_state.as_ref().map(|state| state.cycle_id.clone()));
+        .or_else(|| cycle_state.as_ref().map(|state| state.cycle_id.clone()))
+        .or_else(|| {
+            closeout_projection
+                .as_ref()
+                .and_then(|projection| projection.cycle_id.clone())
+        });
     let Some(cycle_id) = cycle_id else {
         return Ok(());
     };
     let capture_id = active_capture
         .as_ref()
         .map(|capture| capture.capture_id.clone())
-        .or_else(|| cycle_state.and_then(|state| state.capture_id));
+        .or_else(|| cycle_state.and_then(|state| state.capture_id))
+        .or_else(|| {
+            closeout_projection
+                .as_ref()
+                .and_then(|projection| projection.capture_id.clone())
+        });
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
     let event_id = format!(
         "pending-response-cleared:{document_hash}:{cycle_id}:{}:{reason}",
@@ -216,6 +266,58 @@ mod tests {
         clear_pending(&doc).unwrap();
         assert_eq!(load_active_pending_response(&doc).unwrap(), None);
         assert!(!pending.exists());
+    }
+
+    #[test]
+    fn cleared_state_ignores_stale_pending_projection_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("task.md");
+        std::fs::write(&doc, "---\n---\n").unwrap();
+
+        save_pending(&doc, "response text").unwrap();
+        clear_pending(&doc).unwrap();
+
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
+        std::fs::create_dir_all(pending.parent().unwrap()).unwrap();
+        std::fs::write(&pending, "stale response text").unwrap();
+
+        assert_eq!(
+            load_pending_response_state(&doc).unwrap(),
+            PendingResponseState::Cleared
+        );
+        assert_eq!(
+            load_pending_response_with_projection_backup(&doc).unwrap(),
+            None
+        );
+        assert!(
+            !pending.exists(),
+            "cleared durable state should retire the stale backup projection"
+        );
+    }
+
+    #[test]
+    fn missing_state_imports_pending_projection_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("task.md");
+        std::fs::write(&doc, "---\n---\n").unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
+        std::fs::create_dir_all(pending.parent().unwrap()).unwrap();
+        std::fs::write(&pending, "legacy response text").unwrap();
+
+        assert_eq!(
+            load_pending_response_state(&doc).unwrap(),
+            PendingResponseState::Missing
+        );
+        assert_eq!(
+            load_pending_response_with_projection_backup(&doc)
+                .unwrap()
+                .as_deref(),
+            Some("legacy response text")
+        );
     }
 
     #[test]

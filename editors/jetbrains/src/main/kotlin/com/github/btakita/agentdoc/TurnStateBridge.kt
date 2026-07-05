@@ -58,13 +58,26 @@ object TurnStateBridge {
         if (state == "idle" || !inFlight) {
             TurnStatePresentation("", false)
         } else {
-            val label =
+            val phaseLabel =
                 if (state == "awaiting_response") "⟳ agent-doc: awaiting response"
                 else "⟳ agent-doc: persisting"
+            val steeringLabel = root.getAsJsonObject("realtime_steering")
+                ?.get("state")
+                ?.asString
+                ?.let(::steeringLabel)
+            val label = listOfNotNull(phaseLabel, steeringLabel).joinToString(" · ")
             TurnStatePresentation(label, true)
         }
     } catch (e: Throwable) {
         LOG.debug("[turn-projection] parse failed: ${e.message}")
         TurnStatePresentation("", false)
+    }
+
+    private fun steeringLabel(state: String): String? = when (state) {
+        "prompt_target" -> "new prompt"
+        "content_edit" -> "document edited"
+        "prompt_deleted" -> "prompt deleted"
+        "prompt_reduced" -> "prompt reduced"
+        else -> null
     }
 }

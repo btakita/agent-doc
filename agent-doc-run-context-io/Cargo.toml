@@ -12,6 +12,7 @@ name = "agent_doc_run_context_io"
 [dependencies]
 agent-doc-config = { path = "../agent-doc-config", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.67" }

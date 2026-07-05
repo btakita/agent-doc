@@ -12,7 +12,7 @@ use anyhow::Result;
 /// or exchange) or a consumed head clears the marker; a silently-deleted user
 /// queue edit fails closed.
 pub fn check_dropped_queue_prompt_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     if state.dropped_queue_prompts.is_empty() {
@@ -104,7 +104,7 @@ pub fn check_queue_response_contamination_guard(
 /// when the editor overwrote the disk prompt via IPC buffer convergence before
 /// the post-commit disk diff could observe it.
 pub fn check_dropped_exchange_prompt_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
     if state.dropped_exchange_prompts.is_empty() {
@@ -236,18 +236,24 @@ pub fn check_snapshot_committed_guard(
 /// component, or an exchange holding only a compacted `### Session Summary`,
 /// returns false.
 pub fn committed_exchange_has_response_body(file: &Path) -> Result<bool> {
-    let content = std::fs::read_to_string(file)?;
-    agent_doc_element::element::parse(&content)?;
-    Ok(agent_doc_turn::closeout_guard::exchange_has_assistant_response_body(&content))
+    let doc = crate::resolve_current_document(file, "committed_exchange_has_response_body")?;
+    agent_doc_element::element::parse(doc.content())?;
+    Ok(agent_doc_turn::closeout_guard::exchange_has_assistant_response_body(doc.content()))
 }
 
 pub fn check_committed_without_response_body_guard(
     file: &Path,
     recovery_hint: impl FnOnce(&Path) -> String,
 ) -> Result<GuardResult> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
+    let raw_state = agent_doc_cycle_state_io::load(file)?;
+    let detail_last_event = raw_state
+        .as_ref()
+        .filter(|raw| raw.cycle_id == state.cycle_id && raw.phase == state.phase)
+        .map(|raw| raw.last_event.as_str())
+        .unwrap_or(state.last_event.as_str());
     let committed_exchange_has_body = committed_exchange_has_response_body(file)?;
     let decision = agent_doc_turn::closeout_guard::committed_without_response_body_decision(
         agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyEvidence {
@@ -257,7 +263,7 @@ pub fn check_committed_without_response_body_guard(
             response_hash_recorded: state.response_sha256.is_some(),
             queue_turn: state.queue_task_id.is_some() || !state.active_queue_heads.is_empty(),
             had_pending_mutations: state.had_pending_mutations,
-            last_event: &state.last_event,
+            last_event: detail_last_event,
         },
     );
     match decision {
@@ -271,7 +277,7 @@ pub fn check_committed_without_response_body_guard(
                     "committed_without_response_body_guard_skipped_noop_commit file={} cycle_id={} last_event={} pending_done={} reaped={}",
                     file.display(),
                     state.cycle_id,
-                    state.last_event,
+                    detail_last_event,
                     state.pending_done_ids.len(),
                     state.reaped_pending_ids.len(),
                 ),
@@ -284,7 +290,7 @@ pub fn check_committed_without_response_body_guard(
     let recovery_hint = recovery_hint(file);
     let msg = agent_doc_workflow::session_check::committed_without_response_body_guard_message(
         &state.cycle_id,
-        &state.last_event,
+        detail_last_event,
         &side_effects,
         &recovery_hint,
     );
@@ -295,7 +301,7 @@ pub fn check_committed_without_response_body_guard(
             "committed_without_response_body_guard_failed file={} cycle_id={} last_event={} had_pending_mutations={} pending_done={} reaped={}",
             file.display(),
             state.cycle_id,
-            state.last_event,
+            detail_last_event,
             state.had_pending_mutations,
             state.pending_done_ids.len(),
             state.reaped_pending_ids.len(),

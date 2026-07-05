@@ -117,26 +117,15 @@ fn git_commit_count(root: &Path) -> usize {
         .unwrap()
 }
 
-fn assert_terminal_closeout_proof(root: &Path, doc: &Path) {
-    let canonical_doc = doc.canonicalize().unwrap();
-    let ledger_path = agent_doc_workflow_io::proof_ledger::proof_ledger_path(
-        &root.canonicalize().unwrap(),
-        &canonical_doc,
-    );
-    let records = agent_doc_workflow_io::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
-    assert!(
-        records.iter().any(|record| {
-            record.operation_kind
-                == agent_doc_workflow_io::proof_ledger::ProofOperationKind::TerminalProof
-                && record.proof_kind
-                    == agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::TerminalStateObserved
-                && record.outcome == agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded
-                && record.proof.contains("phase=committed")
-                && record.proof.contains("agreement=file_snapshot_head")
-        }),
-        "expected committed terminal closeout proof in {}",
-        ledger_path.display()
-    );
+fn assert_terminal_closeout_proof(_root: &Path, doc: &Path) {
+    let proof = agent_doc_cycle_state_io::load_latest_terminal_closeout_proof(doc)
+        .unwrap()
+        .expect("expected typed terminal closeout proof projection");
+    assert!(proof.last_event.contains("commit"));
+    assert!(proof.did_commit);
+    assert_eq!(proof.file_hash, proof.snapshot_hash);
+    assert_eq!(proof.snapshot_hash, proof.head_hash);
+    assert_eq!(proof.agreement, "file_snapshot_head");
 }
 
 fn extract_preflight_baseline(output: &str) -> String {
@@ -3436,7 +3425,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(",
         "agent_doc_element_backlog::backlog::reap_with_items(",
         "agent_doc_session_check_io::detect_bypassed_response_write(",
-        "agent_doc_session_check_io::first_unstarted_prompt_bearing_change(",
+        "agent_doc_session_check_io::realtime_steering_since_turn_baseline(",
         "agent_doc_flow_io::closeout::log_closeout_guard_event(",
         "agent_doc_frontmatter::frontmatter::parse(",
         "visible_response_recovery_is_adoptable(",
@@ -11674,7 +11663,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             && session_check_command.contains("crate::check_pending_done_guard")
             && session_check_command.contains("crate::check_blocked_closeout_followup_guard")
             && session_check_command.contains("crate::check_dropped_exchange_prompt_guard")
-            && session_check.contains("first_unstarted_prompt_bearing_change"),
+            && session_check.contains("realtime_steering_since_turn_baseline"),
         "session-check command IO should call the focused guard adapters directly"
     );
 
@@ -12849,6 +12838,10 @@ fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
     let closeout_guards =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/closeout_guards.rs"))
             .unwrap();
+    let baseline_comparison = fs::read_to_string(
+        manifest_dir.join("agent-doc-document-realtime/src/baseline_comparison.rs"),
+    )
+    .unwrap();
     let prompt_bearing_io =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/prompt_bearing.rs"))
             .unwrap();
@@ -12868,8 +12861,17 @@ fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
         "agent_doc_diff::first_unstarted_prompt_bearing_change_from_diff",
     ] {
         assert!(
+            baseline_comparison.contains(required),
+            "realtime baseline comparison should call the focused diff helper directly: {required}"
+        );
+    }
+    for required in [
+        "agent_doc_document_realtime::baseline_comparison::BaselineComparison::new",
+        ".realtime_steering()",
+    ] {
+        assert!(
             prompt_bearing_io.contains(required),
-            "session-check prompt-bearing IO should call the focused diff helper directly: {required}"
+            "session-check prompt-bearing IO should delegate to realtime baseline comparison: {required}"
         );
     }
 }

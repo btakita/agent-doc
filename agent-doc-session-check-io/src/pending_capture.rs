@@ -143,16 +143,17 @@ pub fn unresolved_promised_backlog_item_ids(
         let target_path = Path::new(&target.path);
         let normalized_target =
             std::fs::canonicalize(target_path).unwrap_or_else(|_| target_path.to_path_buf());
-        let content = if normalized_target == current {
-            match std::fs::read_to_string(file) {
-                Ok(content) => content,
-                Err(_) => continue,
-            }
+        let target_file = if normalized_target == current {
+            file
         } else {
-            match std::fs::read_to_string(&normalized_target) {
-                Ok(content) => content,
-                Err(_) => continue,
-            }
+            normalized_target.as_path()
+        };
+        let content = match crate::resolve_current_document_content(
+            target_file,
+            "pending_capture_required_backlog_target",
+        ) {
+            Ok(content) => content,
+            Err(_) => continue,
         };
         let Ok(ids) = agent_doc_element_backlog::backlog::tracked_work_ids_for_target(
             &content,

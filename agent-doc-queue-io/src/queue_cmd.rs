@@ -13,7 +13,7 @@
 //!   (#freshqueueauth) for an id-backed correction head while leaving the open
 //!   backlog item unresolved.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use std::path::Path;
 
 use crate::one_shot_sync::OneShotQueueSyncResult;
@@ -35,6 +35,16 @@ pub struct QueueCommandConsumeOutcome {
 }
 
 pub trait QueueCommandEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()>;
+
     fn consume_queue_prompt_force_disk(
         &self,
         file: &Path,
@@ -82,8 +92,7 @@ pub fn consume_with_options(
     let mut drained = false;
 
     for _ in 0..target {
-        let content = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let content = effects.current_document_content(file, "queue_consume_classify")?;
         match classify_active_queue_head(&content)? {
             ActiveQueueHeadKind::None => break, // no queue component or no prompt left to strike
             ActiveQueueHeadKind::IdBacked => {
@@ -223,10 +232,16 @@ pub fn prune_noise(effects: &impl QueueCommandEffects, file: &Path) -> Result<()
     Ok(())
 }
 
-pub fn sync(file: &Path) -> Result<()> {
-    match crate::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(file, |path, content| {
-        agent_doc_snapshot_io::save(path, content, agent_doc_ops_log_io::log_op)
-    })? {
+pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
+    let content = effects.current_document_content(file, "queue_sync")?;
+    match crate::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(
+        file,
+        &content,
+        |path, current, target| {
+            effects.converge_document_or_disk(path, target, current, "queue_sync")
+        },
+        |path, content| agent_doc_snapshot_io::save(path, content, agent_doc_ops_log_io::log_op),
+    )? {
         OneShotQueueSyncResult::AlreadyInSync {
             requested_count,
             mode,
@@ -294,6 +309,21 @@ mod tests {
     }
 
     impl QueueCommandEffects for FakeEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
+
         fn consume_queue_prompt_force_disk(
             &self,
             file: &Path,
@@ -338,7 +368,8 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        sync(&doc).expect("enqueue marker should append to queue");
+        let effects = FakeEffects;
+        sync_with_effects(&effects, &doc).expect("enqueue marker should append to queue");
         let result = std::fs::read_to_string(&doc).unwrap();
 
         assert!(

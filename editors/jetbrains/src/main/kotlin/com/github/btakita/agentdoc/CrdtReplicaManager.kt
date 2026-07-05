@@ -117,14 +117,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
         }
         if (await) {
-            val future = executor.submit<Boolean> { attach() }
-            return try {
-                future.get(150, TimeUnit.MILLISECONDS)
-            } catch (e: Exception) {
-                future.cancel(false)
-                log.debug("[crdt-replica] open-document attach timed out for $filePath: ${e.message}")
-                false
-            }
+            log.debug("[crdt-replica] open-document attach requested with await=true; scheduling asynchronously for $filePath")
         }
         executor.execute { attach() }
         return true

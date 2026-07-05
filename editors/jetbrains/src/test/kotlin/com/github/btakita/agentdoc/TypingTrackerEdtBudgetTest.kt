@@ -137,6 +137,7 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "socket-triggered publication should resolve the live editor document and publish without queued-op side effects",
             publishBody.contains("LocalFileSystem.getInstance().findFileByPath(filePath)") &&
+                publishBody.contains("runReadAction<com.intellij.openapi.editor.Document?>") &&
                 publishBody.contains("return reportFullContentNow(") &&
                 publishBody.contains("drainEditorOps = false") &&
                 publishBody.contains("requireAuthority = true"),
@@ -149,7 +150,8 @@ class TypingTrackerEdtBudgetTest {
             reporterBody.contains("agent_doc_document_changed_digest_content_for_editor_v2") &&
                 reporterBody.contains("if (requireAuthority) false else") &&
                 reporterBody.contains("CrdtReplicaManager.ensureReplicaForOpenDocument") &&
-                reporterBody.contains("await = requireAuthority") &&
+                reporterBody.contains("await = false") &&
+                reporterBody.contains("if (requireAuthority && !replicaRefreshAccepted) return false") &&
                 reporterBody.contains("if (drainEditorOps)"),
         )
     }
@@ -210,10 +212,11 @@ class TypingTrackerEdtBudgetTest {
             listenerBody.contains("forwardLocalDelta("),
         )
         assertTrue(
-            "publish/open document repair must attach the CRDT replica through the worker",
+            "publish/open document repair must attach the CRDT replica through the worker without blocking IPC receipts",
             source.contains("fun ensureOpenDocumentReplica(") &&
-                source.contains("executor.submit<Boolean>") &&
-                source.contains("forwarderFor(filePath, text)"),
+                source.contains("executor.execute { attach() }") &&
+                source.contains("forwarderFor(filePath, text)") &&
+                !source.contains("future.get(150, TimeUnit.MILLISECONDS)"),
         )
     }
 }

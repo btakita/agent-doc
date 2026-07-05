@@ -269,7 +269,10 @@ object TypingTracker : DocumentListener {
         val lib = AgentDocLib.get() ?: return false
         val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return false
         if (!file.name.endsWith(".md")) return false
-        val document = FileDocumentManager.getInstance().getDocument(file) ?: return false
+        val document = com.intellij.openapi.application.ApplicationManager.getApplication()
+            .runReadAction<com.intellij.openapi.editor.Document?> {
+                FileDocumentManager.getInstance().getDocument(file)
+            } ?: return false
         return reportFullContentNow(
             lib = lib,
             filePath = filePath,
@@ -356,13 +359,13 @@ object TypingTracker : DocumentListener {
                 reportLiveBufferContentV2OrV1(lib, filePath, text, requireAuthority)
             }
             if (!reported) return false
-            val replicaReady = CrdtReplicaManager.ensureReplicaForOpenDocument(
+            val replicaRefreshAccepted = CrdtReplicaManager.ensureReplicaForOpenDocument(
                 filePath = filePath,
                 document = document,
                 editorText = text,
-                await = requireAuthority,
+                await = false,
             )
-            if (requireAuthority && !replicaReady) return false
+            if (requireAuthority && !replicaRefreshAccepted) return false
             LOG.debug("[native] document_changed content reported: $filePath")
             if (drainEditorOps) {
                 val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))

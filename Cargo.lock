@@ -91,6 +91,7 @@ dependencies = [
  "agent-doc-prompt-io",
  "agent-doc-queue",
  "agent-doc-queue-io",
+ "agent-doc-repair-command-io",
  "agent-doc-repair-io",
  "agent-doc-response-replay-io",
  "agent-doc-response-toc-io",
@@ -1203,6 +1204,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-queue-io",
+ "agent-doc-repair-command-io",
  "agent-doc-repair-io",
  "agent-doc-repair-runtime-io",
  "agent-doc-response-replay-io",
@@ -1558,6 +1560,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-repair-command-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-repair-io",
+ "agent-doc-repair-runtime-io",
+ "agent-doc-turn",
+ "agent-doc-write-command-io",
+ "agent-doc-write-runtime-io",
+ "anyhow",
 ]
 
 [[package]]

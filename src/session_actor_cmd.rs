@@ -2405,7 +2405,7 @@ fn idle_projection_needs_reconciliation(ctx: &SessionContext, evidence: &LivePan
 
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
     if repair {
-        let closeout = agent_doc_orchestration::repair::repair(file)?;
+        let closeout = agent_doc_repair_command_io::repair(file)?;
         let mut repair_notes = agent_doc_sync_io::sync::repair_file_state(file)?;
         let repair_ctx = build_context(file)?;
         if let Some(note) = clear_closed_actor_pane_projection(&repair_ctx)? {

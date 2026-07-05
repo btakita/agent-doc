@@ -3556,6 +3556,8 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    let repair_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/src/lib.rs")).unwrap();
     let repair_io =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     let write =
@@ -3570,12 +3572,16 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
         "agent-doc-repair-io should own strict empty-response closeout recovery coordination"
     );
     assert!(
-        repair.contains("agent_doc_repair_io::recover_empty_response_for_strict_closeout("),
-        "repair.rs should delegate strict empty-response closeout recovery to repair IO"
+        repair_command.contains("agent_doc_repair_io::recover_empty_response_for_strict_closeout("),
+        "repair command IO should delegate strict empty-response closeout recovery to repair IO"
     );
     assert!(
-        repair.contains("pub fn run_write_command_with_empty_response_recovery("),
-        "repair.rs should own the write-command recovery bridge"
+        repair_command.contains("pub fn run_write_command_with_empty_response_recovery("),
+        "repair command IO should own the write-command recovery bridge"
+    );
+    assert!(
+        !repair.contains("pub fn run_write_command_with_empty_response_recovery("),
+        "orchestration repair should not expose the write-command recovery bridge"
     );
     assert!(
         !write.contains("fn recover_empty_response_for_strict_closeout("),
@@ -3606,7 +3612,7 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
     assert_source_mentions_all(
         &main,
         "src/main.rs",
-        &["agent_doc_orchestration::repair::run_write_command_with_empty_response_recovery("],
+        &["agent_doc_repair_command_io::run_write_command_with_empty_response_recovery("],
     );
     assert!(
         !write_run_entry.contains("crate::repair::"),
@@ -11465,6 +11471,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/repair.rs::OrchestrationRepairReplayWriteEffects",
             "agent-doc-write-runtime-io::REPAIR_REPLAY_WRITE_EFFECTS",
             "Move the remaining public repair command bridge",
+        ),
+        (
+            "Repair command bridge extraction",
+            "agent-doc-orchestration/src/repair.rs::{repair,run_write_command_with_empty_response_recovery}",
+            "agent-doc-repair-command-io/src/lib.rs",
+            "Relocate the repair integration tests out of `agent-doc-orchestration/src/repair.rs`",
         ),
         (
             "Preflight output DTO graph",

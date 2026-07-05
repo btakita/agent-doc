@@ -1,0 +1,18 @@
+[package]
+name = "agent-doc-repair-command-io"
+version = "0.34.67"
+edition = "2024"
+description = "Default repair command runtime bridge for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_repair_command_io"
+
+[dependencies]
+agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.67" }
+agent-doc-repair-runtime-io = { path = "../agent-doc-repair-runtime-io", version = "0.34.67" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
+agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version = "0.34.67" }
+agent-doc-write-runtime-io = { path = "../agent-doc-write-runtime-io", version = "0.34.67" }
+anyhow = "1"

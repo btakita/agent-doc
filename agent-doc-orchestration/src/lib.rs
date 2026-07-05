@@ -37,5 +37,6 @@
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod codex_hook;
 pub mod preflight;
-pub mod repair;
+#[cfg(test)]
+mod repair;
 pub mod start;

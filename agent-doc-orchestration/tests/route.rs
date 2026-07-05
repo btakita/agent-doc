@@ -262,7 +262,7 @@ use agent_doc_session_registry_io::registration as sessions;
 
 #[cfg(test)]
 fn route_repair_closeout(file: &Path) -> Result<String> {
-    agent_doc_orchestration::repair::repair(file).map(|outcome| format!("{outcome:?}"))
+    agent_doc_repair_command_io::repair(file).map(|outcome| format!("{outcome:?}"))
 }
 
 #[cfg(test)]

@@ -62,6 +62,7 @@ members = [
     "agent-doc-prompt-context-io",
     "agent-doc-prompt-io",
     "agent-doc-prompt-lines",
+    "agent-doc-repair-command-io",
     "agent-doc-repair-io",
     "agent-doc-repair-runtime-io",
     "agent-doc-response-toc",
@@ -231,6 +232,7 @@ agent-doc-prompt-contract = { path = "agent-doc-prompt-contract", version = "0.3
 agent-doc-prompt-io = { path = "agent-doc-prompt-io", version = "0.34.67" }
 agent-doc-queue = { path = "agent-doc-queue", version = "0.34.67" }
 agent-doc-queue-io = { path = "agent-doc-queue-io", version = "0.34.67" }
+agent-doc-repair-command-io = { path = "agent-doc-repair-command-io", version = "0.34.67" }
 agent-doc-repair-io = { path = "agent-doc-repair-io", version = "0.34.67" }
 agent-doc-response-replay-io = { path = "agent-doc-response-replay-io", version = "0.34.67" }
 agent-doc-response-toc-io = { path = "agent-doc-response-toc-io", version = "0.34.67" }

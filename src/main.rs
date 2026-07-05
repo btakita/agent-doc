@@ -138,7 +138,7 @@ impl ClaimRuntimeEffects for CliClaimRuntimeEffects {
 }
 
 fn route_repair_closeout(file: &Path) -> anyhow::Result<String> {
-    agent_doc_orchestration::repair::repair(file).map(|outcome| format!("{outcome:?}"))
+    agent_doc_repair_command_io::repair(file).map(|outcome| format!("{outcome:?}"))
 }
 
 struct CliProjectControllerRuntimeEffects;
@@ -208,7 +208,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
     }
 
     fn repair(&self, file: &Path) -> anyhow::Result<agent_doc_turn::repair::RepairOutcome> {
-        agent_doc_orchestration::repair::repair(file)
+        agent_doc_repair_command_io::repair(file)
     }
 
     fn repair_stale_preflight_started_cycle(
@@ -3796,7 +3796,7 @@ fn try_main() -> anyhow::Result<()> {
                         .map_err(|e| anyhow::anyhow!(e))?,
                 ),
             };
-            agent_doc_orchestration::repair::run_write_command_with_empty_response_recovery(
+            agent_doc_repair_command_io::run_write_command_with_empty_response_recovery(
                 agent_doc_write_command_io::CommandOptions {
                     file: args.file,
                     baseline_file: args.baseline_file,
@@ -3854,7 +3854,7 @@ fn try_main() -> anyhow::Result<()> {
                         .map_err(|e| anyhow::anyhow!(e))?,
                 ),
             };
-            agent_doc_orchestration::repair::run_write_command_with_empty_response_recovery(
+            agent_doc_repair_command_io::run_write_command_with_empty_response_recovery(
                 agent_doc_write_command_io::CommandOptions {
                     file: args.file,
                     baseline_file: args.baseline_file,
@@ -3969,7 +3969,7 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 return Ok(());
             }
-            let outcome = agent_doc_orchestration::repair::repair(&file)?;
+            let outcome = agent_doc_repair_command_io::repair(&file)?;
             if !outcome.repaired() {
                 eprintln!("[repair] No pending response found for {}", file.display());
             }

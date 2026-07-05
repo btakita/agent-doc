@@ -1050,11 +1050,11 @@ fn process_global_test_mutations_share_session_check_lock() {
         "test_support must route env and cwd test guards through a reentrant shared process-global lock"
     );
 
-    // session_check was decomposed into focused IO modules and the remaining
-    // orchestration-bound coverage now lives as an integration test. The helpers
+    // session_check was decomposed into focused IO modules and the broad boundary
+    // coverage now lives with the focused session-check IO crate. The helpers
     // shadow core fn names like `inspect`, so they stay together in that test.
     let session_check_tests =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/session_check.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/tests/session_check.rs"))
             .unwrap();
     assert!(
         session_check_tests.contains("fn inspect(file: &std::path::Path)")
@@ -3966,7 +3966,7 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "queue-io continuation host should inject snapshot/controller-projection recycle effects into the focused detector"
     );
     for relative in [
-        "agent-doc-orchestration/tests/session_check.rs",
+        "agent-doc-session-check-io/tests/session_check.rs",
         "agent-doc-route-io/src/authoritative_actor.rs",
         "agent-doc-start-runtime-io/src/idle_watch.rs",
         "agent-doc-preflight-io/src/lib.rs",
@@ -11051,6 +11051,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the remaining orchestration-bound session-check tests into `agent-doc-session-check-io`",
         ),
         (
+            "Session-check integration suite relocation",
+            "agent-doc-orchestration/tests/session_check.rs",
+            "agent-doc-session-check-io/tests/session_check.rs",
+            "Split the broad session-check effects fixtures into smaller owner-crate suites",
+        ),
+        (
             "Flow closeout effects facade demotion",
             "agent-doc-orchestration/src/flow/mod.rs",
             "agent-doc-flow-io",
@@ -11640,8 +11646,14 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             .exists(),
         "orchestration must not keep the moved session_check source module"
     );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/tests/session_check.rs")
+            .exists(),
+        "orchestration must not keep the moved session_check integration suite"
+    );
     let session_check =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/session_check.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/tests/session_check.rs"))
             .unwrap();
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();

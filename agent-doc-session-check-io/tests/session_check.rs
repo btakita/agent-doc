@@ -1,11 +1,10 @@
 //! # Module: session_check
 //!
-//! Test-only session-check boundary shim.
+//! Session-check IO boundary coverage.
 //!
 //! Production inspection/closeout logic lives in `agent-doc-session-check-io`.
-//! Orchestration supplies the remaining effects through
-//! [`agent_doc_closeout_runtime_io::session_check_effects`]; this module keeps historical orchestration
-//! boundary tests available without compiling a production facade.
+//! The remaining broad runtime effects are supplied through
+//! [`agent_doc_closeout_runtime_io::session_check_effects`] until those ports are split.
 
 use anyhow::Result;
 use std::path::Path;

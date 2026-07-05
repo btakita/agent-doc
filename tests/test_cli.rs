@@ -11104,6 +11104,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split the remaining write-command replay bridge after `CommandOptions`/`CommitMode` leave `write.rs`",
         ),
         (
+            "Route document-prep write-authority edge removal",
+            "agent-doc-orchestration/src/route.rs",
+            "agent-doc-document-realtime-io::{atomic_write_through_authority,RUNTIME_WRITE_CONVERGENCE_EFFECTS}",
+            "Split direct route repair closeout from document-prep writes",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

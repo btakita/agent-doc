@@ -264,7 +264,7 @@ fn route_write_document(
     reason: &str,
 ) -> Result<()> {
     if agent_doc_route_io::invocation::force_disk_route_writes() {
-        crate::write::atomic_write_pub(file, next_content)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, next_content)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -278,7 +278,7 @@ fn route_write_document(
         Ok(())
     } else {
         agent_doc_write_converge_io::converge_document_or_disk(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             next_content,
             previous_content,

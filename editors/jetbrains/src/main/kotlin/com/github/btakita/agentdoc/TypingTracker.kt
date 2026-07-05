@@ -356,6 +356,13 @@ object TypingTracker : DocumentListener {
                 reportLiveBufferContentV2OrV1(lib, filePath, text, requireAuthority)
             }
             if (!reported) return false
+            val replicaReady = CrdtReplicaManager.ensureReplicaForOpenDocument(
+                filePath = filePath,
+                document = document,
+                editorText = text,
+                await = requireAuthority,
+            )
+            if (requireAuthority && !replicaReady) return false
             LOG.debug("[native] document_changed content reported: $filePath")
             if (drainEditorOps) {
                 val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))

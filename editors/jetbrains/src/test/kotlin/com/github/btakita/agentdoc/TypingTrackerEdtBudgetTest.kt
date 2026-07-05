@@ -148,6 +148,8 @@ class TypingTrackerEdtBudgetTest {
             "authority refresh must require the v2 capability-bearing ABI and keep legacy fallback only for non-authority reports",
             reporterBody.contains("agent_doc_document_changed_digest_content_for_editor_v2") &&
                 reporterBody.contains("if (requireAuthority) false else") &&
+                reporterBody.contains("CrdtReplicaManager.ensureReplicaForOpenDocument") &&
+                reporterBody.contains("await = requireAuthority") &&
                 reporterBody.contains("if (drainEditorOps)"),
         )
     }
@@ -206,6 +208,12 @@ class TypingTrackerEdtBudgetTest {
         assertFalse(
             "CRDT documentChanged must not call the replica/socket forwarder on the UI thread",
             listenerBody.contains("forwardLocalDelta("),
+        )
+        assertTrue(
+            "publish/open document repair must attach the CRDT replica through the worker",
+            source.contains("fun ensureOpenDocumentReplica(") &&
+                source.contains("executor.submit<Boolean>") &&
+                source.contains("forwarderFor(filePath, text)"),
         )
     }
 }

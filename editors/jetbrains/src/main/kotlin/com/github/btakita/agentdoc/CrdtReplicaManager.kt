@@ -100,6 +100,36 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
     }
 
+    fun ensureOpenDocumentReplica(
+        filePath: String,
+        document: Document,
+        editorText: String? = null,
+        await: Boolean = false,
+    ): Boolean {
+        val attach = {
+            try {
+                val text = editorText ?: ApplicationManager.getApplication().runReadAction<String> { document.text }
+                shadows[filePath] = text
+                forwarderFor(filePath, text) != null
+            } catch (e: Exception) {
+                log.debug("[crdt-replica] open-document attach skipped for $filePath: ${e.message}")
+                false
+            }
+        }
+        if (await) {
+            val future = executor.submit<Boolean> { attach() }
+            return try {
+                future.get(150, TimeUnit.MILLISECONDS)
+            } catch (e: Exception) {
+                future.cancel(false)
+                log.debug("[crdt-replica] open-document attach timed out for $filePath: ${e.message}")
+                false
+            }
+        }
+        executor.execute { attach() }
+        return true
+    }
+
     private fun forwardLocalDeltaFromShadow(
         filePath: String,
         document: Document,
@@ -249,7 +279,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     private fun forwarderFor(filePath: String, initialEditorText: String? = null): CrdtReplicaForwarder? {
-        forwarders[filePath]?.let { return it }
+        forwarders[filePath]?.let {
+            if (initialEditorText != null) {
+                it.ensureEditorText(initialEditorText)
+            }
+            return it
+        }
         val root = resolveProjectRoot(filePath) ?: return null
         val identity = "${EditorIdentity.id}:$filePath"
         val forwarder = CrdtReplicaForwarder(
@@ -330,8 +365,29 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             instances.remove(project)?.dispose()
         }
 
+        fun ensureReplicaForOpenDocument(
+            filePath: String,
+            document: Document,
+            editorText: String? = null,
+            await: Boolean = false,
+        ): Boolean {
+            val manager = instances.values.firstOrNull { it.ownsFilePath(filePath) }
+                ?: instances.values.firstOrNull()
+                ?: return false
+            return manager.ensureOpenDocumentReplica(filePath, document, editorText, await)
+        }
+
         fun isApplyingRemote(filePath: String): Boolean =
             instances.values.any { it.applyingRemote.contains(filePath) }
+    }
+
+    private fun ownsFilePath(filePath: String): Boolean {
+        val base = project.basePath ?: return false
+        return try {
+            File(filePath).absoluteFile.toPath().startsWith(File(base).absoluteFile.toPath())
+        } catch (_: Exception) {
+            false
+        }
     }
 }
 

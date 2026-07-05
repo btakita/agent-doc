@@ -390,7 +390,7 @@ fn consume_recovered_queue_head(
         file,
         queue_completion_ids,
         force_disk_without_listener,
-        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
     )
 }
 
@@ -513,7 +513,8 @@ fn try_recover_repeated_queue_head_response(
         });
     }
 
-    match crate::write::complete_required_closeout(file) {
+    match agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
+    {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
         }
@@ -1008,7 +1009,8 @@ fn attempt_stop_closeout(
         return Ok(StopCloseAttempt::StillOpen { note });
     }
 
-    match crate::write::complete_required_closeout(file) {
+    match agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
+    {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
         }

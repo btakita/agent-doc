@@ -11110,6 +11110,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split direct route repair closeout from document-prep writes",
         ),
         (
+            "Codex hook write-authority edge removal",
+            "agent-doc-orchestration/src/codex_hook.rs",
+            "agent-doc-document-realtime-io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS",
+            "Split repeated-queue recovery note formatting from closeout side effects",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

@@ -23376,7 +23376,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "FFI listener should call focused IPC IO directly while injecting the ops-log sink"
     );
     for relative in [
-        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-preflight-runtime-io/src/lib.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
         "agent-doc-write-ipc-io/src/transport.rs",

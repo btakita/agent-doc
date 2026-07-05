@@ -3423,6 +3423,9 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "pub fn run_with_queue_completion_ids<",
         "pub fn repair<",
         "pub trait RepairIoEffects",
+        "pub trait RepairStrictReplayWriteEffects",
+        "pub trait RepairFallbackWriteEffects",
+        "pub trait RepairRecoveredQueueHeadEffects",
         "pub trait RepairReplayWriteEffects",
         "fn apply_closeout_recovery_mutation(",
         "struct BlockedRepairPayloadRecord",
@@ -3522,9 +3525,9 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
             && repair_io.contains("pub fn run_with_queue_completion_ids<")
             && codex_hook.contains("agent_doc_repair_io::run_with_queue_completion_ids(")
             && repair.contains("agent_doc_repair_runtime_io::repair_coordinator_effects(")
-            && repair.contains("agent_doc_repair_io::run(")
-            && repair.contains("agent_doc_repair_io::repair("),
-        "repair callers should adapt into the focused repair IO coordinator"
+            && repair.contains("agent_doc_repair_io::repair(")
+            && !repair.contains("pub fn run(file: &Path)"),
+        "repair callers should adapt into the focused repair IO coordinator without a public orchestration run facade"
     );
     let closeout_runtime =
         fs::read_to_string(manifest_dir.join("agent-doc-closeout-runtime-io/src/lib.rs")).unwrap();
@@ -11184,7 +11187,13 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Repair orphaned response replay/writeback IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
-            "Split `RepairReplayWriteEffects` into strict-write replay, non-git template/append write, and queue-head cleanup ports",
+            "The replay callback port is split",
+        ),
+        (
+            "Repair orphaned response replay/writeback port split",
+            "agent-doc-repair-io/src/lib.rs::RepairReplayWriteEffects",
+            "agent-doc-repair-io::{RepairStrictReplayWriteEffects,RepairFallbackWriteEffects,RepairRecoveredQueueHeadEffects}",
+            "Move the write command DTO/runtime into a focused write command crate",
         ),
         (
             "Repair template normalization IO graph",
@@ -11359,6 +11368,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/{lib.rs,preflight.rs,preflight/run.rs,codex_hook.rs,route.rs}",
             "agent-doc-repair-io::{run,run_with_queue_completion_ids,repair}",
             "Move the remaining `OrchestrationRepairReplayWriteEffects` write-replay adapter after `write.rs` exits orchestration",
+        ),
+        (
+            "Repair run facade deletion",
+            "agent-doc-orchestration/src/repair.rs::run",
+            "agent-doc-repair-io::run",
+            "Move or delete the remaining public `repair`",
         ),
         (
             "Template response prompt-order repair IO graph",

@@ -41,7 +41,7 @@ pub trait RepairIoEffects {
     ) -> Result<()>;
 }
 
-pub trait RepairReplayWriteEffects {
+pub trait RepairStrictReplayWriteEffects {
     fn run_strict_write_replay(
         &self,
         file: &Path,
@@ -51,7 +51,9 @@ pub trait RepairReplayWriteEffects {
         force_disk: bool,
         queue_completion_ids: &[String],
     ) -> Result<()>;
+}
 
+pub trait RepairFallbackWriteEffects {
     fn apply_template_from_string(
         &self,
         file: &Path,
@@ -60,8 +62,22 @@ pub trait RepairReplayWriteEffects {
     ) -> Result<()>;
 
     fn apply_append_from_string(&self, file: &Path, response: &str) -> Result<()>;
+}
 
+pub trait RepairRecoveredQueueHeadEffects {
     fn strike_recovered_free_text_queue_head(&self, file: &Path) -> Result<()>;
+}
+
+pub trait RepairReplayWriteEffects:
+    RepairStrictReplayWriteEffects + RepairFallbackWriteEffects + RepairRecoveredQueueHeadEffects
+{
+}
+
+impl<T> RepairReplayWriteEffects for T where
+    T: RepairStrictReplayWriteEffects
+        + RepairFallbackWriteEffects
+        + RepairRecoveredQueueHeadEffects
+{
 }
 
 pub trait RepairTemplateWriteEffects {

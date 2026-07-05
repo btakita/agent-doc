@@ -70,7 +70,7 @@ pub(crate) struct OrchestrationRepairReplayWriteEffects;
 pub(crate) static REPAIR_REPLAY_WRITE_EFFECTS: OrchestrationRepairReplayWriteEffects =
     OrchestrationRepairReplayWriteEffects;
 
-impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplayWriteEffects {
+impl agent_doc_repair_io::RepairStrictReplayWriteEffects for OrchestrationRepairReplayWriteEffects {
     fn run_strict_write_replay(
         &self,
         file: &Path,
@@ -97,7 +97,9 @@ impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplay
             response.to_string(),
         )
     }
+}
 
+impl agent_doc_repair_io::RepairFallbackWriteEffects for OrchestrationRepairReplayWriteEffects {
     fn apply_template_from_string(
         &self,
         file: &Path,
@@ -114,7 +116,11 @@ impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplay
     fn apply_append_from_string(&self, file: &Path, response: &str) -> Result<()> {
         crate::write::apply_append_from_string(file, response)
     }
+}
 
+impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects
+    for OrchestrationRepairReplayWriteEffects
+{
     fn strike_recovered_free_text_queue_head(&self, file: &Path) -> Result<()> {
         match agent_doc_queue_io::queue_consume::consume_queue_prompt_force_disk(
             file,
@@ -159,8 +165,8 @@ pub(crate) fn recover_empty_response_for_strict_closeout(
     )
 }
 
-/// Check for a pending response and apply it if found.
-pub fn run(file: &Path) -> Result<RepairOutcome> {
+#[cfg(test)]
+fn run(file: &Path) -> Result<RepairOutcome> {
     agent_doc_repair_io::run(
         agent_doc_repair_runtime_io::repair_coordinator_effects(&REPAIR_REPLAY_WRITE_EFFECTS),
         file,

@@ -82,6 +82,7 @@ agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.6
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.67" }
 agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.67" }
+agent-doc-repair-runtime-io = { path = "../agent-doc-repair-runtime-io", version = "0.34.67" }
 agent-doc-response-replay-io = { path = "../agent-doc-response-replay-io", version = "0.34.67" }
 agent-doc-response-toc-io = { path = "../agent-doc-response-toc-io", version = "0.34.67" }
 agent-doc-route-io = { path = "../agent-doc-route-io", version = "0.34.67" }

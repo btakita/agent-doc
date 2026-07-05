@@ -4958,7 +4958,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, visible, agent_doc_ops_log_io::log_op).unwrap();
 
         assert!(
-            crate::repair::recover_missing_committed_head_response(&doc).unwrap(),
+            agent_doc_repair_runtime_io::recover_missing_committed_head_response(&doc).unwrap(),
             "missing committed response should be recovered"
         );
 

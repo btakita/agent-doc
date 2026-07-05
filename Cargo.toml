@@ -62,6 +62,7 @@ members = [
     "agent-doc-prompt-io",
     "agent-doc-prompt-lines",
     "agent-doc-repair-io",
+    "agent-doc-repair-runtime-io",
     "agent-doc-response-toc",
     "agent-doc-response-toc-io",
     "agent-doc-response-replay-io",

@@ -1148,6 +1148,7 @@ dependencies = [
  "agent-doc-queue",
  "agent-doc-queue-io",
  "agent-doc-repair-io",
+ "agent-doc-repair-runtime-io",
  "agent-doc-response-replay-io",
  "agent-doc-response-toc-io",
  "agent-doc-route-io",
@@ -1521,6 +1522,20 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-repair-runtime-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-commit-io",
+ "agent-doc-document",
+ "agent-doc-document-realtime-io",
+ "agent-doc-git-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-turn",
+ "anyhow",
 ]
 
 [[package]]

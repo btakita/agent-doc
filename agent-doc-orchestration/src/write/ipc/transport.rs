@@ -3244,7 +3244,7 @@ Implemented.
         agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let head_before = head_count(root);
-        let recovered = crate::repair::recover_dedupe_only_drift(&doc)
+        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc)
             .expect("dedupe-only drift recovery should succeed");
         assert!(
             recovered,
@@ -3297,7 +3297,7 @@ Implemented.
         let doc = root.join("session.md");
         agent_doc_snapshot_io::save(&doc, clean, agent_doc_ops_log_io::log_op).unwrap();
 
-        let recovered = crate::repair::recover_dedupe_only_drift(&doc).unwrap();
+        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc).unwrap();
         assert!(
             !recovered,
             "no drift between file and HEAD should not trigger dedupe-only recovery"
@@ -3332,7 +3332,7 @@ Implemented.
         fs::write(&doc, &user_edit).unwrap();
         agent_doc_snapshot_io::save(&doc, &user_edit, agent_doc_ops_log_io::log_op).unwrap();
 
-        let recovered = crate::repair::recover_dedupe_only_drift(&doc).unwrap();
+        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc).unwrap();
         assert!(
             !recovered,
             "arbitrary working-tree drift must not be auto-committed as a dedupe recovery"

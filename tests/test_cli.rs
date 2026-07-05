@@ -11134,6 +11134,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move `OrchestrationRepairReplayWriteEffects` into a focused repair/write runtime adapter",
         ),
         (
+            "Repair runtime recovery callback IO graph",
+            "agent-doc-orchestration/src/repair.rs",
+            "agent-doc-repair-runtime-io/src/lib.rs",
+            "move the remaining strict empty-response bridge after write command DTO extraction",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

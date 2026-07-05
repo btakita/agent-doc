@@ -33,7 +33,3 @@
 //! `agent-doc-turn-executor-tmux`. This crate remains a transitional adapter
 //! for harness, git, editor, and remaining command ports while those ports are
 //! split into narrower crates.
-
-// The orchestration cluster + sessions/supervisor + neighbors (increment 6).
-#[cfg(test)]
-mod repair;

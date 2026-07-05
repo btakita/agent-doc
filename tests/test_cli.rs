@@ -1166,7 +1166,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-preflight-command-io/src/lib.rs",
         "agent-doc-preflight-command-io/src/run.rs",
         "agent-doc-preflight-io/src/lib.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-command-io/tests/repair.rs",
         "agent-doc-orchestration/tests/route.rs",
         "agent-doc-route-io/src/dispatch_only.rs",
         "agent-doc-route-io/src/dispatch_only/proof.rs",
@@ -1336,8 +1336,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // visible-write guard effect port, its production call, and the test
         // adapter.
         ("agent-doc-preflight-io/src/lib.rs", "guard_") => 3,
-        ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
-        ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
+        ("agent-doc-repair-command-io/tests/repair.rs", "guard_") => 10,
+        ("agent-doc-repair-command-io/tests/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/tests/route.rs", "accepted_only") => 2,
         ("agent-doc-orchestration/tests/route.rs", "flow_reason=") => 2,
         // +5 for the audited `#snrun` blocked-in-interactive-substate guard:
@@ -3462,7 +3462,8 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     }
 
     let repair =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/tests/repair.rs"))
+            .unwrap();
     let commit_io =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -3554,7 +3555,8 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
 fn test_repair_io_owns_strict_empty_response_recovery() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let repair =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/tests/repair.rs"))
+            .unwrap();
     let repair_command =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/src/lib.rs")).unwrap();
     let repair_io =
@@ -5202,7 +5204,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     );
     for relative in [
         "agent-doc-commit-io/src/lib.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-command-io/tests/repair.rs",
         "agent-doc-write-runtime-io/src/lib.rs",
         "agent-doc-write-runtime-io/src/ipc/transport.rs",
         "agent-doc-session-check-io/src/write_pending_checks.rs",
@@ -6054,7 +6056,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     let repair_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/tests/repair.rs"))
+            .unwrap();
     for forbidden in [
         "pub fn response_already_applied",
         "pub fn response_already_applied_after_prefix_strip",
@@ -7192,8 +7195,9 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
             "agent-doc-turn must own repair outcome vocabulary: {required}"
         );
     }
-    let orchestration_repair_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    let repair_integration_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/tests/repair.rs"))
+            .unwrap();
     for forbidden in [
         "pub const AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR",
         "pub const RESPONSE_PATCHBACK_UNCOMMITTED_ERROR",
@@ -7204,8 +7208,8 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         "impl RepairOutcome",
     ] {
         assert!(
-            !orchestration_repair_source.contains(forbidden),
-            "orchestration repair must stay a file-backed adapter, not re-own outcome vocabulary: {forbidden}"
+            !repair_integration_source.contains(forbidden),
+            "repair integration tests must stay an adapter, not re-own outcome vocabulary: {forbidden}"
         );
     }
     for required in [
@@ -11484,6 +11488,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Relocate the repair integration tests out of `agent-doc-orchestration/src/repair.rs`",
         ),
         (
+            "Repair test-only source module deletion",
+            "agent-doc-orchestration/src/repair.rs",
+            "agent-doc-repair-command-io/tests/repair.rs",
+            "Split long-running repair fixtures between `agent-doc-repair-io`, `agent-doc-repair-runtime-io`, and `agent-doc-repair-command-io`",
+        ),
+        (
             "Preflight command runtime extraction",
             "agent-doc-orchestration/src/preflight.rs",
             "agent-doc-preflight-command-io/src/{lib.rs,run.rs}",
@@ -11652,7 +11662,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-codex-stop-io/src/lib.rs",
         "agent-doc-preflight-command-io/src/lib.rs",
         "agent-doc-preflight-command-io/src/run.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-command-io/tests/repair.rs",
         "agent-doc-orchestration/tests/route.rs",
         "agent-doc-write-runtime-io/src/lib.rs",
     ] {
@@ -11814,7 +11824,7 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
         "src/main.rs",
         "src/session_actor_cmd.rs",
         "agent-doc-orchestration/src/lib.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-command-io/tests/repair.rs",
         "agent-doc-orchestration/tests/route.rs",
         "agent-doc-write-runtime-io/src/lib.rs",
     ] {
@@ -21569,7 +21579,8 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
     }
 
     let repair =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/tests/repair.rs"))
+            .unwrap();
     let repair_io =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -23504,7 +23515,8 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "run IO should call focused project-root IO instead of owning stderr/queue/actor root discovery"
     );
     let repair_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/tests/repair.rs"))
+            .unwrap();
     assert!(
         !repair_source.contains("agent_doc_fs::find_project_root(")
             && repair_source.contains("agent_doc_project_root_io::project_root_containing("),
@@ -24677,7 +24689,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
         "agent-doc-write-runtime-io/src/lib.rs",
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-command-io/tests/repair.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -25022,7 +25034,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-document-realtime-io/src/lib.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-command-io/tests/repair.rs",
         "agent-doc-cycle-state-io/src/lib.rs",
         "agent-doc-start-runtime-io/src/idle_watch.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
@@ -25710,7 +25722,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-session-check-io/src/closeout_guards.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-command-io/tests/repair.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -28075,7 +28087,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
         "agent-doc-queue-io/src/queue_cmd.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-session-check-io/src/queue_head_provenance_guards.rs",
-        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-repair-command-io/tests/repair.rs",
         "agent-doc-preflight-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();

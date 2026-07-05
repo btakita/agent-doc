@@ -304,17 +304,14 @@ libc = "0.2"
 tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustls"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
-# Heavy deps removed from the CLI shell in #bz6s Wave 5 — now reached only
-# transitively through agent-doc-orchestration (acceptance criterion #2):
+# Heavy deps removed from the CLI shell in #bz6s Wave 5. Keep them out of the
+# root CLI dependency surface (acceptance criterion #2):
 # alacritty_terminal, fs2, hex, htmd, interprocess, portable-pty, regex,
 # rusqlite, serde_yaml, signal-hook, tagpath, yrs.
 
 [dev-dependencies]
 agent-doc-controller-io = { path = "agent-doc-controller-io", version = "0.34.67", features = ["test-support"] }
-# Keep orchestration's remaining test-only shortcuts available for the CLI
-# shell's own tests while controller shortcuts live in agent-doc-controller-io.
 agent-doc-element-queue = { path = "agent-doc-element-queue", version = "0.34.67" }
-agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.67", features = ["test-support"] }
 assert_cmd = "2"
 existence = "0.4"
 filetime = "0.2"

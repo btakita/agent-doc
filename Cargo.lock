@@ -1663,12 +1663,27 @@ dependencies = [
 name = "agent-doc-repair-command-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-capture-io",
+ "agent-doc-closeout-runtime-io",
+ "agent-doc-cycle-state-io",
+ "agent-doc-diff-io",
+ "agent-doc-document-realtime-io",
+ "agent-doc-element",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-root-io",
  "agent-doc-repair-io",
  "agent-doc-repair-runtime-io",
+ "agent-doc-session-check-io",
+ "agent-doc-snapshot-io",
  "agent-doc-turn",
+ "agent-doc-workflow",
  "agent-doc-write-command-io",
  "agent-doc-write-runtime-io",
  "anyhow",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

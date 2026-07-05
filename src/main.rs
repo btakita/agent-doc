@@ -3529,14 +3529,11 @@ fn try_main() -> anyhow::Result<()> {
             route_owned_reap_policy,
         } => match route_owned_reap_policy {
             agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto => {
-                agent_doc_orchestration::start::run(&file, force, route_owned)
+                agent_doc_start_runtime_io::run(&file, force, route_owned)
             }
-            policy => agent_doc_orchestration::start::run_with_reap_policy(
-                &file,
-                force,
-                route_owned,
-                policy,
-            ),
+            policy => {
+                agent_doc_start_runtime_io::run_with_reap_policy(&file, force, route_owned, policy)
+            }
         },
         Commands::Route {
             file,

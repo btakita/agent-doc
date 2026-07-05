@@ -984,7 +984,7 @@ fn live_tmux_tests_are_not_in_default_development_suite() {
         "agent-doc-orchestration/tests/route.rs",
         "src/session_actor_cmd.rs",
         "agent-doc-session-registry-io/src/registration.rs",
-        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
         "agent-doc-sync-io/src/sync.rs",
     ];
     let mut unignored = Vec::new();
@@ -2628,11 +2628,11 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent_doc_hooks_io::fire_doc_hooks(",
         ),
         (
-            "agent-doc-orchestration/src/start/supervisor_io.rs",
+            "agent-doc-start-runtime-io/src/supervisor_io.rs",
             "use agent_doc_hooks_io::fire_doc_hooks;",
         ),
         (
-            "agent-doc-orchestration/src/start.rs",
+            "agent-doc-start-runtime-io/src/lib.rs",
             "use agent_doc_hooks_io::fire_doc_hooks;",
         ),
     ] {
@@ -3967,7 +3967,7 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     for relative in [
         "agent-doc-orchestration/tests/session_check.rs",
         "agent-doc-route-io/src/authoritative_actor.rs",
-        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
         "agent-doc-preflight-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -6639,8 +6639,8 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
         "session actor command should read turn-active markers through the focused IO crate"
     );
     for relative_path in [
-        "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
@@ -6649,7 +6649,7 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
         );
     }
     let start_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     assert!(
         !start_source.contains("agent_doc_fs::find_project_root(")
             && start_source.contains("agent_doc_turn_status_io::read_turn_active_marker_for_file("),
@@ -7016,7 +7016,7 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
     let session_check_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     let idle_watch_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     assert!(
         session_check_source.contains(
@@ -7404,7 +7404,7 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
     for relative in [
         "agent-doc-ops-log-io/src/lib.rs",
         "agent-doc-session-accretion-io/src/lib.rs",
-        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
         "agent-doc-sync-io/src/sync.rs",
         "agent-doc-write-runtime-io/src/lib.rs",
     ] {
@@ -9339,15 +9339,15 @@ fn test_agent_doc_supervisor_recycle_uses_pcp_graph_for_inflight() {
     );
     for (relative, required) in [
         (
-            "agent-doc-orchestration/src/start/idle_watch.rs",
+            "agent-doc-start-runtime-io/src/idle_watch.rs",
             "agent_doc_controller_io::project_controller::supervisor_recycle_yield_requested_for_file",
         ),
         (
-            "agent-doc-orchestration/src/start/idle_watch.rs",
+            "agent-doc-start-runtime-io/src/idle_watch.rs",
             "agent_doc_controller_io::project_controller::clear_supervisor_recycle_yield_for_file",
         ),
         (
-            "agent-doc-orchestration/src/start/idle_watch.rs",
+            "agent-doc-start-runtime-io/src/idle_watch.rs",
             "agent_doc_controller_io::project_controller::supervisor_recycle_started_for_file",
         ),
         (
@@ -9476,7 +9476,7 @@ fn test_agent_doc_route_submit_uses_controller_projection_not_sidecar_markers() 
             "agent_doc_controller_io::project_controller::begin_route_submit_with_reason",
         ),
         (
-            "agent-doc-orchestration/src/start/idle_watch.rs",
+            "agent-doc-start-runtime-io/src/idle_watch.rs",
             "agent_doc_controller_io::project_controller::route_submit_in_flight_for_file",
         ),
         (
@@ -9578,7 +9578,7 @@ fn test_agent_doc_supervisor_owns_auto_trigger_policy() {
     }
 
     let start =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     assert!(
         start.contains("use agent_doc_supervisor::auto_trigger::{")
             && start.contains("auto_trigger_clear_cooldown_action")
@@ -9615,9 +9615,9 @@ fn test_agent_doc_queue_owns_idle_drain_policy() {
     }
 
     let start =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     let idle_watch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     for forbidden in [
         "fn idle_queue_head_slash_command(",
@@ -9683,8 +9683,8 @@ fn test_agent_doc_queue_owns_drain_owner_lease_policy() {
     for relative_path in [
         "src/main.rs",
         "src/sim_world.rs",
-        "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
@@ -9861,7 +9861,7 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
     }
 
     let idle_watch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     for forbidden in [
         "clear_settle_idle_ticks = clear_settle_idle_ticks.saturating_add",
@@ -11377,6 +11377,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move idle queue completion into a focused start runtime IO adapter",
         ),
         (
+            "Start command runtime extraction",
+            "agent-doc-orchestration/src/start.rs",
+            "agent-doc-start-runtime-io/src/{lib.rs,run.rs,idle_watch.rs,supervisor_io.rs}",
+            "Split `SupervisorShared`, idle-watch queue completion",
+        ),
+        (
             "Write IPC transport convergence effect-provider edge removal",
             "agent-doc-orchestration/src/write/ipc/transport.rs",
             "agent-doc-document-realtime-io::RUNTIME_WRITE_CONVERGENCE_EFFECTS",
@@ -12295,7 +12301,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "orchestration must not keep a convergence_playback facade module"
     );
     let orchestration_start_idle_watch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     assert!(
         orchestration_start_idle_watch
@@ -13365,9 +13371,9 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-sync-io/src/sync.rs",
         "agent-doc-session-check-io/src/guard_modes.rs",
         "agent-doc-supervisor-io/src/config.rs",
-        "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/start/run.rs",
-        "agent-doc-orchestration/src/start/supervisor_io.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
+        "agent-doc-start-runtime-io/src/run.rs",
+        "agent-doc-start-runtime-io/src/supervisor_io.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -13508,9 +13514,9 @@ fn test_global_config_has_no_orchestration_facade() {
         "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-harness/src/lib.rs",
         "agent-doc-orchestration/tests/direct_run.rs",
-        "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/start/run.rs",
-        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
+        "agent-doc-start-runtime-io/src/run.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
         "agent-doc-stream-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -17357,7 +17363,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     );
 
     let start =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "struct AutoTriggerMonitor",
         "enum AutoTriggerCooldownAction",
@@ -17743,7 +17749,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "project_controller should use focused binary launch resolution directly"
     );
     let start_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     assert!(
         start_source.contains("use agent_doc_turn_executor::binary::current_agent_doc_binary;")
             && !start_source.contains("project_controller::current_agent_doc_binary"),
@@ -18048,7 +18054,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let supervisor_io_detection =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/detection.rs")).unwrap();
     let orchestration_supervisor_io =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/supervisor_io.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/supervisor_io.rs"))
             .unwrap();
     let supervisor_pty =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/pty.rs")).unwrap();
@@ -18066,9 +18072,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/in_process.rs"))
             .unwrap();
     let orchestration_start =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     let orchestration_start_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/run.rs")).unwrap();
     let start_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
@@ -18372,7 +18378,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     for relative in [
         "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-orchestration/tests/route.rs",
-        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
         "agent-doc-sync-io/src/sync.rs",
         "src/queue_dispatch.rs",
         "src/session_actor_cmd.rs",
@@ -18478,7 +18484,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     for relative in [
         "agent-doc-sync-io/src/sync.rs",
-        "agent-doc-orchestration/src/start/run.rs",
+        "agent-doc-start-runtime-io/src/run.rs",
         "agent-doc-session-check-io/src/command.rs",
         "agent-doc-route-io/src/pane_resolution.rs",
     ] {
@@ -18584,7 +18590,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let start_idle_watch_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     let route_authoritative_actor =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_actor.rs"))
@@ -18681,9 +18687,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     let start_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     let start_run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/run.rs")).unwrap();
     let forbidden_snippet = "fn resolve_agent_args(";
     assert!(
         !start_source.contains(forbidden_snippet),
@@ -18882,10 +18888,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
 
     for relative in [
-        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
         "agent-doc-supervisor-process/src/in_process.rs",
-        "agent-doc-orchestration/src/start/idle_watch.rs",
-        "agent-doc-orchestration/src/start/run.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/run.rs",
         "agent-doc-harness/src/lib.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
     ] {
@@ -19007,7 +19013,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "direct-pane route IO should call focused supervisor recycle-resubmit policy directly"
     );
     let idle_watch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     assert!(
         idle_watch.contains("agent_doc_supervisor::selfkill::supervisor_self_kill_action"),
@@ -19046,7 +19052,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     for relative in [
         "src/main.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
-        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -19107,7 +19113,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "supervisor-io detection should adapt live buffers and call focused supervisor detection policy directly while start.rs keeps only the concrete state adapter"
     );
     let idle_watch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     assert!(
         idle_watch.contains("agent_doc_supervisor::{")
@@ -19120,7 +19126,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
 
     for relative in [
-        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
         "agent-doc-supervisor-process/src/in_process.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -19342,7 +19348,7 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
     );
 
     let start_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/run.rs")).unwrap();
     assert!(
         start_run.contains("agent_doc_supervisor_process::{") && start_run.contains("resize,"),
         "supervisor run loop should import resize from agent-doc-supervisor-process directly"
@@ -19534,7 +19540,7 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
     );
 
     let start_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/run.rs")).unwrap();
     assert!(
         start_run.contains("build_harness_launch_spec(")
             && start_run.contains("StartRunLaunchLog")
@@ -19569,9 +19575,9 @@ fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
         "agent-doc-supervisor-process should own PTY reader/stdin-forwarder thread loops behind callback traits"
     );
     let start_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     let start_supervisor_io =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/supervisor_io.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/supervisor_io.rs"))
             .unwrap();
     assert!(
         start_source.contains("output_state::SupervisorOutputState")
@@ -20018,7 +20024,7 @@ fn test_agent_doc_preflight_io_owns_debounce_wait_graph() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
     let idle_watch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     let preflight_debounce =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/debounce.rs")).unwrap();
@@ -22838,9 +22844,9 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/direct_pane_dispatch.rs"))
             .unwrap();
     let start_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     let idle_watch_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     let session_actor_source =
         fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
@@ -24187,10 +24193,10 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-route-io/src/startup.rs",
         "agent-doc-session-registry-io/src/registration.rs",
         "agent-doc-sync-io/src/sync/pane_repair.rs",
-        "agent-doc-orchestration/src/start/run.rs",
-        "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/start/idle_watch.rs",
-        "agent-doc-orchestration/src/start/supervisor_io.rs",
+        "agent-doc-start-runtime-io/src/run.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/supervisor_io.rs",
         "agent-doc-supervisor-io/src/ipc.rs",
         "agent-doc-supervisor-process/src/io_threads.rs",
         "agent-doc-supervisor-process/src/pty.rs",
@@ -24213,8 +24219,8 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-route-io/src/startup.rs",
         "agent-doc-sync-io/src/sync/pane_repair.rs",
-        "agent-doc-orchestration/src/start.rs",
-        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/lib.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
         "agent-doc-supervisor-io/src/ipc.rs",
         "agent-doc-supervisor-process/src/io_threads.rs",
         "agent-doc-supervisor-process/src/pty.rs",
@@ -25036,7 +25042,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-document-realtime-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-cycle-state-io/src/lib.rs",
-        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -27384,7 +27390,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "agent-doc-crdt-relay-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-repair-io/src/lib.rs",
-        "agent-doc-orchestration/src/start/supervisor_io.rs",
+        "agent-doc-start-runtime-io/src/supervisor_io.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -28955,7 +28961,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     let write_ipc_transport =
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/transport.rs")).unwrap();
     let idle_watch =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
     let flow_closeout =
         fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/closeout.rs")).unwrap();

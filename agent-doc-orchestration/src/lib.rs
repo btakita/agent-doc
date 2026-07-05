@@ -38,4 +38,3 @@
 pub mod preflight;
 #[cfg(test)]
 mod repair;
-pub mod start;

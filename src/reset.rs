@@ -65,7 +65,7 @@ pub fn run(
     fm.resume = None;
     let updated = frontmatter::write(&fm, body)?;
     if force_disk {
-        agent_doc_orchestration::write::atomic_write_pub(file, &updated)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

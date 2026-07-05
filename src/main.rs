@@ -275,7 +275,7 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
-        agent_doc_orchestration::write::atomic_write_pub(file, content)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
     fn try_editor_converge(
@@ -720,7 +720,7 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for CliBacklogCommandEf
     }
 
     fn record_document_write_provenance(&self, file: &Path, content: &str) {
-        agent_doc_orchestration::write::record_document_write_provenance(file, content);
+        agent_doc_document_realtime_io::record_document_write_provenance(file, content);
     }
 }
 
@@ -735,7 +735,7 @@ pub(crate) static CLI_QUEUE_CONSUME_WRITE_EFFECTS: CliQueueConsumeWriteEffects =
 
 impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for CliQueueConsumeWriteEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
-        agent_doc_orchestration::write::atomic_write_pub(file, content)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
     fn converge_document_or_disk(
@@ -773,7 +773,7 @@ impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
-        agent_doc_orchestration::write::atomic_write_pub(file, content)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
     fn try_ipc_stream_flush(

@@ -89,7 +89,7 @@ pub(crate) fn write_schedule(file: &Path, schedule: &AutoDagSchedule) -> Result<
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    agent_doc_orchestration::write::atomic_write_pub(
+    agent_doc_document_realtime_io::atomic_write_through_authority(
         &path,
         &serde_json::to_string_pretty(schedule).context("failed to serialize auto-DAG schedule")?,
     )?;

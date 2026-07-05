@@ -1560,8 +1560,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `guard_visible_write_idle(...)` calls were replaced by the shared
         // `converge_document_or_disk` gate, which routes the no-listener disk
         // fallback through the single `guard_visible_write_idle_and_current`
-        // guard inside `atomic_write_if_current_pub`. Fewer hot-path guard
-        // tokens, not more — the guard boundary is centralized, not added.
+        // guard inside the document realtime write authority. Fewer hot-path
+        // guard tokens, not more — the guard boundary is centralized, not added.
         // +1 (#ipcproofcloseout): `run_command` now invokes the existing stale
         // snapshot reset-drift guard before granular backlog/review/status
         // mutations, so a failed finalize cannot alter backlog state without the
@@ -11335,6 +11335,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/write.rs",
             "agent-doc-document-realtime-io::{RUNTIME_WRITE_CONVERGENCE_EFFECTS,RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS}",
             "Move remaining write command runtime sequencing into focused command IO crates",
+        ),
+        (
+            "Write public write-authority facade deletion",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-document-realtime-io::{atomic_write_through_authority,record_document_write_provenance}",
+            "Move remaining CLI document-write adapters to focused command IO crates",
         ),
         (
             "Repair runtime recovery callback IO graph",
@@ -28913,6 +28919,9 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         !write_source.contains("#[cfg(test)]\nmod converge;")
             && !write_source.contains("pub use converge::*;")
             && !write_source.contains("pub(crate) use converge::*;")
+            && !write_source.contains("pub fn atomic_write_pub(")
+            && !write_source.contains("pub fn atomic_write_if_current_pub(")
+            && !write_source.contains("pub fn record_document_write_provenance(")
             && !write_source.contains(
                 "RUNTIME_WRITE_CONVERGENCE_EFFECTS as WRITE_CONVERGENCE_EFFECTS"
             )

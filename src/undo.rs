@@ -15,7 +15,7 @@
 //! - `run()` is the sole public entry point.
 //! - The pre-response snapshot is single-use: calling `run()` twice reverts to
 //!   the same state as calling it once (no stacking of undos).
-//! - All writes go through `write::atomic_write_pub` to guarantee crash-safety.
+//! - All writes go through `agent_doc_document_realtime_io::atomic_write_through_authority` to guarantee crash-safety.
 //!
 //! ## Evals
 //! - undo_restores_pre_response: pre-response snapshot present → document reverted, snapshot deleted
@@ -24,8 +24,6 @@
 
 use anyhow::Result;
 use std::path::Path;
-
-use agent_doc_orchestration::write;
 
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
@@ -36,7 +34,7 @@ pub fn run(file: &Path) -> Result<()> {
     match pre_response {
         Some(content) => {
             // Restore the pre-response content
-            write::atomic_write_pub(file, &content)?;
+            agent_doc_document_realtime_io::atomic_write_through_authority(file, &content)?;
 
             // Update the main snapshot to match the restored state
             agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)?;

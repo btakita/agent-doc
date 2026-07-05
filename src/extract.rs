@@ -13,7 +13,7 @@
 //!   alias. When `bypass_claim` is false and the target is owned by a different tmux pane, transfer
 //!   is rejected with an error. Pass `bypass_claim=true` (CLI: `--bypass-claim`) for cross-pane
 //!   transfers.
-//! - Both operations write atomically via `write::atomic_write_pub` and persist a snapshot after
+//! - Both operations write atomically via `agent_doc_document_realtime_io::atomic_write_through_authority` and persist a snapshot after
 //!   each file mutation.
 //! - `split_last_entry` is private; it splits on the last `### Re:` header position.
 //!
@@ -39,7 +39,6 @@ use agent_doc_element::element::{self, is_backlog_component, is_icebox_component
 
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_frontmatter_io::security_review::enforce_cross_document_review;
-use agent_doc_orchestration::write;
 
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
 /// the target has no active session. Returns Err suggesting --bypass-claim
@@ -241,7 +240,7 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
 
     // Update source: replace exchange content with remaining
     let new_source = exchange.replace_content(&source_content, &remaining);
-    write::atomic_write_pub(source, &new_source)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(source, &new_source)?;
     agent_doc_snapshot_io::save(source, &new_source, agent_doc_ops_log_io::log_op)?;
 
     // Append extracted content to target's exchange component with source annotation
@@ -276,7 +275,7 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
         )
     };
 
-    write::atomic_write_pub(target, &new_target)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(target, &new_target)?;
     agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
     eprintln!(
@@ -426,7 +425,7 @@ pub fn transfer(
 
     // Clear source component
     let new_source = comp.replace_content(&source_content, "\n");
-    write::atomic_write_pub(source, &new_source)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(source, &new_source)?;
     agent_doc_snapshot_io::save(source, &new_source, agent_doc_ops_log_io::log_op)?;
 
     // Append to target component (or end of file) with source annotation
@@ -453,7 +452,7 @@ pub fn transfer(
         )
     };
 
-    write::atomic_write_pub(target, &new_target)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(target, &new_target)?;
     agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
     // Also transfer tracked list surfaces that belong with the moved context.
@@ -467,13 +466,19 @@ pub fn transfer(
             if let Some((new_source_surface, new_target_surface)) =
                 merge_list_component(surface, &latest_source, &latest_target)?
             {
-                write::atomic_write_pub(target, &new_target_surface)?;
+                agent_doc_document_realtime_io::atomic_write_through_authority(
+                    target,
+                    &new_target_surface,
+                )?;
                 agent_doc_snapshot_io::save(
                     target,
                     &new_target_surface,
                     agent_doc_ops_log_io::log_op,
                 )?;
-                write::atomic_write_pub(source, &new_source_surface)?;
+                agent_doc_document_realtime_io::atomic_write_through_authority(
+                    source,
+                    &new_source_surface,
+                )?;
                 agent_doc_snapshot_io::save(
                     source,
                     &new_source_surface,
@@ -567,7 +572,7 @@ fn transfer_pending_items(
         remaining_body
     };
     let new_source = source_pending.replace_content(&source_content, &new_pending_content);
-    write::atomic_write_pub(source, &new_source)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(source, &new_source)?;
     agent_doc_snapshot_io::save(source, &new_source, agent_doc_ops_log_io::log_op)?;
 
     // Append matched items to target component
@@ -586,7 +591,7 @@ fn transfer_pending_items(
         )
     };
 
-    write::atomic_write_pub(target, &new_target)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(target, &new_target)?;
     agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
     agent_doc_commit_io::commit(target)?;
@@ -700,7 +705,7 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
         format!("{}\n{}", target_content.trim_end(), referral_block)
     };
 
-    write::atomic_write_pub(target, &new_target)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(target, &new_target)?;
     agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
 
     agent_doc_commit_io::commit(target)?;

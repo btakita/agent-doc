@@ -1146,7 +1146,7 @@ fn active_cycle_in_scope(doc: &Path) -> Result<bool> {
 }
 
 fn write_and_close_active_cycle(doc: &Path, body: &str) -> Result<()> {
-    agent_doc_orchestration::write::atomic_write_pub(doc, body)
+    agent_doc_document_realtime_io::atomic_write_through_authority(doc, body)
         .with_context(|| format!("failed to write {}", doc.display()))?;
     let binary = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("agent-doc"));
     let output = Command::new(binary)

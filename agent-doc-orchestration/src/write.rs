@@ -110,9 +110,6 @@
 //!   trailing `## User` headings from append responses before this module adds
 //!   the canonical transcript headings.
 //!
-//! - `atomic_write_pub`: public thin wrapper around the internal `atomic_write`
-//!   (write to temp file + rename). Used by `compact` and other modules.
-//!
 //! ## Agentic Contracts
 //!
 //! - Snapshot invariant: the snapshot saved after every write normally contains
@@ -2009,42 +2006,8 @@ fn normalize_final_template_content(
     Ok(normalized)
 }
 
-/// Atomic write: write to temp file then rename. Public for use by compact.
-pub fn atomic_write_pub(path: &Path, content: &str) -> Result<()> {
-    agent_doc_document_realtime_io::atomic_write_through_authority(path, content)
-}
-
-/// Atomic write guarded by the same visible-buffer proof used by response writes.
-pub fn atomic_write_if_current_pub(
-    path: &Path,
-    content: &str,
-    expected_current: &str,
-    source: &str,
-) -> Result<()> {
-    agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
-        path,
-        content,
-        expected_current,
-        source,
-    )
-}
-
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
     agent_doc_document_realtime_io::atomic_write_through_authority(path, content)
-}
-
-/// Record write-provenance for agent-doc's own disk write to a session document
-/// (#pcp2 / #ipc-drift-writeprovenance). Skips `.agent-doc/` sidecar/snapshot
-/// writes — provenance is only meaningful for the editor-visible document. The
-/// path is canonicalized to match the lookup key used by the visible-write
-/// reconcile guard. Best-effort: never fails the write.
-///
-/// Shared by every agent-doc document-write path (the IPC/finalize `write.rs`
-/// `atomic_write` and the direct-run `run.rs` `atomic_write`) so a foreign-looking
-/// disk change from any agent-doc writer is positively attributed instead of
-/// inferred from the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic.
-pub fn record_document_write_provenance(path: &Path, content: &str) {
-    agent_doc_document_realtime_io::record_document_write_provenance(path, content);
 }
 
 #[cfg(test)]

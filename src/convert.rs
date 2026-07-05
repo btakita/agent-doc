@@ -47,7 +47,6 @@ use crate::{
     AgentDocMode,
     frontmatter::{self, AgentDocFormat, AgentDocWrite},
 };
-use agent_doc_orchestration::write;
 
 pub fn run(
     file: &Path,
@@ -110,7 +109,7 @@ pub fn run(
     } else {
         // Only write strategy changed — update frontmatter
         let updated = frontmatter::set_format_and_write(&content, target_format, target_write)?;
-        write::atomic_write_pub(file, &updated)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated)?;
         agent_doc_snapshot_io::save(file, &updated, agent_doc_ops_log_io::log_op)?;
         eprintln!(
             "Updated {} write strategy: {} → {}",
@@ -150,7 +149,7 @@ fn convert_to_template(
     let exchange_content = append_to_template_body(body);
     let new_doc = frontmatter::write(&fm, &exchange_content)?;
 
-    write::atomic_write_pub(file, &new_doc)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)?;
     agent_doc_snapshot_io::save(file, &new_doc, agent_doc_ops_log_io::log_op)?;
 
     eprintln!("Converted {} to template mode", file.display());
@@ -176,7 +175,7 @@ fn convert_to_append(
     let append_content = template_to_append_body(body);
     let new_doc = frontmatter::write(&fm, &append_content)?;
 
-    write::atomic_write_pub(file, &new_doc)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)?;
     agent_doc_snapshot_io::save(file, &new_doc, agent_doc_ops_log_io::log_op)?;
 
     eprintln!("Converted {} to append mode", file.display());

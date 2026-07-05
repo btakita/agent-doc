@@ -68,7 +68,6 @@ use crate::{
 };
 use agent_doc_agent_io::agent;
 use agent_doc_config::{AgentConfig, Config};
-use agent_doc_orchestration::write;
 use agent_doc_preflight_io::PreflightOutput;
 use agent_doc_prompt_context::AgentPromptContext;
 use agent_doc_queue::dispatch_item::{QueueItemKind, classify};
@@ -862,7 +861,7 @@ fn inject_prompt(file: &Path, task: &str) -> Result<()> {
     let updated =
         agent_doc_element_exchange::insert_prompt_line_before_boundary(&doc, &prompt_line)?;
     if updated != doc {
-        write::atomic_write_pub(file, &updated)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated)?;
     }
     Ok(())
 }
@@ -934,7 +933,7 @@ mod th {
             mode: ResolvedMode,
         ) -> Result<()> {
             self.finalize_calls.borrow_mut().push(response.to_string());
-            write::run_command_with_response(
+            agent_doc_orchestration::write::run_command_with_response(
                 agent_doc_write_command_io::CommandOptions {
                     file: file.to_path_buf(),
                     baseline_file: None,

@@ -837,10 +837,13 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-archive-io",
  "agent-doc-capture-io",
+ "agent-doc-closeout-runtime-io",
+ "agent-doc-controller",
  "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
+ "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-flow",
@@ -854,14 +857,18 @@ dependencies = [
  "agent-doc-preflight-io",
  "agent-doc-project-root-io",
  "agent-doc-run-context-io",
+ "agent-doc-session-check-io",
  "agent-doc-snapshot-io",
  "agent-doc-state-backbone",
+ "agent-doc-template",
  "agent-doc-turn",
+ "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-doc-workflow-io",
  "agent-doc-write-converge-io",
  "anyhow",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

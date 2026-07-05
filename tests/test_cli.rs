@@ -10389,8 +10389,9 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             );
         }
         assert!(
-            moved_from.contains("agent-doc-orchestration/src"),
-            "coarse extraction ledger row should name the orchestration source graph: {cells:?}"
+            moved_from.contains("agent-doc-orchestration/src")
+                || moved_from.contains("agent-doc-orchestration/tests"),
+            "coarse extraction ledger row should name the orchestration source/test graph: {cells:?}"
         );
         assert!(
             moved_to.contains("agent-doc-")
@@ -11060,6 +11061,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/flow/{mod.rs,closeout.rs}",
             "agent-doc-orchestration/tests/{flow_closeout.rs,flow_events.rs}",
             "Move the remaining orchestration-bound closeout effect fixtures into `agent-doc-flow-io` after the git/write/repair effects split",
+        ),
+        (
+            "Flow integration suite relocation",
+            "agent-doc-orchestration/tests/{flow_closeout.rs,flow_events.rs}",
+            "agent-doc-flow-io/tests/{flow_closeout.rs,flow_events.rs}",
+            "Split broad closeout fixtures between `agent-doc-flow-io` and smaller owner crates",
         ),
         (
             "Focus command host IO",
@@ -11802,8 +11809,7 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     );
 
     let closeout_tests =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/flow_closeout.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-flow-io/tests/flow_closeout.rs")).unwrap();
     assert!(
         !closeout_tests.contains("crate::")
             && closeout_tests.contains("agent_doc_flow_io::closeout::")
@@ -11812,8 +11818,7 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     );
 
     let flow_events =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/flow_events.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-flow-io/tests/flow_events.rs")).unwrap();
     assert!(
         flow_events.contains("agent_doc_flow::types")
             && !flow_events.contains("agent_doc_orchestration::flow"),

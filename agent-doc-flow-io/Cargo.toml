@@ -37,3 +37,12 @@ agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.34.67"
 agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.67" }
 anyhow = "1"
 serde_json = "1"
+
+[dev-dependencies]
+agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.34.67" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.67" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
+agent-doc-work-graph = { path = "../agent-doc-work-graph", version = "0.34.67" }
+tempfile = "3"

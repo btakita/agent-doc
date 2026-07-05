@@ -188,7 +188,7 @@ mod visible_write_content_snapshot_tests {
                     source_patch_id,
                     &mut |file, repaired_content, expected_bad_state| {
                         agent_doc_write_converge_io::try_ipc_full_content_response_fallback_from_source(
-                            &super::WRITE_CONVERGENCE_EFFECTS,
+                            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
                             file,
                             repaired_content,
                             expected_bad_state,
@@ -2057,7 +2057,7 @@ Stale response that the operator cleared.
             None,
             &mut |file, repaired_content, expected_bad_state| {
                 agent_doc_write_converge_io::try_ipc_full_content_response_fallback_from_source(
-                    &super::WRITE_CONVERGENCE_EFFECTS,
+                    &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
                     file,
                     repaired_content,
                     expected_bad_state,
@@ -3348,7 +3348,7 @@ mod core_tests {
         );
 
         let written = agent_doc_write_converge_io::try_editor_converge(
-            &super::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
             &target,
             &source,
@@ -3439,7 +3439,7 @@ mod core_tests {
         });
 
         let converged = agent_doc_write_converge_io::try_editor_converge(
-            &super::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
             &target,
             &source,

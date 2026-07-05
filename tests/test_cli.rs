@@ -5979,9 +5979,13 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         cli_dedupe_source.contains("agent_doc_response_replay_io::run(&EFFECTS, file)")
             && cli_dedupe_source.contains("agent_doc_write_converge_io::converge_or_disk_write")
             && cli_dedupe_source
-                .contains("agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS")
+                .contains("agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS")
             && cli_dedupe_source.contains("agent_doc_snapshot_io::save("),
         "CLI dedupe adapter should only inject writer and snapshot effects"
+    );
+    assert!(
+        !cli_dedupe_source.contains("agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS"),
+        "CLI dedupe adapter must not route convergence effects through the orchestration write facade"
     );
     assert!(
         !manifest_dir
@@ -11325,6 +11329,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/lib.rs",
             "agent-doc-document-realtime-io::{RUNTIME_WRITE_CONVERGENCE_EFFECTS,RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,atomic_write_through_authority,record_document_write_provenance}",
             "Move the remaining repair write-replay adapter after `write.rs` exits orchestration",
+        ),
+        (
+            "Write runtime effect facade deletion",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-document-realtime-io::{RUNTIME_WRITE_CONVERGENCE_EFFECTS,RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS}",
+            "Move remaining write command runtime sequencing into focused command IO crates",
         ),
         (
             "Repair runtime recovery callback IO graph",
@@ -23827,10 +23837,13 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             .unwrap();
     assert!(
         main_source.contains("agent_doc_write_ipc_io::try_ipc_with_effects(")
-            && main_source.contains("&agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS")
+            && main_source
+                .contains("&agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS")
             && !main_source.contains("agent_doc_orchestration::write::try_ipc(")
             && write_run_entry_source.contains("agent_doc_write_ipc_io::try_ipc_with_effects(")
-            && write_run_entry_source.contains("&WRITE_CONVERGENCE_EFFECTS"),
+            && write_run_entry_source
+                .contains("&agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS")
+            && !write_run_entry_source.contains("&WRITE_CONVERGENCE_EFFECTS"),
         "production write IPC callers should call the focused transport crate directly"
     );
     assert!(
@@ -28900,7 +28913,20 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         !write_source.contains("#[cfg(test)]\nmod converge;")
             && !write_source.contains("pub use converge::*;")
             && !write_source.contains("pub(crate) use converge::*;")
-            && write_source.contains("WRITE_CONVERGENCE_EFFECTS")
+            && !write_source.contains(
+                "RUNTIME_WRITE_CONVERGENCE_EFFECTS as WRITE_CONVERGENCE_EFFECTS"
+            )
+            && !write_source.contains(
+                "RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS as QUEUE_CONSUME_WRITEBACK_EFFECTS"
+            )
+            && !write_source.contains("RuntimeWriteConvergenceEffects as WriteConvergenceEffects")
+            && !write_source.contains(
+                "RuntimeQueueConsumeWritebackEffects as QueueConsumeWritebackEffects"
+            )
+            && write_source
+                .contains("agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS")
+            && write_source
+                .contains("agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS")
             && realtime_io.contains("pub static RUNTIME_WRITE_CONVERGENCE_EFFECTS")
             && realtime_io.contains(
                 "impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConvergenceEffects",

@@ -515,7 +515,7 @@ pub fn run_template(
     // if editor convergence is unavailable or unproven, fail closed instead of
     // writing the merged document straight to disk.
     agent_doc_write_converge_io::try_editor_converge(
-        &super::WRITE_CONVERGENCE_EFFECTS,
+        &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
         file,
         &final_content,
         &content_current,
@@ -859,7 +859,7 @@ pub fn run_stream(
                 Some(normalize_prefix_lines.as_slice())
             };
             let ipc_result = agent_doc_write_ipc_io::try_ipc_with_effects(
-                &WRITE_CONVERGENCE_EFFECTS,
+                &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
                 file,
                 &patches,
                 &unmatched,
@@ -2130,7 +2130,7 @@ pub fn apply_template_from_string_with_options(
         // the editor path; if editor convergence is unavailable or unproven,
         // fail closed instead of writing the repaired document straight to disk.
         agent_doc_write_converge_io::try_editor_converge(
-            &super::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             &final_content,
             &content_current,

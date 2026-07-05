@@ -706,23 +706,16 @@ fn consume_queue_prompts_for_done_ids_closeout(
             file,
             done_ids,
             true,
-            &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
         )
     } else {
         queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
             file,
             done_ids,
-            &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
         )
     }
 }
-
-pub use agent_doc_document_realtime_io::{
-    RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS as QUEUE_CONSUME_WRITEBACK_EFFECTS,
-    RUNTIME_WRITE_CONVERGENCE_EFFECTS as WRITE_CONVERGENCE_EFFECTS,
-    RuntimeQueueConsumeWritebackEffects as QueueConsumeWritebackEffects,
-    RuntimeWriteConvergenceEffects as WriteConvergenceEffects,
-};
 
 fn set_status_with_options(file: &Path, text: &str, force_disk: bool) -> Result<()> {
     agent_doc_status_io::set_with_runtime_options(file, text, force_disk)
@@ -1414,7 +1407,7 @@ fn run_command_inner(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
-                        &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
                     ) {
                         eprintln!("[queue] warning: done-id marking failed: {}", e);
                     }
@@ -1423,7 +1416,7 @@ fn run_command_inner(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
-                        &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
                     ) {
                         Ok(0) => {
                             eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?)
@@ -1444,14 +1437,14 @@ fn run_command_inner(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
-                        &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
                     )?;
                 } else {
                     let marked = queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
-                        &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
                     )?;
                     if marked == 0 {
                         eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?);
@@ -1474,7 +1467,7 @@ fn run_command_inner(
                 file,
                 &response_body,
                 options.force_disk,
-                &QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
             ) {
                 Ok(0) => {}
                 Ok(n) => eprintln!("[queue] struck {n} answered free-text head(s) (#ftstrike)"),
@@ -3903,7 +3896,7 @@ mod tests {
         fs::write(&doc, "content").unwrap();
 
         let result = agent_doc_write_converge_io::try_ipc_full_content(
-            &WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
             "new content",
         )

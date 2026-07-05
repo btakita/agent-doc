@@ -286,7 +286,7 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
         reason: &str,
     ) -> anyhow::Result<bool> {
         agent_doc_write_converge_io::try_editor_converge(
-            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             target_content,
             source_content,
@@ -711,7 +711,7 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for CliBacklogCommandEf
         reason: &str,
     ) -> anyhow::Result<()> {
         agent_doc_write_converge_io::converge_or_disk_write(
-            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             current_content,
             target_content,
@@ -746,7 +746,7 @@ impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for CliQueueCon
         reason: &str,
     ) -> anyhow::Result<()> {
         agent_doc_write_converge_io::converge_document_or_disk(
-            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             target_content,
             source_content,
@@ -783,7 +783,7 @@ impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
         unmatched: &str,
     ) -> anyhow::Result<bool> {
         agent_doc_write_ipc_io::try_ipc_with_effects(
-            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             patches,
             unmatched,

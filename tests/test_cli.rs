@@ -3623,6 +3623,24 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
         !write_run_entry.contains("crate::repair::"),
         "write/run_entry.rs must not call repair; empty-response recovery belongs at the repair-owned command boundary"
     );
+    assert!(
+        write.contains("pub(crate) use run_entry::*;") && !write.contains("pub use run_entry::*;"),
+        "write.rs should keep run_entry helpers crate-visible instead of re-exporting them publicly"
+    );
+    for forbidden in [
+        "pub fn run(",
+        "pub fn run_template(",
+        "pub fn run_stream(",
+        "pub fn run_ipc(",
+        "pub fn apply_append_from_string(",
+        "pub fn apply_template_from_string(",
+        "pub fn apply_template_from_string_with_options(",
+    ] {
+        assert!(
+            !write_run_entry.contains(forbidden),
+            "write/run_entry.rs must not expose public orchestration write facades: {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -11367,6 +11385,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Write run_command facade demotion",
             "agent-doc-orchestration/src/write.rs::run_command",
             "agent-doc-orchestration/src/repair.rs::run_write_command_with_empty_response_recovery",
+            "Move write command runtime sequencing into focused command IO",
+        ),
+        (
+            "Write run_entry public facade demotion",
+            "`pub use run_entry::*` plus public",
+            "crate-visible helpers behind",
             "Move write command runtime sequencing into focused command IO",
         ),
         (

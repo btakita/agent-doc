@@ -1870,7 +1870,7 @@ fn verify_pane_ownership(file: &Path) -> Result<()> {
 }
 
 mod run_entry;
-pub use run_entry::*;
+pub(crate) use run_entry::*;
 
 #[cfg(test)]
 mod ipc;

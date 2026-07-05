@@ -47,7 +47,7 @@ fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Resu
 ///
 /// `baseline` is the document content at the time the response was generated.
 /// If omitted, the current document content is used (no merge needed).
-pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
+pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -228,7 +228,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
 /// Run the template write command: parse patch blocks and apply to components.
 ///
 /// `baseline` is the document content at the time the response was generated.
-pub fn run_template(
+pub(crate) fn run_template(
     file: &Path,
     baseline: Option<&str>,
     origin: Option<&str>,
@@ -577,7 +577,7 @@ pub fn run_template(
 /// tries IPC first. On IPC timeout or missing proof, retains the pending response
 /// and fails closed for retry instead of writing the document behind the editor.
 /// When `force_disk` is true, always uses direct disk write.
-pub fn run_stream(
+pub(crate) fn run_stream(
     file: &Path,
     baseline: Option<&str>,
     force_disk: bool,
@@ -1383,7 +1383,7 @@ pub fn run_stream(
 /// `.agent-doc/patches/<hash>.json`. The IDE plugin picks it up, applies
 /// patches via Document API (no external file change dialog), and deletes
 /// the file as ACK. Fails closed on timeout or missing proof.
-pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
+pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -1972,7 +1972,7 @@ fn strip_exchange_boundary_lines(content: &str) -> String {
 
 /// Apply an append-mode response from a string (not stdin).
 /// Used by `repair` to apply orphaned responses.
-pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
+pub(crate) fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     let response = agent_doc_turn::response_text::strip_assistant_heading(response);
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -2019,11 +2019,12 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
 
 /// Apply template-mode patches from a string (not stdin).
 /// Used by `repair` to apply orphaned template responses.
-pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
+#[cfg(test)]
+pub(crate) fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     apply_template_from_string_with_options(file, response, TemplateApplyOptions::default())
 }
 
-pub fn apply_template_from_string_with_options(
+pub(crate) fn apply_template_from_string_with_options(
     file: &Path,
     response: &str,
     options: TemplateApplyOptions,

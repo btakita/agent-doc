@@ -83,6 +83,11 @@ Use the lazily-backed state backbone as the source for document/session state:
   watcher / actor authority). This checkpoint only lands the lazily primitive
   and CurrentDocument-backed cache; it does not claim that the rename/adoption is
   complete.
+- Cutover progress: `CycleContext` and `ActorContext` now alias direct
+  `lazily::TypedContext` schemas, with memoized Slot/Cell factories living in
+  `agent-doc-run-context-io`. The old `DocumentContext` wrapper is removed, and
+  callers use the typed contexts plus `AgentDocContextExt` while the remaining
+  realtime document graph is still being collapsed into direct lazily contexts.
 - Realtime steering is one such baseline comparison. If the operator edits the
   prompt during an in-flight turn, the current document model is compared with
   the turn baseline and projected as `prompt_target`, `content_edit`,
@@ -223,9 +228,10 @@ Status as of 2026-07-05 in `src/agent-doc`:
   `EditorPatchApplied` / `EditorPatchRejected` remain agent-doc semantics; lazily
   supplies the receipt/projection substrate.
 - Lazily release status as of 2026-07-05: `lazily-spec v0.22.0`,
-  `lazily-formal v0.23.0`, `lazily-rs v0.21.3`, `lazily-kt v0.12.1`, and
-  `lazily-js v0.5.2` are tagged and pushed. `lazily-rs v0.21.3` is published to
-  crates.io, and `lazily-kt v0.12.1` is published to GitHub Packages. The
+  `lazily-formal v0.23.0`, `lazily-rs v0.21.5`, `lazily-kt v0.12.1`, and
+  `lazily-js v0.5.2` are tagged and pushed. `lazily-rs v0.21.5` is published to
+  crates.io with direct `ctx.get(factory)` / `ctx.set(factory, value)` typed
+  factory APIs, and `lazily-kt v0.12.1` is published to GitHub Packages. The
   `@lazily-hub/lazily-js v0.5.2` npm publish is blocked on npm OTP/browser auth
   (`EOTP`); the package is otherwise built, tested, tagged, and ready to publish
   after npm 2FA is completed.

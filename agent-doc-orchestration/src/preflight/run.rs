@@ -5,9 +5,9 @@ use agent_doc_diff as diff;
 use agent_doc_diff::semantic::semantic_diff_summary;
 use agent_doc_preflight_io::{
     PendingMaintenanceReport, QueueState, check_linked_docs, enforce_no_dropped_backlog,
-    enforce_no_shadow_open_backlog, inspect_queue_state, read_and_truncate_claims, read_claims,
-    resolve_pipeline_state, run_gate_verify, run_pending_maintenance, run_queue_maintenance,
-    save_baseline_content,
+    enforce_no_shadow_open_backlog, explicit_backlog_target_requirements, inspect_queue_state,
+    read_and_truncate_claims, read_claims, resolve_pipeline_state, run_gate_verify,
+    run_pending_maintenance, run_queue_maintenance, save_baseline_content,
 };
 use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_strings};
 use agent_doc_queue::queue_convergence::{

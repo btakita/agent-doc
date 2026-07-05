@@ -11368,6 +11368,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split baseline path resolution from disk/model writes",
         ),
         (
+            "Preflight explicit backlog target requirement IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Split cross-document review reads from tracked-work fingerprint extraction",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
@@ -12858,6 +12864,45 @@ fn test_agent_doc_preflight_io_owns_baseline_content_graph() {
             "agent-doc-preflight-io must own baseline content IO: {required}"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_explicit_backlog_target_requirement_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let preflight_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    let preflight_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+
+    assert!(
+        !orchestration_preflight.contains("fn explicit_backlog_target_requirements("),
+        "orchestration preflight must not own explicit backlog target requirement IO"
+    );
+    assert!(
+        orchestration_preflight_run.contains("explicit_backlog_target_requirements(file,"),
+        "preflight/run should call focused explicit backlog target requirement IO directly"
+    );
+    for required in [
+        "pub fn explicit_backlog_target_requirements(",
+        "agent_doc_frontmatter_io::session::parse_for_file",
+        "agent_doc_frontmatter_io::security_review::enforce_cross_document_review",
+        "agent_doc_document::tracked_work_projection::tracked_work_fingerprint",
+        "agent_doc_cycle_state_io::BacklogTargetRequirement",
+    ] {
+        assert!(
+            preflight_io.contains(required),
+            "agent-doc-preflight-io must own explicit backlog target requirement IO: {required}"
+        );
+    }
+    assert!(
+        preflight_io_manifest.contains("agent-doc-frontmatter-io ="),
+        "agent-doc-preflight-io should own frontmatter IO dependency for cross-document target requirements"
+    );
 }
 
 #[test]

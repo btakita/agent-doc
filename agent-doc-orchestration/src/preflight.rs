@@ -101,7 +101,7 @@
 //!   returns `Some(path)` when `.agent-doc/` exists.
 
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
 #[cfg(test)]
@@ -202,52 +202,6 @@ fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
         file.display()
     );
     Ok(true)
-}
-
-fn explicit_backlog_target_requirements(
-    source_file: &Path,
-    source_frontmatter: &frontmatter::Frontmatter,
-    targets: &[PathBuf],
-) -> Result<Vec<agent_doc_cycle_state_io::BacklogTargetRequirement>> {
-    let mut requirements = Vec::new();
-    for target in targets {
-        let target_existing = if target.exists() {
-            Some(
-                std::fs::read_to_string(target)
-                    .with_context(|| format!("failed to read {}", target.display()))?,
-            )
-        } else {
-            None
-        };
-        let target_frontmatter = if let Some(content) = target_existing.as_ref() {
-            Some(agent_doc_frontmatter_io::session::parse_for_file(content, target)?.0)
-        } else {
-            None
-        };
-        agent_doc_frontmatter_io::security_review::enforce_cross_document_review(
-            "preflight prompt contract",
-            source_file,
-            source_frontmatter,
-            target,
-            target_frontmatter.as_ref(),
-        )?;
-        let fingerprint = match target_existing.as_deref() {
-            Some(content) => {
-                agent_doc_document::tracked_work_projection::tracked_work_fingerprint(content)?
-            }
-            None => agent_doc_document::tracked_work_projection::TrackedWorkFingerprint::empty(),
-        };
-        requirements.push(agent_doc_cycle_state_io::BacklogTargetRequirement {
-            path: std::fs::canonicalize(target)
-                .unwrap_or_else(|_| target.to_path_buf())
-                .display()
-                .to_string(),
-            component: fingerprint.component,
-            baseline_hash: fingerprint.baseline_hash,
-            baseline_item_ids: fingerprint.baseline_item_ids,
-        });
-    }
-    Ok(requirements)
 }
 
 /// Run the preflight sequence for a session document.
@@ -840,6 +794,7 @@ pub use run::*;
 mod th {
     use super::*;
     use std::io::Write;
+    use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
     // The source-repo locator accepts the document's git root when it is the

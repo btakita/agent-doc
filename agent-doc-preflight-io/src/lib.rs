@@ -40,7 +40,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PreflightWarning {
@@ -351,6 +351,52 @@ pub fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
             None
         }
     }
+}
+
+pub fn explicit_backlog_target_requirements(
+    source_file: &Path,
+    source_frontmatter: &frontmatter::Frontmatter,
+    targets: &[PathBuf],
+) -> Result<Vec<agent_doc_cycle_state_io::BacklogTargetRequirement>> {
+    let mut requirements = Vec::new();
+    for target in targets {
+        let target_existing = if target.exists() {
+            Some(
+                std::fs::read_to_string(target)
+                    .with_context(|| format!("failed to read {}", target.display()))?,
+            )
+        } else {
+            None
+        };
+        let target_frontmatter = if let Some(content) = target_existing.as_ref() {
+            Some(agent_doc_frontmatter_io::session::parse_for_file(content, target)?.0)
+        } else {
+            None
+        };
+        agent_doc_frontmatter_io::security_review::enforce_cross_document_review(
+            "preflight prompt contract",
+            source_file,
+            source_frontmatter,
+            target,
+            target_frontmatter.as_ref(),
+        )?;
+        let fingerprint = match target_existing.as_deref() {
+            Some(content) => {
+                agent_doc_document::tracked_work_projection::tracked_work_fingerprint(content)?
+            }
+            None => agent_doc_document::tracked_work_projection::TrackedWorkFingerprint::empty(),
+        };
+        requirements.push(agent_doc_cycle_state_io::BacklogTargetRequirement {
+            path: std::fs::canonicalize(target)
+                .unwrap_or_else(|_| target.to_path_buf())
+                .display()
+                .to_string(),
+            component: fingerprint.component,
+            baseline_hash: fingerprint.baseline_hash,
+            baseline_item_ids: fingerprint.baseline_item_ids,
+        });
+    }
+    Ok(requirements)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

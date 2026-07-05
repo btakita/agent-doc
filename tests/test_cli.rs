@@ -11358,6 +11358,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split write command commit-boundary sequencing after write command DTO extraction",
         ),
         (
+            "Write run_command facade demotion",
+            "agent-doc-orchestration/src/write.rs::run_command",
+            "agent-doc-orchestration/src/repair.rs::run_write_command_with_empty_response_recovery",
+            "Move write command runtime sequencing into focused command IO",
+        ),
+        (
             "Repair runtime recovery callback IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-runtime-io/src/lib.rs",
@@ -24255,9 +24261,13 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         .find("fn set_status_with_options")
         .expect("write.rs should define the status command helper");
     let status_adapter_end = orchestration_write
-        .find("pub fn run_command(")
+        .find("fn run_command(")
         .expect("write.rs should define run_command after the status helper");
     let status_adapter = &orchestration_write[status_adapter_start..status_adapter_end];
+    assert!(
+        !orchestration_write.contains("pub fn run_command("),
+        "write.rs must not expose run_command as a public facade; CLI write/finalize should enter through the repair-owned recovery bridge"
+    );
     for forbidden in [
         "struct WriteStatusEffects",
         "impl agent_doc_status_io::StatusWriteEffects for WriteStatusEffects",

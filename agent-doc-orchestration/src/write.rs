@@ -52,8 +52,8 @@
 //!   `.agent-doc/patches/<hash>.json`, polls for the plugin to delete the file
 //!   as ACK (2 s timeout), then fails closed without direct disk fallback when
 //!   the write is unproven.
-//! - `run_command(options, commit_mode)`: shared CLI entrypoint for `write` and
-//!   `finalize`. `finalize` is always strict. `write --commit` stays
+//! - `run_command(options, commit_mode)`: private shared command entrypoint for
+//!   `write` and `finalize`. `finalize` is always strict. `write --commit` stays
 //!   best-effort for non-session documents and `--pending-only`, but upgrades to
 //!   the same strict commit-boundary contract as `finalize` when the target file
 //!   is a real session document (`agent_doc_session` / legacy `session`) and the
@@ -978,7 +978,7 @@ fn apply_pending_and_status_mutations(
     Ok(())
 }
 
-pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
+fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
     run_command_inner(options, commit_mode, None)
 }
 

@@ -15618,6 +15618,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     .unwrap();
     let route_cycle_ack_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/cycle_ack.rs")).unwrap();
+    let route_runtime_effects_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/runtime_effects.rs")).unwrap();
     let flow_types_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
     assert!(
@@ -15642,7 +15644,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .exists()
             && !route_source.contains("mod cycle_ack;")
             && route_source.contains("use agent_doc_route_io::cycle_ack::")
-            && route_source.contains("route_cycle_ack_effects()"),
+            && route_runtime_effects_source.contains("pub fn route_cycle_ack_effects()"),
         "orchestration must not keep a route cycle-ack module after the route cycle acknowledgment graph moves to agent-doc-route-io"
     );
     assert!(
@@ -15650,7 +15652,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .join("agent-doc-orchestration/src/route/dispatch_only.rs")
             .exists()
             && !route_source.contains("mod dispatch_only;")
-            && route_source.contains("route_dispatch_only_effects()")
+            && route_runtime_effects_source.contains("pub fn route_dispatch_only_effects()")
             && route_dispatch_only_source.contains("pub fn dispatch_only_send_reopen("),
         "orchestration must not keep a route dispatch-only module after the send/retry graph moves to agent-doc-route-io"
     );
@@ -28291,12 +28293,15 @@ fn test_agent_doc_route_io_owns_route_document_prep() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/document_prep.rs")).unwrap();
     let route_command =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/command.rs")).unwrap();
+    let runtime_effects =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/runtime_effects.rs")).unwrap();
 
     for forbidden_snippet in [
         "agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)",
         "agent_doc_snapshot_io::load(file).ok().flatten()",
         "agent_doc_git_io::revision::show_head(file).ok().flatten()",
         "fn scrub_duplicate_prompt_comments_for_route(",
+        "document_prep_effects: route_document_prep_effects()",
         "agent_doc_template::remove_duplicate_answered_exchange_prompt_tail",
         "agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs",
         "agent_doc_template::guard_no_duplicate_prompt_residue_outside_exchange",
@@ -28324,8 +28329,8 @@ fn test_agent_doc_route_io_owns_route_document_prep() {
                 "agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs",
             )
             && route_command.contains("prepare_route_document(file, effects.document_prep_effects)")
-            && route_source.contains("document_prep_effects: route_document_prep_effects()"),
-        "route document preparation should live in agent-doc-route-io while orchestration injects only write authority"
+            && runtime_effects.contains("document_prep_effects: route_document_prep_effects()"),
+        "route document preparation should live in agent-doc-route-io and be assembled by focused runtime effects"
     );
 }
 
@@ -28395,6 +28400,13 @@ fn test_agent_doc_route_io_owns_route_runtime_effect_bundles() {
         "pub fn route_startup_effects(",
         "fn enqueue_route_dispatch_prompt_for_dispatch_only(",
         "fn dispatch_only_starting_pane_ready_timeout(",
+        "fn route_run_pending_maintenance(",
+        "fn route_inspect_session(",
+        "fn route_decide_closeout_recovery(",
+        "pub fn route_managed_pane_resolution_effects(",
+        "pub fn route_authoritative_actor_effects(",
+        "pub fn route_closeout_drain_effects(",
+        "pub fn route_command_effects(",
     ] {
         assert!(
             !route_source.contains(forbidden_snippet),
@@ -28412,10 +28424,18 @@ fn test_agent_doc_route_io_owns_route_runtime_effect_bundles() {
         "pub fn dispatch_only_starting_pane_ready_timeout(",
         "pub fn route_dispatch_only_effects(",
         "pub fn route_startup_effects(",
+        "pub fn route_managed_pane_resolution_effects(",
+        "pub fn route_authoritative_actor_effects(",
+        "pub fn route_closeout_drain_effects(",
+        "pub fn route_command_effects(",
+        "fn route_run_pending_maintenance(",
+        "fn route_inspect_session(",
+        "fn route_decide_closeout_recovery(",
         "file_route_dispatch_bug_report_with_runtime_effects",
         "route_write_document",
         "enqueue_route_dispatch_prompt(",
         "dispatch_only_starting_pane_ready_timeout_for_binary",
+        "wait_for_ready_override: crate::invocation::wait_for_ready_override",
     ] {
         assert!(
             runtime_effects.contains(required_snippet),
@@ -28425,12 +28445,13 @@ fn test_agent_doc_route_io_owns_route_runtime_effect_bundles() {
     assert!(
         route_io_lib.contains("pub mod runtime_effects;")
             && route_source.contains("use agent_doc_route_io::runtime_effects::{")
-            && route_source.contains(
-                "wait_for_ready_override: agent_doc_route_io::invocation::wait_for_ready_override"
-            )
-            && main_source.contains("agent_doc_route_io::runtime_effects::route_startup_effects()")
+            && route_source
+                .contains("pub fn runtime_route_command_effects() -> RouteCommandEffects")
+            && route_source.contains("route_command_effects(route_repair_closeout)")
+            && main_source
+                .contains("agent_doc_orchestration::route::runtime_route_command_effects()")
             && !main_source.contains("agent_doc_orchestration::route::route_startup_effects()"),
-        "production route startup and remaining orchestration route adapters should consume focused route runtime effects directly"
+        "production route command and remaining orchestration route adapters should consume focused route runtime effects directly"
     );
 }
 
@@ -28531,6 +28552,8 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/command.rs")).unwrap();
     let route_invocation =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/invocation.rs")).unwrap();
+    let route_runtime_effects =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/runtime_effects.rs")).unwrap();
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
 
     for forbidden_snippet in [
@@ -28542,6 +28565,11 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
         "resolve_target_session(tmux",
         "clear_for_success(\n                file,\n                \"route_success\"",
         "cleanup_failed_route_panes(tmux",
+        "pub fn route_command_effects() -> RouteCommandEffects",
+        "fn route_run_pending_maintenance(",
+        "fn route_inspect_session(",
+        "fn route_decide_closeout_recovery(",
+        "pub fn route_closeout_drain_effects() -> RouteCloseoutDrainEffects",
         "static WAIT_FOR_READY_OVERRIDE",
         "static FORCE_DISK_ROUTE_WRITES",
     ] {
@@ -28579,18 +28607,28 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
             && route_invocation.contains("pub fn force_disk_route_writes(")
             && route_invocation.contains("pub fn run_with_tmux_with_options(")
             && route_invocation.contains("command::run_with_tmux_with_options(")
+            && route_runtime_effects
+                .contains("pub fn route_command_effects(repair_closeout: fn(&Path) -> Result<String>) -> RouteCommandEffects")
+            && route_runtime_effects.contains("pub fn route_managed_pane_resolution_effects(")
+            && route_runtime_effects.contains("pub fn route_authoritative_actor_effects(")
+            && route_runtime_effects.contains("pub fn route_closeout_drain_effects(")
+            && route_runtime_effects.contains("fn route_run_pending_maintenance(")
+            && route_runtime_effects.contains("fn route_inspect_session(")
+            && route_runtime_effects.contains("fn route_decide_closeout_recovery(")
             && route_source.contains("#[cfg(test)]\nuse agent_doc_route_io::command::RouteMode;")
             && !route_source.contains("pub use agent_doc_route_io::command::RouteMode;")
-            && route_source.contains("pub fn route_command_effects() -> RouteCommandEffects")
+            && route_source.contains("pub fn runtime_route_command_effects() -> RouteCommandEffects")
+            && route_source.contains("route_command_effects(route_repair_closeout)")
             && route_source.contains("#[cfg(test)]\npub fn run(")
             && route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub fn run_with_force_disk(")
             && route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub fn run_with_tmux(")
             && route_source.contains("agent_doc_route_io::invocation::run_with_tmux_with_options(")
             && main_source.contains("agent_doc_route_io::invocation::run_with_force_disk(")
-            && main_source.contains("agent_doc_orchestration::route::route_command_effects()")
+            && main_source
+                .contains("agent_doc_orchestration::route::runtime_route_command_effects()")
             && !main_source.contains("agent_doc_orchestration::route::run_with_force_disk(")
             && !main_source.contains("agent_doc_orchestration::route::RouteMode"),
-        "agent-doc-route-io command/invocation should own top-level route runtime and invocation state while orchestration injects effect bundles"
+        "agent-doc-route-io command/invocation/runtime_effects should own top-level route runtime while orchestration injects only repair closeout"
     );
 }
 

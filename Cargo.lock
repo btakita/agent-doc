@@ -1650,6 +1650,7 @@ name = "agent-doc-route-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-agent-io",
+ "agent-doc-closeout-runtime-io",
  "agent-doc-codex-hook-io",
  "agent-doc-config",
  "agent-doc-controller",
@@ -1668,6 +1669,8 @@ dependencies = [
  "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-ops-log-io",
+ "agent-doc-preflight-io",
+ "agent-doc-preflight-runtime-io",
  "agent-doc-project-config-io",
  "agent-doc-project-root-io",
  "agent-doc-queue",

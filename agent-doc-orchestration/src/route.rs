@@ -197,8 +197,6 @@ use agent_doc_route_io::authoritative_actor::{
     authoritative_actor_start_wait_terminal_state, managed_capability_proof_status,
     route_starting_actor_not_ready_log_line, tracked_harness_clear_requires_fresh_restart,
 };
-use agent_doc_route_io::authoritative_dispatch::RouteAuthoritativeActorEffects;
-use agent_doc_route_io::closeout_drain::RouteCloseoutDrainEffects;
 #[cfg(test)]
 use agent_doc_route_io::closeout_drain::{
     classify_route_closeout_block, drain_open_closeout_before_routed_dispatch,
@@ -225,7 +223,6 @@ use agent_doc_route_io::dispatch_recovery::resolve_fresh_dispatch_target_after_r
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
 #[cfg(test)]
 use agent_doc_route_io::document_prep::scrub_duplicate_prompt_comments_for_route;
-use agent_doc_route_io::pane_resolution::ManagedPaneResolutionEffects;
 #[cfg(test)]
 use agent_doc_route_io::pane_resolution::cleanup_failed_route_panes;
 #[cfg(test)]
@@ -239,9 +236,10 @@ use agent_doc_route_io::queue_dispatch::{
 };
 #[cfg(test)]
 use agent_doc_route_io::runtime_effects::dispatch_only_starting_pane_ready_timeout;
+use agent_doc_route_io::runtime_effects::route_command_effects;
+#[cfg(test)]
 use agent_doc_route_io::runtime_effects::{
-    route_busy_pane_retry_effects, route_cycle_ack_effects, route_dispatch_effects,
-    route_dispatch_only_effects, route_document_prep_effects, route_queue_effects,
+    route_closeout_drain_effects, route_dispatch_only_effects, route_queue_effects,
     route_startup_effects,
 };
 #[cfg(test)]
@@ -254,49 +252,11 @@ use agent_doc_supervisor::route_runtime::SupervisorHealth;
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
 #[cfg(test)]
 use agent_doc_supervisor::route_runtime::{RouteActorState, SupervisorRuntime};
-use agent_doc_turn::closeout_recovery::{CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput};
 #[cfg(test)]
 use tmux_router::Tmux;
 
 #[cfg(test)]
 use agent_doc_session_registry_io::registration as sessions;
-
-fn route_managed_pane_resolution_effects() -> ManagedPaneResolutionEffects {
-    ManagedPaneResolutionEffects {
-        route_dispatch_effects: route_dispatch_effects(),
-        route_cycle_ack_effects: route_cycle_ack_effects(),
-        route_busy_pane_retry_effects: route_busy_pane_retry_effects(),
-        route_startup_effects: route_startup_effects(),
-        route_authoritative_actor_effects: route_authoritative_actor_effects(),
-    }
-}
-
-fn route_authoritative_actor_effects() -> RouteAuthoritativeActorEffects {
-    RouteAuthoritativeActorEffects {
-        closeout_drain_effects: route_closeout_drain_effects(),
-        queue_effects: route_queue_effects(),
-        route_dispatch_effects: route_dispatch_effects(),
-        route_cycle_ack_effects: route_cycle_ack_effects(),
-        dispatch_only_route_effects: route_dispatch_only_effects(),
-        wait_for_ready_override: agent_doc_route_io::invocation::wait_for_ready_override,
-    }
-}
-
-fn route_run_pending_maintenance(file: &Path, force_disk: bool) -> Result<()> {
-    if force_disk {
-        agent_doc_preflight_io::run_pending_maintenance_force_disk(
-            file,
-            &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-        )
-        .map(|_| ())
-    } else {
-        agent_doc_preflight_io::run_pending_maintenance(
-            file,
-            &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-        )
-        .map(|_| ())
-    }
-}
 
 fn route_repair_closeout(file: &Path) -> Result<String> {
     agent_doc_repair_io::repair(
@@ -308,42 +268,8 @@ fn route_repair_closeout(file: &Path) -> Result<String> {
     .map(|outcome| format!("{outcome:?}"))
 }
 
-fn route_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
-    agent_doc_session_check_io::inspect(
-        file,
-        &agent_doc_closeout_runtime_io::session_check_effects(),
-    )
-}
-
-fn route_decide_closeout_recovery(
-    file: &Path,
-    input: CloseoutRecoveryDecisionInput<'_>,
-) -> CloseoutRecoveryDecision {
-    agent_doc_flow_io::closeout::decide_closeout_recovery(
-        file,
-        input,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
-    )
-}
-
-fn route_closeout_drain_effects() -> RouteCloseoutDrainEffects {
-    RouteCloseoutDrainEffects {
-        force_disk_route_writes: agent_doc_route_io::invocation::force_disk_route_writes,
-        run_pending_maintenance: route_run_pending_maintenance,
-        repair_closeout: route_repair_closeout,
-        inspect_session: route_inspect_session,
-        decide_closeout_recovery: route_decide_closeout_recovery,
-    }
-}
-
-pub fn route_command_effects() -> RouteCommandEffects {
-    RouteCommandEffects {
-        document_prep_effects: route_document_prep_effects(),
-        managed_pane_resolution_effects: route_managed_pane_resolution_effects(),
-        authoritative_actor_effects: route_authoritative_actor_effects(),
-        dispatch_only_effects: route_dispatch_only_effects(),
-        startup_effects: route_startup_effects(),
-    }
+pub fn runtime_route_command_effects() -> RouteCommandEffects {
+    route_command_effects(route_repair_closeout)
 }
 
 #[cfg(test)]
@@ -364,7 +290,7 @@ pub fn run(
         mode,
         plain_trigger,
         wait_for_ready,
-        route_command_effects(),
+        runtime_route_command_effects(),
     )
 }
 
@@ -389,7 +315,7 @@ pub fn run_with_force_disk(
         plain_trigger,
         wait_for_ready,
         force_disk,
-        route_command_effects(),
+        runtime_route_command_effects(),
     )
 }
 
@@ -414,7 +340,7 @@ pub fn run_with_tmux(
         mode,
         plain_trigger,
         wait_for_ready,
-        route_command_effects(),
+        runtime_route_command_effects(),
     )
 }
 
@@ -441,7 +367,7 @@ pub fn run_with_tmux_with_options(
         plain_trigger,
         wait_for_ready,
         force_disk,
-        route_command_effects(),
+        runtime_route_command_effects(),
     )
 }
 
@@ -2284,7 +2210,7 @@ mod tests {
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
         let _ = super::drain_open_closeout_before_routed_dispatch(
             &doc,
-            super::route_closeout_drain_effects(),
+            super::route_closeout_drain_effects(super::route_repair_closeout),
         );
 
         let after = std::fs::read_to_string(&doc).unwrap();
@@ -2314,7 +2240,7 @@ mod tests {
             &doc,
             low_level_reason.to_string(),
             true,
-            super::route_closeout_drain_effects(),
+            super::route_closeout_drain_effects(super::route_repair_closeout),
         );
         match dispatch_decision {
             CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout => {
@@ -2347,7 +2273,7 @@ mod tests {
             &doc,
             low_level_reason.to_string(),
             false,
-            super::route_closeout_drain_effects(),
+            super::route_closeout_drain_effects(super::route_repair_closeout),
         );
         match dispatch_decision {
             CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head } => {
@@ -2380,7 +2306,7 @@ mod tests {
             &doc,
             low_level_reason.to_string(),
             false,
-            super::route_closeout_drain_effects(),
+            super::route_closeout_drain_effects(super::route_repair_closeout),
         );
         match dispatch_decision {
             CloseoutBlockDispatchDecision::FailClosed => {

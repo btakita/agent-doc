@@ -14,6 +14,7 @@ agent-doc-agent-io = { path = "../agent-doc-agent-io", version = "0.34.67" }
 agent-doc-config = { path = "../agent-doc-config", version = "0.34.67" }
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
+agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.34.67" }
 agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
@@ -29,6 +30,8 @@ agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
+agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.67" }
+agent-doc-preflight-runtime-io = { path = "../agent-doc-preflight-runtime-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }

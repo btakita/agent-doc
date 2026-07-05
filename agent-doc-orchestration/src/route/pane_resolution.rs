@@ -1,6 +1,9 @@
 //! Test adapter for route pane-resolution fixtures.
 
 use super::*;
+use agent_doc_route_io::runtime_effects::{
+    route_authoritative_actor_effects, route_managed_pane_resolution_effects,
+};
 
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
@@ -25,7 +28,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
         target_session,
         harness,
         created_panes,
-        route_authoritative_actor_effects(),
+        route_authoritative_actor_effects(super::route_repair_closeout),
         route_dispatch_only_effects(),
         route_startup_effects(),
     )
@@ -54,7 +57,7 @@ pub(crate) fn resolve_or_create_pane(
         target_session,
         harness,
         created_panes,
-        route_managed_pane_resolution_effects(),
+        route_managed_pane_resolution_effects(super::route_repair_closeout),
     )
 }
 
@@ -83,7 +86,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         target_session,
         harness,
         created_panes,
-        route_managed_pane_resolution_effects(),
+        route_managed_pane_resolution_effects(super::route_repair_closeout),
         allow_auto_fix_retry,
         allow_busy_interrupt_retry,
         auto_fix_attempted,

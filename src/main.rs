@@ -3541,7 +3541,7 @@ fn try_main() -> anyhow::Result<()> {
                 plain_trigger,
                 wait_for_ready,
                 force_disk,
-                agent_doc_orchestration::route::route_command_effects(),
+                agent_doc_orchestration::route::runtime_route_command_effects(),
             )
         }
         Commands::Prompt { file, answer, all } => {

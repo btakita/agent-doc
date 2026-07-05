@@ -271,18 +271,18 @@ thread_local! {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct WriteFlags {
-    pub allow_replace_pending: bool,
-    pub has_pending_add: bool,
-    pub has_pending_done: bool,
-    pub has_pending_mutation: bool,
-    pub pending_done_ids: Vec<String>,
-    pub queue_completion_ids: Vec<String>,
-    pub pending_kept_open_ids: Vec<String>,
-    pub strict_closeout: bool,
-    pub force_disk: bool,
+pub(crate) struct WriteFlags {
+    pub(crate) allow_replace_pending: bool,
+    pub(crate) has_pending_add: bool,
+    pub(crate) has_pending_done: bool,
+    pub(crate) has_pending_mutation: bool,
+    pub(crate) pending_done_ids: Vec<String>,
+    pub(crate) queue_completion_ids: Vec<String>,
+    pub(crate) pending_kept_open_ids: Vec<String>,
+    pub(crate) strict_closeout: bool,
+    pub(crate) force_disk: bool,
     pub(crate) empty_response_recovery: Option<EmptyResponseRecovery>,
-    pub rerun_command_base: Option<String>,
+    pub(crate) rerun_command_base: Option<String>,
 }
 
 fn pending_write_flags(flags: &WriteFlags) -> agent_doc_session_check_io::PendingWriteFlags {

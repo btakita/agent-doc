@@ -3624,6 +3624,10 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
         "write/run_entry.rs must not call repair; empty-response recovery belongs at the repair-owned command boundary"
     );
     assert!(
+        write.contains("pub(crate) struct WriteFlags") && !write.contains("pub struct WriteFlags"),
+        "write.rs must not expose WriteFlags as a public orchestration DTO"
+    );
+    assert!(
         write.contains("pub(crate) use run_entry::*;") && !write.contains("pub use run_entry::*;"),
         "write.rs should keep run_entry helpers crate-visible instead of re-exporting them publicly"
     );
@@ -11391,6 +11395,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Write run_entry public facade demotion",
             "`pub use run_entry::*` plus public",
             "crate-visible helpers behind",
+            "Move write command runtime sequencing into focused command IO",
+        ),
+        (
+            "WriteFlags public DTO demotion",
+            "agent-doc-orchestration/src/write.rs::WriteFlags",
+            "crate-visible `WriteFlags`",
             "Move write command runtime sequencing into focused command IO",
         ),
         (

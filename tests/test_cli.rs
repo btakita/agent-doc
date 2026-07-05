@@ -3595,8 +3595,8 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
     }
     for forbidden in [
         "let outcome = run(file)?;",
-        "write::recover_missing_committed_head_response(file)?",
-        "write::recover_dedupe_only_drift(file)?",
+        "write::recover_missing_committed_head_response",
+        "write::recover_dedupe_only_drift",
         "committing pending mutations without a response body",
     ] {
         assert!(
@@ -3626,9 +3626,10 @@ fn test_orchestration_write_uses_closeout_commit_adapter() {
         "write.rs must not call git directly; commit ownership belongs behind closeout effects"
     );
     assert!(
-        write.contains("fn commit_via_closeout_effects(")
-            && write.contains("CloseoutEffects::commit(&crate::closeout_effects(), file)"),
-        "write.rs should route commit boundaries through the injected closeout effects adapter"
+        !write.contains("fn commit_via_closeout_effects(")
+            && write.contains("agent_doc_flow_io::closeout::CloseoutEffects::commit(")
+            && write.contains("&crate::closeout_effects()"),
+        "write.rs should route commit boundaries through the injected closeout effects adapter without a local helper facade"
     );
 }
 
@@ -5908,11 +5909,13 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         write_source.contains("agent_doc_turn::response_replay::response_already_applied"),
         "orchestration write should call focused response replay policy directly"
     );
+    let repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
     assert!(
-        write_source.contains("use agent_doc_turn::response_replay::{")
-            && write_source.contains("dedupe_responses")
-            && write_source.contains("response_materialized_in_content"),
-        "orchestration write should import focused response replay policy directly"
+        write_source
+            .contains("use agent_doc_turn::response_replay::response_materialized_in_content")
+            && repair_source.contains("use agent_doc_turn::response_replay::dedupe_responses;"),
+        "orchestration write/repair should import focused response replay policy directly from the owning module"
     );
     let response_replay_io =
         fs::read_to_string(manifest_dir.join("agent-doc-response-replay-io/src/lib.rs")).unwrap();
@@ -11093,6 +11096,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/preflight.rs",
             "agent-doc-document-realtime-io::atomic_write_through_authority",
             "relocate the write.rs template-normalization tests beside `agent-doc-template-io`",
+        ),
+        (
+            "Repair empty-response recovery callback inversion",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-repair-io",
+            "Split the remaining write-command replay bridge after `CommandOptions`/`CommitMode` leave `write.rs`",
         ),
         (
             "Repair recovery coordinator IO graph",

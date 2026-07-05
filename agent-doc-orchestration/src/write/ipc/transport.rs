@@ -2105,7 +2105,7 @@ Can you preserve the second paragraph too?
 #[cfg(test)]
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
-    use super::{recover_dedupe_only_drift, try_ipc};
+    use super::try_ipc;
     use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
     use agent_doc_ipc_protocol::{
         EditorBadStateFingerprint, FullContentRepairRedelivery, IpcDiskRepairReason,
@@ -3244,8 +3244,8 @@ Implemented.
         agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let head_before = head_count(root);
-        let recovered =
-            recover_dedupe_only_drift(&doc).expect("dedupe-only drift recovery should succeed");
+        let recovered = crate::repair::recover_dedupe_only_drift(&doc)
+            .expect("dedupe-only drift recovery should succeed");
         assert!(
             recovered,
             "file matching dedupe(HEAD) must be recognized as a dedupe-only drift"
@@ -3297,7 +3297,7 @@ Implemented.
         let doc = root.join("session.md");
         agent_doc_snapshot_io::save(&doc, clean, agent_doc_ops_log_io::log_op).unwrap();
 
-        let recovered = recover_dedupe_only_drift(&doc).unwrap();
+        let recovered = crate::repair::recover_dedupe_only_drift(&doc).unwrap();
         assert!(
             !recovered,
             "no drift between file and HEAD should not trigger dedupe-only recovery"
@@ -3332,7 +3332,7 @@ Implemented.
         fs::write(&doc, &user_edit).unwrap();
         agent_doc_snapshot_io::save(&doc, &user_edit, agent_doc_ops_log_io::log_op).unwrap();
 
-        let recovered = recover_dedupe_only_drift(&doc).unwrap();
+        let recovered = crate::repair::recover_dedupe_only_drift(&doc).unwrap();
         assert!(
             !recovered,
             "arbitrary working-tree drift must not be auto-committed as a dedupe recovery"

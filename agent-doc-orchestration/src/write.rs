@@ -227,15 +227,14 @@ use std::path::{Path, PathBuf};
 use agent_doc_document::write_normalization::count_code_fence_openings;
 use agent_doc_document::write_normalization::{
     SplicePendingComponentWarning, cleanup_resolved_backlog_prompts_after_response,
-    latest_response_block_missing_from_current, splice_pending_component,
-    splice_response_block_into_current_exchange, strip_boundary_for_dedup,
+    splice_pending_component, strip_boundary_for_dedup,
 };
 use agent_doc_document_realtime::write_policy::{
     reconcile_visible_write, response_already_in_current,
 };
 pub(crate) use agent_doc_document_realtime_io::{
-    VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS, guard_visible_write_idle_and_current,
-    guard_visible_write_idle_current_or_target, guard_visible_write_reconcile_with_target,
+    VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS, guard_visible_write_idle_current_or_target,
+    guard_visible_write_reconcile_with_target,
 };
 #[cfg(test)]
 use agent_doc_element::element;
@@ -268,7 +267,7 @@ use agent_doc_template_io::{
 use agent_doc_template::stale_baseline::{
     exchange_append_patch_can_rebase_to_head, is_stale_baseline, patch_touches_exchange,
 };
-use agent_doc_turn::response_replay::{dedupe_responses, response_materialized_in_content};
+use agent_doc_turn::response_replay::response_materialized_in_content;
 
 thread_local! {
     static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -1652,7 +1651,10 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                     }
                     return Ok(());
                 }
-                match commit_via_closeout_effects(file) {
+                match agent_doc_flow_io::closeout::CloseoutEffects::commit(
+                    &crate::closeout_effects(),
+                    file,
+                ) {
                     // `#staleinmem` — record what we just committed so a later
                     // out-of-band disk correction is detectable at the next barrier.
                     Ok(_) => agent_doc_crdt_relay_io::record_committed_baseline_for_file(file),
@@ -1690,77 +1692,6 @@ fn log_closeout_guard(
     reason: agent_doc_turn::closeout_guard::CloseoutGuardReason,
 ) {
     agent_doc_flow_io::closeout::log_closeout_guard_event(file, stage, outcome, reason);
-}
-
-pub(crate) fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
-    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
-        return Ok(false);
-    };
-    let current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    let Some(response_block) = latest_response_block_missing_from_current(&head_content, &current)
-    else {
-        return Ok(false);
-    };
-    let Some(recovered) = splice_response_block_into_current_exchange(&current, &response_block)
-    else {
-        return Ok(false);
-    };
-    if recovered == current {
-        return Ok(false);
-    }
-    eprintln!(
-        "[write] empty response stdin; merged latest committed HEAD response back into visible document for {}",
-        file.display()
-    );
-    guard_visible_write_idle_and_current(file, "recover_committed_head_response", &current)?;
-    atomic_write(file, &recovered)?;
-    agent_doc_snapshot_io::save(file, &recovered, agent_doc_ops_log_io::log_op)?;
-    commit_via_closeout_effects(file)?;
-    Ok(true)
-}
-
-/// When `agent-doc write --commit <FILE>` runs with empty stdin and the
-/// working tree differs from HEAD only by the deletions a fresh
-/// `agent-doc dedupe <FILE>` would produce against HEAD, accept that as a
-/// recoverable closeout: align the snapshot to the current file and commit
-/// through the normal binary path.
-///
-/// Why: when a finalize cycle produces a duplicate response (for example the
-/// IPC retry / file-IPC fallback path adopting a response already in the live
-/// file), the user runs `agent-doc dedupe` to remove the duplicate. The
-/// follow-up `agent-doc write --commit` (no stdin) used to bail with
-/// "empty response — nothing to write", forcing a manual `git commit` and
-/// defeating the binary-owned closeout contract. This branch keeps the
-/// closeout binary-owned by recognizing the dedupe-only drift signature.
-pub(crate) fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
-    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
-        return Ok(false);
-    };
-    let current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    if current == head_content {
-        return Ok(false);
-    }
-    let dedupe_of_head = dedupe_responses(&head_content);
-    if dedupe_of_head == head_content {
-        // HEAD has no duplicates — drift is something else, not a dedupe outcome.
-        return Ok(false);
-    }
-    if dedupe_of_head != current {
-        return Ok(false);
-    }
-    eprintln!(
-        "[write] empty response stdin; current file matches dedupe(HEAD) for {} — committing dedupe-only working-tree drift through the binary closeout path",
-        file.display()
-    );
-    agent_doc_snapshot_io::save(file, &current, agent_doc_ops_log_io::log_op)?;
-    commit_via_closeout_effects(file)?;
-    Ok(true)
-}
-
-fn commit_via_closeout_effects(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::CloseoutEffects::commit(&crate::closeout_effects(), file)
 }
 
 fn ipc_response_materialized_or_fallback(
@@ -5027,7 +4958,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, visible, agent_doc_ops_log_io::log_op).unwrap();
 
         assert!(
-            recover_missing_committed_head_response(&doc).unwrap(),
+            crate::repair::recover_missing_committed_head_response(&doc).unwrap(),
             "missing committed response should be recovered"
         );
 

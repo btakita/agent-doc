@@ -62,10 +62,14 @@
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
 use agent_doc_turn::repair::RepairOutcome;
-use anyhow::Result;
+use agent_doc_turn::response_replay::dedupe_responses;
+use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::write;
+use agent_doc_document::write_normalization::{
+    latest_response_block_missing_from_current, splice_response_block_into_current_exchange,
+};
 
 fn repair_coordinator_effects() -> agent_doc_repair_io::RepairCoordinatorEffects<
     'static,
@@ -75,11 +79,10 @@ fn repair_coordinator_effects() -> agent_doc_repair_io::RepairCoordinatorEffects
     agent_doc_repair_io::RepairCoordinatorEffects {
         repair_io_effects: &crate::REPAIR_IO_EFFECTS,
         replay_write_effects: &crate::REPAIR_REPLAY_WRITE_EFFECTS,
-        complete_required_closeout: crate::write::complete_required_closeout,
+        complete_required_closeout: repair_complete_required_closeout,
         inspect_session: repair_inspect_session,
-        recover_missing_committed_head_response:
-            crate::write::recover_missing_committed_head_response,
-        recover_dedupe_only_drift: crate::write::recover_dedupe_only_drift,
+        recover_missing_committed_head_response,
+        recover_dedupe_only_drift,
     }
 }
 
@@ -109,6 +112,67 @@ pub(crate) fn recover_empty_response_for_strict_closeout(
         strict_closeout,
         has_pending_mutation,
     )
+}
+
+fn repair_complete_required_closeout(file: &Path) -> Result<bool> {
+    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
+}
+
+pub(crate) fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
+    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(false);
+    };
+    let current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let Some(response_block) = latest_response_block_missing_from_current(&head_content, &current)
+    else {
+        return Ok(false);
+    };
+    let Some(recovered) = splice_response_block_into_current_exchange(&current, &response_block)
+    else {
+        return Ok(false);
+    };
+    if recovered == current {
+        return Ok(false);
+    }
+    eprintln!(
+        "[write] empty response stdin; merged latest committed HEAD response back into visible document for {}",
+        file.display()
+    );
+    agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
+        file,
+        "recover_committed_head_response",
+        &current,
+    )?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &recovered)?;
+    agent_doc_snapshot_io::save(file, &recovered, agent_doc_ops_log_io::log_op)?;
+    agent_doc_flow_io::closeout::CloseoutEffects::commit(&crate::closeout_effects(), file)?;
+    Ok(true)
+}
+
+pub(crate) fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
+    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(false);
+    };
+    let current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    if current == head_content {
+        return Ok(false);
+    }
+    let dedupe_of_head = dedupe_responses(&head_content);
+    if dedupe_of_head == head_content {
+        return Ok(false);
+    }
+    if dedupe_of_head != current {
+        return Ok(false);
+    }
+    eprintln!(
+        "[write] empty response stdin; current file matches dedupe(HEAD) for {} — committing dedupe-only working-tree drift through the binary closeout path",
+        file.display()
+    );
+    agent_doc_snapshot_io::save(file, &current, agent_doc_ops_log_io::log_op)?;
+    agent_doc_flow_io::closeout::CloseoutEffects::commit(&crate::closeout_effects(), file)?;
+    Ok(true)
 }
 
 /// Check for a pending response and apply it if found.

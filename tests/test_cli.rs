@@ -11128,6 +11128,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the remaining write IPC transport graph into focused write IPC runtime IO",
         ),
         (
+            "Crate-root runtime write-provider edge removal",
+            "agent-doc-orchestration/src/lib.rs",
+            "agent-doc-document-realtime-io::{RUNTIME_WRITE_CONVERGENCE_EFFECTS,RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,atomic_write_through_authority,record_document_write_provenance}",
+            "Move `OrchestrationRepairReplayWriteEffects` into a focused repair/write runtime adapter",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

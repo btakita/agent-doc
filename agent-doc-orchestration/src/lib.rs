@@ -55,7 +55,7 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for BacklogCommandEffec
         reason: &str,
     ) -> anyhow::Result<()> {
         agent_doc_write_converge_io::converge_or_disk_write(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             current_content,
             target_content,
@@ -64,7 +64,7 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for BacklogCommandEffec
     }
 
     fn record_document_write_provenance(&self, file: &std::path::Path, content: &str) {
-        crate::write::record_document_write_provenance(file, content);
+        agent_doc_document_realtime_io::record_document_write_provenance(file, content);
     }
 }
 
@@ -79,7 +79,7 @@ pub static REPAIR_IO_EFFECTS: OrchestrationRepairIoEffects = OrchestrationRepair
 
 impl agent_doc_repair_io::RepairIoEffects for OrchestrationRepairIoEffects {
     fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
-        crate::write::atomic_write_pub(file, content)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
     fn mark_committed_frontmatter(
@@ -129,7 +129,7 @@ impl agent_doc_repair_io::RepairIoEffects for OrchestrationRepairIoEffects {
 
 impl agent_doc_repair_io::RepairTemplateWriteEffects for OrchestrationRepairIoEffects {
     fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
-        crate::write::atomic_write_pub(file, content)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
     fn repair_response_prompt_order_for_file(
@@ -253,7 +253,7 @@ impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplay
     fn strike_recovered_free_text_queue_head(&self, file: &std::path::Path) -> anyhow::Result<()> {
         match agent_doc_queue_io::queue_consume::consume_queue_prompt_force_disk(
             file,
-            &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
         ) {
             Ok(Some(outcome)) => {
                 eprintln!(
@@ -280,7 +280,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionChe
     }
 
     fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
-        crate::write::atomic_write_pub(file, content)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
     fn repair_committed_historical_snapshot_drift(
@@ -325,7 +325,7 @@ impl agent_doc_run_io::DirectRunEffects for OrchestrationDirectRunEffects {
     }
 
     fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
-        crate::write::atomic_write_pub(file, content)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
     fn consume_queue_prompts_for_done_ids_with_outcome(
@@ -339,19 +339,20 @@ impl agent_doc_run_io::DirectRunEffects for OrchestrationDirectRunEffects {
                 file,
                 done_ids,
                 true,
-                &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
             )
         } else {
             agent_doc_queue_io::queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
                 file,
                 done_ids,
-                &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
             )
         }
     }
 
     fn complete_required_closeout(&self, file: &std::path::Path) -> anyhow::Result<()> {
-        crate::write::complete_required_closeout(file).map(|_| ())
+        agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
+            .map(|_| ())
     }
 
     fn abandon_recursive_cycle(

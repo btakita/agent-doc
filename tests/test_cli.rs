@@ -11122,6 +11122,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move idle queue completion into a focused start runtime IO adapter",
         ),
         (
+            "Write IPC transport convergence effect-provider edge removal",
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "agent-doc-document-realtime-io::RUNTIME_WRITE_CONVERGENCE_EFFECTS",
+            "Move the remaining write IPC transport graph into focused write IPC runtime IO",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

@@ -23,7 +23,7 @@ pub(crate) fn try_ipc(
     reuse_patch_id: Option<&str>,
 ) -> Result<agent_doc_write_ipc_io::IpcResult> {
     agent_doc_write_ipc_io::try_ipc_with_effects(
-        &crate::write::WRITE_CONVERGENCE_EFFECTS,
+        &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
         file,
         patches,
         unmatched,
@@ -707,7 +707,7 @@ mod submodule_patch_routing_tests {
         fs::write(&doc, newer_visible).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id,
@@ -810,7 +810,7 @@ mod submodule_patch_routing_tests {
         .unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id,
@@ -1090,7 +1090,7 @@ mod submodule_patch_routing_tests {
         fs::write(&doc, stale_disk_with_live_prompt).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id: "already-applied-missing",
@@ -1176,7 +1176,7 @@ mod submodule_patch_routing_tests {
         .unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id,
@@ -1225,7 +1225,7 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id: "already-applied-missing-response",
@@ -1270,7 +1270,7 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, content_ours, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id: "already-applied-empty-response-probe",
@@ -2117,7 +2117,7 @@ mod late_fallback_patch_guard_tests {
 
     fn try_ipc_full_content(file: &Path, content: &str) -> anyhow::Result<bool> {
         agent_doc_write_converge_io::try_ipc_full_content(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             content,
         )
@@ -2129,7 +2129,7 @@ mod late_fallback_patch_guard_tests {
         source_content: &str,
     ) -> anyhow::Result<bool> {
         agent_doc_write_converge_io::try_ipc_full_content_response_fallback_from_source(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             content,
             source_content,
@@ -2142,7 +2142,7 @@ mod late_fallback_patch_guard_tests {
         source_content: &str,
     ) -> anyhow::Result<bool> {
         agent_doc_write_converge_io::try_ipc_full_content_operator_mutation_from_source(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             content,
             source_content,
@@ -2896,7 +2896,7 @@ mod late_fallback_patch_guard_tests {
         let decision = IpcRepairDecision::file_read(bad_state.to_string())
             .apply_ipc_dedupe(repaired.to_string(), bad_state.to_string());
         let err = agent_doc_write_converge_io::repair_ipc_decision_visible_state(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
             &decision,
             Some("source-patch"),
@@ -3531,7 +3531,7 @@ Implemented.
         };
 
         agent_doc_write_converge_io::repair_ipc_decision_visible_state(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
             &decision,
             Some("live-drift-1"),
@@ -3600,7 +3600,7 @@ Implemented.
         };
 
         let err = agent_doc_write_converge_io::repair_ipc_decision_visible_state(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
             &decision,
             Some("live-drift-2"),

@@ -11461,6 +11461,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split `agent-doc-write-runtime-io` into command entry, repair replay/apply, visible-write convergence, and test-fixture modules",
         ),
         (
+            "Repair replay write-runtime adapter extraction",
+            "agent-doc-orchestration/src/repair.rs::OrchestrationRepairReplayWriteEffects",
+            "agent-doc-write-runtime-io::REPAIR_REPLAY_WRITE_EFFECTS",
+            "Move the remaining public repair command bridge",
+        ),
+        (
             "Preflight output DTO graph",
             "agent-doc-orchestration/src/preflight.rs",
             "agent-doc-preflight-io/src/lib.rs",
@@ -20152,10 +20158,11 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
                 .contains("agent_doc_preflight_runtime_io::preflight_cycle_completion_effects(")
             && orchestration_preflight
                 .contains("agent_doc_repair_runtime_io::repair_coordinator_effects(")
-            && orchestration_preflight.contains("&crate::repair::REPAIR_REPLAY_WRITE_EFFECTS")
+            && orchestration_preflight
+                .contains("&agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS")
             && orchestration_preflight
                 .contains("agent_doc_closeout_runtime_io::session_check_effects()"),
-        "orchestration preflight.rs should only inject the temporary repair replay writer and session-check runtime effects"
+        "orchestration preflight.rs should only inject the focused repair replay writer and session-check runtime effects"
     );
     assert!(
         preflight_manifest.contains("agent-doc-element-exchange =")

@@ -329,6 +329,78 @@ fn queue_consume_writeback_effects(force_disk: bool) -> &'static dyn QueueConsum
     }
 }
 
+pub struct RuntimeRepairReplayWriteEffects;
+
+pub static REPAIR_REPLAY_WRITE_EFFECTS: RuntimeRepairReplayWriteEffects =
+    RuntimeRepairReplayWriteEffects;
+
+impl agent_doc_repair_io::RepairStrictReplayWriteEffects for RuntimeRepairReplayWriteEffects {
+    fn run_strict_write_replay(
+        &self,
+        file: &Path,
+        response: &str,
+        is_template: bool,
+        is_stream: bool,
+        force_disk: bool,
+        queue_completion_ids: &[String],
+    ) -> Result<()> {
+        let commit_mode = if agent_doc_git_io::status::is_in_git_repo(file) {
+            CommitMode::Required
+        } else {
+            CommitMode::None
+        };
+        run_command_with_response(
+            CommandOptions::repair_replay(
+                file,
+                is_template,
+                is_stream,
+                force_disk,
+                queue_completion_ids,
+            ),
+            commit_mode,
+            response.to_string(),
+        )
+    }
+}
+
+impl agent_doc_repair_io::RepairFallbackWriteEffects for RuntimeRepairReplayWriteEffects {
+    fn apply_template_from_string(
+        &self,
+        file: &Path,
+        response: &str,
+        force_disk: bool,
+    ) -> Result<()> {
+        run_entry::apply_template_from_string_with_options(
+            file,
+            response,
+            TemplateApplyOptions { force_disk },
+        )
+    }
+
+    fn apply_append_from_string(&self, file: &Path, response: &str) -> Result<()> {
+        run_entry::apply_append_from_string(file, response)
+    }
+}
+
+impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects for RuntimeRepairReplayWriteEffects {
+    fn strike_recovered_free_text_queue_head(&self, file: &Path) -> Result<()> {
+        match agent_doc_queue_io::queue_consume::consume_queue_prompt_force_disk(
+            file,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+        ) {
+            Ok(Some(outcome)) => {
+                eprintln!(
+                    "[repair] struck consumed free-text queue head (remaining: {})",
+                    outcome.remaining
+                );
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct WriteFlags {
     pub(crate) allow_replace_pending: bool,

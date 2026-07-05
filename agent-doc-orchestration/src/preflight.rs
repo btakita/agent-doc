@@ -131,7 +131,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         file,
         &agent_doc_preflight_runtime_io::preflight_cycle_completion_effects(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
-                &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+                &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
             ),
             agent_doc_closeout_runtime_io::session_check_effects(),
         ),

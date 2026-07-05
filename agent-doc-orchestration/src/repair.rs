@@ -65,80 +65,6 @@ use agent_doc_turn::repair::RepairOutcome;
 use anyhow::Result;
 use std::path::Path;
 
-pub(crate) struct OrchestrationRepairReplayWriteEffects;
-
-pub(crate) static REPAIR_REPLAY_WRITE_EFFECTS: OrchestrationRepairReplayWriteEffects =
-    OrchestrationRepairReplayWriteEffects;
-
-impl agent_doc_repair_io::RepairStrictReplayWriteEffects for OrchestrationRepairReplayWriteEffects {
-    fn run_strict_write_replay(
-        &self,
-        file: &Path,
-        response: &str,
-        is_template: bool,
-        is_stream: bool,
-        force_disk: bool,
-        queue_completion_ids: &[String],
-    ) -> Result<()> {
-        let commit_mode = if agent_doc_git_io::status::is_in_git_repo(file) {
-            agent_doc_write_command_io::CommitMode::Required
-        } else {
-            agent_doc_write_command_io::CommitMode::None
-        };
-        agent_doc_write_runtime_io::run_command_with_response(
-            agent_doc_write_command_io::CommandOptions::repair_replay(
-                file,
-                is_template,
-                is_stream,
-                force_disk,
-                queue_completion_ids,
-            ),
-            commit_mode,
-            response.to_string(),
-        )
-    }
-}
-
-impl agent_doc_repair_io::RepairFallbackWriteEffects for OrchestrationRepairReplayWriteEffects {
-    fn apply_template_from_string(
-        &self,
-        file: &Path,
-        response: &str,
-        force_disk: bool,
-    ) -> Result<()> {
-        agent_doc_write_runtime_io::run_entry::apply_template_from_string_with_options(
-            file,
-            response,
-            agent_doc_write_command_io::TemplateApplyOptions { force_disk },
-        )
-    }
-
-    fn apply_append_from_string(&self, file: &Path, response: &str) -> Result<()> {
-        agent_doc_write_runtime_io::run_entry::apply_append_from_string(file, response)
-    }
-}
-
-impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects
-    for OrchestrationRepairReplayWriteEffects
-{
-    fn strike_recovered_free_text_queue_head(&self, file: &Path) -> Result<()> {
-        match agent_doc_queue_io::queue_consume::consume_queue_prompt_force_disk(
-            file,
-            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
-        ) {
-            Ok(Some(outcome)) => {
-                eprintln!(
-                    "[repair] struck consumed free-text queue head (remaining: {})",
-                    outcome.remaining
-                );
-                Ok(())
-            }
-            Ok(None) => Ok(()),
-            Err(err) => Err(err),
-        }
-    }
-}
-
 pub fn run_write_command_with_empty_response_recovery(
     options: agent_doc_write_command_io::CommandOptions,
     commit_mode: agent_doc_write_command_io::CommitMode,
@@ -157,7 +83,9 @@ pub(crate) fn recover_empty_response_for_strict_closeout(
     force_disk: bool,
 ) -> Result<bool> {
     agent_doc_repair_io::recover_empty_response_for_strict_closeout(
-        agent_doc_repair_runtime_io::repair_coordinator_effects(&REPAIR_REPLAY_WRITE_EFFECTS),
+        agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
+        ),
         file,
         strict_closeout,
         has_pending_mutation,
@@ -168,14 +96,18 @@ pub(crate) fn recover_empty_response_for_strict_closeout(
 #[cfg(test)]
 fn run(file: &Path) -> Result<RepairOutcome> {
     agent_doc_repair_io::run(
-        agent_doc_repair_runtime_io::repair_coordinator_effects(&REPAIR_REPLAY_WRITE_EFFECTS),
+        agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
+        ),
         file,
     )
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
     agent_doc_repair_io::repair(
-        agent_doc_repair_runtime_io::repair_coordinator_effects(&REPAIR_REPLAY_WRITE_EFFECTS),
+        agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
+        ),
         file,
     )
 }

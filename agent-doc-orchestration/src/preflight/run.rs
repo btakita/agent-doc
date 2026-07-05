@@ -272,7 +272,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         } else {
             match agent_doc_repair_io::run(
                 agent_doc_repair_runtime_io::repair_coordinator_effects(
-                    &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+                    &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
                 ),
                 file,
             ) {

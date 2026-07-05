@@ -13421,7 +13421,7 @@ fn test_agent_doc_frontmatter_owns_cross_document_security_review_policy() {
         !orchestration_lib.contains("pub mod security"),
         "orchestration must not expose security as a module facade"
     );
-    for relative in ["src/extract.rs", "agent-doc-orchestration/src/preflight.rs"] {
+    for relative in ["src/extract.rs", "agent-doc-preflight-io/src/lib.rs"] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains(

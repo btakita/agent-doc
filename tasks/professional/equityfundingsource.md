@@ -38,12 +38,12 @@ complete
 Compacted content:
 - Archived 10 response topic(s): Advance-lender dialog; deploy; Realtime pipeline events + notifications; 7 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): #ccpz; IPC proof diagnostic (interrupted-cycle recovery); lend...
-<!-- agent:boundary:3feac3d5 -->
+<!-- agent:boundary:0fb4a148 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- [#sy71]
-- [#7jj2]
+- 🚧 [#sy71]
+- ~~[#7jj2]~~
 <!-- /agent:queue -->
 
 ## Notes

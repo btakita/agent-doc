@@ -20033,6 +20033,66 @@ fn test_agent_doc_preflight_runtime_io_owns_route_queue_snapshot_recovery_graph(
 }
 
 #[test]
+fn test_agent_doc_preflight_runtime_io_owns_ipc_truncation_recovery_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
+    let preflight_runtime_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/Cargo.toml")).unwrap();
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+
+    for required in [
+        "pub fn recover_ipc_truncated_worktree_from_editor_buffer(",
+        "fn poll_save_document_visible_write_receipt(",
+        "agent_doc_debounce::await_editor_sync_barrier(",
+        "agent_doc_ipc_io::send_save_document(",
+        "agent_doc_ipc_io::send_save_document_file_signal(",
+        "agent_doc_write_converge_io::poll_visible_write_text_lazily_event_or_projection(",
+        "editor_buffer_preserved_head_exchange(",
+        "ipc_truncation_recovered_from_editor_buffer file=",
+    ] {
+        assert!(
+            preflight_runtime.contains(required),
+            "agent-doc-preflight-runtime-io must own IPC truncation recovery marker: {required}"
+        );
+    }
+
+    for required_dep in [
+        "agent-doc-debounce =",
+        "agent-doc-document =",
+        "agent-doc-ipc-io =",
+        "agent-doc-project-root-io =",
+        "agent-doc-session-check-io =",
+        "uuid =",
+    ] {
+        assert!(
+            preflight_runtime_manifest.contains(required_dep),
+            "agent-doc-preflight-runtime-io should declare IPC truncation recovery dependency: {required_dep}"
+        );
+    }
+
+    for forbidden in [
+        "fn recover_ipc_truncated_worktree_from_editor_buffer(",
+        "fn poll_save_document_visible_write_receipt(",
+        "agent_doc_debounce::await_editor_sync_barrier(",
+        "editor_buffer_preserved_head_exchange(",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight.rs must not re-own IPC truncation recovery marker: {forbidden}"
+        );
+    }
+
+    assert!(
+        orchestration_preflight.contains(
+            "agent_doc_preflight_runtime_io::recover_ipc_truncated_worktree_from_editor_buffer("
+        ),
+        "preflight sequencing should call the focused IPC truncation recovery helper"
+    );
+}
+
+#[test]
 fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =

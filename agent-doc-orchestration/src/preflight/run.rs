@@ -161,7 +161,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         && !open_cycle
         && agent_doc_session_check_io::detect_unstarted_prompt_bearing_diff(file)?.is_none()
     {
-        enforce_no_uncommitted_closeout_drift(file, &rc)?;
+        agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
+            file,
+            &rc,
+            &crate::session_check_effects(),
+        )?;
     }
 
     // Step 1: Recover orphaned pending responses.
@@ -290,7 +294,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // snapshot/file pair that already contains a visible response could be
     // normalized into a misleading `no_changes` result.
     if !options.probe {
-        enforce_no_uncommitted_closeout_drift(file, &rc)?;
+        agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
+            file,
+            &rc,
+            &crate::session_check_effects(),
+        )?;
     }
 
     // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and

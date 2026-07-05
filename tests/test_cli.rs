@@ -20025,10 +20025,8 @@ fn test_agent_doc_preflight_runtime_io_owns_route_queue_snapshot_recovery_graph(
     }
 
     assert!(
-        orchestration_preflight.contains(
-            "agent_doc_preflight_runtime_io::recover_route_queue_snapshot_commit_boundary(file, rc)?"
-        ),
-        "preflight sequencing should call the focused route-queue snapshot recovery helper"
+        preflight_runtime.contains("recover_route_queue_snapshot_commit_boundary(file, rc)?"),
+        "preflight runtime sequencing should call the focused route-queue snapshot recovery helper"
     );
 }
 
@@ -20085,10 +20083,64 @@ fn test_agent_doc_preflight_runtime_io_owns_ipc_truncation_recovery_graph() {
     }
 
     assert!(
-        orchestration_preflight.contains(
-            "agent_doc_preflight_runtime_io::recover_ipc_truncated_worktree_from_editor_buffer("
-        ),
-        "preflight sequencing should call the focused IPC truncation recovery helper"
+        preflight_runtime.contains("recover_ipc_truncated_worktree_from_editor_buffer(file, rc)?"),
+        "preflight runtime sequencing should call the focused IPC truncation recovery helper"
+    );
+}
+
+#[test]
+fn test_agent_doc_preflight_runtime_io_owns_closeout_drift_recovery_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+
+    for required in [
+        "pub fn enforce_no_uncommitted_closeout_drift(",
+        "session_check_effects: &impl agent_doc_session_check_io::SessionCheckEffects",
+        "recover_route_queue_snapshot_commit_boundary(file, rc)?",
+        "detect_jb_cache_conflict_accept_duplicate_replay_with_context(",
+        "jb_cache_conflict_accept_duplicate_replay_repaired file=",
+        "detect_late_ipc_response_overapplication_with_context(file, rc)?",
+        "late_ipc_response_overapplication_repaired file=",
+        "detect_jb_cache_conflict_cancel_recoverable_with_context(",
+        "jb_cache_conflict_cancel_auto_recovery_attempt file=",
+        "agent_doc_commit_io::commit(file)",
+        "recover_ipc_truncated_worktree_from_editor_buffer(file, rc)?",
+        "detect_uncommitted_closeout_drift_with_context(",
+        "preflight_blocked_uncommitted_closeout_drift file=",
+    ] {
+        assert!(
+            preflight_runtime.contains(required),
+            "agent-doc-preflight-runtime-io must own closeout-drift recovery marker: {required}"
+        );
+    }
+
+    for forbidden in [
+        "fn enforce_no_uncommitted_closeout_drift(",
+        "detect_jb_cache_conflict_accept_duplicate_replay_with_context(",
+        "detect_late_ipc_response_overapplication_with_context(",
+        "detect_jb_cache_conflict_cancel_recoverable_with_context(",
+        "detect_uncommitted_closeout_drift_with_context(",
+        "jb_cache_conflict_cancel_auto_recovery_attempt file=",
+        "late_ipc_response_overapplication_repaired file=",
+        "jb_cache_conflict_accept_duplicate_replay_repaired file=",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight.rs must not re-own closeout-drift recovery marker: {forbidden}"
+        );
+    }
+
+    assert!(
+        orchestration_preflight_run
+            .contains("agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(")
+            && orchestration_preflight_run.contains("&crate::session_check_effects()"),
+        "preflight run sequencing should call the focused closeout-drift runtime helper"
     );
 }
 
@@ -27936,8 +27988,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let preflight_runtime =
-        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "fn queue_prompt_text_for_route_change(",
         "fn operator_prioritize_route_prompt(",

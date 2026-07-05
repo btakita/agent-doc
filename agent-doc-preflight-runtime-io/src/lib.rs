@@ -49,6 +49,135 @@ impl agent_doc_preflight_io::PreflightMaintenanceWriteEffects
     }
 }
 
+pub fn enforce_no_uncommitted_closeout_drift(
+    file: &Path,
+    rc: &agent_doc_run_context_io::RunContext,
+    session_check_effects: &impl agent_doc_session_check_io::SessionCheckEffects,
+) -> Result<()> {
+    if recover_route_queue_snapshot_commit_boundary(file, rc)? {
+        return Ok(());
+    }
+
+    if let Some(replay) =
+        agent_doc_session_check_io::detect_jb_cache_conflict_accept_duplicate_replay_with_context(
+            file, rc,
+        )?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "jb_cache_conflict_accept_duplicate_replay_repaired file={} heading={}",
+                file.display(),
+                replay.heading.replace('\n', " ")
+            ),
+        );
+        eprintln!(
+            "[preflight] jb_cache_conflict_accept: removing duplicate response replay at `{}` for {}",
+            replay.heading,
+            file.display()
+        );
+        agent_doc_document_realtime_io::atomic_write_through_authority(
+            file,
+            &replay.deduped_content,
+        )?;
+        agent_doc_snapshot_io::save(file, &replay.deduped_content, agent_doc_ops_log_io::log_op)?;
+        return Ok(());
+    }
+
+    if let Some(overapplication) =
+        agent_doc_session_check_io::detect_late_ipc_response_overapplication_with_context(file, rc)?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "late_ipc_response_overapplication_repaired file={}",
+                file.display()
+            ),
+        );
+        eprintln!(
+            "[preflight] late_ipc_overapplication: restoring committed HEAD over re-added response for {}",
+            file.display()
+        );
+        agent_doc_document_realtime_io::atomic_write_through_authority(
+            file,
+            &overapplication.remediated_content,
+        )?;
+        agent_doc_snapshot_io::save(
+            file,
+            &overapplication.remediated_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        return Ok(());
+    }
+
+    if agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable_with_context(
+        file, rc,
+    )? {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "jb_cache_conflict_cancel_auto_recovery_attempt file={}",
+                file.display()
+            ),
+        );
+        eprintln!(
+            "[preflight] jb_cache_conflict_cancel: response written but not committed for {} -- running auto-commit",
+            file.display()
+        );
+        match agent_doc_commit_io::commit(file) {
+            Ok(_) => {
+                rc.invalidate_head_content();
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "jb_cache_conflict_cancel_auto_recovery_succeeded file={}",
+                        file.display()
+                    ),
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "jb_cache_conflict_cancel_auto_recovery_failed file={} error={}",
+                        file.display(),
+                        e.to_string().replace('\n', " ")
+                    ),
+                );
+                eprintln!(
+                    "[preflight] jb_cache_conflict_cancel auto-commit failed for {}: {}",
+                    file.display(),
+                    e
+                );
+            }
+        }
+    }
+
+    if recover_ipc_truncated_worktree_from_editor_buffer(file, rc)? {
+        return Ok(());
+    }
+
+    if let Some(message) =
+        agent_doc_session_check_io::detect_uncommitted_closeout_drift_with_context(
+            file,
+            rc,
+            session_check_effects,
+        )?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_blocked_uncommitted_closeout_drift file={} reason={}",
+                file.display(),
+                message.replace('\n', " ")
+            ),
+        );
+        anyhow::bail!("{}", message);
+    }
+    Ok(())
+}
+
 pub fn relocate_out_of_exchange_prompt_before_diff(
     file: &Path,
     doc_content: &str,

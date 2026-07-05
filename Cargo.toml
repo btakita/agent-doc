@@ -52,6 +52,7 @@ members = [
     "agent-doc-ipc-protocol",
     "agent-doc-plugin-owner",
     "agent-doc-plugin-owner-io",
+    "agent-doc-preflight-command-io",
     "agent-doc-preflight-io",
     "agent-doc-preflight-runtime-io",
     "agent-doc-project-config-io",
@@ -226,6 +227,7 @@ agent-doc-owner-pane-io = { path = "agent-doc-owner-pane-io", version = "0.34.67
 agent-doc-process-owner-io = { path = "agent-doc-process-owner-io", version = "0.34.67" }
 agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.67" }
 agent-doc-plugin-owner = { path = "agent-doc-plugin-owner", version = "0.34.67" }
+agent-doc-preflight-command-io = { path = "agent-doc-preflight-command-io", version = "0.34.67" }
 agent-doc-preflight-io = { path = "agent-doc-preflight-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "agent-doc-project-config-io", version = "0.34.67" }
 agent-doc-project-root-io = { path = "agent-doc-project-root-io", version = "0.34.67" }

@@ -1163,8 +1163,8 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-git-io/src/dirs.rs",
         "src/orchestrate.rs",
         "src/orchestrate/dag.rs",
-        "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/preflight/run.rs",
+        "agent-doc-preflight-command-io/src/lib.rs",
+        "agent-doc-preflight-command-io/src/run.rs",
         "agent-doc-preflight-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/tests/route.rs",
@@ -1307,10 +1307,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // trust a flushed editor buffer that itself dropped the committed `exchange`
         // response, falling through to the safe bail instead of auto-committing a
         // response-less document.
-        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 3,
+        ("agent-doc-preflight-command-io/src/lib.rs", "reason=") => 3,
         // 1 -> 0: queue selected-head handling moved to typed queue projection
         // fields, retiring the last ad hoc `reason=` token from preflight/run.
-        ("agent-doc-orchestration/src/preflight/run.rs", "reason=") => 0,
+        ("agent-doc-preflight-command-io/src/run.rs", "reason=") => 0,
         // 1 -> 2 (`reason=clean_session|operator_verify`): the go-mode
         // backlog→queue sync skips agent-undrainable heads and logs
         // `go_queue_skip_undrainable id=#<id> reason=<reason> session=<...>`
@@ -2921,7 +2921,7 @@ fn test_turn_scope_io_extraction_stays_first_class_and_facade_free() {
     for relative_path in [
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-commit-io/src/lib.rs",
-        "agent-doc-orchestration/src/preflight/run.rs",
+        "agent-doc-preflight-command-io/src/run.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "tests/run_integration.rs",
     ] {
@@ -3061,10 +3061,9 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         "orchestration must not keep a context_pct adapter module after transcript IO extraction"
     );
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let preflight_warnings_source =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     for forbidden_snippet in [
@@ -4138,8 +4137,7 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
     let queue_convergence =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_convergence.rs")).unwrap();
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     for required_snippet in [
         "pub fn realign_baseline_to_converged_queue(",
         "pub fn queue_body_diff_is_non_selected_future_state(",
@@ -4282,8 +4280,7 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
     }
 
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     assert!(
         preflight_run.contains("agent_doc_queue::queue_directive::do_directive_target_ids"),
         "preflight/run.rs should call focused queue directive parsing directly"
@@ -4335,8 +4332,7 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         "preflight maintenance must not re-own queue directive lifecycle expectation policy"
     );
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     assert!(
         preflight_run.contains("agent_doc_queue::queue_directive::filter_expect_done_or_gate_ids"),
         "preflight run should call focused queue directive lifecycle expectation policy directly"
@@ -4394,7 +4390,7 @@ fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
 
     for relative in [
         "agent-doc-queue-io/src/queue_consume.rs",
-        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-preflight-command-io/src/lib.rs",
         "agent-doc-preflight-io/src/lib.rs",
         "agent-doc-write-runtime-io/src/lib.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
@@ -4477,7 +4473,7 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
     let orchestration_git_tests =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/git.rs")).unwrap();
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_maintenance =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -5705,8 +5701,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
 
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     assert!(
         preflight_run.contains("agent_doc_element_backlog::backlog::open_backlog_ids_in_content"),
         "preflight should call focused open-backlog id extraction directly"
@@ -6346,13 +6341,13 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
             fs::read_to_string(manifest_dir.join("src/plan.rs")).unwrap(),
         ),
         (
-            "agent-doc-orchestration/src/preflight.rs",
-            fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs"))
+            "agent-doc-preflight-command-io/src/lib.rs",
+            fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs"))
                 .unwrap(),
         ),
         (
-            "agent-doc-orchestration/src/preflight/run.rs",
-            fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            "agent-doc-preflight-command-io/src/run.rs",
+            fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs"))
                 .unwrap(),
         ),
         (
@@ -6999,8 +6994,7 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
     }
 
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     assert!(
         preflight_source.contains("use agent_doc_turn::drain_stall::{"),
         "preflight must consume focused drain-stall policy directly"
@@ -7634,7 +7628,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
 
     for relative in [
         "src/orchestrate.rs",
-        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-preflight-command-io/src/lib.rs",
         "agent-doc-run-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -8319,10 +8313,9 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         "orchestration must not expose harness_prompt as a module facade"
     );
     let preflight_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     for forbidden_snippet in [
         "pub(crate) fn push_unique_strings(",
         "pub(crate) fn push_unique_prompt_bearing_changes(",
@@ -8349,7 +8342,7 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
             ],
         ),
         (
-            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-command-io/src/lib.rs",
             vec![
                 "agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning",
             ],
@@ -8364,7 +8357,7 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
             vec!["crate::prompt_contract"],
         ),
         (
-            "agent-doc-orchestration/src/preflight/run.rs",
+            "agent-doc-preflight-command-io/src/run.rs",
             vec![
                 "agent_doc_prompt_contract::collect_added_diff_lines",
                 "use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_strings};",
@@ -8413,7 +8406,7 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
             "agent_doc_harness::prompt_source::synthetic_diff_for_file(",
         ),
         (
-            "agent-doc-orchestration/src/preflight/run.rs",
+            "agent-doc-preflight-command-io/src/run.rs",
             "agent_doc_harness::prompt_source::synthetic_diff_for_file(",
         ),
     ] {
@@ -9685,7 +9678,7 @@ fn test_agent_doc_queue_owns_drain_owner_lease_policy() {
         "src/sim_world.rs",
         "agent-doc-start-runtime-io/src/lib.rs",
         "agent-doc-start-runtime-io/src/idle_watch.rs",
-        "agent-doc-orchestration/src/preflight/run.rs",
+        "agent-doc-preflight-command-io/src/run.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
@@ -10104,7 +10097,7 @@ fn test_agent_doc_run_context_io_owns_lazily_document_context_graph() {
         "src/orchestrate.rs",
         "src/patch.rs",
         "agent-doc-run-io/src/lib.rs",
-        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-preflight-command-io/src/lib.rs",
         "agent-doc-start-io/src/lib.rs",
         "agent-doc-write-runtime-io/src/run_entry.rs",
     ] {
@@ -11491,6 +11484,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Relocate the repair integration tests out of `agent-doc-orchestration/src/repair.rs`",
         ),
         (
+            "Preflight command runtime extraction",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-command-io/src/{lib.rs,run.rs}",
+            "Split cycle-completion effect wiring",
+        ),
+        (
             "Preflight output DTO graph",
             "agent-doc-orchestration/src/preflight.rs",
             "agent-doc-preflight-io/src/lib.rs",
@@ -11651,8 +11650,8 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "src/main.rs",
         "src/mcp.rs",
         "agent-doc-codex-stop-io/src/lib.rs",
-        "agent-doc-orchestration/src/preflight.rs",
-        "agent-doc-orchestration/src/preflight/run.rs",
+        "agent-doc-preflight-command-io/src/lib.rs",
+        "agent-doc-preflight-command-io/src/run.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/tests/route.rs",
         "agent-doc-write-runtime-io/src/lib.rs",
@@ -12346,8 +12345,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         );
     }
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     assert!(
         preflight_run.contains("agent_doc_workflow::session_cycle::prompt_targets_from_changes"),
         "preflight should call focused session-cycle workflow policy directly"
@@ -12368,7 +12366,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "agent-doc-sqlite should own semantic-diff durable op-log persistence"
     );
     let preflight_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn post_exchange_comment_prompt_preset_warning(",
         "fn preset_item_id_collision_warning(",
@@ -12794,7 +12792,7 @@ fn test_agent_doc_diff_owns_truncation_pure_policy() {
     );
     for (relative, required_call, required_store) in [
         (
-            "agent-doc-orchestration/src/preflight/run.rs",
+            "agent-doc-preflight-command-io/src/run.rs",
             "agent_doc_diff_io::compute_with_current(",
             "agent_doc_snapshot_io::DiffSnapshotStore::new(",
         ),
@@ -12964,8 +12962,7 @@ fn test_preflight_output_uses_user_intent_prompt_changes_json_surface() {
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let preflight_run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
 
     assert!(
         preflight_source
@@ -12992,7 +12989,7 @@ fn test_preflight_output_uses_user_intent_prompt_changes_json_surface() {
 fn test_agent_doc_preflight_io_owns_linked_doc_change_detection_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
     let preflight_io =
@@ -13042,10 +13039,9 @@ fn test_agent_doc_preflight_io_owns_linked_doc_change_detection_graph() {
 fn test_agent_doc_preflight_io_owns_claims_log_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let preflight_io =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
 
@@ -13082,10 +13078,9 @@ fn test_agent_doc_preflight_io_owns_claims_log_graph() {
 fn test_agent_doc_preflight_io_owns_baseline_content_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let preflight_io =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
 
@@ -13116,10 +13111,9 @@ fn test_agent_doc_preflight_io_owns_baseline_content_graph() {
 fn test_agent_doc_preflight_io_owns_explicit_backlog_target_requirement_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let preflight_io =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let preflight_io_manifest =
@@ -13166,7 +13160,7 @@ fn test_agent_doc_diff_owns_post_exchange_comment_policy() {
     }
 
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let workflow_preflight_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/preflight_policy.rs"))
             .unwrap();
@@ -13245,10 +13239,9 @@ fn test_agent_doc_diff_owns_semantic_diff_summary_policy() {
     );
 
     let preflight_mod =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     for forbidden in [
         "pub struct SemanticDiffSummary",
         "pub enum SemanticComponentOp",
@@ -18588,7 +18581,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     let preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let start_idle_watch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
@@ -19768,7 +19761,7 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "preflight must not keep a queue_tombstone IO facade module"
     );
     let preflight_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     assert!(
         !preflight_lib.contains("mod queue_tombstone"),
         "preflight must not expose a queue_tombstone IO facade"
@@ -19824,7 +19817,7 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         );
     }
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_warnings_source =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     for forbidden_snippet in [
@@ -19913,7 +19906,7 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
 fn test_agent_doc_preflight_io_owns_layout_health_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_layout =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/layout.rs")).unwrap();
     let preflight_io_lib =
@@ -19968,8 +19961,7 @@ fn test_agent_doc_preflight_io_owns_layout_health_graph() {
 fn test_agent_doc_preflight_io_owns_auto_gc_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let preflight_gc =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/gc.rs")).unwrap();
     let preflight_io_lib =
@@ -20019,10 +20011,9 @@ fn test_agent_doc_preflight_io_owns_auto_gc_graph() {
 fn test_agent_doc_preflight_io_owns_debounce_wait_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
             .unwrap();
@@ -20084,7 +20075,7 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
     let preflight_io =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_runtime = orchestration_preflight
         .split("\n#[cfg(test)]")
         .next()
@@ -20203,14 +20194,13 @@ fn test_agent_doc_preflight_runtime_io_owns_prompt_cleanup_graph() {
     let preflight_runtime_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/Cargo.toml")).unwrap();
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_runtime = orchestration_preflight
         .split("\n#[cfg(test)]")
         .next()
         .unwrap_or(&orchestration_preflight);
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
 
     for required in [
         "pub fn relocate_out_of_exchange_prompt_before_diff(",
@@ -20278,7 +20268,7 @@ fn test_agent_doc_preflight_runtime_io_owns_route_queue_snapshot_recovery_graph(
     let preflight_runtime_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/Cargo.toml")).unwrap();
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
 
     for required in [
         "pub fn recover_route_queue_snapshot_commit_boundary(",
@@ -20335,7 +20325,7 @@ fn test_agent_doc_preflight_runtime_io_owns_ipc_truncation_recovery_graph() {
     let preflight_runtime_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/Cargo.toml")).unwrap();
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
 
     for required in [
         "pub fn recover_ipc_truncated_worktree_from_editor_buffer(",
@@ -20391,10 +20381,9 @@ fn test_agent_doc_preflight_runtime_io_owns_closeout_drift_recovery_graph() {
     let preflight_runtime =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
 
     for required in [
         "pub fn enforce_no_uncommitted_closeout_drift(",
@@ -20452,10 +20441,9 @@ fn test_agent_doc_preflight_io_owns_sweep_owner_graph() {
     let preflight_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
 
     assert!(
         preflight_io_lib.contains("pub mod sweep;"),
@@ -20518,10 +20506,9 @@ fn test_agent_doc_preflight_io_owns_sweep_owner_graph() {
 fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let orchestration_build =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/build.rs")).unwrap();
     let preflight_warnings =
@@ -20596,8 +20583,7 @@ fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
 fn test_agent_doc_preflight_io_owns_warning_collection_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let preflight_warnings =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     let preflight_manifest =
@@ -20652,8 +20638,7 @@ fn test_agent_doc_preflight_io_owns_warning_collection_graph() {
 fn test_agent_doc_preflight_io_owns_semantic_advisory_warning_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let preflight_warnings =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     let preflight_manifest =
@@ -20730,8 +20715,7 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
     }
 
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let session_check =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     assert!(
@@ -20907,7 +20891,7 @@ fn test_agent_doc_element_done_owns_done_archive_content_policy() {
         "agent-doc-orchestration should depend on the focused done element crate directly"
     );
     let preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let done_archive =
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/done_archive.rs"))
             .unwrap();
@@ -20970,7 +20954,7 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/backlog_cmd.rs"))
             .unwrap();
     let preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_maintenance =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let orchestration_lib =
@@ -21188,10 +21172,9 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_reap_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/backlog_cmd.rs"))
             .unwrap();
     let preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     for forbidden in [
         "pub pending_reordered:",
         "pub pending_gated_count:",
@@ -22064,7 +22047,7 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
         "agent-doc-sync-io/src/sync/pane_repair.rs",
         "agent-doc-sync-io/src/sync/registry.rs",
         "agent-doc-sync-io/src/sync/layout.rs",
-        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-preflight-command-io/src/lib.rs",
         "agent-doc-prompt-io/src/lib.rs",
     ];
     for relative_path in direct_call_sources {
@@ -23493,8 +23476,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "agent-doc-start-io should call focused project-root IO instead of owning supervisor-start root discovery"
     );
     let preflight_run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     assert!(
         !preflight_run_source.contains("agent_doc_fs::find_project_root(")
             && preflight_run_source.contains("agent_doc_project_root_io::project_root_containing("),
@@ -23509,7 +23491,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "preflight maintenance should call focused project-root IO instead of owning queue/done/ops-log root discovery"
     );
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     assert!(
         !preflight_source.contains("agent_doc_fs::find_project_root(")
             && preflight_source.contains("agent_doc_project_root_io::project_root_containing("),
@@ -23884,7 +23866,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     for relative in [
         "src/main.rs",
         "src/cleanup_cmd.rs",
-        "agent-doc-orchestration/src/preflight/run.rs",
+        "agent-doc-preflight-command-io/src/run.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -23898,7 +23880,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let orchestration_preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     assert!(
         preflight_source.contains("Vec<agent_doc_ipc_protocol::PendingCallback>")
             && !orchestration_preflight_source.contains("Vec<crate::callback::PendingCallback>"),
@@ -24871,7 +24853,7 @@ fn test_agent_doc_document_owns_tracked_work_projection_policy() {
         "agent-doc-document should expose tracked-work projection through its owning module"
     );
     let orchestration_preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_io =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let forbidden = "fn tracked_work_component_fingerprint(";
@@ -25028,7 +25010,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
     );
 
     for relative in [
-        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-preflight-command-io/src/lib.rs",
         "agent-doc-session-check-io/src/command.rs",
         "agent-doc-session-check-io/src/detect.rs",
         "agent-doc-session-check-io/src/closeout_guards.rs",
@@ -25623,8 +25605,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     let preflight_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let preflight_run_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let repair_io_source =
@@ -26194,7 +26175,7 @@ fn test_agent_doc_element_backlog_owns_active_identity_projection_policy() {
     );
 
     let preflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_warnings =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     let workflow_preflight_policy =
@@ -26728,8 +26709,7 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
     let write_ipc_io =
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
     let preflight_run =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     assert!(
         write_run_entry.contains("agent_doc_document_realtime::write_policy::{")
             && write_run_entry.contains("snapshot_persist_mode_with_current")
@@ -28474,7 +28454,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     let turn_cycle_ack =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/cycle_ack.rs")).unwrap();
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
     let preflight_runtime =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [

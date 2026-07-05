@@ -650,7 +650,7 @@ fn test_preflight_timing_1500ms_is_configurable() {
     let preflight_debounce_src =
         std::fs::read_to_string(root.join("agent-doc-preflight-io/src/debounce.rs")).unwrap();
     let preflight_run_src =
-        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight/run.rs")).unwrap();
+        std::fs::read_to_string(root.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
 
     assert!(
         preflight_debounce_src.contains(".and_then(|(fm, _)| fm.debounce_ms)"),
@@ -720,7 +720,8 @@ fn test_timing_constants_are_documented() {
     // This is a code review test, not an executable test
     // Verification:
     // - grep -n "1500\|3000\|30000\|500" agent-doc-debounce/src/lib.rs \
-    //   agent-doc-orchestration/src/preflight{,/run}.rs should show comments
+    //   agent-doc-preflight-io/src/debounce.rs agent-doc-preflight-command-io/src/run.rs
+    //   should show comments
     // - Each constant should have a docstring or comment block explaining it
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -731,7 +732,7 @@ fn test_timing_constants_are_documented() {
     // The run entry points (with the `Default: 2000ms` debounce doc) were
     // extracted into preflight/run.rs (#splitmods4 large-module split).
     let preflight_run_src =
-        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight/run.rs")).unwrap();
+        std::fs::read_to_string(root.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
     assert!(
         debounce_src.contains("1500")
             && debounce_src.contains("preflight_debounce_max_wait")

@@ -259,6 +259,53 @@ pub fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) 
     }
 }
 
+pub fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {
+    let canonical = file.canonicalize().ok()?;
+    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
+
+    Some(root.join(".agent-doc/claims.log"))
+}
+
+/// Read the claims log without mutating it. Returns non-empty lines.
+pub fn read_claims(file: &Path) -> Vec<String> {
+    let Some(log_path) = claims_log_path(file) else {
+        return vec![];
+    };
+
+    let contents = match std::fs::read_to_string(&log_path) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    if contents.is_empty() {
+        return vec![];
+    }
+
+    contents
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect()
+}
+
+/// Read the claims log and truncate it. Returns non-empty lines.
+pub fn read_and_truncate_claims(file: &Path) -> Vec<String> {
+    let Some(log_path) = claims_log_path(file) else {
+        return vec![];
+    };
+
+    let claims = read_claims(file);
+    if claims.is_empty() {
+        return claims;
+    }
+
+    if let Err(e) = std::fs::write(&log_path, "") {
+        eprintln!("[preflight] failed to truncate claims log: {}", e);
+    }
+
+    claims
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
     /// Non-blocking warnings the skill should surface before responding.
@@ -4159,6 +4206,32 @@ mod tests {
         let cache_path = cache.unwrap();
         assert!(cache_path.exists());
         assert!(cache_path.ends_with("links_cache"));
+    }
+
+    #[test]
+    fn preflight_claims_read_and_truncated() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        let log_path = dir.path().join(".agent-doc/claims.log");
+        std::fs::write(&log_path, "claim A\nclaim B\n").unwrap();
+
+        let claims = read_and_truncate_claims(&doc);
+        assert_eq!(claims, vec!["claim A", "claim B"]);
+
+        let after = std::fs::read_to_string(&log_path).unwrap();
+        assert!(after.is_empty(), "claims log should be empty after read");
+    }
+
+    #[test]
+    fn preflight_no_claims_log_returns_empty() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        let claims = read_and_truncate_claims(&doc);
+        assert!(claims.is_empty());
     }
 
     fn write_optverify_doc(dir: &TempDir, predicate_annotation: &str) -> PathBuf {

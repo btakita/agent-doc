@@ -842,60 +842,6 @@ fn log_and_skip_foreign_owned_sweep_if_needed(
 mod run;
 pub use run::*;
 
-fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {
-    // Canonicalize to find project root reliably.
-    let canonical = file.canonicalize().ok()?;
-    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
-
-    Some(root.join(".agent-doc/claims.log"))
-}
-
-/// Read the claims log without mutating it. Returns lines as a `Vec<String>`.
-/// Returns an empty vec if the log doesn't exist or can't be read.
-fn read_claims(file: &Path) -> Vec<String> {
-    let Some(log_path) = claims_log_path(file) else {
-        return vec![];
-    };
-
-    let contents = match std::fs::read_to_string(&log_path) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-
-    if contents.is_empty() {
-        return vec![];
-    }
-
-    // Collect non-empty lines.
-    let claims: Vec<String> = contents
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| l.to_string())
-        .collect();
-
-    claims
-}
-
-/// Read the claims log and truncate it. Returns lines as a `Vec<String>`.
-/// Returns an empty vec if the log doesn't exist or can't be read.
-fn read_and_truncate_claims(file: &Path) -> Vec<String> {
-    let Some(log_path) = claims_log_path(file) else {
-        return vec![];
-    };
-
-    let claims = read_claims(file);
-    if claims.is_empty() {
-        return claims;
-    }
-
-    // Truncate the log.
-    if let Err(e) = std::fs::write(&log_path, "") {
-        eprintln!("[preflight] failed to truncate claims log: {}", e);
-    }
-
-    claims
-}
-
 fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
     let baseline_path = match agent_doc_fs::baseline_path_for(file) {
         Ok(path) => path,
@@ -1894,34 +1840,6 @@ mod tests {
             file_after.contains(&format!("<!--\n{prompt}\n-->")),
             "preflight must not scrub post-exchange scratch text that already existed in HEAD:\n{file_after}"
         );
-    }
-    #[test]
-    fn preflight_claims_read_and_truncated() {
-        let dir = setup_project();
-        let doc = dir.path().join("session.md");
-        std::fs::write(&doc, "# Doc\n").unwrap();
-        agent_doc_snapshot_io::save(&doc, "# Doc\n", agent_doc_ops_log_io::log_op).unwrap();
-
-        // Write a claims log.
-        let log_path = dir.path().join(".agent-doc/claims.log");
-        std::fs::write(&log_path, "claim A\nclaim B\n").unwrap();
-
-        let claims = read_and_truncate_claims(&doc);
-        assert_eq!(claims, vec!["claim A", "claim B"]);
-
-        // Log should be truncated.
-        let after = std::fs::read_to_string(&log_path).unwrap();
-        assert!(after.is_empty(), "claims log should be empty after read");
-    }
-    #[test]
-    fn preflight_no_claims_log_returns_empty() {
-        let dir = setup_project();
-        let doc = dir.path().join("session.md");
-        std::fs::write(&doc, "# Doc\n").unwrap();
-
-        // No claims.log exists.
-        let claims = read_and_truncate_claims(&doc);
-        assert!(claims.is_empty());
     }
     #[test]
     fn preflight_output_serializes_correctly() {

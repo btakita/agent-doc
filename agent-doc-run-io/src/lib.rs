@@ -8,6 +8,7 @@ use agent_doc_prompt_cache::{
     PromptCacheBlocks, PromptCacheSessionCostSample, render_cache_miss_ranking,
 };
 use agent_doc_queue_io::queue_consume;
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_session_accretion::SessionAccretionReport;
 use agent_doc_template as template;
 use agent_doc_template_io::{
@@ -319,7 +320,7 @@ pub fn run_once(
         agent_doc_document_realtime_io::atomic_write_through_authority(file, &content_original)?;
     }
     if !dry_run {
-        let early_rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+        let early_rc = agent_doc_run_context_io::run_context(file.to_path_buf());
         let (early_fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
             &content_original,
             file,
@@ -355,7 +356,7 @@ pub fn run_once(
         provided.set_file_path(file.to_path_buf());
         provided
     } else {
-        owned_rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+        owned_rc = agent_doc_run_context_io::run_context(file.to_path_buf());
         &owned_rc
     };
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
@@ -716,7 +717,7 @@ pub fn apply_template_response(
     response: &str,
     use_crdt: bool,
 ) -> Result<()> {
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     let current_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "direct_run_template_current",
@@ -1477,7 +1478,7 @@ pub fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> 
         file,
         "active_queue_prompt_state",
     )?;
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     let (fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
         file,
@@ -1750,7 +1751,7 @@ fn build_prompt_volatile_suffix(
         agent_doc_prompt_context::format_active_format_requirements(content)
             .map(|section| format!("\n\n{}\n", section))
             .unwrap_or_default();
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     let ssh_context = rc.ssh_context();
     let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
         file,

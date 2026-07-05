@@ -13,6 +13,7 @@ use crate::session_resolution::resolve_target_session;
 use crate::startup::RouteStartupEffects;
 use crate::startup_debounce::await_idle;
 use agent_doc_harness::HarnessConfig;
+use agent_doc_run_context_io::AgentDocContextExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteMode {
@@ -86,7 +87,7 @@ pub fn run_with_tmux_with_options(
     let updated_content = prepared.content;
     let session_id = prepared.session_id;
 
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     let fm = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &updated_content,
         file,

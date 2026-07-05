@@ -98,6 +98,7 @@ use std::time::{Duration, Instant};
 
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_sync::{ResyncTargetMatcher, superseded_candidates};
 use agent_doc_tmux::{
     PruneCleanupMode, StashTtlCandidate, TmuxPaneProcessKind,
@@ -409,10 +410,10 @@ fn registry_for_project_root<'a>(
         .registries
         .entry(project_root.to_path_buf())
         .or_insert_with(|| {
-            let actor = agent_doc_run_context_io::ActorContext::for_project_root(
+            let actor = agent_doc_run_context_io::actor_context_for_project_root(
                 project_root.to_path_buf(),
             );
-            (*actor.context().session_registry()).clone()
+            (*actor.session_registry()).clone()
         })
 }
 

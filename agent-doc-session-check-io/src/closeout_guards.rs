@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use agent_doc_document_realtime::baseline_comparison::BaselineComparison;
-use agent_doc_run_context_io::RunContext;
+use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 

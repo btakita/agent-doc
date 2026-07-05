@@ -97,6 +97,7 @@ mod worktree;
 
 use agent_doc_claim_io::ClaimRuntimeEffects;
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_template_io as template_io;
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
@@ -947,7 +948,7 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
         let ac = self
             .actor_contexts
             .entry(path.to_path_buf())
-            .or_insert_with(|| agent_doc_run_context_io::ActorContext::new(path.to_path_buf()));
+            .or_insert_with(|| agent_doc_run_context_io::actor_context(path.to_path_buf()));
         ac.on_file_change(path.to_path_buf());
         Ok(())
     }

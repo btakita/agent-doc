@@ -198,6 +198,7 @@ use tempfile::NamedTempFile;
 use crate::SyncLockAcquire;
 use crate::acquire_sync_lock;
 use agent_doc_controller::dispatch::{is_stash_window_name, normalize_context_session};
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 #[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
@@ -265,7 +266,7 @@ fn parse_frontmatter_for_sync<'a>(
     file: &Path,
     phase: &str,
 ) -> Result<(frontmatter::Frontmatter, &'a str)> {
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     agent_doc_frontmatter_io::session::parse_for_file_with_context(content, file, &rc.ssh_context())
         .map_err(|err| anyhow::anyhow!("sync {} frontmatter: {}", phase, err))
 }

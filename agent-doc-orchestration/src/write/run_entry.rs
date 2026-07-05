@@ -12,6 +12,7 @@ use agent_doc_element_exchange::extract_normalization_targets;
 use agent_doc_frontmatter::frontmatter::content_uses_crdt_write;
 use agent_doc_queue_io::queue_consume;
 use agent_doc_queue_io::queue_consumption_proof::QueueConsumptionProofStage;
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_template::response_materialization::sanitize_template_patchback_response;
 use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;
 use agent_doc_template_io as template_io;
@@ -251,7 +252,7 @@ pub(crate) fn run_template(
         anyhow::bail!("file not found: {}", file.display());
     }
     verify_pane_ownership(file)?;
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
 
     let mut response = read_response_input()?;
 
@@ -603,7 +604,7 @@ pub(crate) fn run_stream(
         anyhow::bail!("file not found: {}", file.display());
     }
     verify_pane_ownership(file)?;
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     // #jb-tsift-pane-sync diagnostic: capture a streamed write/commit to `file`
     // executing inside a tmux pane that owns a different document.
     agent_doc_sync_io::sync::log_cross_document_execution_context(file, "stream");
@@ -1400,7 +1401,7 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
 
     let mut response = read_response_input()?;
 
@@ -2045,7 +2046,7 @@ pub(crate) fn apply_template_from_string_with_options(
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let use_crdt = content_uses_crdt_write(&content);
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     let mut response = response.to_string();
     sanitize_template_patchback_response(&mut response)?;
 

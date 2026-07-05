@@ -5,6 +5,7 @@ use agent_doc_frontmatter::frontmatter;
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 
 pub struct RuntimePreflightMaintenanceWriteEffects;
@@ -296,9 +297,9 @@ pub fn relocate_out_of_exchange_prompt_before_diff(
 
 pub fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> Result<bool> {
     let current = resolve_current_preflight_document(file, "duplicate_answered_prompt_tail")?;
-    let Some(cleaned_doc) = agent_doc_template::remove_duplicate_answered_exchange_prompt_tail(
-        &current,
-    ) else {
+    let Some(cleaned_doc) =
+        agent_doc_template::remove_duplicate_answered_exchange_prompt_tail(&current)
+    else {
         return Ok(false);
     };
 

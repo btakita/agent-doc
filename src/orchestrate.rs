@@ -51,6 +51,7 @@
 //! - `sequential_orchestration_uses_streaming_backend_for_crdt_docs`
 //! - `dag_orchestration_runs_topological_order`
 
+use agent_doc_run_context_io::AgentDocContextExt;
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
@@ -468,7 +469,7 @@ fn build_agent_prompt(
     session_accretion: Option<&SessionAccretionReport>,
 ) -> String {
     let diff_text = diff_text.unwrap_or_default();
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     let ssh_context = rc.ssh_context();
     let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
         file,

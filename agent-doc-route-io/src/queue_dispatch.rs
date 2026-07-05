@@ -5,6 +5,7 @@ use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 
 pub type RouteWriteDocumentFn =
@@ -138,7 +139,7 @@ pub fn inactive_route_queue_head(file: &Path) -> Result<Option<String>> {
 }
 
 pub fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Option<String>> {
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     let (fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         content,
         file,

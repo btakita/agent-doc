@@ -1,13 +1,13 @@
 //! Lazily-rs dependency graph for agent-doc filesystem computations.
 //!
-//! Provides [`RunContext`] — a short-lived context for a single CLI invocation
+//! Provides [`CycleContext`] — a short-lived context for a single CLI invocation
 //! (`preflight → plan → write → commit`) — that caches filesystem-derived
 //! lookups (`project_root`, `project_config`, etc.) behind a reactive
 //! dependency graph. Within a CLI run, each slot computes at most once.
 //!
 //! For long-lived contexts (watch daemon, supervisor), use [`ActorContext`],
-//! which adds explicit invalidation via `SlotHandle::clear()` /
-//! `CellHandle::clear_dependents()` on file/config change events.
+//! which uses the same typed document schema with an actor-specific lazily
+//! context family and explicit invalidation on file/config change events.
 //!
 //! Slot graph:
 //!
@@ -29,601 +29,666 @@ use agent_doc_element::element::{self, Component};
 use agent_doc_frontmatter::frontmatter::{self, Frontmatter};
 use agent_doc_frontmatter::project_config::ProjectConfig;
 use agent_doc_frontmatter_io::session::ResolvedSshContext;
-use lazily::{CellHandle, Context, SlotHandle};
+use lazily::{TypedCellHandle, TypedContext, TypedFactoryContext, TypedSlotHandle};
 
 use agent_doc_cycle_state_io::CycleState;
 use agent_doc_document_realtime::{CurrentDocument, reconcile_current_doc};
 use agent_doc_project_config_io as project_config_io;
 
-pub type FilePathCell = CellHandle<PathBuf>;
-pub type CurrentDocumentCell = CellHandle<Option<CurrentDocument>>;
-pub type CanonicalPathSlot = SlotHandle<PathBuf>;
-pub type ProjectRootSlot = SlotHandle<Option<PathBuf>>;
-pub type ConfigPathSlot = SlotHandle<Option<PathBuf>>;
-pub type ProjectConfigSlot = SlotHandle<Arc<ProjectConfig>>;
-pub type SnapshotPathSlot = SlotHandle<Option<PathBuf>>;
-pub type DocRelativeSlot = SlotHandle<Option<String>>;
-pub type SshContextSlot = SlotHandle<Arc<ResolvedSshContext>>;
-pub type FrontmatterSlot = SlotHandle<Arc<Frontmatter>>;
-pub type ComponentsSlot = SlotHandle<Arc<Vec<Component>>>;
-pub type DocHashSlot = SlotHandle<String>;
+lazily::define_schema!(pub CycleContextSchema);
+lazily::define_schema!(pub ActorContextSchema);
+
+pub type CycleContext = TypedContext<CycleContextSchema>;
+/// Compatibility alias while call sites are renamed to `CycleContext`.
+pub type RunContext = CycleContext;
+pub type ActorContext = TypedContext<ActorContextSchema>;
+
+pub type FilePathCell<Schema> = TypedCellHandle<Schema, PathBuf>;
+pub type CurrentDocumentCell<Schema> = TypedCellHandle<Schema, Option<CurrentDocument>>;
+pub type CanonicalPathSlot<Schema> = TypedSlotHandle<Schema, PathBuf>;
+pub type ProjectRootSlot<Schema> = TypedSlotHandle<Schema, Option<PathBuf>>;
+pub type ConfigPathSlot<Schema> = TypedSlotHandle<Schema, Option<PathBuf>>;
+pub type ProjectConfigSlot<Schema> = TypedSlotHandle<Schema, Arc<ProjectConfig>>;
+pub type SnapshotPathSlot<Schema> = TypedSlotHandle<Schema, Option<PathBuf>>;
+pub type DocRelativeSlot<Schema> = TypedSlotHandle<Schema, Option<String>>;
+pub type SshContextSlot<Schema> = TypedSlotHandle<Schema, Arc<ResolvedSshContext>>;
+pub type FrontmatterSlot<Schema> = TypedSlotHandle<Schema, Arc<Frontmatter>>;
+pub type ComponentsSlot<Schema> = TypedSlotHandle<Schema, Arc<Vec<Component>>>;
+pub type DocHashSlot<Schema> = TypedSlotHandle<Schema, String>;
 /// Phase 7 (#lr-cycle-7): cached per-document cycle state, loaded at most once
 /// per context lifetime. `None` when no cycle-state sidecar exists yet.
-pub type CycleStateSlot = SlotHandle<Option<Arc<CycleState>>>;
+pub type CycleStateSlot<Schema> = TypedSlotHandle<Schema, Option<Arc<CycleState>>>;
 /// Phase 7 (#lr-cycle-7): cached snapshot content, loaded (with flock) at most
 /// once per context lifetime. `None` when no snapshot exists yet.
-pub type SnapshotContentSlot = SlotHandle<Option<Arc<String>>>;
+pub type SnapshotContentSlot<Schema> = TypedSlotHandle<Schema, Option<Arc<String>>>;
 /// Phase 8 (#lr-head-8): cached `git show HEAD:<doc>` content, spawned at
 /// most once per context lifetime. `None` when the document is not tracked or
 /// HEAD cannot provide content.
-pub type HeadContentSlot = SlotHandle<Option<Arc<String>>>;
+pub type HeadContentSlot<Schema> = TypedSlotHandle<Schema, Option<Arc<String>>>;
 /// Phase 8 (#lr-head-8): cached comparison of snapshot content against HEAD.
-pub type SnapshotCommitStatusSlot = SlotHandle<agent_doc_snapshot_io::SnapshotCommitStatus>;
+pub type SnapshotCommitStatusSlot<Schema> =
+    TypedSlotHandle<Schema, agent_doc_snapshot_io::SnapshotCommitStatus>;
 /// Phase 9 (#lr-wire-9): cached harness detection. Harness env vars are
-/// process-static for a CLI run, so compute once per [`RunContext`].
-pub type HarnessSlot = SlotHandle<String>;
+/// process-static for a CLI run, so compute once per [`CycleContext`].
+pub type HarnessSlot<Schema> = TypedSlotHandle<Schema, String>;
 /// Phase 10 (#lr-actor-10): cached global user configuration. For CLI runs this
 /// is process-static; for long-lived actors it is invalidated by config-change
 /// events before the next read.
-pub type GlobalConfigSlot = SlotHandle<Arc<agent_doc_config::Config>>;
+pub type GlobalConfigSlot<Schema> = TypedSlotHandle<Schema, Arc<agent_doc_config::Config>>;
 /// Phase 10 (#lr-actor-10): cached session registry for the current document's
 /// project root. Read-modify-write callers still load under `RegistryLock`.
-pub type SessionRegistrySlot = SlotHandle<Arc<tmux_router::Registry>>;
+pub type SessionRegistrySlot<Schema> = TypedSlotHandle<Schema, Arc<tmux_router::Registry>>;
 
-pub struct RunContext {
-    ctx: Context,
-    file_path: FilePathCell,
-    current_document: CurrentDocumentCell,
-    canonical_path: CanonicalPathSlot,
-    project_root: ProjectRootSlot,
-    config_path: ConfigPathSlot,
-    project_config: ProjectConfigSlot,
-    snapshot_path: SnapshotPathSlot,
-    doc_relative: DocRelativeSlot,
-    ssh_context: SshContextSlot,
-    frontmatter: FrontmatterSlot,
-    components: ComponentsSlot,
-    doc_hash: DocHashSlot,
-    cycle_state: CycleStateSlot,
-    snapshot_content: SnapshotContentSlot,
-    head_content: HeadContentSlot,
-    snapshot_commit_status: SnapshotCommitStatusSlot,
-    harness: HarnessSlot,
-    global_config: GlobalConfigSlot,
-    session_registry: SessionRegistrySlot,
+struct FilePathKey;
+struct CurrentDocumentKey;
+struct CanonicalPathKey;
+struct ProjectRootKey;
+struct ConfigPathKey;
+struct ProjectConfigKey;
+struct SnapshotPathKey;
+struct DocRelativeKey;
+struct SshContextKey;
+struct FrontmatterKey;
+struct ComponentsKey;
+struct DocHashKey;
+struct CycleStateKey;
+struct SnapshotContentKey;
+struct HeadContentKey;
+struct SnapshotCommitStatusKey;
+struct HarnessKey;
+struct GlobalConfigKey;
+struct SessionRegistryKey;
+
+fn file_path_cell<C>(ctx: &C) -> FilePathCell<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_cell::<FilePathKey, _, _>(|_| PathBuf::new())
 }
 
-impl RunContext {
-    pub fn new(file_path: PathBuf) -> Self {
-        let ctx = Context::new();
+fn current_document_cell<C>(ctx: &C) -> CurrentDocumentCell<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_cell::<CurrentDocumentKey, _, _>(|_| None::<CurrentDocument>)
+}
 
-        let file_path_cell = ctx.cell(file_path);
+fn canonical_path_slot<C>(ctx: &C) -> CanonicalPathSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<CanonicalPathKey, _, _>(|ctx| {
+        let path: PathBuf = ctx.get(file_path_cell(ctx));
+        std::fs::canonicalize(&path).unwrap_or(path)
+    })
+}
 
-        let canonical_path = ctx.slot({
-            let fp = file_path_cell;
-            move |ctx: &Context| -> PathBuf {
-                let path: PathBuf = ctx.get_cell(&fp);
-                std::fs::canonicalize(&path).unwrap_or(path)
+fn project_root_slot<C>(ctx: &C) -> ProjectRootSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<ProjectRootKey, _, _>(|ctx| {
+        let path: PathBuf = ctx.get(canonical_path_slot(ctx));
+        agent_doc_project_root_io::project_root_containing(&path)
+    })
+}
+
+fn config_path_slot<C>(ctx: &C) -> ConfigPathSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<ConfigPathKey, _, _>(|ctx| {
+        let root: Option<PathBuf> = ctx.get(project_root_slot(ctx));
+        root.map(|r| r.join(".agent-doc").join("config.toml"))
+    })
+}
+
+fn project_config_slot<C>(ctx: &C) -> ProjectConfigSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<ProjectConfigKey, _, _>(|ctx| {
+        let path: Option<PathBuf> = ctx.get(config_path_slot(ctx));
+        Arc::new(match path {
+            Some(ref p) => project_config_io::load_project_from(p),
+            None => ProjectConfig::default(),
+        })
+    })
+}
+
+fn snapshot_path_slot<C>(ctx: &C) -> SnapshotPathSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<SnapshotPathKey, _, _>(|ctx| {
+        let root: Option<PathBuf> = ctx.get(project_root_slot(ctx));
+        root.map(|r| r.join(".agent-doc").join("snapshots"))
+    })
+}
+
+fn doc_relative_slot<C>(ctx: &C) -> DocRelativeSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<DocRelativeKey, _, _>(|ctx| {
+        let canonical: PathBuf = ctx.get(canonical_path_slot(ctx));
+        let root: Option<PathBuf> = ctx.get(project_root_slot(ctx));
+        root.map(|r| {
+            canonical
+                .strip_prefix(&r)
+                .unwrap_or(canonical.as_path())
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+    })
+}
+
+fn ssh_context_slot<C>(ctx: &C) -> SshContextSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<SshContextKey, _, _>(|ctx| {
+        let config: Arc<ProjectConfig> = ctx.get(project_config_slot(ctx));
+        let doc_rel: Option<String> = ctx.get(doc_relative_slot(ctx));
+        Arc::new(ResolvedSshContext {
+            config,
+            doc_relative: doc_rel.unwrap_or_default(),
+        })
+    })
+}
+
+fn frontmatter_slot<C>(ctx: &C) -> FrontmatterSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<FrontmatterKey, _, _>(|ctx| {
+        let content = ctx
+            .get(current_document_cell(ctx))
+            .map(|doc| doc.into_content())
+            .unwrap_or_default();
+        let ssh: Arc<ResolvedSshContext> = ctx.get(ssh_context_slot(ctx));
+        let resolver = ssh.as_resolver_context(&ssh.doc_relative);
+        let fm = frontmatter::parse_with_ssh_resolver(&content, &resolver)
+            .map(|(fm, _)| fm)
+            .unwrap_or_default();
+        Arc::new(fm)
+    })
+}
+
+fn components_slot<C>(ctx: &C) -> ComponentsSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<ComponentsKey, _, _>(|ctx| {
+        let content = ctx
+            .get(current_document_cell(ctx))
+            .map(|doc| doc.into_content())
+            .unwrap_or_default();
+        Arc::new(element::parse(&content).unwrap_or_default())
+    })
+}
+
+fn doc_hash_slot<C>(ctx: &C) -> DocHashSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<DocHashKey, _, _>(|ctx| {
+        let canonical: PathBuf = ctx.get(canonical_path_slot(ctx));
+        agent_doc_fs::document_state_hash(&canonical).unwrap_or_else(|_| {
+            agent_doc_fs::document_state_hash_from_str(canonical.to_string_lossy().as_ref())
+        })
+    })
+}
+
+fn cycle_state_slot<C>(ctx: &C) -> CycleStateSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    // Phase 7 (#lr-cycle-7): load the per-document cycle state once. A real
+    // load error is surfaced to stderr (never swallowed); a missing sidecar is
+    // the normal `None` case.
+    ctx.memoized_slot::<CycleStateKey, _, _>(|ctx| {
+        let path: PathBuf = ctx.get(file_path_cell(ctx));
+        match agent_doc_cycle_state_io::load(&path) {
+            Ok(state) => state.map(Arc::new),
+            Err(e) => {
+                eprintln!(
+                    "[graph] cycle_state load failed for {}: {}",
+                    path.display(),
+                    e
+                );
+                None
             }
-        });
-
-        let project_root = ctx.slot({
-            let cp = canonical_path;
-            move |ctx: &Context| -> Option<PathBuf> {
-                let path: PathBuf = ctx.get(&cp);
-                agent_doc_project_root_io::project_root_containing(&path)
-            }
-        });
-
-        let config_path = ctx.slot({
-            let pr = project_root;
-            move |ctx: &Context| -> Option<PathBuf> {
-                let root: Option<PathBuf> = ctx.get(&pr);
-                root.map(|r| r.join(".agent-doc").join("config.toml"))
-            }
-        });
-
-        let project_config = ctx.slot({
-            let cp = config_path;
-            move |ctx: &Context| -> Arc<ProjectConfig> {
-                let path: Option<PathBuf> = ctx.get(&cp);
-                Arc::new(match path {
-                    Some(ref p) => project_config_io::load_project_from(p),
-                    None => ProjectConfig::default(),
-                })
-            }
-        });
-
-        let snapshot_path = ctx.slot({
-            let pr = project_root;
-            move |ctx: &Context| -> Option<PathBuf> {
-                let root: Option<PathBuf> = ctx.get(&pr);
-                root.map(|r| r.join(".agent-doc").join("snapshots"))
-            }
-        });
-
-        let doc_relative = ctx.slot({
-            let cp = canonical_path;
-            let pr = project_root;
-            move |ctx: &Context| -> Option<String> {
-                let canonical: PathBuf = ctx.get(&cp);
-                let root: Option<PathBuf> = ctx.get(&pr);
-                root.map(|r| {
-                    canonical
-                        .strip_prefix(&r)
-                        .unwrap_or(canonical.as_path())
-                        .to_string_lossy()
-                        .replace('\\', "/")
-                })
-            }
-        });
-
-        let ssh_context = ctx.slot({
-            let pc = project_config;
-            let dr = doc_relative;
-            move |ctx: &Context| -> Arc<ResolvedSshContext> {
-                let config: Arc<ProjectConfig> = ctx.get(&pc);
-                let doc_rel: Option<String> = ctx.get(&dr);
-                Arc::new(ResolvedSshContext {
-                    config,
-                    doc_relative: doc_rel.unwrap_or_default(),
-                })
-            }
-        });
-
-        let current_document = ctx.cell(None::<CurrentDocument>);
-
-        let frontmatter = ctx.slot({
-            let cd = current_document;
-            let sc = ssh_context;
-            move |ctx: &Context| -> Arc<Frontmatter> {
-                let content = ctx
-                    .get_cell(&cd)
-                    .map(|doc| doc.into_content())
-                    .unwrap_or_default();
-                let ssh: Arc<ResolvedSshContext> = ctx.get(&sc);
-                let resolver = ssh.as_resolver_context(&ssh.doc_relative);
-                let fm = frontmatter::parse_with_ssh_resolver(&content, &resolver)
-                    .map(|(fm, _)| fm)
-                    .unwrap_or_default();
-                Arc::new(fm)
-            }
-        });
-
-        let components = ctx.slot({
-            let cd = current_document;
-            move |ctx: &Context| -> Arc<Vec<Component>> {
-                let content = ctx
-                    .get_cell(&cd)
-                    .map(|doc| doc.into_content())
-                    .unwrap_or_default();
-                Arc::new(element::parse(&content).unwrap_or_default())
-            }
-        });
-
-        let doc_hash = ctx.slot({
-            let cp = canonical_path;
-            move |ctx: &Context| -> String {
-                let canonical: PathBuf = ctx.get(&cp);
-                agent_doc_fs::document_state_hash(&canonical).unwrap_or_else(|_| {
-                    agent_doc_fs::document_state_hash_from_str(canonical.to_string_lossy().as_ref())
-                })
-            }
-        });
-
-        // Phase 7 (#lr-cycle-7): load the per-document cycle state once. A real
-        // load error is surfaced to stderr (never swallowed); a missing sidecar
-        // is the normal `None` case.
-        let cycle_state = ctx.slot({
-            let fp = file_path_cell;
-            move |ctx: &Context| -> Option<Arc<CycleState>> {
-                let path: PathBuf = ctx.get_cell(&fp);
-                match agent_doc_cycle_state_io::load(&path) {
-                    Ok(state) => state.map(Arc::new),
-                    Err(e) => {
-                        eprintln!(
-                            "[graph] cycle_state load failed for {}: {}",
-                            path.display(),
-                            e
-                        );
-                        None
-                    }
-                }
-            }
-        });
-
-        // Phase 7 (#lr-cycle-7): load the snapshot content (with flock) once.
-        let snapshot_content = ctx.slot({
-            let fp = file_path_cell;
-            move |ctx: &Context| -> Option<Arc<String>> {
-                let path: PathBuf = ctx.get_cell(&fp);
-                match agent_doc_snapshot_io::load(&path) {
-                    Ok(content) => content.map(Arc::new),
-                    Err(e) => {
-                        eprintln!("[graph] snapshot load failed for {}: {}", path.display(), e);
-                        None
-                    }
-                }
-            }
-        });
-
-        // Phase 8 (#lr-head-8): load HEAD content once per CLI context instead
-        // of spawning `git show HEAD:<doc>` repeatedly across guards.
-        let head_content = ctx.slot({
-            let cp = canonical_path;
-            let pr = project_root;
-            move |ctx: &Context| -> Option<Arc<String>> {
-                let canonical: PathBuf = ctx.get(&cp);
-                // Register the project-root dependency even though
-                // `git::show_head` performs the final submodule narrowing.
-                let _root: Option<PathBuf> = ctx.get(&pr);
-                match agent_doc_git_io::revision::show_head(&canonical) {
-                    Ok(content) => content.map(Arc::new),
-                    Err(e) => {
-                        eprintln!(
-                            "[graph] git show HEAD failed for {}: {}",
-                            canonical.display(),
-                            e
-                        );
-                        None
-                    }
-                }
-            }
-        });
-
-        // Phase 8 (#lr-head-8): cache the snapshot-vs-HEAD status. Keep the
-        // full enum rather than a bool so existing diagnostics retain their
-        // specific NoSnapshot/NoHead/NotInGitRepo/mismatch variants.
-        let snapshot_commit_status = ctx.slot({
-            let fp = file_path_cell;
-            let sc = snapshot_content;
-            let hc = head_content;
-            move |ctx: &Context| -> agent_doc_snapshot_io::SnapshotCommitStatus {
-                let path: PathBuf = ctx.get_cell(&fp);
-                if !agent_doc_git_io::status::is_in_git_repo(&path) {
-                    return agent_doc_snapshot_io::SnapshotCommitStatus::NotInGitRepo;
-                }
-                let snapshot: Option<Arc<String>> = ctx.get(&sc);
-                let head: Option<Arc<String>> = ctx.get(&hc);
-                agent_doc_snapshot_io::snapshot_commit_status_from_contents(
-                    snapshot.as_deref().map(String::as_str),
-                    head.as_deref().map(String::as_str),
-                )
-            }
-        });
-
-        let harness = ctx.slot(|_ctx: &Context| agent_doc_model_tier::detect_harness());
-
-        let global_config = ctx.slot(|_ctx: &Context| -> Arc<agent_doc_config::Config> {
-            Arc::new(match agent_doc_config::load() {
-                Ok(config) => config,
-                Err(e) => {
-                    eprintln!("[graph] global config load failed: {e}");
-                    agent_doc_config::Config::default()
-                }
-            })
-        });
-
-        let session_registry = ctx.slot({
-            let pr = project_root;
-            move |ctx: &Context| -> Arc<tmux_router::Registry> {
-                let root: Option<PathBuf> = ctx.get(&pr);
-                let loaded = match root {
-                    Some(ref root) => agent_doc_session_registry_io::load_in(root).map_err(|e| {
-                        anyhow::anyhow!(
-                            "failed to load session registry from {}: {e}",
-                            agent_doc_session_registry_io::registry_path_in(root).display()
-                        )
-                    }),
-                    None => agent_doc_session_registry_io::load()
-                        .map_err(|e| anyhow::anyhow!("failed to load session registry: {e}")),
-                };
-
-                Arc::new(match loaded {
-                    Ok(registry) => registry,
-                    Err(e) => {
-                        eprintln!("[graph] {e}");
-                        tmux_router::Registry::new()
-                    }
-                })
-            }
-        });
-
-        Self {
-            ctx,
-            file_path: file_path_cell,
-            current_document,
-            canonical_path,
-            project_root,
-            config_path,
-            project_config,
-            snapshot_path,
-            doc_relative,
-            ssh_context,
-            frontmatter,
-            components,
-            doc_hash,
-            cycle_state,
-            snapshot_content,
-            head_content,
-            snapshot_commit_status,
-            harness,
-            global_config,
-            session_registry,
         }
+    })
+}
+
+fn snapshot_content_slot<C>(ctx: &C) -> SnapshotContentSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    // Phase 7 (#lr-cycle-7): load the snapshot content (with flock) once.
+    ctx.memoized_slot::<SnapshotContentKey, _, _>(|ctx| {
+        let path: PathBuf = ctx.get(file_path_cell(ctx));
+        match agent_doc_snapshot_io::load(&path) {
+            Ok(content) => content.map(Arc::new),
+            Err(e) => {
+                eprintln!("[graph] snapshot load failed for {}: {}", path.display(), e);
+                None
+            }
+        }
+    })
+}
+
+fn head_content_slot<C>(ctx: &C) -> HeadContentSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    // Phase 8 (#lr-head-8): load HEAD content once per CLI context instead of
+    // spawning `git show HEAD:<doc>` repeatedly across guards.
+    ctx.memoized_slot::<HeadContentKey, _, _>(|ctx| {
+        let canonical: PathBuf = ctx.get(canonical_path_slot(ctx));
+        // Register the project-root dependency even though `git::show_head`
+        // performs the final submodule narrowing.
+        let _root: Option<PathBuf> = ctx.get(project_root_slot(ctx));
+        match agent_doc_git_io::revision::show_head(&canonical) {
+            Ok(content) => content.map(Arc::new),
+            Err(e) => {
+                eprintln!(
+                    "[graph] git show HEAD failed for {}: {}",
+                    canonical.display(),
+                    e
+                );
+                None
+            }
+        }
+    })
+}
+
+fn snapshot_commit_status_slot<C>(ctx: &C) -> SnapshotCommitStatusSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    // Phase 8 (#lr-head-8): cache the snapshot-vs-HEAD status. Keep the full
+    // enum rather than a bool so diagnostics retain their specific variants.
+    ctx.memoized_slot::<SnapshotCommitStatusKey, _, _>(|ctx| {
+        let path: PathBuf = ctx.get(file_path_cell(ctx));
+        if !agent_doc_git_io::status::is_in_git_repo(&path) {
+            return agent_doc_snapshot_io::SnapshotCommitStatus::NotInGitRepo;
+        }
+        let snapshot: Option<Arc<String>> = ctx.get(snapshot_content_slot(ctx));
+        let head: Option<Arc<String>> = ctx.get(head_content_slot(ctx));
+        agent_doc_snapshot_io::snapshot_commit_status_from_contents(
+            snapshot.as_deref().map(String::as_str),
+            head.as_deref().map(String::as_str),
+        )
+    })
+}
+
+fn harness_slot<C>(ctx: &C) -> HarnessSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<HarnessKey, _, _>(|_| agent_doc_model_tier::detect_harness())
+}
+
+fn global_config_slot<C>(ctx: &C) -> GlobalConfigSlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<GlobalConfigKey, _, _>(|_| {
+        Arc::new(match agent_doc_config::load() {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("[graph] global config load failed: {e}");
+                agent_doc_config::Config::default()
+            }
+        })
+    })
+}
+
+fn session_registry_slot<C>(ctx: &C) -> SessionRegistrySlot<C::Schema>
+where
+    C: TypedFactoryContext + ?Sized,
+{
+    ctx.memoized_slot::<SessionRegistryKey, _, _>(|ctx| {
+        let root: Option<PathBuf> = ctx.get(project_root_slot(ctx));
+        let loaded = match root {
+            Some(ref root) => agent_doc_session_registry_io::load_in(root).map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to load session registry from {}: {e}",
+                    agent_doc_session_registry_io::registry_path_in(root).display()
+                )
+            }),
+            None => agent_doc_session_registry_io::load()
+                .map_err(|e| anyhow::anyhow!("failed to load session registry: {e}")),
+        };
+
+        Arc::new(match loaded {
+            Ok(registry) => registry,
+            Err(e) => {
+                eprintln!("[graph] {e}");
+                tmux_router::Registry::new()
+            }
+        })
+    })
+}
+
+pub fn cycle_context(file_path: PathBuf) -> CycleContext {
+    let ctx = CycleContext::new();
+    ctx.set(file_path_cell(&ctx), file_path);
+    ctx
+}
+
+pub fn run_context(file_path: PathBuf) -> RunContext {
+    cycle_context(file_path)
+}
+
+pub fn actor_context(file_path: PathBuf) -> ActorContext {
+    let ctx = ActorContext::new();
+    ctx.set(file_path_cell(&ctx), file_path);
+    ctx
+}
+
+pub fn cycle_context_from_project_root(project_root: PathBuf) -> CycleContext {
+    cycle_context(project_root.join(".agent-doc"))
+}
+
+pub fn actor_context_from_project_root(project_root: PathBuf) -> ActorContext {
+    actor_context(project_root.join(".agent-doc"))
+}
+
+pub fn actor_context_for_project_root(project_root: PathBuf) -> ActorContext {
+    actor_context_from_project_root(project_root)
+}
+
+pub trait AgentDocContextExt {
+    fn file_path(&self) -> PathBuf;
+    fn set_file_path(&self, path: PathBuf);
+    fn canonical_path(&self) -> PathBuf;
+    fn project_root(&self) -> Option<PathBuf>;
+    fn config_path(&self) -> Option<PathBuf>;
+    fn project_config(&self) -> Arc<ProjectConfig>;
+    fn snapshot_path(&self) -> Option<PathBuf>;
+    fn doc_relative(&self) -> Option<String>;
+    fn ssh_context(&self) -> Arc<ResolvedSshContext>;
+    fn doc_content(&self) -> String;
+    fn set_doc_content(&self, content: String);
+    fn current_document(&self) -> Option<CurrentDocument>;
+    fn set_current_document(&self, current: CurrentDocument);
+    fn clear_current_document(&self);
+    fn frontmatter(&self) -> Arc<Frontmatter>;
+    fn components(&self) -> Arc<Vec<Component>>;
+    fn doc_hash(&self) -> String;
+    fn cycle_state(&self) -> Option<Arc<CycleState>>;
+    fn snapshot_content(&self) -> Option<Arc<String>>;
+    fn head_content(&self) -> Option<Arc<String>>;
+    fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus;
+    fn harness(&self) -> String;
+    fn global_config(&self) -> Arc<agent_doc_config::Config>;
+    fn session_registry(&self) -> Arc<tmux_router::Registry>;
+    fn invalidate_cycle_state(&self);
+    fn invalidate_snapshot_content(&self);
+    fn invalidate_head_content(&self);
+    fn invalidate_global_config(&self);
+    fn invalidate_session_registry(&self);
+    fn is_cycle_state_cached(&self) -> bool;
+    fn is_snapshot_content_cached(&self) -> bool;
+    fn is_head_content_cached(&self) -> bool;
+    fn is_snapshot_commit_status_cached(&self) -> bool;
+    fn is_harness_cached(&self) -> bool;
+    fn is_global_config_cached(&self) -> bool;
+    fn is_session_registry_cached(&self) -> bool;
+    fn invalidate_project_root(&self);
+    fn invalidate_project_config(&self);
+    fn is_project_root_cached(&self) -> bool;
+    fn is_project_config_cached(&self) -> bool;
+    fn is_canonical_path_cached(&self) -> bool;
+    fn is_doc_relative_cached(&self) -> bool;
+    fn is_ssh_context_cached(&self) -> bool;
+    fn is_frontmatter_cached(&self) -> bool;
+    fn is_components_cached(&self) -> bool;
+    fn is_doc_hash_cached(&self) -> bool;
+    fn invalidate_doc_content(&self);
+    fn snapshot_path_for(&self) -> Option<PathBuf>;
+    fn lock_path_for(&self) -> Option<PathBuf>;
+    fn baseline_path_for(&self) -> Option<PathBuf>;
+    fn pending_path_for(&self) -> Option<PathBuf>;
+    fn on_file_change(&self, new_path: PathBuf);
+    fn on_config_change(&self);
+    fn on_session_registry_change(&self);
+    fn invalidate_all(&self);
+}
+
+impl<Schema: 'static> AgentDocContextExt for TypedContext<Schema> {
+    fn file_path(&self) -> PathBuf {
+        self.get(file_path_cell(self))
     }
 
-    pub fn from_project_root(project_root: PathBuf) -> Self {
-        Self::new(project_root.join(".agent-doc"))
+    fn set_file_path(&self, path: PathBuf) {
+        self.set(file_path_cell(self), path);
     }
 
-    pub fn file_path(&self) -> PathBuf {
-        self.ctx.get_cell(&self.file_path)
+    fn canonical_path(&self) -> PathBuf {
+        self.get(canonical_path_slot(self))
     }
 
-    pub fn set_file_path(&self, path: PathBuf) {
-        self.ctx.set_cell(&self.file_path, path);
+    fn project_root(&self) -> Option<PathBuf> {
+        self.get(project_root_slot(self))
     }
 
-    pub fn canonical_path(&self) -> PathBuf {
-        self.ctx.get(&self.canonical_path)
+    fn config_path(&self) -> Option<PathBuf> {
+        self.get(config_path_slot(self))
     }
 
-    pub fn project_root(&self) -> Option<PathBuf> {
-        self.ctx.get(&self.project_root)
+    fn project_config(&self) -> Arc<ProjectConfig> {
+        self.get(project_config_slot(self))
     }
 
-    pub fn config_path(&self) -> Option<PathBuf> {
-        self.ctx.get(&self.config_path)
+    fn snapshot_path(&self) -> Option<PathBuf> {
+        self.get(snapshot_path_slot(self))
     }
 
-    pub fn project_config(&self) -> Arc<ProjectConfig> {
-        self.ctx.get(&self.project_config)
+    fn doc_relative(&self) -> Option<String> {
+        self.get(doc_relative_slot(self))
     }
 
-    pub fn snapshot_path(&self) -> Option<PathBuf> {
-        self.ctx.get(&self.snapshot_path)
+    fn ssh_context(&self) -> Arc<ResolvedSshContext> {
+        self.get(ssh_context_slot(self))
     }
 
-    pub fn doc_relative(&self) -> Option<String> {
-        self.ctx.get(&self.doc_relative)
-    }
-
-    pub fn ssh_context(&self) -> Arc<ResolvedSshContext> {
-        self.ctx.get(&self.ssh_context)
-    }
-
-    pub fn doc_content(&self) -> String {
+    fn doc_content(&self) -> String {
         self.current_document()
             .map(CurrentDocument::into_content)
             .unwrap_or_default()
     }
 
-    pub fn set_doc_content(&self, content: String) {
+    fn set_doc_content(&self, content: String) {
         let current = CurrentDocument::new(self.file_path(), reconcile_current_doc(&content, None));
         self.set_current_document(current);
     }
 
-    pub fn current_document(&self) -> Option<CurrentDocument> {
-        self.ctx.get_cell(&self.current_document)
+    fn current_document(&self) -> Option<CurrentDocument> {
+        self.get(current_document_cell(self))
     }
 
-    pub fn set_current_document(&self, current: CurrentDocument) {
-        self.ctx.set_cell(&self.current_document, Some(current));
+    fn set_current_document(&self, current: CurrentDocument) {
+        self.set(current_document_cell(self), Some(current));
     }
 
-    pub fn clear_current_document(&self) {
-        self.ctx.set_cell(&self.current_document, None);
+    fn clear_current_document(&self) {
+        self.set(current_document_cell(self), None);
     }
 
-    pub fn frontmatter(&self) -> Arc<Frontmatter> {
-        self.ctx.get(&self.frontmatter)
+    fn frontmatter(&self) -> Arc<Frontmatter> {
+        self.get(frontmatter_slot(self))
     }
 
-    pub fn components(&self) -> Arc<Vec<Component>> {
-        self.ctx.get(&self.components)
+    fn components(&self) -> Arc<Vec<Component>> {
+        self.get(components_slot(self))
     }
 
-    pub fn doc_hash(&self) -> String {
-        self.ctx.get(&self.doc_hash)
+    fn doc_hash(&self) -> String {
+        self.get(doc_hash_slot(self))
     }
 
-    /// Phase 7 (#lr-cycle-7): cached cycle state for this document (loaded once).
-    pub fn cycle_state(&self) -> Option<Arc<CycleState>> {
-        self.ctx.get(&self.cycle_state)
+    fn cycle_state(&self) -> Option<Arc<CycleState>> {
+        self.get(cycle_state_slot(self))
     }
 
-    /// Phase 7 (#lr-cycle-7): cached snapshot content for this document.
-    pub fn snapshot_content(&self) -> Option<Arc<String>> {
-        self.ctx.get(&self.snapshot_content)
+    fn snapshot_content(&self) -> Option<Arc<String>> {
+        self.get(snapshot_content_slot(self))
     }
 
-    /// Phase 8 (#lr-head-8): cached HEAD content for this document.
-    pub fn head_content(&self) -> Option<Arc<String>> {
-        self.ctx.get(&self.head_content)
+    fn head_content(&self) -> Option<Arc<String>> {
+        self.get(head_content_slot(self))
     }
 
-    /// Phase 8 (#lr-head-8): cached snapshot-vs-HEAD comparison.
-    pub fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus {
-        self.ctx.get(&self.snapshot_commit_status)
+    fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus {
+        self.get(snapshot_commit_status_slot(self))
     }
 
-    /// Phase 9 (#lr-wire-9): cached harness detection for this CLI run.
-    pub fn harness(&self) -> String {
-        self.ctx.get(&self.harness)
+    fn harness(&self) -> String {
+        self.get(harness_slot(self))
     }
 
-    /// Phase 10 (#lr-actor-10): cached global user configuration.
-    pub fn global_config(&self) -> Arc<agent_doc_config::Config> {
-        self.ctx.get(&self.global_config)
+    fn global_config(&self) -> Arc<agent_doc_config::Config> {
+        self.get(global_config_slot(self))
     }
 
-    /// Phase 10 (#lr-actor-10): cached session registry for this document's
-    /// project root. This is for read-only point-in-time queries; mutation paths
-    /// must continue to load while holding `RegistryLock`.
-    pub fn session_registry(&self) -> Arc<tmux_router::Registry> {
-        self.ctx.get(&self.session_registry)
+    fn session_registry(&self) -> Arc<tmux_router::Registry> {
+        self.get(session_registry_slot(self))
     }
 
-    /// Invalidate the cached cycle state after a save/mutation so the next read
-    /// reloads it (Phase 7).
-    pub fn invalidate_cycle_state(&self) {
-        self.cycle_state.clear(&self.ctx);
+    fn invalidate_cycle_state(&self) {
+        cycle_state_slot(self).clear(self);
     }
 
-    /// Invalidate the cached snapshot content after a save/delete (Phase 7).
-    pub fn invalidate_snapshot_content(&self) {
-        self.snapshot_content.clear(&self.ctx);
+    fn invalidate_snapshot_content(&self) {
+        snapshot_content_slot(self).clear(self);
     }
 
-    /// Invalidate the cached HEAD content after `git::commit`.
-    pub fn invalidate_head_content(&self) {
-        self.head_content.clear(&self.ctx);
+    fn invalidate_head_content(&self) {
+        head_content_slot(self).clear(self);
     }
 
-    /// Invalidate cached global config after a config-file change.
-    pub fn invalidate_global_config(&self) {
-        self.global_config.clear(&self.ctx);
+    fn invalidate_global_config(&self) {
+        global_config_slot(self).clear(self);
     }
 
-    /// Invalidate cached session registry after registry mutation or a watcher
-    /// event. Registry mutation paths generally create a fresh `RunContext`;
-    /// long-lived `ActorContext`s call this before the next read.
-    pub fn invalidate_session_registry(&self) {
-        self.session_registry.clear(&self.ctx);
+    fn invalidate_session_registry(&self) {
+        session_registry_slot(self).clear(self);
     }
 
-    pub fn is_cycle_state_cached(&self) -> bool {
-        self.ctx.is_set(&self.cycle_state)
+    fn is_cycle_state_cached(&self) -> bool {
+        self.is_set(&cycle_state_slot(self))
     }
 
-    pub fn is_snapshot_content_cached(&self) -> bool {
-        self.ctx.is_set(&self.snapshot_content)
+    fn is_snapshot_content_cached(&self) -> bool {
+        self.is_set(&snapshot_content_slot(self))
     }
 
-    pub fn is_head_content_cached(&self) -> bool {
-        self.ctx.is_set(&self.head_content)
+    fn is_head_content_cached(&self) -> bool {
+        self.is_set(&head_content_slot(self))
     }
 
-    pub fn is_snapshot_commit_status_cached(&self) -> bool {
-        self.ctx.is_set(&self.snapshot_commit_status)
+    fn is_snapshot_commit_status_cached(&self) -> bool {
+        self.is_set(&snapshot_commit_status_slot(self))
     }
 
-    pub fn is_harness_cached(&self) -> bool {
-        self.ctx.is_set(&self.harness)
+    fn is_harness_cached(&self) -> bool {
+        self.is_set(&harness_slot(self))
     }
 
-    pub fn is_global_config_cached(&self) -> bool {
-        self.ctx.is_set(&self.global_config)
+    fn is_global_config_cached(&self) -> bool {
+        self.is_set(&global_config_slot(self))
     }
 
-    pub fn is_session_registry_cached(&self) -> bool {
-        self.ctx.is_set(&self.session_registry)
+    fn is_session_registry_cached(&self) -> bool {
+        self.is_set(&session_registry_slot(self))
     }
 
-    pub fn invalidate_project_root(&self) {
-        self.project_root.clear(&self.ctx);
+    fn invalidate_project_root(&self) {
+        project_root_slot(self).clear(self);
     }
 
-    pub fn invalidate_project_config(&self) {
-        self.project_config.clear(&self.ctx);
+    fn invalidate_project_config(&self) {
+        project_config_slot(self).clear(self);
     }
 
-    pub fn is_project_root_cached(&self) -> bool {
-        self.ctx.is_set(&self.project_root)
+    fn is_project_root_cached(&self) -> bool {
+        self.is_set(&project_root_slot(self))
     }
 
-    pub fn is_project_config_cached(&self) -> bool {
-        self.ctx.is_set(&self.project_config)
+    fn is_project_config_cached(&self) -> bool {
+        self.is_set(&project_config_slot(self))
     }
 
-    pub fn is_canonical_path_cached(&self) -> bool {
-        self.ctx.is_set(&self.canonical_path)
+    fn is_canonical_path_cached(&self) -> bool {
+        self.is_set(&canonical_path_slot(self))
     }
 
-    pub fn is_doc_relative_cached(&self) -> bool {
-        self.ctx.is_set(&self.doc_relative)
+    fn is_doc_relative_cached(&self) -> bool {
+        self.is_set(&doc_relative_slot(self))
     }
 
-    pub fn is_ssh_context_cached(&self) -> bool {
-        self.ctx.is_set(&self.ssh_context)
+    fn is_ssh_context_cached(&self) -> bool {
+        self.is_set(&ssh_context_slot(self))
     }
 
-    pub fn is_frontmatter_cached(&self) -> bool {
-        self.ctx.is_set(&self.frontmatter)
+    fn is_frontmatter_cached(&self) -> bool {
+        self.is_set(&frontmatter_slot(self))
     }
 
-    pub fn is_components_cached(&self) -> bool {
-        self.ctx.is_set(&self.components)
+    fn is_components_cached(&self) -> bool {
+        self.is_set(&components_slot(self))
     }
 
-    pub fn is_doc_hash_cached(&self) -> bool {
-        self.ctx.is_set(&self.doc_hash)
+    fn is_doc_hash_cached(&self) -> bool {
+        self.is_set(&doc_hash_slot(self))
     }
 
-    pub fn invalidate_doc_content(&self) {
-        self.current_document.clear_dependents(&self.ctx);
+    fn invalidate_doc_content(&self) {
+        current_document_cell(self).clear_dependents(self);
     }
 
-    pub fn snapshot_path_for(&self) -> Option<PathBuf> {
+    fn snapshot_path_for(&self) -> Option<PathBuf> {
         self.project_root()?;
         agent_doc_fs::snapshot_path_for(&self.canonical_path()).ok()
     }
 
-    pub fn lock_path_for(&self) -> Option<PathBuf> {
+    fn lock_path_for(&self) -> Option<PathBuf> {
         self.project_root()?;
         agent_doc_fs::state_lock_path_for(&self.canonical_path()).ok()
     }
 
-    pub fn baseline_path_for(&self) -> Option<PathBuf> {
+    fn baseline_path_for(&self) -> Option<PathBuf> {
         self.project_root()?;
         agent_doc_fs::baseline_path_for(&self.canonical_path()).ok()
     }
 
-    pub fn pending_path_for(&self) -> Option<PathBuf> {
+    fn pending_path_for(&self) -> Option<PathBuf> {
         self.project_root()?;
         agent_doc_fs::pending_response_path_for(&self.canonical_path()).ok()
     }
-}
 
-pub struct ActorContext {
-    inner: RunContext,
-}
-
-impl ActorContext {
-    pub fn new(file_path: PathBuf) -> Self {
-        Self {
-            inner: RunContext::new(file_path),
-        }
+    fn on_file_change(&self, new_path: PathBuf) {
+        self.set_file_path(new_path);
     }
 
-    pub fn for_project_root(project_root: PathBuf) -> Self {
-        Self {
-            inner: RunContext::from_project_root(project_root),
-        }
+    fn on_config_change(&self) {
+        self.invalidate_project_root();
+        self.invalidate_global_config();
     }
 
-    pub fn on_file_change(&self, new_path: PathBuf) {
-        self.inner.set_file_path(new_path);
+    fn on_session_registry_change(&self) {
+        self.invalidate_session_registry();
     }
 
-    pub fn on_config_change(&self) {
-        self.inner.invalidate_project_root();
-        self.inner.invalidate_global_config();
-    }
-
-    pub fn on_session_registry_change(&self) {
-        self.inner.invalidate_session_registry();
-    }
-
-    pub fn invalidate_all(&self) {
-        self.inner.invalidate_project_root();
-        self.inner.invalidate_global_config();
-        self.inner.invalidate_session_registry();
-    }
-
-    pub fn context(&self) -> &RunContext {
-        &self.inner
+    fn invalidate_all(&self) {
+        self.invalidate_project_root();
+        self.invalidate_global_config();
+        self.invalidate_session_registry();
     }
 }
 
@@ -733,7 +798,7 @@ mod tests {
         let doc = dir.path().join("nested/deep/file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
 
         let root = rc.project_root().unwrap();
         assert_eq!(root, dir.path());
@@ -749,7 +814,7 @@ mod tests {
         let doc = dir.path().join("nested/file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let root = rc.project_root();
         assert!(root.is_some());
@@ -765,7 +830,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         assert!(!rc.is_project_root_cached());
         let root = rc.project_root();
@@ -782,7 +847,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let snap = rc.snapshot_path().unwrap();
         assert_eq!(snap, dir.path().join(".agent-doc").join("snapshots"));
@@ -796,7 +861,7 @@ mod tests {
         let doc = dir.path().join("nested/deep/file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let rel = rc.doc_relative().unwrap();
         assert_eq!(rel, "nested/deep/file.md");
@@ -814,7 +879,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let ssh = rc.ssh_context();
         assert_eq!(ssh.config.tmux_session.as_deref(), Some("test"));
@@ -833,7 +898,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let cfg = rc.project_config();
         assert_eq!(cfg.tmux_session.as_deref(), Some("my-session"));
@@ -847,7 +912,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let _root = rc.project_root();
         assert!(rc.is_project_root_cached());
@@ -868,7 +933,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let _root = rc.project_root();
         let _cfg = rc.project_config();
@@ -889,7 +954,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let _root = rc.project_root();
         let _cfg = rc.project_config();
@@ -911,17 +976,17 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let ac = ActorContext::new(doc);
+        let ac = actor_context(doc);
 
-        let _root = ac.context().project_root();
-        let _cfg = ac.context().project_config();
-        assert!(ac.context().is_project_root_cached());
-        assert!(ac.context().is_project_config_cached());
+        let _root = ac.project_root();
+        let _cfg = ac.project_config();
+        assert!(ac.is_project_root_cached());
+        assert!(ac.is_project_config_cached());
 
         ac.on_config_change();
 
-        assert!(!ac.context().is_project_root_cached());
-        assert!(!ac.context().is_project_config_cached());
+        assert!(!ac.is_project_root_cached());
+        assert!(!ac.is_project_config_cached());
     }
 
     #[test]
@@ -931,13 +996,13 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let ac = ActorContext::new(doc);
-        let _root = ac.context().project_root();
-        assert!(ac.context().is_project_root_cached());
+        let ac = actor_context(doc);
+        let _root = ac.project_root();
+        assert!(ac.is_project_root_cached());
 
         ac.on_file_change(PathBuf::from("/other/path.md"));
 
-        assert!(!ac.context().is_project_root_cached());
+        assert!(!ac.is_project_root_cached());
     }
 
     #[test]
@@ -959,7 +1024,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let rel = rc.doc_relative();
         let root = rc.project_root();
@@ -979,7 +1044,7 @@ mod tests {
         )
         .unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
         rc.set_doc_content(std::fs::read_to_string(&doc).unwrap());
 
         let fm = rc.frontmatter();
@@ -997,7 +1062,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "disk replica\n").unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
         let current = CurrentDocument::new(
             doc.clone(),
             reconcile_current_doc(
@@ -1027,7 +1092,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "no frontmatter here\n").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
         rc.set_doc_content("no frontmatter here\n".to_string());
 
         let fm = rc.frontmatter();
@@ -1042,7 +1107,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "plain text\n").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
         rc.set_doc_content("plain text\n".to_string());
 
         let comps = rc.components();
@@ -1056,7 +1121,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         let hash1 = rc.doc_hash();
         let hash2 = rc.doc_hash();
@@ -1071,7 +1136,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
 
         let graph_hash = rc.doc_hash();
         let canonical = doc.canonicalize().unwrap();
@@ -1086,7 +1151,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
 
         assert_eq!(
             rc.snapshot_path_for(),
@@ -1101,7 +1166,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
 
         assert_eq!(
             rc.lock_path_for(),
@@ -1116,7 +1181,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
 
         assert_eq!(
             rc.baseline_path_for(),
@@ -1131,7 +1196,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
 
         assert_eq!(
             rc.pending_path_for(),
@@ -1150,7 +1215,7 @@ mod tests {
         )
         .unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
         rc.set_doc_content(std::fs::read_to_string(&doc).unwrap());
 
         let _fm = rc.frontmatter();
@@ -1171,7 +1236,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
 
         assert!(!rc.is_doc_hash_cached());
         let _hash = rc.doc_hash();
@@ -1191,7 +1256,7 @@ mod tests {
         std::fs::write(&doc, "hello").unwrap();
         agent_doc_snapshot_io::save(&doc, "snapshot body", agent_doc_ops_log_io::log_op).unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
         assert!(!rc.is_snapshot_content_cached());
         let content = rc.snapshot_content().expect("snapshot present");
         assert_eq!(content.as_str(), "snapshot body");
@@ -1208,7 +1273,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "hello").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = run_context(doc);
         assert!(rc.snapshot_content().is_none());
         assert!(rc.is_snapshot_content_cached(), "the None result is cached");
     }
@@ -1220,7 +1285,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "hello").unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
         // No sidecar yet → None, and the None is cached.
         assert!(rc.cycle_state().is_none());
         assert!(rc.is_cycle_state_cached());
@@ -1250,7 +1315,7 @@ mod tests {
         std::fs::write(&doc, "first\n").unwrap();
         commit_path(dir.path(), "file.md", "first");
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
         assert!(!rc.is_head_content_cached());
         let first = rc.head_content().expect("tracked file has HEAD content");
         assert_eq!(first.as_str(), "first\n");
@@ -1286,7 +1351,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, "committed\n", agent_doc_ops_log_io::log_op).unwrap();
         commit_path(dir.path(), "file.md", "add doc");
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
         assert!(!rc.is_snapshot_commit_status_cached());
         assert_eq!(
             rc.snapshot_commit_status(),
@@ -1335,7 +1400,7 @@ mod tests {
         }
         unsafe { std::env::set_var("CODEX_THREAD_ID", "thread-1") };
 
-        let rc = RunContext::new(PathBuf::from("doc.md"));
+        let rc = run_context(PathBuf::from("doc.md"));
         assert!(!rc.is_harness_cached());
         assert_eq!(rc.harness(), "codex");
         assert!(rc.is_harness_cached());
@@ -1368,7 +1433,7 @@ mod tests {
         .unwrap();
         let _xdg = EnvVarRestore::set("XDG_CONFIG_HOME", config_root.path());
 
-        let rc = RunContext::new(PathBuf::from("doc.md"));
+        let rc = run_context(PathBuf::from("doc.md"));
         assert!(!rc.is_global_config_cached());
         let first = rc.global_config();
         assert_eq!(first.default_agent.as_deref(), Some("claude"));
@@ -1403,7 +1468,7 @@ mod tests {
         first_registry.insert("first".to_string(), registry_entry("%1", "first", &doc));
         agent_doc_session_registry_io::save_in(dir.path(), &first_registry).unwrap();
 
-        let rc = RunContext::new(doc.clone());
+        let rc = run_context(doc.clone());
         assert!(!rc.is_session_registry_cached());
         let first = rc.session_registry();
         assert!(first.values().any(|entry| entry.pane == "%1"));
@@ -1432,22 +1497,21 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let ac = ActorContext::new(doc.clone());
-        assert!(ac.context().session_registry().is_empty());
-        assert!(ac.context().is_session_registry_cached());
+        let ac = actor_context(doc.clone());
+        assert!(ac.session_registry().is_empty());
+        assert!(ac.is_session_registry_cached());
 
         let mut registry = tmux_router::Registry::new();
         registry.insert("live".to_string(), registry_entry("%9", "live", &doc));
         agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
 
         assert!(
-            ac.context().session_registry().is_empty(),
+            ac.session_registry().is_empty(),
             "actor registry stays cached until an actor event invalidates it"
         );
         ac.on_session_registry_change();
         assert!(
-            ac.context()
-                .session_registry()
+            ac.session_registry()
                 .values()
                 .any(|entry| entry.pane == "%9")
         );

@@ -12,14 +12,16 @@ use agent_doc_preflight_io::{
     sweep::{current_sweep_owner, log_and_skip_foreign_owned_sweep_if_needed, sweep_owner_for_doc},
 };
 use agent_doc_preflight_runtime_io::{
-    relocate_out_of_exchange_prompt_before_diff, resolve_current_preflight_document,
+    relocate_out_of_exchange_prompt_before_diff,
     remove_duplicate_answered_exchange_prompt_tail_for_preflight,
     remove_post_exchange_duplicate_prompt_comments_for_preflight,
+    resolve_current_preflight_document,
 };
 use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_strings};
 use agent_doc_queue::queue_convergence::{
     queue_body_diff_is_non_selected_future_state, realign_baseline_to_converged_queue,
 };
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_turn::drain_stall::{StallFacts, StallVerdict, classify_stall};
 use agent_doc_workflow::session_cycle::{compute_user_intent_prompt_changes, derive_turn_scope};
 use anyhow::Context;
@@ -92,7 +94,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let content = resolve_current_preflight_document(file, "initial")?;
     let pre_mutation_unresolved_exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     let (initial_frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
         file,

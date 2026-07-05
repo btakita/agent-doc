@@ -67,6 +67,7 @@
 //! - `session_check_snapshot_committed_guard_fails_when_snapshot_differs`
 //! - `session_check_snapshot_committed_guard_passes_when_committed`
 
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_turn::CyclePhase;
 use agent_doc_turn::op_log::{
     PREFLIGHT_START_EVENT, event_name, is_write_completed_commit_missing_event,
@@ -483,7 +484,7 @@ pub fn inspect_with_warnings(
         // CurrentDocument. Guards that need content, frontmatter, or components
         // read from that lazily graph instead of independently resolving and
         // parsing the current document.
-        let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+        let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
         // #rtwwire (rung 3): seed the guard-sweep cache from the authoritative
         // current document. Active editors resolve through the CRDT relay; disk
         // is consulted only when no editor is attached.
@@ -710,7 +711,7 @@ pub fn detect_uncommitted_closeout_drift(
     file: &Path,
     effects: &impl SessionCheckEffects,
 ) -> Result<Option<String>> {
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     detect_uncommitted_closeout_drift_with_context(file, &rc, effects)
 }
 

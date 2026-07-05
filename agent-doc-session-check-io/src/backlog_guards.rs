@@ -3,7 +3,7 @@ use std::path::Path;
 use agent_doc_element_backlog::guard_policy::{
     dropped_from_history_guard, malformed_tracked_item_guard, shadow_backlog_guard,
 };
-use agent_doc_run_context_io::RunContext;
+use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 

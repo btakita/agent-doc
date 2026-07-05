@@ -8,6 +8,7 @@ use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{existing_patch_is_reposition_only, is_socket_receipt_timeout_error};
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_template::response_materialization::extract_response_headings_from_patches;
 use agent_doc_template::stale_baseline::is_append_mode_component;
 use agent_doc_write_converge_io::{
@@ -54,7 +55,7 @@ pub fn patch_response_headings_already_in_head(
     if headings.is_empty() {
         return true;
     }
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
     let Some(head) = rc.head_content() else {
         return false;
     };

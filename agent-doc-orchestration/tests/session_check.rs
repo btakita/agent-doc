@@ -53,6 +53,7 @@ fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+    use agent_doc_run_context_io::AgentDocContextExt;
     use agent_doc_session_check_io::resolve_pending_done_guard_mode_with_context;
     use std::fs;
     use std::io::Write;
@@ -75,7 +76,7 @@ mod tests {
     /// the file's current content, mirroring how `inspect_with_warnings` shares
     /// one context across the guard sweep.
     fn test_rc(file: &std::path::Path) -> agent_doc_run_context_io::RunContext {
-        let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+        let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
         rc.set_doc_content(std::fs::read_to_string(file).unwrap_or_default());
         rc
     }
@@ -845,7 +846,7 @@ mod tests {
     fn phase6_guard_mode_resolves_from_frontmatter_slot_not_file() {
         let missing = std::path::Path::new("/nonexistent/phase6-content-slot.md");
 
-        let rc = agent_doc_run_context_io::RunContext::new(missing.to_path_buf());
+        let rc = agent_doc_run_context_io::run_context(missing.to_path_buf());
         rc.set_doc_content(
             "---\nagent_doc_session: test\npending_done_guard: strict\n---\n\nBody\n".to_string(),
         );
@@ -854,7 +855,7 @@ mod tests {
             agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict,
         );
 
-        let rc_off = agent_doc_run_context_io::RunContext::new(missing.to_path_buf());
+        let rc_off = agent_doc_run_context_io::run_context(missing.to_path_buf());
         rc_off.set_doc_content(
             "---\nagent_doc_session: test\npending_done_guard: off\n---\n\nBody\n".to_string(),
         );
@@ -872,7 +873,7 @@ mod tests {
         let content =
             "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n"
                 .to_string();
-        let rc = agent_doc_run_context_io::RunContext::new(missing.to_path_buf());
+        let rc = agent_doc_run_context_io::run_context(missing.to_path_buf());
         rc.set_doc_content(content.clone());
 
         let doc = rc.doc_content();
@@ -5931,7 +5932,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, without_head, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::record_dropped_queue_prompts(&doc, &[head.to_string()]).unwrap();
 
-        let rc = agent_doc_run_context_io::RunContext::new(doc.clone());
+        let rc = agent_doc_run_context_io::run_context(doc.clone());
         rc.set_doc_content(without_head.to_string());
         match check_free_text_queue_head_provenance(&doc, &rc).unwrap() {
             GuardResult::Error(message) => {
@@ -5979,7 +5980,7 @@ Body\n\
         fs::write(&doc, &with_echo).unwrap();
         agent_doc_snapshot_io::save(&doc, &with_echo, agent_doc_ops_log_io::log_op).unwrap();
 
-        let rc = agent_doc_run_context_io::RunContext::new(doc.clone());
+        let rc = agent_doc_run_context_io::run_context(doc.clone());
         rc.set_doc_content(with_echo);
         assert!(
             matches!(

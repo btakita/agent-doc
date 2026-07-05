@@ -44,7 +44,7 @@ use agent_doc_element::element;
 use crate::PatchMode;
 use agent_doc_frontmatter::project_config::ComponentConfig;
 use agent_doc_project_config_io as project_config_io;
-use agent_doc_run_context_io::RunContext;
+use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
 
 fn load_configs_with_context(
     file: &Path,
@@ -89,7 +89,7 @@ pub fn run(
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
-    let rc = RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
 
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;

@@ -10010,7 +10010,7 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
 }
 
 #[test]
-fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
+fn test_agent_doc_run_context_io_owns_lazily_document_context_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
@@ -10031,20 +10031,26 @@ fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
     let run_context_source =
         fs::read_to_string(manifest_dir.join("agent-doc-run-context-io/src/lib.rs")).unwrap();
     for required in [
-        "pub struct RunContext",
-        "pub struct ActorContext",
-        "pub fn new(file_path: PathBuf) -> Self",
-        "pub fn from_project_root(project_root: PathBuf) -> Self",
-        "pub fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus",
-        "pub fn session_registry(&self) -> Arc<tmux_router::Registry>",
-        "lazily::{CellHandle, Context, SlotHandle}",
+        "lazily::define_schema!(pub CycleContextSchema);",
+        "lazily::define_schema!(pub ActorContextSchema);",
+        "pub type CycleContext = TypedContext<CycleContextSchema>",
+        "pub type ActorContext = TypedContext<ActorContextSchema>",
+        "pub fn run_context(file_path: PathBuf) -> RunContext",
+        "pub fn actor_context_for_project_root(project_root: PathBuf) -> ActorContext",
+        "pub trait AgentDocContextExt",
+        "fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus",
+        "fn session_registry(&self) -> Arc<tmux_router::Registry>",
+        "lazily::{TypedCellHandle, TypedContext, TypedFactoryContext, TypedSlotHandle}",
     ] {
         assert!(
             run_context_source.contains(required),
-            "agent-doc-run-context-io must own the Lazily-backed run-context graph: {required}"
+            "agent-doc-run-context-io must own the typed Lazily context graph directly: {required}"
         );
     }
     for forbidden in [
+        "pub struct DocumentContext",
+        "pub type CycleContext = DocumentContext",
+        "pub type ActorContext = DocumentContext",
         "agent_doc_orchestration::",
         "crate::test_support::",
         "pub use agent_doc_run_context_io",
@@ -10089,10 +10095,15 @@ fn test_agent_doc_run_context_io_owns_lazily_run_context_graph() {
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
-            source.contains("agent_doc_run_context_io::RunContext")
+            (source.contains("agent_doc_run_context_io::CycleContext")
+                || source.contains("agent_doc_run_context_io::RunContext")
+                || source.contains("agent_doc_run_context_io::run_context")
+                || source.contains("agent_doc_run_context_io::AgentDocContextExt")
+                || source.contains("agent_doc_run_context_io::{AgentDocContextExt, RunContext}")
+                || source.contains("agent_doc_run_context_io::{RunContext, AgentDocContextExt}"))
                 && !source.contains("agent_doc_orchestration::graph::RunContext")
                 && !source.contains("crate::graph::RunContext"),
-            "{relative} should use the focused run-context crate directly"
+            "{relative} should use the focused document-context crate directly"
         );
     }
 }
@@ -14271,7 +14282,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     let route_startup_harness =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_harness.rs")).unwrap();
     assert!(
-        route_startup_harness.contains("RunContext::new")
+        route_startup_harness.contains("agent_doc_run_context_io::run_context")
             && route_startup_harness.contains("HarnessConfig::from_context"),
         "agent-doc-route-io startup harness resolution should own frontmatter/global config adaptation"
     );

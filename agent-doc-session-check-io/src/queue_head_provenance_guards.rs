@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use agent_doc_run_context_io::RunContext;
+use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 
@@ -336,7 +336,7 @@ mod tests {
     }
 
     fn run_context(doc: &Path, content: &str) -> RunContext {
-        let rc = RunContext::new(doc.to_path_buf());
+        let rc = agent_doc_run_context_io::run_context(doc.to_path_buf());
         rc.set_doc_content(content.to_string());
         rc
     }

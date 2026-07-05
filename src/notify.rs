@@ -48,7 +48,7 @@ use std::process::Command;
 
 use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_backlog::backlog;
-use agent_doc_run_context_io::RunContext;
+use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {
@@ -152,7 +152,7 @@ pub fn run(
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
-    let rc = RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
 
     let has_pending_ops = !pending_add.is_empty() || !pending_add_gated.is_empty();
     let pending_only = has_pending_ops && message.is_none();

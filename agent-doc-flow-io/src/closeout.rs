@@ -2,6 +2,7 @@ use agent_doc_flow::{
     closeout::closeout_latency_message,
     types::{FlowOutcome, FlowStage},
 };
+use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_turn::closeout_guard::CloseoutGuardReason;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryCommandInput, CloseoutRecoveryCycleInput, CloseoutRecoveryDecision,
@@ -69,7 +70,7 @@ pub fn log_closeout_guard_event(
 
 pub fn complete_required_closeout(file: &Path, effects: &dyn CloseoutEffects) -> Result<bool> {
     let mut timer = CloseoutTimer::start(file);
-    let rc = agent_doc_run_context_io::RunContext::new(file.to_path_buf());
+    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
 
     // `#crdtauth4` — authority-gated state-vector commit barrier (plan phase 4).
     // Under `CrdtAuthority::MultiReplica` (a live editor is attached) flush every

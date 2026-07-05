@@ -47,94 +47,6 @@ pub use agent_doc_document_realtime_io::{
     RuntimePipelineFrontmatterEffects as PipelineFrontmatterEffects,
 };
 
-pub struct OrchestrationRepairIoEffects;
-
-pub static REPAIR_IO_EFFECTS: OrchestrationRepairIoEffects = OrchestrationRepairIoEffects;
-
-impl agent_doc_repair_io::RepairIoEffects for OrchestrationRepairIoEffects {
-    fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
-    }
-
-    fn mark_committed_frontmatter(
-        &self,
-        file: &std::path::Path,
-        event: &str,
-        snapshot_content: Option<&str>,
-        file_content: Option<&str>,
-    ) -> anyhow::Result<agent_doc_cycle_state_io::CycleState> {
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            event,
-            snapshot_content,
-            file_content,
-        )
-    }
-
-    fn mark_abandoned_frontmatter(
-        &self,
-        file: &std::path::Path,
-        event: &str,
-        snapshot_content: Option<&str>,
-        file_content: Option<&str>,
-    ) -> anyhow::Result<agent_doc_cycle_state_io::CycleState> {
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            event,
-            snapshot_content,
-            file_content,
-        )
-    }
-
-    fn apply_closeout_recovery_mutation(
-        &self,
-        file: &std::path::Path,
-        mutation: agent_doc_flow_io::closeout::CloseoutRecoveryMutation<'_>,
-    ) -> anyhow::Result<()> {
-        agent_doc_flow_io::closeout::apply_closeout_recovery_mutation(
-            file,
-            mutation,
-            &crate::closeout_effects(),
-        )
-    }
-}
-
-impl agent_doc_repair_io::RepairTemplateWriteEffects for OrchestrationRepairIoEffects {
-    fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
-    }
-
-    fn repair_response_prompt_order_for_file(
-        &self,
-        content: &str,
-        known_response: Option<&str>,
-        file: &std::path::Path,
-        fallback_snapshot: Option<&str>,
-    ) -> anyhow::Result<Option<String>> {
-        agent_doc_template_io::repair_response_prompt_order_for_file(
-            content,
-            known_response,
-            file,
-            fallback_snapshot,
-        )
-    }
-
-    fn normalize_template_structure_or_fail_preserving(
-        &self,
-        content: &str,
-        file: &std::path::Path,
-        prompt_input: Option<&str>,
-    ) -> anyhow::Result<String> {
-        agent_doc_template_io::normalize_template_structure_or_fail_preserving(
-            content,
-            file,
-            prompt_input,
-        )
-    }
-}
-
 pub struct OrchestrationRepairReplayWriteEffects;
 
 pub static REPAIR_REPLAY_WRITE_EFFECTS: OrchestrationRepairReplayWriteEffects =
@@ -142,11 +54,11 @@ pub static REPAIR_REPLAY_WRITE_EFFECTS: OrchestrationRepairReplayWriteEffects =
 
 pub(crate) fn repair_coordinator_effects() -> agent_doc_repair_io::RepairCoordinatorEffects<
     'static,
-    OrchestrationRepairIoEffects,
+    agent_doc_closeout_runtime_io::RuntimeRepairIoEffects,
     OrchestrationRepairReplayWriteEffects,
 > {
     agent_doc_repair_io::RepairCoordinatorEffects {
-        repair_io_effects: &REPAIR_IO_EFFECTS,
+        repair_io_effects: &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
         replay_write_effects: &REPAIR_REPLAY_WRITE_EFFECTS,
         complete_required_closeout: repair_complete_required_closeout,
         inspect_session: repair_inspect_session,
@@ -157,13 +69,19 @@ pub(crate) fn repair_coordinator_effects() -> agent_doc_repair_io::RepairCoordin
 }
 
 fn repair_complete_required_closeout(file: &std::path::Path) -> anyhow::Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
+    agent_doc_flow_io::closeout::complete_required_closeout(
+        file,
+        &agent_doc_closeout_runtime_io::closeout_effects(),
+    )
 }
 
 fn repair_inspect_session(
     file: &std::path::Path,
 ) -> anyhow::Result<agent_doc_session_check_io::SessionCheckStatus> {
-    agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
+    agent_doc_session_check_io::inspect(
+        file,
+        &agent_doc_closeout_runtime_io::session_check_effects(),
+    )
 }
 
 impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplayWriteEffects {
@@ -230,190 +148,5 @@ impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplay
             Ok(None) => Ok(()),
             Err(err) => Err(err),
         }
-    }
-}
-
-pub struct OrchestrationSessionCheckEffects;
-
-pub fn session_check_effects() -> OrchestrationSessionCheckEffects {
-    OrchestrationSessionCheckEffects
-}
-
-impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionCheckEffects {
-    fn closeout_recovery_hint(&self, file: &std::path::Path) -> String {
-        closeout_recovery_hint(file)
-    }
-
-    fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
-    }
-
-    fn repair_committed_historical_snapshot_drift(
-        &self,
-        file: &std::path::Path,
-    ) -> anyhow::Result<Option<&'static str>> {
-        agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)
-    }
-
-    fn recover_missing_commit_boundary(
-        &self,
-        file: &std::path::Path,
-        event: &str,
-    ) -> anyhow::Result<Option<&'static str>> {
-        agent_doc_repair_io::recover_missing_commit_boundary(&crate::REPAIR_IO_EFFECTS, file, event)
-    }
-}
-
-pub struct OrchestrationDirectRunEffects;
-
-pub static DIRECT_RUN_EFFECTS: OrchestrationDirectRunEffects = OrchestrationDirectRunEffects;
-
-impl agent_doc_run_io::DirectRunEffects for OrchestrationDirectRunEffects {
-    fn guard_no_exchange_compaction_request_for_diff(
-        &self,
-        file: &std::path::Path,
-        diff_text: &str,
-    ) -> anyhow::Result<()> {
-        agent_doc_run_io::guard_no_exchange_compaction_request_for_diff(file, diff_text)
-    }
-
-    fn commit(&self, file: &std::path::Path) -> anyhow::Result<bool> {
-        agent_doc_commit_io::commit(file)
-    }
-
-    fn normalize_template_structure_or_fail(
-        &self,
-        content: &str,
-        file: &std::path::Path,
-    ) -> anyhow::Result<String> {
-        agent_doc_template_io::normalize_template_structure_or_fail(content, file)
-    }
-
-    fn atomic_write(&self, file: &std::path::Path, content: &str) -> anyhow::Result<()> {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
-    }
-
-    fn consume_queue_prompts_for_done_ids_with_outcome(
-        &self,
-        file: &std::path::Path,
-        done_ids: &[String],
-        force_disk: bool,
-    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_consume::QueueConsumptionOutcome>> {
-        if force_disk {
-            agent_doc_queue_io::queue_consume::consume_queue_prompts_with_outcome(
-                file,
-                done_ids,
-                true,
-                &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
-            )
-        } else {
-            agent_doc_queue_io::queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
-                file,
-                done_ids,
-                &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
-            )
-        }
-    }
-
-    fn complete_required_closeout(&self, file: &std::path::Path) -> anyhow::Result<()> {
-        agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
-            .map(|_| ())
-    }
-
-    fn abandon_recursive_cycle(
-        &self,
-        file: &std::path::Path,
-        event: &str,
-        diagnostic: &str,
-    ) -> anyhow::Result<()> {
-        agent_doc_run_io::abandon_run_recursive_cycle(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            event,
-            diagnostic,
-        )
-    }
-}
-
-pub struct OrchestrationCloseoutEffects;
-
-pub fn closeout_effects() -> OrchestrationCloseoutEffects {
-    OrchestrationCloseoutEffects
-}
-
-impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffects {
-    fn commit(&self, file: &std::path::Path) -> anyhow::Result<bool> {
-        agent_doc_commit_io::commit(file)
-    }
-
-    fn run_pending_maintenance(
-        &self,
-        file: &std::path::Path,
-        force_disk: bool,
-    ) -> anyhow::Result<agent_doc_preflight_io::PendingMaintenanceReport> {
-        if force_disk {
-            agent_doc_preflight_io::run_pending_maintenance_force_disk(
-                file,
-                &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-            )
-        } else {
-            agent_doc_preflight_io::run_pending_maintenance(
-                file,
-                &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-            )
-        }
-    }
-
-    fn enforce_clean_closeout(&self, file: &std::path::Path) -> anyhow::Result<()> {
-        agent_doc_session_check_io::enforce_clean_closeout(file, &crate::session_check_effects())
-    }
-
-    fn cancel_preflight_cycle(&self, file: &std::path::Path) -> anyhow::Result<()> {
-        agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, file).map(|_| ())
-    }
-
-    fn detect_jb_cache_conflict_cancel_recoverable(
-        &self,
-        file: &std::path::Path,
-    ) -> anyhow::Result<bool> {
-        agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(file)
-    }
-
-    fn detect_bypassed_response_write(
-        &self,
-        file: &std::path::Path,
-    ) -> anyhow::Result<Option<String>> {
-        agent_doc_session_check_io::detect_bypassed_response_write(file)
-    }
-
-    fn mark_committed_frontmatter(
-        &self,
-        file: &std::path::Path,
-        event: &str,
-        snapshot_content: Option<&str>,
-        file_content: Option<&str>,
-    ) -> anyhow::Result<agent_doc_cycle_state_io::CycleState> {
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            event,
-            snapshot_content,
-            file_content,
-        )
-    }
-}
-
-pub fn closeout_recovery_hint(file: &std::path::Path) -> String {
-    let state = agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
-        file,
-        &crate::closeout_effects(),
-    );
-    match agent_doc_flow_io::closeout::closeout_recovery_command_for_file(file, state) {
-        Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
-        None => format!(
-            "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",
-            file.display(),
-            file.display()
-        ),
     }
 }

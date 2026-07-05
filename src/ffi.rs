@@ -698,7 +698,7 @@ pub unsafe extern "C" fn agent_doc_cancel_preflight_cycle(file_path: *const c_ch
         Err(_) => return -1,
     };
     match agent_doc_repair_io::cancel_preflight_cycle(
-        &agent_doc_orchestration::REPAIR_IO_EFFECTS,
+        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
         std::path::Path::new(path),
     ) {
         Ok(agent_doc_turn::repair::CancelOutcome::Abandoned) => 1,

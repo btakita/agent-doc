@@ -469,7 +469,7 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
     let file = required_path_arg(args, "file")?;
     let report = agent_doc_session_check_io::inspect_with_warnings(
         &file,
-        &agent_doc_orchestration::session_check_effects(),
+        &agent_doc_closeout_runtime_io::session_check_effects(),
     )?;
     let (ok, status, message) = match report.status {
         agent_doc_session_check_io::SessionCheckStatus::Ok(message) => (true, "ok", message),
@@ -587,7 +587,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
     )?;
     let report = agent_doc_session_check_io::inspect_with_warnings(
         &file,
-        &agent_doc_orchestration::session_check_effects(),
+        &agent_doc_closeout_runtime_io::session_check_effects(),
     )?;
     let (ok, status, message) = match report.status {
         agent_doc_session_check_io::SessionCheckStatus::Ok(message) => (true, "ok", message),

@@ -30,6 +30,7 @@ dependencies = [
  "agent-doc-callback-io",
  "agent-doc-capture-io",
  "agent-doc-claim-io",
+ "agent-doc-closeout-runtime-io",
  "agent-doc-codex-hook-io",
  "agent-doc-commit-io",
  "agent-doc-compact-io",
@@ -96,6 +97,7 @@ dependencies = [
  "agent-doc-route-io",
  "agent-doc-run-context-io",
  "agent-doc-run-io",
+ "agent-doc-run-runtime-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
@@ -265,6 +267,22 @@ dependencies = [
  "tempfile",
  "tmux-router",
  "uuid",
+]
+
+[[package]]
+name = "agent-doc-closeout-runtime-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-commit-io",
+ "agent-doc-cycle-state-io",
+ "agent-doc-document-realtime-io",
+ "agent-doc-flow-io",
+ "agent-doc-preflight-io",
+ "agent-doc-preflight-runtime-io",
+ "agent-doc-repair-io",
+ "agent-doc-session-check-io",
+ "agent-doc-template-io",
+ "anyhow",
 ]
 
 [[package]]
@@ -1119,6 +1137,7 @@ dependencies = [
  "agent-doc-archive-io",
  "agent-doc-callback-io",
  "agent-doc-capture-io",
+ "agent-doc-closeout-runtime-io",
  "agent-doc-codex-hook-io",
  "agent-doc-commit-io",
  "agent-doc-config",
@@ -1188,6 +1207,7 @@ dependencies = [
  "agent-doc-route-io",
  "agent-doc-run-context-io",
  "agent-doc-run-io",
+ "agent-doc-run-runtime-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-session-accretion-io",
@@ -1753,6 +1773,21 @@ dependencies = [
  "fs2",
  "libc",
  "tmux-router",
+]
+
+[[package]]
+name = "agent-doc-run-runtime-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-closeout-runtime-io",
+ "agent-doc-commit-io",
+ "agent-doc-document-realtime-io",
+ "agent-doc-flow-io",
+ "agent-doc-git-io",
+ "agent-doc-queue-io",
+ "agent-doc-run-io",
+ "agent-doc-template-io",
+ "anyhow",
 ]
 
 [[package]]

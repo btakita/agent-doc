@@ -4,7 +4,7 @@
 //!
 //! Production inspection/closeout logic lives in `agent-doc-session-check-io`.
 //! Orchestration supplies the remaining effects through
-//! [`agent_doc_orchestration::session_check_effects`]; this module keeps historical orchestration
+//! [`agent_doc_closeout_runtime_io::session_check_effects`]; this module keeps historical orchestration
 //! boundary tests available without compiling a production facade.
 
 use anyhow::Result;
@@ -24,7 +24,7 @@ use agent_doc_turn::op_log::PREFLIGHT_START_EVENT;
 use agent_doc_workflow::session_check::GuardResult;
 
 fn closeout_recovery_hint(file: &Path) -> String {
-    agent_doc_orchestration::closeout_recovery_hint(file)
+    agent_doc_closeout_runtime_io::closeout_recovery_hint(file)
 }
 
 #[cfg(test)]
@@ -58,13 +58,16 @@ mod tests {
     use std::process::Command;
     fn inspect(file: &std::path::Path) -> Result<SessionCheckStatus> {
         let _process_global_lock = agent_doc_test_support::env_lock();
-        agent_doc_session_check_io::inspect(file, &agent_doc_orchestration::session_check_effects())
+        agent_doc_session_check_io::inspect(
+            file,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
     }
     fn inspect_with_warnings(file: &std::path::Path) -> Result<SessionCheckReport> {
         let _process_global_lock = agent_doc_test_support::env_lock();
         agent_doc_session_check_io::inspect_with_warnings(
             file,
-            &agent_doc_orchestration::session_check_effects(),
+            &agent_doc_closeout_runtime_io::session_check_effects(),
         )
     }
     /// Phase 6 (#lr-content-6): build a `RunContext` whose `DocContentCell` holds
@@ -5331,7 +5334,7 @@ Body\n\
         match agent_doc_session_check_io::run_with_options(
             &doc,
             true,
-            &agent_doc_orchestration::session_check_effects(),
+            &agent_doc_closeout_runtime_io::session_check_effects(),
         ) {
             Ok(()) => {}
             other => panic!("expected codex_final_gate to adopt manual patchback, got {other:?}"),
@@ -7082,7 +7085,7 @@ Body\n\
 
         agent_doc_session_check_io::enforce_clean_closeout(
             &doc,
-            &agent_doc_orchestration::session_check_effects(),
+            &agent_doc_closeout_runtime_io::session_check_effects(),
         )
         .expect("enforce_clean_closeout should self-heal, not bail");
         assert_eq!(fs::read_to_string(&doc).unwrap(), committed);

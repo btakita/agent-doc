@@ -135,7 +135,10 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         return Ok(StopResponse::Continue { continue_: true });
     }
 
-    match agent_doc_session_check_io::inspect(&file, &crate::session_check_effects())? {
+    match agent_doc_session_check_io::inspect(
+        &file,
+        &agent_doc_closeout_runtime_io::session_check_effects(),
+    )? {
         agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {
             if let Some(response) = auto_queue_continuation_response(
                 &file,
@@ -517,8 +520,10 @@ fn try_recover_repeated_queue_head_response(
         });
     }
 
-    match agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
-    {
+    match agent_doc_flow_io::closeout::complete_required_closeout(
+        file,
+        &agent_doc_closeout_runtime_io::closeout_effects(),
+    ) {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
         }
@@ -1017,8 +1022,10 @@ fn attempt_stop_closeout(
         return Ok(StopCloseAttempt::StillOpen { note });
     }
 
-    match agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
-    {
+    match agent_doc_flow_io::closeout::complete_required_closeout(
+        file,
+        &agent_doc_closeout_runtime_io::closeout_effects(),
+    ) {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
         }
@@ -1406,7 +1413,12 @@ Done.\n\
         );
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Final assistant response."));
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
@@ -1453,7 +1465,12 @@ Done.\n\
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Why was startup missed?"));
         assert!(content.contains("Recovered through Stop."));
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
@@ -1733,7 +1750,12 @@ Done.\n\
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Recovered from visible response."));
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
@@ -1791,7 +1813,12 @@ Done.\n\
             !content.contains("Reviewing the current plan and repo conventions"),
             "leading commentary should be stripped from the replayed closeout"
         );
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
@@ -1843,7 +1870,12 @@ Done.\n\
                 .exists(),
             "guard-prefixed patch payload should not be captured as blocked"
         );
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
@@ -1910,7 +1942,12 @@ Done.\n\
             !capture.response_body.contains("<!-- patch:backlog -->"),
             "captured response should be stripped of backlog patches after normalization"
         );
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
@@ -1943,7 +1980,12 @@ Done.\n\
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
 
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("active harness session changed this document"));
             }
@@ -1970,7 +2012,12 @@ Done.\n\
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Post-closeout active-session drift."));
         assert!(content.contains("Recovered post-closeout drift."));
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
@@ -2018,7 +2065,12 @@ Done.\n\
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Recovered from nested root drift."));
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
@@ -2069,7 +2121,12 @@ Done.\n\
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
 
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("active harness session changed this document"));
             }
@@ -2097,7 +2154,12 @@ Done.\n\
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("Visible drift after committed closeout."));
         assert!(content.contains("Recovered after preamble prompt tracking."));
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("committed"));
             }
@@ -3122,7 +3184,12 @@ Done.\n\
         .unwrap();
         track_doc(&dir, &doc, "turn-1");
 
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("is `committed`"), "{message}");
                 assert!(

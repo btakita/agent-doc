@@ -13,21 +13,21 @@ pub use agent_doc_flow_io::closeout::{
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     agent_doc_flow_io::closeout::complete_required_closeout(
         file,
-        &agent_doc_orchestration::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_effects(),
     )
 }
 
 pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
     agent_doc_flow_io::closeout::apply_closeout_recovery(
         file,
-        &agent_doc_orchestration::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_effects(),
     )
 }
 
 pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecoveryEvidence> {
     agent_doc_flow_io::closeout::gather_closeout_recovery_evidence(
         file,
-        &agent_doc_orchestration::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_effects(),
     )
 }
 
@@ -36,7 +36,7 @@ pub fn classify_closeout_recovery_state_for_file(
 ) -> agent_doc_turn::closeout_recovery::CloseoutRecoveryState {
     agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
         file,
-        &agent_doc_orchestration::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_effects(),
     )
 }
 
@@ -172,7 +172,7 @@ mod tests {
         matches!(
             agent_doc_session_check_io::inspect(
                 &doc,
-                &agent_doc_orchestration::session_check_effects()
+                &agent_doc_closeout_runtime_io::session_check_effects()
             )
             .unwrap(),
             agent_doc_session_check_io::SessionCheckStatus::Ok(_)

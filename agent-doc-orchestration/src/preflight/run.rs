@@ -60,7 +60,10 @@ pub fn run(file: &Path) -> Result<()> {
 
 fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) {
     let Ok(agent_doc_session_check_io::SessionCheckStatus::Ok(_)) =
-        agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
+        agent_doc_session_check_io::inspect(
+            file,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
     else {
         return;
     };
@@ -165,7 +168,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
             file,
             &rc,
-            &crate::session_check_effects(),
+            &agent_doc_closeout_runtime_io::session_check_effects(),
         )?;
     }
 
@@ -298,7 +301,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
             file,
             &rc,
-            &crate::session_check_effects(),
+            &agent_doc_closeout_runtime_io::session_check_effects(),
         )?;
     }
 
@@ -2736,7 +2739,11 @@ mod tests {
             "template queue scaffold should stay balanced:\n{content}"
         );
         assert!(matches!(
-            agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap(),
+            agent_doc_session_check_io::inspect(
+                &doc,
+                &agent_doc_closeout_runtime_io::session_check_effects()
+            )
+            .unwrap(),
             agent_doc_session_check_io::SessionCheckStatus::Ok(_)
         ));
 
@@ -4483,7 +4490,12 @@ mod tests {
             !log.contains("preflight_diff_start file="),
             "boundary-artifact-only diff must not log preflight_diff_start:\n{log}"
         );
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {}
             status => {
                 panic!(

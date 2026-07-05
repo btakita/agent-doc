@@ -297,7 +297,7 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
             .map(|s| phase_str(s.phase));
         let recovery_state = agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
             doc_path,
-            &agent_doc_orchestration::closeout_effects(),
+            &agent_doc_closeout_runtime_io::closeout_effects(),
         );
         let recovery_command = agent_doc_flow_io::closeout::closeout_recovery_command_for_file(
             doc_path,
@@ -638,7 +638,7 @@ pub fn clear(file: &Path) -> Result<()> {
 /// delivered — and surface as a warning.
 fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_turn::repair::CancelOutcome {
     match agent_doc_repair_io::cancel_preflight_cycle(
-        &agent_doc_orchestration::REPAIR_IO_EFFECTS,
+        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
         file,
     ) {
         Ok(outcome) => {

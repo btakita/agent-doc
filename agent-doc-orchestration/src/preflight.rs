@@ -145,7 +145,10 @@ impl PreflightCycleCompletionEffects for OrchestrationPreflightCycleCompletionEf
     }
 
     fn session_interruption(&self, file: &Path) -> Result<Option<String>> {
-        match agent_doc_session_check_io::inspect(file, &crate::session_check_effects())? {
+        match agent_doc_session_check_io::inspect(
+            file,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )? {
             agent_doc_session_check_io::SessionCheckStatus::Ok(_) => Ok(None),
             agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => Ok(Some(reason)),
         }

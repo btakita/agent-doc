@@ -1,0 +1,21 @@
+[package]
+name = "agent-doc-run-runtime-io"
+version = "0.34.67"
+edition = "2024"
+description = "Direct-run runtime effects for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_run_runtime_io"
+
+[dependencies]
+agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.34.67" }
+agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.34.67" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.67" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.67" }
+agent-doc-run-io = { path = "../agent-doc-run-io", version = "0.34.67" }
+agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.34.67" }
+anyhow = "1"

@@ -1556,18 +1556,19 @@ fn run_command_inner(
     // boundary above (#bare-write-captured-uncommitted), so reaching here with
     // CommitMode::None means the write placed no response body. Any open cycle now is
     // a pre-existing interrupted closeout, not content this write stranded.
-    let bare_session_write_result = if write_result.is_ok()
-        && commit_mode == CommitMode::None
-        && is_session_document(file)?
-    {
-        agent_doc_session_check_io::enforce_clean_closeout(file, &crate::session_check_effects())
+    let bare_session_write_result =
+        if write_result.is_ok() && commit_mode == CommitMode::None && is_session_document(file)? {
+            agent_doc_session_check_io::enforce_clean_closeout(
+                file,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )
             .context(
                 "bare `agent-doc write` did not place a response body, but the session \
              document still has an open cycle outside the commit boundary",
             )
-    } else {
-        Ok(())
-    };
+        } else {
+            Ok(())
+        };
 
     match (write_result, commit_result, bare_session_write_result) {
         (Ok(()), Ok(()), Ok(())) => Ok(()),
@@ -1624,7 +1625,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                     return Ok(());
                 }
                 match agent_doc_flow_io::closeout::CloseoutEffects::commit(
-                    &crate::closeout_effects(),
+                    &agent_doc_closeout_runtime_io::closeout_effects(),
                     file,
                 ) {
                     // `#staleinmem` — record what we just committed so a later
@@ -1642,7 +1643,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                 }
                 agent_doc_session_check_io::enforce_clean_closeout(
                     file,
-                    &crate::session_check_effects(),
+                    &agent_doc_closeout_runtime_io::session_check_effects(),
                 )?;
             } else {
                 eprintln!("[commit] skipped (not in git repo)");
@@ -1654,7 +1655,10 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
 }
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
+    agent_doc_flow_io::closeout::complete_required_closeout(
+        file,
+        &agent_doc_closeout_runtime_io::closeout_effects(),
+    )
 }
 
 fn log_closeout_guard(

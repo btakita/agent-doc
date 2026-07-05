@@ -304,14 +304,21 @@ fn route_repair_closeout(file: &Path) -> Result<String> {
 }
 
 fn route_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
-    agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
+    agent_doc_session_check_io::inspect(
+        file,
+        &agent_doc_closeout_runtime_io::session_check_effects(),
+    )
 }
 
 fn route_decide_closeout_recovery(
     file: &Path,
     input: CloseoutRecoveryDecisionInput<'_>,
 ) -> CloseoutRecoveryDecision {
-    agent_doc_flow_io::closeout::decide_closeout_recovery(file, input, &crate::closeout_effects())
+    agent_doc_flow_io::closeout::decide_closeout_recovery(
+        file,
+        input,
+        &agent_doc_closeout_runtime_io::closeout_effects(),
+    )
 }
 
 fn route_closeout_drain_effects() -> RouteCloseoutDrainEffects {

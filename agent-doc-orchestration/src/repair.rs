@@ -209,7 +209,11 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, &doc).unwrap(),
+            agent_doc_repair_io::cancel_preflight_cycle(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
             CancelOutcome::Abandoned
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -227,7 +231,11 @@ mod tests {
         agent_doc_capture_io::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n").unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, &doc).unwrap(),
+            agent_doc_repair_io::cancel_preflight_cycle(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
             CancelOutcome::Protected
         );
         assert!(
@@ -255,7 +263,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, &doc).unwrap(),
+            agent_doc_repair_io::cancel_preflight_cycle(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
             CancelOutcome::Protected
         );
     }
@@ -266,7 +278,11 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "# Doc\n\nNothing\n").unwrap();
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(&crate::REPAIR_IO_EFFECTS, &doc).unwrap(),
+            agent_doc_repair_io::cancel_preflight_cycle(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
             CancelOutcome::NoOpenCycle
         );
     }
@@ -500,7 +516,12 @@ mod tests {
         let outcome = repair(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::CompletedBacklogReaped);
 
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {}
             other => panic!("expected clean closeout after repair, got {other:?}"),
         }
@@ -1154,7 +1175,12 @@ mod tests {
         );
 
         // Session-check accepts the recovered state (no open cycle, no drift).
-        match agent_doc_session_check_io::inspect(&doc, &crate::session_check_effects()).unwrap() {
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
             agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {}
             agent_doc_session_check_io::SessionCheckStatus::Interrupted(msg) => {
                 panic!("session-check must accept the retired-capture recovery: {msg}")

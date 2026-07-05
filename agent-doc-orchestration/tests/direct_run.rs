@@ -942,7 +942,7 @@ old status\n\
         );
 
         apply_template_response(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &doc,
             baseline,
             response,
@@ -997,7 +997,7 @@ old status\n\
         );
 
         apply_template_response(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &doc,
             baseline,
             response,
@@ -1052,7 +1052,7 @@ old status\n\
         );
 
         apply_template_response(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &doc,
             baseline,
             response,
@@ -1110,7 +1110,7 @@ old status\n\
         let diff_text = agent_doc_diff::unified_diff_from_contents(snapshot, baseline)
             .expect("snapshot and baseline differ");
         let normalized = normalize_direct_run_prompt_prefixes(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &doc,
             baseline,
             &diff_text,
@@ -1149,7 +1149,7 @@ old status\n\
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
         let err = agent_doc_run_io::run(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &doc,
             false,
             None,
@@ -1192,7 +1192,7 @@ old status\n\
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("atomic.md");
         direct_run_atomic_write(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &path,
             "hello world",
         )
@@ -1206,7 +1206,7 @@ old status\n\
         let path = dir.path().join("overwrite.md");
         std::fs::write(&path, "old content").unwrap();
         direct_run_atomic_write(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &path,
             "new content",
         )
@@ -1224,7 +1224,7 @@ old status\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let path = dir.path().join("prov-direct-run.md");
         direct_run_atomic_write(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &path,
             "direct run body",
         )
@@ -1256,7 +1256,7 @@ old status\n\
         std::fs::create_dir_all(dir.path().join(".agent-doc").join("logs")).unwrap();
         let path = dir.path().join("routed-direct-run.md");
         direct_run_atomic_write(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &path,
             "routed direct-run body",
         )
@@ -1291,8 +1291,12 @@ old status\n\
             let content = format!("writer-{}-content", i);
             handles.push(std::thread::spawn(move || {
                 bar.wait();
-                direct_run_atomic_write(&agent_doc_orchestration::DIRECT_RUN_EFFECTS, &p, &content)
-                    .unwrap();
+                direct_run_atomic_write(
+                    &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
+                    &p,
+                    &content,
+                )
+                .unwrap();
             }));
         }
 
@@ -1331,7 +1335,7 @@ old status\n\
             let content = std::fs::read_to_string(&path_a).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
             direct_run_atomic_write(
-                &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+                &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
                 &path_a,
                 &format!("{}\n## Assistant\nResponse A", content),
             )
@@ -1346,7 +1350,7 @@ old status\n\
             let content = std::fs::read_to_string(&path_b).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
             direct_run_atomic_write(
-                &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+                &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
                 &path_b,
                 &format!("{}\n## Assistant\nResponse B", content),
             )
@@ -1386,7 +1390,7 @@ old status\n\
                 let updated = format!("{}writer-{}\n", content, i);
                 std::thread::sleep(std::time::Duration::from_millis(5));
                 direct_run_atomic_write(
-                    &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+                    &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
                     &path,
                     &updated,
                 )
@@ -1427,7 +1431,7 @@ old status\n\
             // Hold lock while "processing"
             std::thread::sleep(std::time::Duration::from_millis(50));
             direct_run_atomic_write(
-                &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+                &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
                 &path_w,
                 "after",
             )

@@ -3527,11 +3527,11 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
                 .contains("agent_doc_repair_io::repair(crate::repair_coordinator_effects(), file)"),
         "repair callers should adapt into the focused repair IO coordinator"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let closeout_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-closeout-runtime-io/src/lib.rs")).unwrap();
     assert!(
-        orchestration_lib.contains("agent_doc_repair_io::cancel_preflight_cycle("),
-        "orchestration closeout effects should route preflight cancel repair through focused repair IO"
+        closeout_runtime.contains("agent_doc_repair_io::cancel_preflight_cycle("),
+        "closeout runtime effects should route preflight cancel repair through focused repair IO"
     );
     for relative in [
         "agent-doc-orchestration/src/codex_hook.rs",
@@ -3636,7 +3636,7 @@ fn test_orchestration_write_uses_closeout_commit_adapter() {
     assert!(
         !write.contains("fn commit_via_closeout_effects(")
             && write.contains("agent_doc_flow_io::closeout::CloseoutEffects::commit(")
-            && write.contains("&crate::closeout_effects()"),
+            && write.contains("&agent_doc_closeout_runtime_io::closeout_effects()"),
         "write.rs should route commit boundaries through the injected closeout effects adapter without a local helper facade"
     );
 }
@@ -10192,7 +10192,7 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         direct_run_tests.contains("agent_doc_run_io::{")
             && direct_run_tests.contains("build_prompt")
             && direct_run_tests.contains("should_continue_auto_queue")
-            && direct_run_tests.contains("agent_doc_orchestration::DIRECT_RUN_EFFECTS"),
+            && direct_run_tests.contains("agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS"),
         "direct-run integration tests should exercise the focused direct-run IO crate directly"
     );
     let orchestration_lib =
@@ -10200,15 +10200,24 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
     assert!(
         !orchestration_lib.contains("pub mod run;")
             && !orchestration_lib.contains("mod run;")
-            && orchestration_lib.contains("pub struct OrchestrationDirectRunEffects")
-            && orchestration_lib.contains("pub static DIRECT_RUN_EFFECTS")
-            && orchestration_lib.contains("impl agent_doc_run_io::DirectRunEffects"),
-        "orchestration must expose only the direct-run effects adapter, not a run source module"
+            && !orchestration_lib.contains("pub struct OrchestrationDirectRunEffects")
+            && !orchestration_lib.contains("pub static DIRECT_RUN_EFFECTS")
+            && !orchestration_lib.contains("impl agent_doc_run_io::DirectRunEffects"),
+        "orchestration must not keep the direct-run source module or runtime effects adapter"
+    );
+    let run_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-run-runtime-io/src/lib.rs")).unwrap();
+    assert!(
+        run_runtime.contains("pub struct RuntimeDirectRunEffects")
+            && run_runtime.contains("pub static DIRECT_RUN_EFFECTS")
+            && run_runtime.contains("impl agent_doc_run_io::DirectRunEffects")
+            && run_runtime.contains("agent_doc_closeout_runtime_io::closeout_effects()"),
+        "agent-doc-run-runtime-io should own the direct-run runtime effects adapter"
     );
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert!(
         main_source.contains("agent_doc_run_io::run(")
-            && main_source.contains("&agent_doc_orchestration::DIRECT_RUN_EFFECTS")
+            && main_source.contains("&agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS")
             && !main_source.contains("agent_doc_orchestration::run::run("),
         "CLI run dispatch should call focused direct-run IO directly"
     );
@@ -10223,11 +10232,22 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
             .contains_key("agent-doc-run-io"),
         "orchestration should depend on the focused direct-run IO crate"
     );
+    assert!(
+        orchestration_manifest["dependencies"]
+            .as_table()
+            .unwrap()
+            .contains_key("agent-doc-run-runtime-io"),
+        "orchestration should depend on the focused direct-run runtime effects crate while callers are still routed through orchestration modules"
+    );
 
     let root_dependencies = workspace["dependencies"].as_table().unwrap();
     assert!(
         root_dependencies.contains_key("agent-doc-run-io"),
         "the CLI should expose the focused direct-run IO crate in the workspace dependency set"
+    );
+    assert!(
+        root_dependencies.contains_key("agent-doc-run-runtime-io"),
+        "the CLI should expose the focused direct-run runtime effects crate in the workspace dependency set"
     );
 }
 
@@ -11485,11 +11505,20 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     assert!(
         !orchestration_lib.contains("pub mod session_check;")
             && !orchestration_lib.contains("mod session_check;")
-            && orchestration_lib.contains("pub fn session_check_effects()")
-            && orchestration_lib.contains(
+            && !orchestration_lib.contains("pub fn session_check_effects()")
+            && !orchestration_lib.contains(
                 "impl agent_doc_session_check_io::SessionCheckEffects for OrchestrationSessionCheckEffects"
             ),
-        "orchestration must delete the session_check source shim and expose only the focused SessionCheckEffects port"
+        "orchestration must delete the session_check source shim and runtime SessionCheckEffects port"
+    );
+    let closeout_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-closeout-runtime-io/src/lib.rs")).unwrap();
+    assert!(
+        closeout_runtime.contains("pub fn session_check_effects()")
+            && closeout_runtime.contains(
+                "impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffects"
+            ),
+        "agent-doc-closeout-runtime-io should own the session-check runtime effects port"
     );
     for production_source in [
         "src/main.rs",
@@ -11529,9 +11558,9 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         );
     }
     for required in [
-        "agent_doc_session_check_io::inspect(file,",
+        "agent_doc_session_check_io::inspect(",
         "agent_doc_session_check_io::inspect_with_warnings(",
-        "&agent_doc_orchestration::session_check_effects()",
+        "&agent_doc_closeout_runtime_io::session_check_effects()",
         "agent_doc_session_check_io::run_with_options(",
         "agent_doc_session_check_io::enforce_clean_closeout(",
     ] {
@@ -11612,11 +11641,21 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     assert!(
         !orchestration_lib.contains("pub mod flow;")
             && !orchestration_lib.contains("mod flow;")
-            && orchestration_lib.contains("pub fn closeout_effects()")
-            && orchestration_lib.contains(
+            && !orchestration_lib.contains("pub fn closeout_effects()")
+            && !orchestration_lib.contains(
                 "impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffects"
             ),
-        "orchestration must delete the flow source module and expose only the focused CloseoutEffects port"
+        "orchestration must delete the flow source module and runtime CloseoutEffects port"
+    );
+    let closeout_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-closeout-runtime-io/src/lib.rs")).unwrap();
+    assert!(
+        closeout_runtime.contains("pub fn closeout_effects()")
+            && closeout_runtime.contains(
+                "impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects"
+            )
+            && closeout_runtime.contains("pub static REPAIR_IO_EFFECTS"),
+        "agent-doc-closeout-runtime-io should own closeout and repair runtime effects ports"
     );
 
     assert!(
@@ -11632,8 +11671,8 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     assert!(
         !closeout_tests.contains("crate::")
             && closeout_tests.contains("agent_doc_flow_io::closeout::")
-            && closeout_tests.contains("agent_doc_orchestration::closeout_effects()"),
-        "moved closeout boundary tests should call flow-io directly through the public root CloseoutEffects port"
+            && closeout_tests.contains("agent_doc_closeout_runtime_io::closeout_effects()"),
+        "moved closeout boundary tests should call flow-io directly through the focused closeout runtime effects port"
     );
 
     let flow_events =
@@ -15587,9 +15626,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .join("agent-doc-orchestration/src/route/dispatch.rs")
             .exists()
             && !route_source.contains("mod dispatch;")
-            && (route_source.contains("use agent_doc_route_io::dispatch::{")
-                || route_source
-                    .contains("use agent_doc_route_io::dispatch::RouteDispatchEffects;")),
+            && route_source.contains("use agent_doc_route_io::dispatch::"),
         "orchestration must not keep a route dispatch module after the dispatch transport/proof graph moves to agent-doc-route-io"
     );
     assert!(
@@ -15605,7 +15642,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .join("agent-doc-orchestration/src/route/cycle_ack.rs")
             .exists()
             && !route_source.contains("mod cycle_ack;")
-            && route_source.contains("use agent_doc_route_io::cycle_ack::RouteCycleAckEffects;"),
+            && route_source.contains("use agent_doc_route_io::cycle_ack::")
+            && route_source.contains("route_cycle_ack_effects()"),
         "orchestration must not keep a route cycle-ack module after the route cycle acknowledgment graph moves to agent-doc-route-io"
     );
     assert!(
@@ -15613,8 +15651,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .join("agent-doc-orchestration/src/route/dispatch_only.rs")
             .exists()
             && !route_source.contains("mod dispatch_only;")
-            && route_source.contains("agent_doc_route_io::dispatch_only::{")
-            && route_source.contains("DispatchOnlyRouteEffects")
+            && route_source.contains("route_dispatch_only_effects()")
             && route_dispatch_only_source.contains("pub fn dispatch_only_send_reopen("),
         "orchestration must not keep a route dispatch-only module after the send/retry graph moves to agent-doc-route-io"
     );
@@ -20153,7 +20190,8 @@ fn test_agent_doc_preflight_runtime_io_owns_closeout_drift_recovery_graph() {
     assert!(
         orchestration_preflight_run
             .contains("agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(")
-            && orchestration_preflight_run.contains("&crate::session_check_effects()"),
+            && orchestration_preflight_run
+                .contains("&agent_doc_closeout_runtime_io::session_check_effects()"),
         "preflight run sequencing should call the focused closeout-drift runtime helper"
     );
 }
@@ -28229,7 +28267,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             && route_queue_dispatch.contains("pub fn activate_existing_route_queue_head(")
             && route_queue_dispatch.contains("pub fn inactive_route_queue_head(")
             && route_source.contains("use agent_doc_route_io::queue_dispatch::{")
-            && route_source.contains("RouteQueueEffects")
+            && route_source.contains("route_queue_effects()")
             && route_cycle_ack.contains("agent_doc_turn::cycle_ack")
             && turn_cycle_ack
                 .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change")
@@ -28303,6 +28341,8 @@ fn test_agent_doc_route_io_owns_route_document_write_authority() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
     let document_write =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/document_write.rs")).unwrap();
+    let route_runtime_effects =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/runtime_effects.rs")).unwrap();
 
     for forbidden_snippet in [
         "fn route_write_document(",
@@ -28329,9 +28369,8 @@ fn test_agent_doc_route_io_owns_route_document_write_authority() {
                 .contains("agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS")
             && document_write.contains("transport=disk_force")
             && document_write.contains("agent_doc_hash::content_hash(next_content)")
-            && route_source
-                .contains("use agent_doc_route_io::document_write::route_write_document;")
-            && route_source.contains("write_document: route_write_document"),
+            && route_runtime_effects.contains("use crate::document_write::route_write_document;")
+            && route_runtime_effects.contains("write_document: route_write_document"),
         "agent-doc-route-io should own route document write authority while orchestration wires the focused callback into route effects"
     );
 }

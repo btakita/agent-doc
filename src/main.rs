@@ -198,7 +198,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
     fn detect_uncommitted_closeout_drift(&self, file: &Path) -> anyhow::Result<Option<String>> {
         agent_doc_session_check_io::detect_uncommitted_closeout_drift(
             file,
-            &agent_doc_orchestration::session_check_effects(),
+            &agent_doc_closeout_runtime_io::session_check_effects(),
         )
     }
 
@@ -211,7 +211,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         file: &Path,
     ) -> anyhow::Result<agent_doc_turn::repair::RepairOutcome> {
         agent_doc_repair_io::repair_stale_preflight_started_cycle(
-            &agent_doc_orchestration::REPAIR_IO_EFFECTS,
+            &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
             file,
         )
     }
@@ -226,7 +226,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
     ) -> anyhow::Result<agent_doc_sync_io::SyncSessionCheckStatus> {
         match agent_doc_session_check_io::inspect(
             file,
-            &agent_doc_orchestration::session_check_effects(),
+            &agent_doc_closeout_runtime_io::session_check_effects(),
         )? {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
                 Ok(agent_doc_sync_io::SyncSessionCheckStatus::Ok(message))
@@ -336,7 +336,7 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
     ) -> anyhow::Result<Option<agent_doc_workflow_io::doctor::LiveSessionCheckFacts>> {
         let report = agent_doc_session_check_io::inspect_with_warnings(
             file,
-            &agent_doc_orchestration::session_check_effects(),
+            &agent_doc_closeout_runtime_io::session_check_effects(),
         )?;
         let facts = match report.status {
             agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
@@ -3364,7 +3364,7 @@ fn try_main() -> anyhow::Result<()> {
             no_git,
             force_disk,
         } => agent_doc_run_io::run(
-            &agent_doc_orchestration::DIRECT_RUN_EFFECTS,
+            &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
             &file,
             branch,
             agent.as_deref(),
@@ -3558,7 +3558,7 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Dedupe { file } => dedupe_cmd::run(&file),
         Commands::Cancel { file } => {
             match agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_orchestration::REPAIR_IO_EFFECTS,
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
                 &file,
             )? {
                 agent_doc_turn::repair::CancelOutcome::Abandoned => {
@@ -3912,7 +3912,7 @@ fn try_main() -> anyhow::Result<()> {
                 use agent_doc_flow_io::closeout::RecoveryApplication;
                 match agent_doc_flow_io::closeout::apply_closeout_recovery(
                     &file,
-                    &agent_doc_orchestration::closeout_effects(),
+                    &agent_doc_closeout_runtime_io::closeout_effects(),
                 )? {
                     RecoveryApplication::NothingToDo => {
                         eprintln!("[repair] {} is clean — no recovery needed", file.display());
@@ -4036,7 +4036,7 @@ fn try_main() -> anyhow::Result<()> {
         } => agent_doc_session_check_io::run_with_options(
             &file,
             codex_final_gate,
-            &agent_doc_orchestration::session_check_effects(),
+            &agent_doc_closeout_runtime_io::session_check_effects(),
         ),
         Commands::Mcp { action } => match action {
             McpAction::Serve { project_root } => mcp::serve(project_root.as_deref()),

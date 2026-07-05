@@ -11170,6 +11170,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the write command runtime/replay entrypoints",
         ),
         (
+            "Write strict empty-response repair back-edge removal",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-repair-io::recover_empty_response_for_strict_closeout",
+            "Move the write-command empty-response recovery bridge",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

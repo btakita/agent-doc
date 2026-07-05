@@ -3376,9 +3376,13 @@ Implemented.
         agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let head_before = head_count(root);
-        let recovered =
-            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false)
-                .expect("strict-closeout empty-stdin path should recognize dedupe-only drift");
+        let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
+            crate::repair_coordinator_effects(),
+            &doc,
+            true,
+            false,
+        )
+        .expect("strict-closeout empty-stdin path should recognize dedupe-only drift");
         assert!(
             recovered,
             "empty stdin + strict closeout + dedupe-only drift must commit through the binary path"
@@ -3428,8 +3432,13 @@ Implemented.
         agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let head_before = head_count(root);
-        let recovered =
-            crate::repair::recover_empty_response_for_strict_closeout(&doc, false, false).unwrap();
+        let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
+            crate::repair_coordinator_effects(),
+            &doc,
+            false,
+            false,
+        )
+        .unwrap();
         assert!(
             !recovered,
             "non-strict empty-stdin path must not silently auto-commit dedupe drift"

@@ -4928,7 +4928,13 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
 
         assert!(
-            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false).unwrap(),
+            agent_doc_repair_io::recover_empty_response_for_strict_closeout(
+                crate::repair_coordinator_effects(),
+                &doc,
+                true,
+                false
+            )
+            .unwrap(),
             "strict empty response recovery should continue past stale preflight repair"
         );
 

@@ -406,6 +406,7 @@ dependencies = [
  "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
  "agent-doc-project-root-io",
  "agent-doc-queue",
  "agent-doc-secret-redact",

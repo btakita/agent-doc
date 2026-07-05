@@ -2687,6 +2687,19 @@ impl SupervisorCrdtCheckpointSummary {
 
 fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option<String>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_checkpoint_skipped file={} source={} authority=git reason=detached_authority",
+                canonical.display(),
+                source,
+            ),
+        );
+        return Ok(Some("detached".to_string()));
+    }
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         agent_doc_ops_log_io::log_op(
             doc,
@@ -2727,10 +2740,32 @@ fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option
         );
         return Ok(None);
     };
+    let socket_path = Path::new(&socket);
+    if matches!(
+        agent_doc_supervisor_io::ipc::probe_socket(socket_path),
+        agent_doc_supervisor_io::ipc::SocketLiveness::Dead
+    ) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_checkpoint_blocked file={} source={} authority=multi_replica reason=dead_supervisor_socket generation={} socket={} recovery=restart_or_reconcile_live_supervisor_without_force_disk",
+                canonical.display(),
+                source,
+                record.generation,
+                socket,
+            ),
+        );
+        anyhow::bail!(
+            "CRDT durable checkpoint blocked for {} before {source}: editor authority is attached but supervisor socket {} is dead or missing (generation={}); recovery=restart or reconcile the live supervisor/CRDT relay without force-disk, then retry",
+            canonical.display(),
+            socket,
+            record.generation
+        );
+    }
     let response = agent_doc_supervisor_io::ipc::send_command(
-        Path::new(&socket),
+        socket_path,
         &agent_doc_supervisor::ipc_protocol::IpcMethod::CrdtCheckpoint {
-            file: canonical.to_string_lossy().to_string(),
+            file: file_arg,
             source: source.to_string(),
         },
     )
@@ -2738,12 +2773,44 @@ fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option
         format!("failed to request CRDT durable checkpoint from supervisor socket {socket}")
     })?;
     if !response.ok {
+        let error = response
+            .error
+            .unwrap_or_else(|| "unknown error".to_string());
+        if error.contains("unknown variant `crdt_checkpoint`")
+            || error.contains("unknown variant crdt_checkpoint")
+        {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "supervisor_crdt_checkpoint_blocked file={} source={} authority=multi_replica reason=unsupported_supervisor_checkpoint_rpc generation={} socket={} error={:?} recovery=recycle_after_live_crdt_checkpoint_capability_available",
+                    canonical.display(),
+                    source,
+                    record.generation,
+                    socket,
+                    error,
+                ),
+            );
+            anyhow::bail!(
+                "CRDT durable checkpoint blocked for {} before {source}: live supervisor at {} does not support crdt_checkpoint; recovery=upgrade/restart the supervisor after the editor/CRDT relay can checkpoint, then retry",
+                canonical.display(),
+                socket
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_checkpoint_rejected file={} source={} authority=multi_replica generation={} socket={} error={:?}",
+                canonical.display(),
+                source,
+                record.generation,
+                socket,
+                error,
+            ),
+        );
         anyhow::bail!(
             "supervisor CRDT durable checkpoint rejected for {}: {}",
             canonical.display(),
-            response
-                .error
-                .unwrap_or_else(|| "unknown error".to_string())
+            error,
         );
     }
     let status = response

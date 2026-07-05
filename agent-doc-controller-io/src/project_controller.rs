@@ -2598,6 +2598,72 @@ mod tests {
         assert_eq!(read.project_root, bootstrap.project_root);
     }
 
+    #[test]
+    fn crdt_checkpoint_skips_detached_actor_with_dead_supervisor_socket() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/detached.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let mut record = actor_record(&document_id, "%41", "@1");
+        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+        let missing_socket = dir.path().join(".agent-doc/supervisor/missing.sock");
+        upsert_supervisor_lease(
+            dir.path(),
+            &record,
+            Some(std::process::id()),
+            missing_socket.to_str(),
+            "ready",
+        )
+        .unwrap();
+
+        let summary = checkpoint_supervisors_for_project(dir.path(), "test_recycle").unwrap();
+        assert_eq!(summary.detached, 1);
+        assert_eq!(summary.failed, 0);
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("supervisor_crdt_checkpoint_skipped"));
+        assert!(ops_log.contains("reason=detached_authority"));
+    }
+
+    #[test]
+    fn crdt_checkpoint_blocks_editor_attached_actor_with_dead_supervisor_socket() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/editor.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
+            &document_id,
+            "jetbrains-test",
+            std::process::id()
+        ));
+        let mut record = actor_record(&document_id, "%41", "@1");
+        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+        let missing_socket = dir.path().join(".agent-doc/supervisor/missing.sock");
+        upsert_supervisor_lease(
+            dir.path(),
+            &record,
+            Some(std::process::id()),
+            missing_socket.to_str(),
+            "ready",
+        )
+        .unwrap();
+
+        let summary = checkpoint_supervisors_for_project(dir.path(), "test_recycle").unwrap();
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.detached, 0);
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("supervisor_crdt_checkpoint_blocked"));
+        assert!(ops_log.contains("reason=dead_supervisor_socket"));
+        assert!(
+            ops_log.contains("recovery=restart_or_reconcile_live_supervisor_without_force_disk")
+        );
+    }
+
     fn actor_record(
         document_id: &str,
         pane: &str,

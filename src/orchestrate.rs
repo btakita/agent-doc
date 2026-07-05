@@ -68,7 +68,8 @@ use crate::{
 };
 use agent_doc_agent_io::agent;
 use agent_doc_config::{AgentConfig, Config};
-use agent_doc_orchestration::{preflight::PreflightOutput, write};
+use agent_doc_orchestration::write;
+use agent_doc_preflight_io::PreflightOutput;
 use agent_doc_prompt_context::AgentPromptContext;
 use agent_doc_queue::dispatch_item::{QueueItemKind, classify};
 #[cfg(test)]

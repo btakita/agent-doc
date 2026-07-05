@@ -11176,6 +11176,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the write-command empty-response recovery bridge",
         ),
         (
+            "Preflight output DTO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Split linked-document change detection and output assembly",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
@@ -12518,7 +12524,7 @@ fn test_agent_doc_diff_uses_current_prompt_bearing_api_names() {
 fn test_preflight_output_uses_user_intent_prompt_changes_json_surface() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let preflight_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();

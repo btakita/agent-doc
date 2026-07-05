@@ -32,6 +32,7 @@ dependencies = [
  "agent-doc-claim-io",
  "agent-doc-closeout-runtime-io",
  "agent-doc-codex-hook-io",
+ "agent-doc-codex-stop-io",
  "agent-doc-commit-io",
  "agent-doc-compact-io",
  "agent-doc-config",
@@ -304,6 +305,42 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml 1.1.2+spec-1.1.0",
+]
+
+[[package]]
+name = "agent-doc-codex-stop-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-capture-io",
+ "agent-doc-closeout-runtime-io",
+ "agent-doc-codex-hook-io",
+ "agent-doc-controller-io",
+ "agent-doc-cycle-state-io",
+ "agent-doc-document",
+ "agent-doc-document-realtime-io",
+ "agent-doc-element",
+ "agent-doc-flow-io",
+ "agent-doc-fs",
+ "agent-doc-git-io",
+ "agent-doc-harness",
+ "agent-doc-hash",
+ "agent-doc-ipc-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-project-root-io",
+ "agent-doc-queue",
+ "agent-doc-queue-io",
+ "agent-doc-repair-io",
+ "agent-doc-repair-runtime-io",
+ "agent-doc-session-accretion-io",
+ "agent-doc-session-check-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-template",
+ "agent-doc-turn",
+ "agent-doc-write-runtime-io",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

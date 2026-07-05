@@ -3132,7 +3132,7 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         "focused Codex hook IO should use focused context usage policy and transcript IO directly"
     );
     let codex_hook =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-codex-stop-io/src/lib.rs")).unwrap();
     assert!(
         !codex_hook.contains("agent_doc_model_tier::context_usage")
             && !codex_hook.contains("agent_doc_model_tier::context_transcript_io")
@@ -3255,7 +3255,7 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
     }
 
     let codex_hook =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-codex-stop-io/src/lib.rs")).unwrap();
     for forbidden in [
         "struct BlockedStopPayloadRecord",
         "fn save_blocked_stop_payload(",
@@ -3508,7 +3508,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "commit lifecycle must call focused repair IO for committed historical snapshot drift repair"
     );
     let codex_hook =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-codex-stop-io/src/lib.rs")).unwrap();
     assert!(
         repair_io.contains("pub fn save_blocked_repair_payload(")
             && repair_io.contains("pub fn run_with_queue_completion_ids<")
@@ -3525,7 +3525,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "closeout runtime effects should route preflight cancel repair through focused repair IO"
     );
     for relative in [
-        "agent-doc-orchestration/src/codex_hook.rs",
+        "agent-doc-codex-stop-io/src/lib.rs",
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-write-runtime-io/src/run_entry.rs",
         "src/main.rs",
@@ -4768,7 +4768,7 @@ fn test_agent_doc_queue_owns_queue_prompt_echo_policy() {
     );
 
     let codex_hook =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-codex-stop-io/src/lib.rs")).unwrap();
     assert!(
         codex_hook.contains("agent_doc_queue::queue_response::format_consumed_prompt_echo")
             && !codex_hook.contains("crate::write::format_consumed_prompt_echo"),
@@ -6119,7 +6119,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let memory_io_closeout =
         fs::read_to_string(manifest_dir.join("agent-doc-memory-io/src/closeout.rs")).unwrap();
     let codex_hook_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-codex-stop-io/src/lib.rs")).unwrap();
     assert!(
         memory_io_closeout.contains("agent_doc_turn::response_text::{")
             && memory_io_closeout.contains("response_prompt_target_from_re_heading")
@@ -10915,6 +10915,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split MCP config detection, transcript lookup, session-accretion reset policy",
         ),
         (
+            "Codex Stop runtime extraction",
+            "agent-doc-orchestration/src/codex_hook.rs",
+            "agent-doc-codex-stop-io/src/lib.rs",
+            "Split Stop payload parsing, queue-continuation decision policy",
+        ),
+        (
             "Write IPC repair decision model extraction",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-ipc-protocol/src/lib.rs",
@@ -11638,7 +11644,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     for production_source in [
         "src/main.rs",
         "src/mcp.rs",
-        "agent-doc-orchestration/src/codex_hook.rs",
+        "agent-doc-codex-stop-io/src/lib.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-orchestration/src/repair.rs",
@@ -28114,7 +28120,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
             "queue_targeted_completion_id_for_current_head",
         ),
         (
-            "agent-doc-orchestration/src/codex_hook.rs",
+            "agent-doc-codex-stop-io/src/lib.rs",
             "agent_doc_queue::queue_consume::queue_targeted_completion_id_for_current_head",
         ),
         (

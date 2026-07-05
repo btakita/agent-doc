@@ -35,7 +35,6 @@
 //! split into narrower crates.
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
-pub mod codex_hook;
 pub mod preflight;
 #[cfg(test)]
 mod repair;

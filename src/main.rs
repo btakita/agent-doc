@@ -4882,7 +4882,7 @@ fn try_main() -> anyhow::Result<()> {
             HookAction::CodexUserPromptSubmit => {
                 agent_doc_codex_hook_io::handle_user_prompt_submit()
             }
-            HookAction::CodexStop => agent_doc_orchestration::codex_hook::handle_stop(),
+            HookAction::CodexStop => agent_doc_codex_stop_io::handle_stop(),
         },
         Commands::Cleanup {
             file,

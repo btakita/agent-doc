@@ -9,6 +9,7 @@ members = [
     "agent-doc-capture-io",
     "agent-doc-claim-io",
     "agent-doc-codex-hook-io",
+    "agent-doc-codex-stop-io",
     "agent-doc-commit-io",
     "agent-doc-closeout-runtime-io",
     "agent-doc-compact-io",
@@ -173,6 +174,7 @@ agent-doc-callback-io = { path = "agent-doc-callback-io", version = "0.34.67" }
 agent-doc-capture-io = { path = "agent-doc-capture-io", version = "0.34.67" }
 agent-doc-claim-io = { path = "agent-doc-claim-io", version = "0.34.67" }
 agent-doc-codex-hook-io = { path = "agent-doc-codex-hook-io", version = "0.34.67" }
+agent-doc-codex-stop-io = { path = "agent-doc-codex-stop-io", version = "0.34.67" }
 agent-doc-closeout-runtime-io = { path = "agent-doc-closeout-runtime-io", version = "0.34.67" }
 agent-doc-compact-io = { path = "agent-doc-compact-io", version = "0.34.67" }
 agent-doc-commit-io = { path = "agent-doc-commit-io", version = "0.34.67" }

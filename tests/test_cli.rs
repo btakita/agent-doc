@@ -2379,7 +2379,6 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-op-capture-io",
         "agent-doc-ops-log-io",
         "agent-doc-owner-pane-io",
-        "agent-doc-orchestration",
         "agent-doc-plugin-owner",
         "agent-doc-project-config-io",
         "agent-doc-prompt-context-io",
@@ -2421,6 +2420,16 @@ fn test_manifest_uses_publishable_dependency_contract() {
             .iter()
             .any(|member| member.as_str() == Some("agent-doc-core")),
         "agent-doc-core must not be retained as an empty facade workspace crate"
+    );
+    assert!(
+        !members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-orchestration")),
+        "agent-doc-orchestration must stay retired from the active workspace"
+    );
+    assert!(
+        !dependencies.contains_key("agent-doc-orchestration"),
+        "agent-doc-orchestration is retired and must not remain a root dependency"
     );
     assert!(
         !manifest_dir.join("agent-doc-core/Cargo.toml").exists(),
@@ -10385,8 +10394,9 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         }
         assert!(
             moved_from.contains("agent-doc-orchestration/src")
-                || moved_from.contains("agent-doc-orchestration/tests"),
-            "coarse extraction ledger row should name the orchestration source/test graph: {cells:?}"
+                || moved_from.contains("agent-doc-orchestration/tests")
+                || moved_from.contains("agent-doc-orchestration/Cargo.toml"),
+            "coarse extraction ledger row should name the orchestration source/test/package graph: {cells:?}"
         );
         assert!(
             moved_to.contains("agent-doc-")
@@ -11230,6 +11240,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/tests/route.rs and agent-doc-orchestration/tests/route/*.rs",
             "agent-doc-route-io/tests/route.rs and agent-doc-route-io/tests/route/*.rs",
             "Split route startup and pane-resolution fixtures into narrower route IO and test-support suites",
+        ),
+        (
+            "Orchestration workspace retirement",
+            "agent-doc-orchestration/Cargo.toml",
+            "Focused crates plus root `Cargo.toml` and `Makefile` without an active `agent-doc-orchestration` build/publish edge",
+            "Delete the historical `agent-doc-orchestration` directory once stale guard tests and release archaeology references no longer need a sentinel path",
         ),
         (
             "Write/repair empty-response command-boundary inversion",

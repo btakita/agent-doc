@@ -29,7 +29,7 @@ CRATES_IO_PUBLISH_ORDER = tmux-router \
 	agent-doc-harness agent-doc-supervisor agent-doc-controller agent-doc-supervisor-io \
 	agent-doc-supervisor-process agent-doc-turn-scope-io agent-doc-turn-status-io \
 	agent-doc-watch-io agent-doc-work-graph agent-doc-workflow agent-doc-workflow-io \
-	agent-doc-orchestration agent-doc
+	agent-doc
 ifneq ($(strip $(LOCAL_RUSTFLAGS)),)
 LOCAL_CARGO_ENV += RUSTFLAGS="$(LOCAL_RUSTFLAGS)"
 endif

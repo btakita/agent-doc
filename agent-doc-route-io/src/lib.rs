@@ -19,6 +19,7 @@ pub mod dispatch_recovery;
 pub mod dispatch_start;
 pub mod dispatch_target;
 pub mod document_prep;
+pub mod document_write;
 pub mod invocation;
 pub mod launch_contract;
 pub mod pane_provenance;

@@ -28188,6 +28188,50 @@ fn test_agent_doc_route_io_owns_route_document_prep() {
 }
 
 #[test]
+fn test_agent_doc_route_io_owns_route_document_write_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/Cargo.toml")).unwrap();
+    let route_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
+    let document_write =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/document_write.rs")).unwrap();
+
+    for forbidden_snippet in [
+        "fn route_write_document(",
+        "agent_doc_write_converge_io::converge_document_or_disk(",
+        "agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS",
+        "transport=disk_force",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own route document write authority after it moves to route IO: {forbidden_snippet}"
+        );
+    }
+
+    assert!(
+        route_io_manifest.contains("agent-doc-document-realtime-io =")
+            && route_io_manifest.contains("agent-doc-write-converge-io =")
+            && route_io_lib.contains("pub mod document_write;")
+            && document_write.contains("pub fn route_write_document(")
+            && document_write.contains("crate::invocation::force_disk_route_writes()")
+            && document_write
+                .contains("agent_doc_document_realtime_io::atomic_write_through_authority(")
+            && document_write.contains("agent_doc_write_converge_io::converge_document_or_disk(")
+            && document_write
+                .contains("agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS")
+            && document_write.contains("transport=disk_force")
+            && document_write.contains("agent_doc_hash::content_hash(next_content)")
+            && route_source
+                .contains("use agent_doc_route_io::document_write::route_write_document;")
+            && route_source.contains("write_document: route_write_document"),
+        "agent-doc-route-io should own route document write authority while orchestration wires the focused callback into route effects"
+    );
+}
+
+#[test]
 fn test_agent_doc_route_io_owns_route_closeout_drain() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let route_source =

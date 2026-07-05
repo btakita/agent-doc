@@ -24211,19 +24211,22 @@ fn test_agent_doc_document_owns_tracked_work_projection_policy() {
         document_lib.contains("pub mod tracked_work_projection;"),
         "agent-doc-document should expose tracked-work projection through its owning module"
     );
-    let preflight =
+    let orchestration_preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let forbidden = "fn tracked_work_component_fingerprint(";
     assert!(
-        !preflight.contains(forbidden),
+        !orchestration_preflight.contains(forbidden) && !preflight_io.contains(forbidden),
         "preflight must not re-own tracked-work projection policy: {forbidden}"
     );
     assert!(
-        preflight.contains("agent_doc_document::tracked_work_projection::tracked_work_fingerprint")
-            && preflight.contains(
+        preflight_io
+            .contains("agent_doc_document::tracked_work_projection::tracked_work_fingerprint")
+            && preflight_io.contains(
                 "agent_doc_document::tracked_work_projection::TrackedWorkFingerprint::empty"
             ),
-        "preflight should call focused tracked-work projection policy directly"
+        "preflight IO should call focused tracked-work projection policy directly"
     );
 }
 

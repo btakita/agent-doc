@@ -15,6 +15,7 @@ test-support = []
 [dependencies]
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.67" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }

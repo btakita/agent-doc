@@ -2685,6 +2685,68 @@ impl SupervisorCrdtCheckpointSummary {
     }
 }
 
+fn checkpoint_crdt_via_local_document_model(
+    canonical: &Path,
+    source: &str,
+    fallback_reason: &str,
+) -> Result<Option<String>> {
+    match agent_doc_crdt_relay_io::checkpoint_durable_projection_for_file(canonical, source) {
+        Ok(agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Detached) => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "supervisor_crdt_checkpoint_fallback file={} source={} status=detached fallback_reason={} transport=local_document_model",
+                    canonical.display(),
+                    source,
+                    fallback_reason,
+                ),
+            );
+            Ok(Some("detached".to_string()))
+        }
+        Ok(agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Checkpointed {
+            bytes,
+            changed,
+            live_editors,
+            text_len,
+            text_hash,
+        }) => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "supervisor_crdt_checkpoint_fallback file={} source={} status=checkpointed fallback_reason={} transport=local_document_model bytes={} changed={} live_editors={} text_len={} text_hash={}",
+                    canonical.display(),
+                    source,
+                    fallback_reason,
+                    bytes,
+                    changed,
+                    live_editors,
+                    text_len,
+                    text_hash,
+                ),
+            );
+            Ok(Some("checkpointed".to_string()))
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "supervisor_crdt_checkpoint_fallback_failed file={} source={} fallback_reason={} transport=local_document_model error={:?}",
+                    canonical.display(),
+                    source,
+                    fallback_reason,
+                    err.to_string(),
+                ),
+            );
+            Err(err).with_context(|| {
+                format!(
+                    "local document-model CRDT durable checkpoint fallback failed for {} after {fallback_reason}",
+                    canonical.display()
+                )
+            })
+        }
+    }
+}
+
 fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option<String>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
@@ -2732,13 +2794,17 @@ fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "supervisor_crdt_checkpoint_skipped file={} source={} reason=no_supervisor_socket generation={}",
+                "supervisor_crdt_checkpoint_reconcile file={} source={} authority=multi_replica reason=no_supervisor_socket generation={} action=local_document_model_checkpoint",
                 canonical.display(),
                 source,
                 record.generation,
             ),
         );
-        return Ok(None);
+        return checkpoint_crdt_via_local_document_model(
+            &canonical,
+            source,
+            "no_supervisor_socket",
+        );
     };
     let socket_path = Path::new(&socket);
     if matches!(
@@ -2748,18 +2814,17 @@ fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "supervisor_crdt_checkpoint_blocked file={} source={} authority=multi_replica reason=dead_supervisor_socket generation={} socket={} recovery=restart_or_reconcile_live_supervisor_without_force_disk",
+                "supervisor_crdt_checkpoint_reconcile file={} source={} authority=multi_replica reason=dead_supervisor_socket generation={} socket={} action=local_document_model_checkpoint",
                 canonical.display(),
                 source,
                 record.generation,
                 socket,
             ),
         );
-        anyhow::bail!(
-            "CRDT durable checkpoint blocked for {} before {source}: editor authority is attached but supervisor socket {} is dead or missing (generation={}); recovery=restart or reconcile the live supervisor/CRDT relay without force-disk, then retry",
-            canonical.display(),
-            socket,
-            record.generation
+        return checkpoint_crdt_via_local_document_model(
+            &canonical,
+            source,
+            "dead_supervisor_socket",
         );
     }
     let response = agent_doc_supervisor_io::ipc::send_command(
@@ -2782,7 +2847,7 @@ fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option
             agent_doc_ops_log_io::log_op(
                 &canonical,
                 &format!(
-                    "supervisor_crdt_checkpoint_blocked file={} source={} authority=multi_replica reason=unsupported_supervisor_checkpoint_rpc generation={} socket={} error={:?} recovery=recycle_after_live_crdt_checkpoint_capability_available",
+                    "supervisor_crdt_checkpoint_reconcile file={} source={} authority=multi_replica reason=unsupported_supervisor_checkpoint_rpc generation={} socket={} error={:?} action=local_document_model_checkpoint",
                     canonical.display(),
                     source,
                     record.generation,
@@ -2790,10 +2855,10 @@ fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option
                     error,
                 ),
             );
-            anyhow::bail!(
-                "CRDT durable checkpoint blocked for {} before {source}: live supervisor at {} does not support crdt_checkpoint; recovery=upgrade/restart the supervisor after the editor/CRDT relay can checkpoint, then retry",
-                canonical.display(),
-                socket
+            return checkpoint_crdt_via_local_document_model(
+                &canonical,
+                source,
+                "unsupported_supervisor_checkpoint_rpc",
             );
         }
         agent_doc_ops_log_io::log_op(

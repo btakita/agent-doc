@@ -2376,7 +2376,7 @@ mod late_fallback_patch_guard_tests {
         agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
             .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "test",
             Some(content),
@@ -2460,7 +2460,7 @@ mod late_fallback_patch_guard_tests {
         agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
             .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "test",
             Some(content),
@@ -2543,7 +2543,7 @@ mod late_fallback_patch_guard_tests {
         agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
             .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "test",
             Some(content),

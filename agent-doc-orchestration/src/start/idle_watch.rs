@@ -1520,7 +1520,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         if pre_response_cycle_stalled {
                             let stalled_secs =
                                 current_epoch_secs().saturating_sub(state.updated_at);
-                            if let Err(err) = agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(&crate::PIPELINE_FRONTMATTER_EFFECTS,
+                            if let Err(err) = agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(&agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
                                 &path,
                                 "suprecyclespin_stalled_cycle_resolved",
                                 None,
@@ -3109,7 +3109,7 @@ mod tests {
         // test) no IPC handler is in flight, so cycle_open is false and the same
         // inputs recycle — the deferred recycle fires at the true quiescent boundary.
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &file,
             "committed",
             Some("# plan\n"),

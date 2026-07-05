@@ -1493,7 +1493,7 @@ Done.\n\
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(&original),
@@ -1545,7 +1545,7 @@ Done.\n\
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
             Some(&original),
@@ -1967,7 +1967,7 @@ Done.\n\
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&original),
@@ -2094,7 +2094,7 @@ Done.\n\
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(&original),
@@ -2269,7 +2269,7 @@ Done.\n\
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit",
             Some(&original),
@@ -3172,7 +3172,7 @@ Done.\n\
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit",
             Some(&original),

@@ -2835,7 +2835,7 @@ Duplicate replay should stay live.
             .unwrap();
 
         let committed_state = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
             Some(committed),

@@ -11701,6 +11701,73 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
 }
 
 #[test]
+fn test_document_realtime_io_owns_pipeline_frontmatter_runtime_effects() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    for forbidden in [
+        "PIPELINE_FRONTMATTER_EFFECTS",
+        "PipelineFrontmatterEffects",
+        "RUNTIME_PIPELINE_FRONTMATTER_EFFECTS as PIPELINE_FRONTMATTER_EFFECTS",
+    ] {
+        assert!(
+            !orchestration_lib.contains(forbidden),
+            "orchestration root must not re-export pipeline-frontmatter runtime effects: {forbidden}"
+        );
+    }
+
+    let document_realtime_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct RuntimePipelineFrontmatterEffects",
+        "pub static RUNTIME_PIPELINE_FRONTMATTER_EFFECTS",
+        "impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects",
+    ] {
+        assert!(
+            document_realtime_io.contains(required),
+            "document realtime IO must own pipeline-frontmatter runtime effects: {required}"
+        );
+    }
+
+    fn collect_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_rs_files(&path, files);
+            } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    let mut orchestration_files = Vec::new();
+    collect_rs_files(
+        &manifest_dir.join("agent-doc-orchestration/src"),
+        &mut orchestration_files,
+    );
+    collect_rs_files(
+        &manifest_dir.join("agent-doc-orchestration/tests"),
+        &mut orchestration_files,
+    );
+    let mut saw_focused_runtime_effects = false;
+    for path in orchestration_files {
+        let source = fs::read_to_string(&path).unwrap();
+        assert!(
+            !source.contains("agent_doc_orchestration::PIPELINE_FRONTMATTER_EFFECTS")
+                && !source.contains("crate::PIPELINE_FRONTMATTER_EFFECTS"),
+            "{} must use document realtime IO directly instead of the orchestration pipeline-frontmatter facade",
+            path.display()
+        );
+        saw_focused_runtime_effects |=
+            source.contains("agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS");
+    }
+    assert!(
+        saw_focused_runtime_effects,
+        "orchestration call sites that need pipeline-frontmatter runtime effects should import document realtime IO directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

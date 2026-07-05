@@ -210,7 +210,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     // response is fully on disk (doc lock still held, so no writer races).
     if let Ok(Some(st)) = agent_doc_cycle_state_io::load(file) {
         agent_doc_cycle_state_io::pipeline_frontmatter::mirror_pipeline_frontmatter(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             file,
             &st,
         );
@@ -549,7 +549,7 @@ pub fn run_template(
     // response is fully on disk (doc lock still held, so no writer races).
     if let Ok(Some(st)) = agent_doc_cycle_state_io::load(file) {
         agent_doc_cycle_state_io::pipeline_frontmatter::mirror_pipeline_frontmatter(
-            &crate::PIPELINE_FRONTMATTER_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             file,
             &st,
         );

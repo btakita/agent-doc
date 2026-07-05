@@ -136,3 +136,125 @@ pub fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
     );
     Ok(true)
 }
+
+pub fn recover_route_queue_snapshot_commit_boundary(
+    file: &Path,
+    rc: &agent_doc_run_context_io::RunContext,
+) -> Result<bool> {
+    if !detect_route_queue_snapshot_commit_boundary_recoverable(file, rc)? {
+        return Ok(false);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_queue_snapshot_auto_recovery_attempt file={}",
+            file.display()
+        ),
+    );
+    eprintln!(
+        "[preflight] route_queue_snapshot: queued dispatch snapshot is not committed for {}; running auto-commit",
+        file.display()
+    );
+    match agent_doc_commit_io::commit(file) {
+        Ok(_) => {
+            rc.invalidate_head_content();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_queue_snapshot_auto_recovery_succeeded file={}",
+                    file.display()
+                ),
+            );
+            Ok(true)
+        }
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_queue_snapshot_auto_recovery_failed file={} error={}",
+                    file.display(),
+                    e.to_string().replace('\n', " ")
+                ),
+            );
+            eprintln!(
+                "[preflight] route_queue_snapshot auto-commit failed for {}: {}",
+                file.display(),
+                e
+            );
+            Ok(false)
+        }
+    }
+}
+
+pub fn detect_route_queue_snapshot_commit_boundary_recoverable(
+    file: &Path,
+    rc: &agent_doc_run_context_io::RunContext,
+) -> Result<bool> {
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+        return Ok(false);
+    };
+    if state.is_open() {
+        return Ok(false);
+    }
+    if !matches!(
+        rc.snapshot_commit_status(),
+        agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+    ) {
+        return Ok(false);
+    }
+
+    let Some(snapshot) = rc.snapshot_content() else {
+        return Ok(false);
+    };
+    let Some(head) = rc.head_content() else {
+        return Ok(false);
+    };
+    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, &snapshot)
+        .is_some()
+    {
+        return Ok(false);
+    }
+
+    let snapshot_prompts =
+        agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts(&snapshot)?;
+    let head_prompts =
+        agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts(&head)?;
+    // Recover only genuine active-auto-queue commit-boundary churn: either the
+    // snapshot still carries the queued dispatch (enqueue case) or HEAD carried
+    // an active auto-queue that the snapshot has since drained to inactive
+    // residue via queue maintenance (#drained-done-queue-clear). The drained
+    // case reduces to an empty stripped diff below (queue body + `queue_active`
+    // are both stripped before comparison), so it auto-commits only when no
+    // non-queue user change exists. Bail on any other snapshot/HEAD drift.
+    if snapshot_prompts.is_empty() && head_prompts.is_empty() {
+        return Ok(false);
+    }
+
+    let head_norm =
+        agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare(&head);
+    let snapshot_norm =
+        agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare(&snapshot);
+    let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&head_norm, &snapshot_norm)
+    else {
+        return Ok(true);
+    };
+    let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text)
+        .into_iter()
+        .filter(|change| {
+            !matches!(
+                change.kind,
+                agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
+                    | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact
+            )
+        })
+        .collect::<Vec<_>>();
+    if changes.is_empty() {
+        return Ok(true);
+    }
+
+    Ok(changes.iter().all(|change| {
+        change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget
+            && agent_doc_queue::route_dispatch::route_prompt_text_for_change(&change.text)
+                .is_some_and(|text| snapshot_prompts.iter().any(|prompt| prompt == &text))
+    }))
+}

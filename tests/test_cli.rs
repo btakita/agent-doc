@@ -19974,6 +19974,65 @@ fn test_agent_doc_preflight_runtime_io_owns_prompt_cleanup_graph() {
 }
 
 #[test]
+fn test_agent_doc_preflight_runtime_io_owns_route_queue_snapshot_recovery_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
+    let preflight_runtime_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/Cargo.toml")).unwrap();
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+
+    for required in [
+        "pub fn recover_route_queue_snapshot_commit_boundary(",
+        "pub fn detect_route_queue_snapshot_commit_boundary_recoverable(",
+        "agent_doc_commit_io::commit(file)",
+        "agent_doc_cycle_state_io::load(file)?",
+        "agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts",
+        "agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare",
+        "agent_doc_diff::classify_prompt_bearing_changes",
+        "route_queue_snapshot_auto_recovery_succeeded file=",
+    ] {
+        assert!(
+            preflight_runtime.contains(required),
+            "agent-doc-preflight-runtime-io must own route-queue snapshot recovery marker: {required}"
+        );
+    }
+
+    for required_dep in [
+        "agent-doc-commit-io =",
+        "agent-doc-cycle-state-io =",
+        "agent-doc-diff =",
+        "agent-doc-queue =",
+        "agent-doc-turn =",
+    ] {
+        assert!(
+            preflight_runtime_manifest.contains(required_dep),
+            "agent-doc-preflight-runtime-io should declare route-queue recovery dependency: {required_dep}"
+        );
+    }
+
+    for forbidden in [
+        "fn recover_route_queue_snapshot_commit_boundary(",
+        "fn detect_route_queue_snapshot_commit_boundary_recoverable(",
+        "agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare",
+        "agent_doc_diff::classify_prompt_bearing_changes",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight.rs must not re-own route-queue snapshot recovery marker: {forbidden}"
+        );
+    }
+
+    assert!(
+        orchestration_preflight.contains(
+            "agent_doc_preflight_runtime_io::recover_route_queue_snapshot_commit_boundary(file, rc)?"
+        ),
+        "preflight sequencing should call the focused route-queue snapshot recovery helper"
+    );
+}
+
+#[test]
 fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =

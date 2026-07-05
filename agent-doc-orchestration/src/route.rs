@@ -201,7 +201,8 @@ use agent_doc_route_io::closeout_drain::{
     classify_route_closeout_block, drain_open_closeout_before_routed_dispatch,
 };
 use agent_doc_route_io::command::RouteCommandEffects;
-pub use agent_doc_route_io::command::RouteMode;
+#[cfg(test)]
+use agent_doc_route_io::command::RouteMode;
 use agent_doc_route_io::cycle_ack::RouteCycleAckEffects;
 #[cfg(test)]
 use agent_doc_route_io::cycle_ack::pending_prompt_bearing_context_for_route;

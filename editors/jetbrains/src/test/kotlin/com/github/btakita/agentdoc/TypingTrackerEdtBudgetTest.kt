@@ -151,6 +151,7 @@ class TypingTrackerEdtBudgetTest {
                 reporterBody.contains("if (requireAuthority) false else") &&
                 reporterBody.contains("CrdtReplicaManager.ensureReplicaForOpenDocument") &&
                 reporterBody.contains("await = false") &&
+                reporterBody.contains("forceRefresh = requireAuthority") &&
                 reporterBody.contains("if (requireAuthority && !replicaRefreshAccepted) return false") &&
                 reporterBody.contains("if (drainEditorOps)"),
         )
@@ -214,9 +215,17 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "publish/open document repair must attach the CRDT replica through the worker without blocking IPC receipts",
             source.contains("fun ensureOpenDocumentReplica(") &&
+                source.contains("forceRefresh: Boolean = false") &&
+                source.contains("refreshForwarderFor(filePath, text)") &&
                 source.contains("executor.execute { attach() }") &&
                 source.contains("forwarderFor(filePath, text)") &&
                 !source.contains("future.get(150, TimeUnit.MILLISECONDS)"),
+        )
+        assertTrue(
+            "authority-bearing publish must be able to recreate a stale cached forwarder after supervisor recycle",
+            source.contains("private fun refreshForwarderFor(") &&
+                source.contains("forwarders.remove(filePath)?.deregister()") &&
+                source.contains("refreshed ${'$'}{File(filePath).name} registration"),
         )
     }
 }

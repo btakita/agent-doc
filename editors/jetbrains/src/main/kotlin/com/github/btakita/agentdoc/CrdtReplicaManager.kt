@@ -105,12 +105,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         document: Document,
         editorText: String? = null,
         await: Boolean = false,
+        forceRefresh: Boolean = false,
     ): Boolean {
         val attach = {
             try {
                 val text = editorText ?: ApplicationManager.getApplication().runReadAction<String> { document.text }
                 shadows[filePath] = text
-                forwarderFor(filePath, text) != null
+                val forwarder = if (forceRefresh) {
+                    refreshForwarderFor(filePath, text)
+                } else {
+                    forwarderFor(filePath, text)
+                }
+                forwarder != null
             } catch (e: Exception) {
                 log.debug("[crdt-replica] open-document attach skipped for $filePath: ${e.message}")
                 false
@@ -301,6 +307,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         return forwarder
     }
 
+    private fun refreshForwarderFor(filePath: String, initialEditorText: String): CrdtReplicaForwarder? {
+        forwarders.remove(filePath)?.deregister()
+        val forwarder = forwarderFor(filePath, initialEditorText)
+        if (forwarder != null) {
+            log.info("[crdt-replica] refreshed ${File(filePath).name} registration")
+        }
+        return forwarder
+    }
+
     private fun markLocalPending(filePath: String) {
         pendingLocalEdits.computeIfAbsent(filePath) { AtomicInteger(0) }.incrementAndGet()
     }
@@ -363,11 +378,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             document: Document,
             editorText: String? = null,
             await: Boolean = false,
+            forceRefresh: Boolean = false,
         ): Boolean {
             val manager = instances.values.firstOrNull { it.ownsFilePath(filePath) }
                 ?: instances.values.firstOrNull()
                 ?: return false
-            return manager.ensureOpenDocumentReplica(filePath, document, editorText, await)
+            return manager.ensureOpenDocumentReplica(filePath, document, editorText, await, forceRefresh)
         }
 
         fun isApplyingRemote(filePath: String): Boolean =

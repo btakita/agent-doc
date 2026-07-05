@@ -364,6 +364,7 @@ object TypingTracker : DocumentListener {
                 document = document,
                 editorText = text,
                 await = false,
+                forceRefresh = requireAuthority,
             )
             if (requireAuthority && !replicaRefreshAccepted) return false
             LOG.debug("[native] document_changed content reported: $filePath")

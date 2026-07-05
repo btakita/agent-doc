@@ -166,6 +166,32 @@ pub struct OrchestrationRepairReplayWriteEffects;
 pub static REPAIR_REPLAY_WRITE_EFFECTS: OrchestrationRepairReplayWriteEffects =
     OrchestrationRepairReplayWriteEffects;
 
+pub(crate) fn repair_coordinator_effects() -> agent_doc_repair_io::RepairCoordinatorEffects<
+    'static,
+    OrchestrationRepairIoEffects,
+    OrchestrationRepairReplayWriteEffects,
+> {
+    agent_doc_repair_io::RepairCoordinatorEffects {
+        repair_io_effects: &REPAIR_IO_EFFECTS,
+        replay_write_effects: &REPAIR_REPLAY_WRITE_EFFECTS,
+        complete_required_closeout: repair_complete_required_closeout,
+        inspect_session: repair_inspect_session,
+        recover_missing_committed_head_response:
+            agent_doc_repair_runtime_io::recover_missing_committed_head_response,
+        recover_dedupe_only_drift: agent_doc_repair_runtime_io::recover_dedupe_only_drift,
+    }
+}
+
+fn repair_complete_required_closeout(file: &std::path::Path) -> anyhow::Result<bool> {
+    agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
+}
+
+fn repair_inspect_session(
+    file: &std::path::Path,
+) -> anyhow::Result<agent_doc_session_check_io::SessionCheckStatus> {
+    agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
+}
+
 impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplayWriteEffects {
     fn run_strict_write_replay(
         &self,

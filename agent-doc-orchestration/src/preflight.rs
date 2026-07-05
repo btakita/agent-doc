@@ -8,7 +8,7 @@
 //!   problems (window index, session drift); issues are
 //!   included in output but do not abort the run.
 //! - Step 0-pre — interrupted-cycle guard: inspects persisted cycle state.
-//!   For any open prior cycle, preflight auto-attempts `repair::run(file)` +
+//!   For any open prior cycle, preflight auto-attempts `agent_doc_repair_io::run` +
 //!   `git::commit(file)` before diffing again. For an open `preflight_started`
 //!   cycle with no recoverable response and unresolved prompt-bearing drift,
 //!   preflight fails closed before the no-op commit path can mark an empty
@@ -16,7 +16,7 @@
 //!   that stages the snapshot only and leaves later live working-tree edits
 //!   uncommitted; if that closeout still cannot prove the prior cycle is durable,
 //!   preflight fails closed instead of diffing again.
-//! - Step 1 — repair: calls `repair::run(file)` to detect and apply any
+//! - Step 1 — repair: calls `agent_doc_repair_io::run` to detect and apply any
 //!   orphaned pending agent responses from a previous interrupted cycle.
 //! - Step 2 — commit: calls `git::commit(file)` to record the previous
 //!   exchange cycle; failure is downgraded to a warning, not a hard error.
@@ -117,7 +117,6 @@ use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
 use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 
-use crate::repair;
 use agent_doc_document::write_normalization::editor_buffer_preserved_head_exchange;
 
 /// A change detected in a related document since the last cycle.
@@ -554,7 +553,7 @@ struct OrchestrationPreflightCycleCompletionEffects;
 
 impl PreflightCycleCompletionEffects for OrchestrationPreflightCycleCompletionEffects {
     fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome> {
-        repair::run(file)
+        agent_doc_repair_io::run(crate::repair_coordinator_effects(), file)
     }
 
     fn commit(&self, file: &Path) -> Result<bool> {

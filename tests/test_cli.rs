@@ -3512,12 +3512,17 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
                 .contains("agent_doc_repair_io::repair_committed_historical_snapshot_drift("),
         "commit lifecycle must call focused repair IO for committed historical snapshot drift repair"
     );
+    let codex_hook =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
     assert!(
         repair_io.contains("pub fn save_blocked_repair_payload(")
             && repair_io.contains("pub fn run_with_queue_completion_ids<")
-            && repair.contains("agent_doc_repair_io::run_with_queue_completion_ids(")
-            && repair.contains("agent_doc_repair_io::RepairCoordinatorEffects"),
-        "repair.rs should only adapt into the focused repair IO coordinator"
+            && codex_hook.contains("agent_doc_repair_io::run_with_queue_completion_ids(")
+            && repair
+                .contains("agent_doc_repair_io::run(crate::repair_coordinator_effects(), file)")
+            && repair
+                .contains("agent_doc_repair_io::repair(crate::repair_coordinator_effects(), file)"),
+        "repair callers should adapt into the focused repair IO coordinator"
     );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -11138,6 +11143,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-runtime-io/src/lib.rs",
             "move the remaining strict empty-response bridge after write command DTO extraction",
+        ),
+        (
+            "Repair coordinator direct-call edge removal",
+            "agent-doc-orchestration/src/{preflight.rs,preflight/run.rs,codex_hook.rs,route.rs}",
+            "agent-doc-repair-io::{run,run_with_queue_completion_ids,repair}",
+            "Move `repair_coordinator_effects` into a focused repair runtime adapter",
         ),
         (
             "Repair recovery coordinator IO graph",

@@ -237,7 +237,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         || if options.probe {
             false
         } else {
-            match repair::run(file) {
+            match agent_doc_repair_io::run(crate::repair_coordinator_effects(), file) {
                 Ok(outcome) => outcome.repaired(),
                 Err(e) => {
                     let message = e.to_string();

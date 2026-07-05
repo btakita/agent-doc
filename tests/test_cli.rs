@@ -13284,7 +13284,7 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
 
     for relative_path in [
         "src/main.rs",
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-command-io/src/lib.rs",
         "agent-doc-stream-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();

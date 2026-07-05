@@ -203,12 +203,12 @@ impl agent_doc_repair_io::RepairReplayWriteEffects for OrchestrationRepairReplay
         queue_completion_ids: &[String],
     ) -> anyhow::Result<()> {
         let commit_mode = if agent_doc_git_io::status::is_in_git_repo(file) {
-            crate::write::CommitMode::Required
+            agent_doc_write_command_io::CommitMode::Required
         } else {
-            crate::write::CommitMode::None
+            agent_doc_write_command_io::CommitMode::None
         };
         crate::write::run_command_with_response(
-            crate::write::CommandOptions {
+            agent_doc_write_command_io::CommandOptions {
                 file: file.to_path_buf(),
                 baseline_file: None,
                 is_template,

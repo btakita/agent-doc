@@ -537,7 +537,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
             );
         }
     }
-    let options = agent_doc_orchestration::write::CommandOptions {
+    let options = agent_doc_write_command_io::CommandOptions {
         file: file.clone(),
         baseline_file: optional_path_arg(args, "baseline_file")?,
         is_template: bool_arg(args, "template", false)?,
@@ -582,7 +582,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
 
     agent_doc_orchestration::write::run_command_with_response(
         options,
-        agent_doc_orchestration::write::CommitMode::Required,
+        agent_doc_write_command_io::CommitMode::Required,
         response,
     )?;
     let report = agent_doc_session_check_io::inspect_with_warnings(

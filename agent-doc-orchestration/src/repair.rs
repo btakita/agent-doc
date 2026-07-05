@@ -61,16 +61,15 @@
 //! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
-use crate::write;
 use agent_doc_turn::repair::RepairOutcome;
 use anyhow::Result;
 use std::path::Path;
 
 pub fn run_write_command_with_empty_response_recovery(
-    options: write::CommandOptions,
-    commit_mode: write::CommitMode,
+    options: agent_doc_write_command_io::CommandOptions,
+    commit_mode: agent_doc_write_command_io::CommitMode,
 ) -> Result<()> {
-    write::run_command_with_empty_response_recovery(
+    crate::write::run_command_with_empty_response_recovery(
         options,
         commit_mode,
         recover_empty_response_for_strict_closeout,

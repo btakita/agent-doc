@@ -11164,6 +11164,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the write-path `guard_no_exchange_compaction_request_between` tests",
         ),
         (
+            "Write command request DTO graph",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-write-command-io/src/lib.rs",
+            "Move the write command runtime/replay entrypoints",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

@@ -934,7 +934,7 @@ mod th {
         ) -> Result<()> {
             self.finalize_calls.borrow_mut().push(response.to_string());
             write::run_command_with_response(
-                write::CommandOptions {
+                agent_doc_write_command_io::CommandOptions {
                     file: file.to_path_buf(),
                     baseline_file: None,
                     is_template: mode.is_template(),
@@ -976,7 +976,7 @@ mod th {
                     commit_sibling: Vec::new(),
                     commit_sibling_message: Vec::new(),
                 },
-                write::CommitMode::BestEffort,
+                agent_doc_write_command_io::CommitMode::BestEffort,
                 response.to_string(),
             )
         }

@@ -3738,7 +3738,7 @@ fn main() -> anyhow::Result<()> {
                 ),
             };
             agent_doc_orchestration::repair::run_write_command_with_empty_response_recovery(
-                agent_doc_orchestration::write::CommandOptions {
+                agent_doc_write_command_io::CommandOptions {
                     file: args.file,
                     baseline_file: args.baseline_file,
                     is_template: args.template,
@@ -3781,9 +3781,9 @@ fn main() -> anyhow::Result<()> {
                     commit_sibling_message: args.commit_sibling_message,
                 },
                 if commit {
-                    agent_doc_orchestration::write::CommitMode::BestEffort
+                    agent_doc_write_command_io::CommitMode::BestEffort
                 } else {
-                    agent_doc_orchestration::write::CommitMode::None
+                    agent_doc_write_command_io::CommitMode::None
                 },
             )
         }
@@ -3796,7 +3796,7 @@ fn main() -> anyhow::Result<()> {
                 ),
             };
             agent_doc_orchestration::repair::run_write_command_with_empty_response_recovery(
-                agent_doc_orchestration::write::CommandOptions {
+                agent_doc_write_command_io::CommandOptions {
                     file: args.file,
                     baseline_file: args.baseline_file,
                     is_template: args.template,
@@ -3838,7 +3838,7 @@ fn main() -> anyhow::Result<()> {
                     commit_sibling: args.commit_sibling,
                     commit_sibling_message: args.commit_sibling_message,
                 },
-                agent_doc_orchestration::write::CommitMode::Required,
+                agent_doc_write_command_io::CommitMode::Required,
             )
         }
         Commands::Stream {

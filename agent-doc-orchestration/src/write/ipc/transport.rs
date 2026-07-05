@@ -39,6 +39,7 @@ pub(crate) fn try_ipc(
 mod submodule_patch_routing_tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
 

@@ -11116,6 +11116,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split repeated-queue recovery note formatting from closeout side effects",
         ),
         (
+            "Start idle-queue writeback edge removal",
+            "agent-doc-orchestration/src/start.rs",
+            "agent-doc-document-realtime-io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS",
+            "Move idle queue completion into a focused start runtime IO adapter",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

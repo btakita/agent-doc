@@ -287,7 +287,7 @@ fn complete_idle_queue_slash_command_head(
 ) -> bool {
     match queue_consume::consume_queue_prompt_force_disk(
         file,
-        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
     ) {
         Ok(Some(outcome)) => {
             if outcome.consumed_text.trim() != expected_head.trim() {

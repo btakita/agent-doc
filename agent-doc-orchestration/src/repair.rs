@@ -65,33 +65,11 @@ use agent_doc_turn::repair::RepairOutcome;
 use anyhow::Result;
 use std::path::Path;
 
-use crate::write;
-
-fn repair_coordinator_effects() -> agent_doc_repair_io::RepairCoordinatorEffects<
-    'static,
-    crate::OrchestrationRepairIoEffects,
-    crate::OrchestrationRepairReplayWriteEffects,
-> {
-    agent_doc_repair_io::RepairCoordinatorEffects {
-        repair_io_effects: &crate::REPAIR_IO_EFFECTS,
-        replay_write_effects: &crate::REPAIR_REPLAY_WRITE_EFFECTS,
-        complete_required_closeout: crate::write::complete_required_closeout,
-        inspect_session: repair_inspect_session,
-        recover_missing_committed_head_response:
-            crate::write::recover_missing_committed_head_response,
-        recover_dedupe_only_drift: crate::write::recover_dedupe_only_drift,
-    }
-}
-
-fn repair_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
-    agent_doc_session_check_io::inspect(file, &crate::session_check_effects())
-}
-
 pub fn run_write_command_with_empty_response_recovery(
-    options: write::CommandOptions,
-    commit_mode: write::CommitMode,
+    options: agent_doc_write_command_io::CommandOptions,
+    commit_mode: agent_doc_write_command_io::CommitMode,
 ) -> Result<()> {
-    write::run_command_with_empty_response_recovery(
+    crate::write::run_command_with_empty_response_recovery(
         options,
         commit_mode,
         recover_empty_response_for_strict_closeout,
@@ -105,7 +83,7 @@ pub(crate) fn recover_empty_response_for_strict_closeout(
     force_disk: bool,
 ) -> Result<bool> {
     agent_doc_repair_io::recover_empty_response_for_strict_closeout(
-        repair_coordinator_effects(),
+        crate::repair_coordinator_effects(),
         file,
         strict_closeout,
         has_pending_mutation,
@@ -115,22 +93,11 @@ pub(crate) fn recover_empty_response_for_strict_closeout(
 
 /// Check for a pending response and apply it if found.
 pub fn run(file: &Path) -> Result<RepairOutcome> {
-    agent_doc_repair_io::run(repair_coordinator_effects(), file)
-}
-
-pub(crate) fn run_with_queue_completion_ids(
-    file: &Path,
-    queue_completion_ids: &[String],
-) -> Result<RepairOutcome> {
-    agent_doc_repair_io::run_with_queue_completion_ids(
-        repair_coordinator_effects(),
-        file,
-        queue_completion_ids,
-    )
+    agent_doc_repair_io::run(crate::repair_coordinator_effects(), file)
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
-    agent_doc_repair_io::repair(repair_coordinator_effects(), file)
+    agent_doc_repair_io::repair(crate::repair_coordinator_effects(), file)
 }
 
 #[cfg(test)]

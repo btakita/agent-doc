@@ -31,6 +31,7 @@ dependencies = [
  "agent-doc-capture-io",
  "agent-doc-claim-io",
  "agent-doc-codex-hook-io",
+ "agent-doc-commit-io",
  "agent-doc-compact-io",
  "agent-doc-config",
  "agent-doc-controller",
@@ -78,6 +79,7 @@ dependencies = [
  "agent-doc-orchestration",
  "agent-doc-owner-pane-io",
  "agent-doc-plugin-owner",
+ "agent-doc-preflight-io",
  "agent-doc-process-owner-io",
  "agent-doc-project-config-io",
  "agent-doc-project-root-io",
@@ -124,6 +126,7 @@ dependencies = [
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-doc-workflow-io",
+ "agent-doc-write-command-io",
  "agent-doc-write-converge-io",
  "agent-doc-write-ipc-io",
  "agent-kit",
@@ -287,16 +290,26 @@ name = "agent-doc-commit-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-capture-io",
+ "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
+ "agent-doc-debounce",
  "agent-doc-diff",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-flow",
  "agent-doc-flow-io",
+ "agent-doc-frontmatter-io",
+ "agent-doc-fs",
  "agent-doc-git",
  "agent-doc-git-io",
+ "agent-doc-hooks-io",
+ "agent-doc-ipc-io",
+ "agent-doc-merge-io",
  "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
+ "agent-doc-project-root-io",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-queue-io",
@@ -306,6 +319,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "agent-doc-turn-scope-io",
+ "agent-doc-workflow",
  "agent-doc-write-converge-io",
  "agent-doc-write-ipc-io",
  "anyhow",
@@ -316,10 +330,12 @@ name = "agent-doc-compact-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-capture-io",
+ "agent-doc-commit-io",
  "agent-doc-controller-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-document",
+ "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-frontmatter",
@@ -331,7 +347,6 @@ dependencies = [
  "agent-doc-merge",
  "agent-doc-merge-io",
  "agent-doc-ops-log-io",
- "agent-doc-orchestration",
  "agent-doc-project-root-io",
  "agent-doc-session-accretion-io",
  "agent-doc-snapshot-io",
@@ -550,9 +565,11 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
+ "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-flow",
  "agent-doc-flow-io",
  "agent-doc-frontmatter",
  "agent-doc-fs",
@@ -563,7 +580,11 @@ dependencies = [
  "agent-doc-ops-log-io",
  "agent-doc-plugin-owner",
  "agent-doc-project-root-io",
+ "agent-doc-queue-io",
+ "agent-doc-session-actor-io",
  "agent-doc-state-backbone",
+ "agent-doc-turn",
+ "agent-doc-write-converge-io",
  "anyhow",
  "serde_json",
  "tempfile",
@@ -1135,6 +1156,7 @@ dependencies = [
  "agent-doc-owner-pane-io",
  "agent-doc-plugin-owner",
  "agent-doc-preflight-io",
+ "agent-doc-preflight-runtime-io",
  "agent-doc-process-owner-io",
  "agent-doc-project-config-io",
  "agent-doc-project-root-io",
@@ -1146,6 +1168,7 @@ dependencies = [
  "agent-doc-queue",
  "agent-doc-queue-io",
  "agent-doc-repair-io",
+ "agent-doc-repair-runtime-io",
  "agent-doc-response-replay-io",
  "agent-doc-response-toc-io",
  "agent-doc-route-io",
@@ -1187,6 +1210,7 @@ dependencies = [
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-doc-workflow-io",
+ "agent-doc-write-command-io",
  "agent-doc-write-converge-io",
  "agent-doc-write-ipc-io",
  "anyhow",
@@ -1279,6 +1303,7 @@ dependencies = [
  "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-ipc-io",
+ "agent-doc-ipc-protocol",
  "agent-doc-markdown-ast",
  "agent-doc-memory",
  "agent-doc-memory-io",
@@ -1288,6 +1313,7 @@ dependencies = [
  "agent-doc-project-root-io",
  "agent-doc-queue",
  "agent-doc-queue-io",
+ "agent-doc-session-accretion",
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
@@ -1305,6 +1331,16 @@ dependencies = [
  "tempfile",
  "tmux-router",
  "tracing",
+]
+
+[[package]]
+name = "agent-doc-preflight-runtime-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-document-realtime-io",
+ "agent-doc-preflight-io",
+ "agent-doc-write-converge-io",
+ "anyhow",
 ]
 
 [[package]]
@@ -1508,6 +1544,20 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-repair-runtime-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-commit-io",
+ "agent-doc-document",
+ "agent-doc-document-realtime-io",
+ "agent-doc-git-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-turn",
+ "anyhow",
 ]
 
 [[package]]
@@ -2333,6 +2383,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-write-command-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-frontmatter",
+]
+
+[[package]]
 name = "agent-doc-write-converge-io"
 version = "0.34.67"
 dependencies = [
@@ -2342,12 +2399,10 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
- "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-element-exchange",
  "agent-doc-element-exchange-io",
  "agent-doc-flow",
- "agent-doc-flow-io",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
@@ -2537,15 +2592,15 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "arc-swap"
-version = "1.9.1"
+version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a3a1fd6f75306b68087b831f025c712524bcb19aad54e557b1129cfa0a2b207"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
 dependencies = [
  "rustversion",
 ]
@@ -2558,9 +2613,9 @@ checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
 
 [[package]]
 name = "arrayvec"
-version = "0.7.7"
+version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f02882884d3e1bc524fb12c79f107f6ad0e1cfd498c536ffb494301740995dfe"
+checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "ascii"
@@ -2692,13 +2747,13 @@ dependencies = [
 
 [[package]]
 name = "bstr"
-version = "1.12.1"
+version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab"
+checksum = "5cee35f73844aa3014bb606320a6c1f010249dbdf43342fe54b5a4f6a8ed4b79"
 dependencies = [
  "memchr",
  "regex-automata",
- "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -2786,9 +2841,9 @@ dependencies = [
 
 [[package]]
 name = "clap_complete"
-version = "4.6.5"
+version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0a7a9bfdb35811f9e59832f0f05975114d2251b415fb534108e6f34060fd772"
+checksum = "db8b397918185f0161ff3d6fcaa9e4bfc09b8367caf6e1d4a2848e5477ed027b"
 dependencies = [
  "clap",
 ]
@@ -3404,9 +3459,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hybrid-array"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9155a582abd142abc056962c29e3ce5ff2ad5469f4246b537ed42c5deba857da"
+checksum = "818356c5132c1fede50f837ca96afbe78ff42413047f4abb886217845e1b6c8c"
 dependencies = [
  "typenum",
 ]
@@ -3539,9 +3594,9 @@ dependencies = [
 
 [[package]]
 name = "inotify-sys"
-version = "0.1.5"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e05c02b5e89bff3b946cedeca278abc628fe811e604f027c45a8aa3cf793d0eb"
+checksum = "9ea94e891b3606826e9c998be69ddca42247dad8ad50b1649a5cb7e1c9ae06fd"
 dependencies = [
  "libc",
 ]
@@ -3608,9 +3663,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.102"
+version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03d04c30968dffe80775bd4d7fb676131cd04a1fb46d2686dbffbaec2d9dfd31"
+checksum = "53b44bfcdb3f8d5837a46dae1ca9660a837176eee74a28b229bc626816589102"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -3678,9 +3733,9 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libredox"
-version = "0.1.17"
+version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f02ab6bace2054fb888a3c16f990117b579d14a3088e472d63c6011fa185c9d3"
+checksum = "c943259e342f1e06ff2da7a83eabdfe7f92ce10262688dbf1895ff0b3e6e4652"
 dependencies = [
  "libc",
 ]
@@ -4423,9 +4478,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.14.1"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30a7197ae7eb376e574fe940d068c30fe0462554a3ddbe4eca7838e049c937a9"
+checksum = "764899a24af3980067ee14bc143654f297b22eaebfe3c7b6b211920a5a59b046"
 dependencies = [
  "zeroize",
 ]
@@ -4905,9 +4960,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.51"
+version = "0.3.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85c17d80feb7334b40c484e45ed1a5273dfd8bfda537c3be2e74a06a6686f327"
+checksum = "18dfaaeddcb932337b5e7866ee7d0ce9b76d2fd092997146f187ec09b4558a50"
 dependencies = [
  "deranged",
  "js-sys",
@@ -4926,9 +4981,9 @@ checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
 
 [[package]]
 name = "time-macros"
-version = "0.2.30"
+version = "0.2.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcef1a61bdb119096e153208ec5cbec23944ce8bca13be5c7f60c634f7403935"
+checksum = "c431b87111666e491a90baa837f914fb45cd5dc3c268591b0220ff5057f2085f"
 dependencies = [
  "num-conv",
  "time-core",
@@ -5126,9 +5181,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter"
-version = "0.26.9"
+version = "0.26.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dab76d0b724ba557954125188cf0633a1ca43199ced82d95c7b9c32cc3de1f3"
+checksum = "3c343ed63e3f5c64d1acdecb5d2c13d4e169cb5fde0052106ebaa6c6f27f9e55"
 dependencies = [
  "cc",
  "regex",
@@ -5156,9 +5211,9 @@ dependencies = [
 
 [[package]]
 name = "tsift-core"
-version = "0.1.73"
+version = "0.1.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4beeef00ce41ebe31c83bb0ae9ba4ef5c34334da0ac11d9d65c5dfe80f0a2189"
+checksum = "a4a80da7e869fdcb19a1381506ab87aece104450625c70bf19439078a4d00bf3"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5169,9 +5224,9 @@ dependencies = [
 
 [[package]]
 name = "tsift-memory"
-version = "0.1.73"
+version = "0.1.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cab3201f03b69297aea73af991237164e6d4fcda72ad0609e874044201e4327"
+checksum = "900160606c91983bae50781f088e64929cc9fe3553df114761f43a7f2b39ddd0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5311,9 +5366,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.23.3"
+version = "1.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "144d6b123cef80b301b8f72a9e2ca4370ddec21950d0a103dd22c437006d2db7"
+checksum = "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
@@ -5394,9 +5449,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.125"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ddb3f79143bced6de84270411622a2699cee572fc0875aeaf1e7867cf9fca1a"
+checksum = "4b067c0c11094aef6b7a801c1e34a26affafdf3d051dba08456b868789aaf9a4"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -5407,9 +5462,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.125"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e21a184b13fb19e157296e2c46056aec9092264fab83e4ba59e68c61b323c3d"
+checksum = "167ce5e579f6bcf889c4f7175a8a5a585de84e8ff93976ce393efa5f2837aab1"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -5417,9 +5472,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.125"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fecefd9c35bd935a20fc3fc344b5f29138961e4f47fb03297d88f2587afb5ebd"
+checksum = "f3997c7839262f4ef12cf90b818d6340c18e80f263f1a94bf157d0ec4420380e"
 dependencies = [
  "bumpalo",
  "proc-macro2",
@@ -5430,18 +5485,18 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.125"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23939e44bb9a5d7576fa2b563dc2e136628f1224e88a8deed09e04858b77871f"
+checksum = "dc1b4cb0cc549fcf58d7dfc081778139b3d283a081644e833e84682ad71cea24"
 dependencies = [
  "unicode-ident",
 ]
 
 [[package]]
 name = "web-sys"
-version = "0.3.102"
+version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6430a72df5eb332242960fe84b3002a241163998241eb596d4f739b9757061d"
+checksum = "8622dcb61c0bcc9fffa6938bed81210af2da9a7e4a1a834b2e37a59b6dfb6141"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -5930,9 +5985,9 @@ dependencies = [
 
 [[package]]
 name = "zlib-rs"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "977347db8caa080403f6b6b7c1cda9479a8e869316f7e13a59b19076a40f94e3"
+checksum = "5431d5661c32445236631278f27946e444ddafe4684cac70b185272d4f9c52d5"
 
 [[package]]
 name = "zmij"

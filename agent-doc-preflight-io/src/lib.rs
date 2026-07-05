@@ -88,6 +88,181 @@ pub struct GateVerifyResult {
     pub auto_resolved: bool,
 }
 
+/// A change detected in a related document since the last cycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelatedDocChange {
+    /// Path to the related document (as declared in frontmatter).
+    pub path: String,
+    /// Human-readable summary of what changed.
+    pub summary: String,
+    /// Whether the related document exists on disk.
+    pub exists: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PreflightOutput {
+    /// Non-blocking warnings the skill should surface before responding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<PreflightWarning>,
+    /// Tmux layout issues found (empty = healthy).
+    /// #per-cycle-protocol-output-overhead: omit when empty so a healthy cycle
+    /// does not spend per-cycle context bytes on `"layout_issues": []`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layout_issues: Vec<String>,
+    /// Whether an orphaned pending response was recovered and applied.
+    pub recovered: bool,
+    /// Whether a git commit was made for the previous cycle.
+    pub committed: bool,
+    /// Lines from `.agent-doc/claims.log` (truncated after read).
+    /// #per-cycle-protocol-output-overhead: omit when empty (the common case).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claims: Vec<String>,
+    /// Unified diff text, or `null` if there are no changes.
+    pub diff: Option<String>,
+    /// True when the snapshot matches the document (no new user input).
+    pub no_changes: bool,
+    /// Changes detected in linked documents since last cycle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_changes: Vec<RelatedDocChange>,
+    /// Path to the baseline file saved after commit (for `--baseline-file` in write).
+    /// Saved after step 2 (commit + boundary reposition) so it matches the snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_file: Option<String>,
+    /// Classification of the diff for skill routing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_type: Option<String>,
+    /// Reason for the diff classification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_type_reason: Option<String>,
+    /// Annotated diff with content-source markers (`[agent]`, `[user+]`, `[user-]`, `[user~]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotated_diff: Option<String>,
+    /// Structured semantic navigation for the same diff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_diff: Option<agent_doc_diff::semantic::SemanticDiffSummary>,
+    /// Operation manifest for the current turn (`#op-scoped-drift-2`): the
+    /// driver node plus the read/write addresses the turn touches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_scope: Option<agent_doc_turn::turn_scope::TurnScope>,
+    /// Affectedness classification of this cycle's node ops against `turn_scope`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op_affectedness: Option<agent_doc_turn::turn_scope::CycleAffectedness>,
+    /// Skill slash commands found in user-added diff lines.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slash_commands: Vec<String>,
+    /// Claude Code built-in commands found in user-added diff lines.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub builtin_commands: Vec<String>,
+    /// Natural-language orchestration request detected from the user diff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestration_request: Option<agent_doc_diff::OrchestrationRequest>,
+    /// Prompt preset references requested from the changed exchange content.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompt_presets_requested: Vec<String>,
+    /// Explicit cross-document backlog targets resolved from prompt/preset text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub explicit_backlog_targets: Vec<String>,
+    /// Resolved model tier the skill should use to gate this cycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_tier: Option<String>,
+    /// Hard-gate tier from model component or frontmatter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_tier: Option<String>,
+    /// Advisory tier computed from diff structural signals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_tier: Option<String>,
+    /// Concrete model name from an inline `/model <x>` command in the diff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_switch: Option<String>,
+    /// Resolved tier for `model_switch`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_switch_tier: Option<String>,
+    /// Pending callback requests from `agent-doc cleanup` or other IPC callers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_callbacks: Vec<agent_doc_ipc_protocol::PendingCallback>,
+    /// Structured owner-pane self-invocation contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned_pane_self_invocation:
+        Option<agent_doc_workflow::owner_pane_self_invocation::OwnedPaneSelfInvocation>,
+    /// Environment variables from frontmatter `env` field (unexpanded).
+    #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
+    pub env: indexmap::IndexMap<String, Option<String>>,
+    /// True when the backlog component's id order changed between snapshot and current.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub backlog_reordered: bool,
+    /// Count of backlog items currently in `[/]` gated state.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub backlog_gated_count: usize,
+    /// Count of non-done items currently in `agent:review`.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub review_count: usize,
+    /// Count of review items currently in `[/]` gated state.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub review_gated_count: usize,
+    /// Opportunistic gated-review verification results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gate_verify: Vec<GateVerifyResult>,
+    /// Canonical serialized list of user-authored changes that should preempt
+    /// or guide the current response cycle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_intent_prompt_changes: Vec<agent_doc_diff::PromptBearingChange>,
+    /// Legacy compatibility field: inline user edits inside prior agent responses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inline_annotations: Vec<String>,
+    /// Short model name for attribution in `### Re:` response headers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_model: Option<String>,
+    /// Ordered prompt texts from the `agent:queue` component.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_prompts: Vec<String>,
+    /// Realtime-selected active queue prompts for this cycle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_queue_prompts: Vec<String>,
+    /// Whether the queue is currently active (consuming prompts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_active: Option<bool>,
+    /// True when a time-gated start fence defers activation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queue_deferred: bool,
+    /// Raw datetime string from `--- start at <time>` when deferred.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_start_at: Option<String>,
+    /// How the queue was activated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_trigger: Option<agent_doc_queue::document_queue::QueueTrigger>,
+    /// If non-null, the queue was halted this cycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_halted: Option<String>,
+    /// True when an accepted controller pause is the effective queue-control state.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queue_paused: bool,
+    /// Controller-recorded pause reason when `queue_paused` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_pause_reason: Option<String>,
+    /// Count of agent-drainable heads at the active queue head.
+    #[serde(default)]
+    pub queue_drainable_head_count: usize,
+    /// Whether the queue has agent-drainable continuation work this session.
+    #[serde(default)]
+    pub queue_continuation_required: bool,
+    /// Explicit non-stall guidance when continuation is required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_continuation_guidance: Option<String>,
+    /// Bounded session-growth / churn advisory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_accretion: Option<agent_doc_session_accretion::SessionAccretionReport>,
+    /// Live finalize-pipeline state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<agent_doc_frontmatter::frontmatter::AgentDocPipeline>,
+    /// Semantic merge acknowledgements to surface once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub semantic_merge_acks: Vec<agent_doc_cycle_state_io::PendingSemanticMergeAck>,
+}
+
+fn is_zero_usize(n: &usize) -> bool {
+    *n == 0
+}
+
 pub trait PreflightMaintenanceWriteEffects {
     fn record_document_write_provenance(&self, file: &Path, content: &str);
 
@@ -3856,7 +4031,7 @@ mod tests {
                 "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
                 "## Review\n\n",
                 "<!-- agent:review -->\n",
-                "- [/] [#saev] early-ack live verify {}\n",
+                "- [/] [#saev] early receipt live verify {}\n",
                 "<!-- /agent:review -->\n"
             ),
             predicate_annotation
@@ -3898,7 +4073,7 @@ mod tests {
         assert!(ids_no_root.is_empty());
     }
 
-    fn start_ack_without_content_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+    fn start_receipt_without_content_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
         let root = project_root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
@@ -3908,7 +4083,10 @@ mod tests {
                     .get("patch_id")
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown");
-                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                )
             });
         })
     }
@@ -5135,7 +5313,7 @@ mod tests {
 
         // Fake editor listener that acks patches but never writes the file, so any
         // change to the on-disk doc could only have come from the binary itself.
-        let _listener = start_ack_without_content_listener(dir.path());
+        let _listener = start_receipt_without_content_listener(dir.path());
         wait_for_live_prompt_drift_listener(dir.path());
 
         let state = run_queue_maintenance(&doc, None).unwrap();
@@ -6460,7 +6638,7 @@ mod tests {
                     }
                     received_clone.lock().unwrap().push(v);
                 }
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -7441,13 +7619,13 @@ mod tests {
         let dir = setup_project();
         let pred = agent_doc_element_backlog::gate_verify::render_annotation(
             &agent_doc_element_backlog::gate_verify::GatePredicate {
-                verify: Some("early_ack_pending".to_string()),
-                disproof: Some("false ack-timeout".to_string()),
+                verify: Some("early_receipt_accepted".to_string()),
+                disproof: Some("false receipt-timeout".to_string()),
                 set_at: Some(100),
             },
         );
         let doc = write_optverify_doc(&dir, &pred);
-        write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
+        write_ops_log(&dir, "[150] early_receipt_accepted emitted ok\n");
 
         let results =
             run_gate_verify(&doc, false, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
@@ -7468,13 +7646,13 @@ mod tests {
         let dir = setup_project();
         let pred = agent_doc_element_backlog::gate_verify::render_annotation(
             &agent_doc_element_backlog::gate_verify::GatePredicate {
-                verify: Some("early_ack_pending".to_string()),
+                verify: Some("early_receipt_accepted".to_string()),
                 disproof: None,
                 set_at: Some(100),
             },
         );
         let doc = write_optverify_doc(&dir, &pred);
-        write_ops_log(&dir, "[150] early_ack_pending emitted ok\n");
+        write_ops_log(&dir, "[150] early_receipt_accepted emitted ok\n");
 
         let results =
             run_gate_verify_force_disk(&doc, true, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
@@ -7500,7 +7678,7 @@ mod tests {
         let dir = setup_project();
         let pred = agent_doc_element_backlog::gate_verify::render_annotation(
             &agent_doc_element_backlog::gate_verify::GatePredicate {
-                verify: Some("early_ack_pending".to_string()),
+                verify: Some("early_receipt_accepted".to_string()),
                 disproof: Some("manual cleanup".to_string()),
                 set_at: Some(100),
             },
@@ -7508,7 +7686,7 @@ mod tests {
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(
             &dir,
-            "[150] early_ack_pending emitted\n[160] looks like a manual cleanup\n",
+            "[150] early_receipt_accepted emitted\n[160] looks like a manual cleanup\n",
         );
 
         let results =
@@ -7526,7 +7704,7 @@ mod tests {
     fn gate_verify_empty_without_predicate() {
         let dir = setup_project();
         let doc = write_optverify_doc(&dir, "");
-        write_ops_log(&dir, "[150] early_ack_pending emitted\n");
+        write_ops_log(&dir, "[150] early_receipt_accepted emitted\n");
         let results =
             run_gate_verify_force_disk(&doc, true, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
                 .unwrap();
@@ -7539,7 +7717,7 @@ mod tests {
         let dir = setup_project();
         let pred = agent_doc_element_backlog::gate_verify::render_annotation(
             &agent_doc_element_backlog::gate_verify::GatePredicate {
-                verify: Some("early_ack_pending".to_string()),
+                verify: Some("early_receipt_accepted".to_string()),
                 disproof: None,
                 set_at: Some(100),
             },
@@ -7547,7 +7725,7 @@ mod tests {
         let doc = write_optverify_doc(&dir, &pred);
         write_ops_log(
             &dir,
-            "[150] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"expect early_ack_pending emitted before apply\"] queue_head=\"[#saev]\"\n",
+            "[150] queue_diff_active_prompt_differs file=doc.md prompt_changes=[\"expect early_receipt_accepted emitted before apply\"] queue_head=\"[#saev]\"\n",
         );
 
         let results =

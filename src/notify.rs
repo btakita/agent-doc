@@ -199,7 +199,7 @@ pub fn run(
         save_snapshot(file, &doc, &rc)?;
 
         if commit {
-            agent_doc_orchestration::git::commit(file)?;
+            agent_doc_commit_io::commit(file)?;
         }
         return Ok(());
     }
@@ -269,7 +269,7 @@ pub fn run(
     );
 
     if commit {
-        agent_doc_orchestration::git::commit(file)?;
+        agent_doc_commit_io::commit(file)?;
     }
 
     Ok(())

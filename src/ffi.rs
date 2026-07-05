@@ -1228,7 +1228,7 @@ pub extern "C" fn agent_doc_sync_check_generation(generation: u64) -> i32 {
 /// messages from the CLI. The callback receives each JSON message as a
 /// read-only NUL-terminated string (do NOT free it) and returns `true` if
 /// the message was handled successfully, `false` on error. The listener
-/// generates the ack response internally based on the return value.
+/// generates the socket receipt response internally based on the return value.
 ///
 /// Returns `true` if the listener was started, `false` on error.
 ///
@@ -1256,13 +1256,15 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
                 // Lend the message to the callback (no ownership transfer)
                 let c_msg = match CString::new(msg) {
                     Ok(c) => c,
-                    Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
+                    Err(_) => {
+                        return Some(r#"{"type":"receipt","status":"rejected"}"#.to_string());
+                    }
                 };
                 let success = callback(c_msg.as_ptr()) != 0;
                 if success {
-                    Some(r#"{"type":"ack","status":"ok"}"#.to_string())
+                    Some(r#"{"type":"receipt","status":"applied"}"#.to_string())
                 } else {
-                    Some(r#"{"type":"ack","status":"error"}"#.to_string())
+                    Some(r#"{"type":"receipt","status":"rejected"}"#.to_string())
                 }
             },
             agent_doc_ops_log_io::log_op,
@@ -1275,25 +1277,23 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
     1
 }
 
-/// V2 of [`agent_doc_start_ipc_listener`] with extended ack-result encoding.
+/// V2 of [`agent_doc_start_ipc_listener`] with extended receipt-result encoding.
 ///
 /// The callback returns one of three values:
-/// - `0` → ack `{"type":"ack","status":"error"}` (apply failed)
-/// - `1` → ack `{"type":"ack","status":"ok"}` (apply succeeded)
-/// - `2` → ack `{"type":"ack","status":"error","reason":"already_applied"}`
+/// - `0` → receipt `{"type":"receipt","status":"rejected"}` (apply failed)
+/// - `1` → receipt `{"type":"receipt","status":"applied"}` (apply succeeded)
+/// - `2` → receipt `{"type":"receipt","status":"applied","reason":"already_applied"}`
 ///   (plugin detected the patch is already in the live buffer and chose NOT
 ///   to re-apply; binary skips the file-IPC fallback so a duplicate response
 ///   heading cannot land).
 ///
-/// Plugins should prefer v2 when available. Existing plugins built against
-/// [`agent_doc_start_ipc_listener`] keep working unchanged.
+/// Plugins should prefer v2 when available.
 ///
-/// Early-ack (`#ipc-early-ack`): the underlying `agent_doc_ipc_io::start_listener`
-/// transport emits a `pending` ack the instant it receives a patch that opted
-/// in (`"early_ack": true`), before this callback's blocking apply runs, then
-/// this callback's terminal ack as usual. No plugin/callback change is needed —
-/// the early ack is owned by the Rust transport. Senders that do not opt in get
-/// only the terminal ack.
+/// Early receipt (`#ipc-early-receipt`): the underlying
+/// `agent_doc_ipc_io::start_listener` transport emits an `accepted` receipt the
+/// instant it receives a patch that opted in (`"early_receipt": true`), before
+/// this callback's blocking apply runs, then this callback's terminal receipt as
+/// usual. The early receipt is owned by the Rust transport.
 ///
 /// Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
 /// `[#ipcpluginalready]`.
@@ -1318,14 +1318,17 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener_v2(
             move |msg| {
                 let c_msg = match CString::new(msg) {
                     Ok(c) => c,
-                    Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
+                    Err(_) => {
+                        return Some(r#"{"type":"receipt","status":"rejected"}"#.to_string());
+                    }
                 };
                 match callback(c_msg.as_ptr()) {
-                    1 => Some(r#"{"type":"ack","status":"ok"}"#.to_string()),
+                    1 => Some(r#"{"type":"receipt","status":"applied"}"#.to_string()),
                     2 => Some(
-                        r#"{"type":"ack","status":"error","reason":"already_applied"}"#.to_string(),
+                        r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#
+                            .to_string(),
                     ),
-                    _ => Some(r#"{"type":"ack","status":"error"}"#.to_string()),
+                    _ => Some(r#"{"type":"receipt","status":"rejected"}"#.to_string()),
                 }
             },
             agent_doc_ops_log_io::log_op,
@@ -1431,6 +1434,15 @@ fn record_editor_patch_receipt(
         ),
         None => format!("editor-patch-applied-{patch_id}-{actor_generation}"),
     };
+    let generation_event = StateEvent::new(
+        format!("{document_hash}:editor-patch-generation-{patch_id}-{actor_generation}"),
+        StateFact::OwnerGenerationChanged {
+            document_hash: document_hash.clone(),
+            owner: agent_doc_state_backbone::StateOwner::EditorIpcBridge,
+            generation: actor_generation,
+        },
+    );
+    let receipt_event_id = format!("{document_hash}:{event_suffix}");
     let fact = match rejected_reason {
         Some(reason) => StateFact::EditorPatchRejected {
             document_hash: document_hash.clone(),
@@ -1444,21 +1456,45 @@ fn record_editor_patch_receipt(
             actor_generation,
         },
     };
+    let receipt_event = StateEvent::new(receipt_event_id, fact);
     match state_ledger().lock() {
         Ok(mut ledger) => {
-            ledger.append(StateEvent::new(
-                format!("{document_hash}:{event_suffix}"),
-                fact,
-            ));
-            1
+            ledger.append(generation_event.clone());
+            ledger.append(receipt_event.clone());
         }
         Err(err) => {
             eprintln!(
                 "[state-projection] editor patch receipt rejected for {file_path}: ledger lock poisoned: {err}"
             );
-            0
+            return 0;
         }
     }
+
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        eprintln!(
+            "[state-projection] editor patch receipt rejected for {file_path}: no agent-doc project root found"
+        );
+        return 0;
+    };
+    if let Err(err) = agent_doc_controller_io::project_controller::append_state_event(
+        &project_root,
+        &generation_event,
+    ) {
+        eprintln!(
+            "[state-projection] editor patch receipt rejected for {file_path}: durable generation append failed: {err}"
+        );
+        return 0;
+    }
+    if let Err(err) = agent_doc_controller_io::project_controller::append_state_event(
+        &project_root,
+        &receipt_event,
+    ) {
+        eprintln!(
+            "[state-projection] editor patch receipt rejected for {file_path}: durable receipt append failed: {err}"
+        );
+        return 0;
+    }
+    1
 }
 
 /// Record that the editor applied a queued patch as a lazily transport receipt.
@@ -2950,6 +2986,7 @@ mod tests {
     #[test]
     fn editor_patch_applied_ffi_records_lazily_receipt() {
         let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let file = tmp.path().join("doc.md");
         std::fs::write(&file, "hello\n").unwrap();
         let canonical = file.canonicalize().unwrap();
@@ -2960,7 +2997,7 @@ mod tests {
         let rc = unsafe { agent_doc_editor_patch_applied(file_c.as_ptr(), patch_c.as_ptr(), 7) };
         assert_eq!(1, rc, "applied receipt should be recorded");
 
-        let doc_hash_c = CString::new(doc_hash).unwrap();
+        let doc_hash_c = CString::new(doc_hash.clone()).unwrap();
         let proj_ptr = unsafe { agent_doc_state_projection(doc_hash_c.as_ptr()) };
         let proj = unsafe { CStr::from_ptr(proj_ptr) }
             .to_str()
@@ -2970,6 +3007,58 @@ mod tests {
         assert!(
             proj.contains(r#""phase":"applied""#),
             "projection should contain applied transport receipt: {proj}"
+        );
+
+        let durable =
+            agent_doc_controller_io::project_controller::load_state_backbone_projection(tmp.path())
+                .unwrap();
+        let document = durable
+            .document(&doc_hash)
+            .expect("durable receipt should project for the document");
+        assert_eq!(
+            document
+                .transport
+                .patches
+                .get("patch-applied-ffi")
+                .map(|patch| patch.phase),
+            Some(agent_doc_state_backbone::TransportPatchPhase::Applied)
+        );
+    }
+
+    #[test]
+    fn editor_patch_rejected_ffi_records_durable_lazily_receipt() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        std::fs::write(&file, "hello\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let doc_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let file_c = CString::new(canonical.to_string_lossy().as_ref()).unwrap();
+        let patch_c = CString::new("patch-rejected-ffi").unwrap();
+        let reason_c = CString::new("file_apply_failed").unwrap();
+
+        let rc = unsafe {
+            agent_doc_editor_patch_rejected(file_c.as_ptr(), patch_c.as_ptr(), 8, reason_c.as_ptr())
+        };
+        assert_eq!(1, rc, "rejected receipt should be recorded durably");
+
+        let durable =
+            agent_doc_controller_io::project_controller::load_state_backbone_projection(tmp.path())
+                .unwrap();
+        let document = durable
+            .document(&doc_hash)
+            .expect("durable rejection should project for the document");
+        assert_eq!(
+            document
+                .transport
+                .patches
+                .get("patch-rejected-ffi")
+                .map(|patch| patch.phase),
+            Some(agent_doc_state_backbone::TransportPatchPhase::Rejected)
+        );
+        assert_eq!(
+            document.transport.last_rejected_reason.as_deref(),
+            Some("file_apply_failed")
         );
     }
 

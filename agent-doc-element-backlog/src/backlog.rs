@@ -5820,11 +5820,11 @@ mod tests {
 
     #[test]
     fn op_set_gate_verify_round_trips_predicate() {
-        let body = "- [/] [#saev] early-ack live verify\n";
+        let body = "- [/] [#saev] early receipt live verify\n";
         let new_body = op_set_gate_verify(
             body,
             "saev",
-            "verify=ops_log:early_ack_pending;disproof=false ack-timeout",
+            "verify=ops_log:early_receipt_accepted;disproof=false receipt-timeout",
             1749526200,
         )
         .unwrap();
@@ -5833,8 +5833,8 @@ mod tests {
         assert_eq!(items[0].state, PendingState::Gated);
         assert_eq!(items[0].gate_type, None);
         let pred = crate::gate_verify::parse_gate_predicate(&items[0].text).unwrap();
-        assert_eq!(pred.verify.as_deref(), Some("early_ack_pending"));
-        assert_eq!(pred.disproof.as_deref(), Some("false ack-timeout"));
+        assert_eq!(pred.verify.as_deref(), Some("early_receipt_accepted"));
+        assert_eq!(pred.disproof.as_deref(), Some("false receipt-timeout"));
         assert_eq!(pred.set_at, Some(1749526200));
     }
 

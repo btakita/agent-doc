@@ -1207,6 +1207,30 @@ export function recordEditorPatchApplied(
     }
 }
 
+export function recordEditorPatchRejected(
+    filePath: string,
+    patchId: string | undefined,
+    generation: number | null,
+    reason: string,
+    projectRoot?: string,
+): void {
+    if (!patchId || generation == null) return;
+    if (!ensureLoaded(projectRoot)) return;
+    bindFunctions();
+    if (!_editor_patch_rejected) {
+        console.warn('[agent-doc/native] incompatible agent-doc native library: missing agent_doc_editor_patch_rejected; reinstall the plugin/native library');
+        return;
+    }
+    try {
+        const ok = _editor_patch_rejected(filePath, patchId, generation, reason) === 1;
+        if (!ok) {
+            console.warn(`[agent-doc/native] editor_patch_rejected receipt rejected for ${patchId}`);
+        }
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] editor_patch_rejected ABI error: ${e.message}`);
+    }
+}
+
 export function recordEditorContentApplied(
     projectRoot: string | undefined,
     patchId: string | undefined,

@@ -2,6 +2,8 @@
 
 use super::*;
 #[cfg(test)]
+use agent_doc_document::write_normalization::cleanup_resolved_backlog_prompts_after_response;
+#[cfg(test)]
 use agent_doc_ipc_protocol::AlreadyAppliedSnapshotOutcome;
 #[cfg(test)]
 use agent_doc_write_converge_io::{
@@ -48,7 +50,7 @@ pub(crate) fn try_ipc(
     reuse_patch_id: Option<&str>,
 ) -> Result<agent_doc_write_ipc_io::IpcResult> {
     agent_doc_write_ipc_io::try_ipc_with_effects(
-        &crate::write::WRITE_CONVERGENCE_EFFECTS,
+        &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
         file,
         patches,
         unmatched,
@@ -64,6 +66,7 @@ pub(crate) fn try_ipc(
 mod submodule_patch_routing_tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -237,7 +240,10 @@ mod submodule_patch_routing_tests {
                         "test_socket_listener",
                     );
                 }
-                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                )
             });
         })
     }
@@ -249,8 +255,8 @@ mod submodule_patch_routing_tests {
             let _ = agent_doc_ipc_io::start_listener(&root, |_msg| {
                 Some(
                     serde_json::json!({
-                        "type": "ack",
-                        "status": "error",
+                        "type": "receipt",
+                        "status": "applied",
                         "reason": "already_applied"
                     })
                     .to_string(),
@@ -281,7 +287,10 @@ mod submodule_patch_routing_tests {
                         "test_socket_listener",
                     );
                 }
-                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                )
             });
         })
     }
@@ -307,7 +316,10 @@ mod submodule_patch_routing_tests {
                         "test_socket_listener",
                     );
                 }
-                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                )
             });
         })
     }
@@ -736,7 +748,7 @@ mod submodule_patch_routing_tests {
         fs::write(&doc, newer_visible).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id,
@@ -839,7 +851,7 @@ mod submodule_patch_routing_tests {
         .unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id,
@@ -1123,7 +1135,7 @@ mod submodule_patch_routing_tests {
         fs::write(&doc, stale_disk_with_live_prompt).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id: "already-applied-missing",
@@ -1209,7 +1221,7 @@ mod submodule_patch_routing_tests {
         );
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id,
@@ -1258,7 +1270,7 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id: "already-applied-missing-response",
@@ -1303,7 +1315,7 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, content_ours, agent_doc_ops_log_io::log_op).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             AlreadyAppliedSocketSnapshotContext {
                 file: &doc,
                 patch_id: "already-applied-empty-response-probe",
@@ -2139,7 +2151,7 @@ Can you preserve the second paragraph too?
 #[cfg(test)]
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
-    use super::{recover_dedupe_only_drift, try_ipc};
+    use super::try_ipc;
     use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
     use agent_doc_ipc_protocol::{
         EditorBadStateFingerprint, FullContentRepairRedelivery, IpcDiskRepairReason,
@@ -2151,7 +2163,7 @@ mod late_fallback_patch_guard_tests {
 
     fn try_ipc_full_content(file: &Path, content: &str) -> anyhow::Result<bool> {
         agent_doc_write_converge_io::try_ipc_full_content(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             content,
         )
@@ -2163,7 +2175,7 @@ mod late_fallback_patch_guard_tests {
         source_content: &str,
     ) -> anyhow::Result<bool> {
         agent_doc_write_converge_io::try_ipc_full_content_response_fallback_from_source(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             content,
             source_content,
@@ -2176,7 +2188,7 @@ mod late_fallback_patch_guard_tests {
         source_content: &str,
     ) -> anyhow::Result<bool> {
         agent_doc_write_converge_io::try_ipc_full_content_operator_mutation_from_source(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             content,
             source_content,
@@ -2718,7 +2730,7 @@ mod late_fallback_patch_guard_tests {
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
                     fs::write(&listener_doc, full_content).ok()?;
                 }
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -2790,7 +2802,7 @@ mod late_fallback_patch_guard_tests {
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
                     fs::write(&listener_doc, full_content).ok()?;
                 }
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -2918,7 +2930,7 @@ mod late_fallback_patch_guard_tests {
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
                     fs::write(&listener_doc, full_content).ok()?;
                 }
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -2936,7 +2948,7 @@ mod late_fallback_patch_guard_tests {
         let decision = IpcRepairDecision::file_read(bad_state.to_string())
             .apply_ipc_dedupe(repaired.to_string(), bad_state.to_string());
         let err = agent_doc_write_converge_io::repair_ipc_decision_visible_state(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
             &decision,
             Some("source-patch"),
@@ -3007,7 +3019,7 @@ mod late_fallback_patch_guard_tests {
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
                     fs::write(&listener_doc, full_content).ok()?;
                 }
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -3096,7 +3108,7 @@ mod late_fallback_patch_guard_tests {
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
                     fs::write(&listener_doc, full_content).ok()?;
                 }
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -3165,7 +3177,7 @@ mod late_fallback_patch_guard_tests {
                     "wrong\n",
                     "test_socket_listener",
                 );
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -3287,8 +3299,8 @@ Implemented.
         agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let head_before = head_count(root);
-        let recovered =
-            recover_dedupe_only_drift(&doc).expect("dedupe-only drift recovery should succeed");
+        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc)
+            .expect("dedupe-only drift recovery should succeed");
         assert!(
             recovered,
             "file matching dedupe(HEAD) must be recognized as a dedupe-only drift"
@@ -3340,7 +3352,7 @@ Implemented.
         let doc = root.join("session.md");
         agent_doc_snapshot_io::save(&doc, clean, agent_doc_ops_log_io::log_op).unwrap();
 
-        let recovered = recover_dedupe_only_drift(&doc).unwrap();
+        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc).unwrap();
         assert!(
             !recovered,
             "no drift between file and HEAD should not trigger dedupe-only recovery"
@@ -3375,7 +3387,7 @@ Implemented.
         fs::write(&doc, &user_edit).unwrap();
         agent_doc_snapshot_io::save(&doc, &user_edit, agent_doc_ops_log_io::log_op).unwrap();
 
-        let recovered = recover_dedupe_only_drift(&doc).unwrap();
+        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc).unwrap();
         assert!(
             !recovered,
             "arbitrary working-tree drift must not be auto-committed as a dedupe recovery"
@@ -3418,9 +3430,14 @@ Implemented.
         agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let head_before = head_count(root);
-        let recovered =
-            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false, false)
-                .expect("strict-closeout empty-stdin path should recognize dedupe-only drift");
+        let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
+            crate::repair_coordinator_effects(),
+            &doc,
+            true,
+            false,
+            Some(false),
+        )
+        .expect("strict-closeout empty-stdin path should recognize dedupe-only drift");
         assert!(
             recovered,
             "empty stdin + strict closeout + dedupe-only drift must commit through the binary path"
@@ -3470,9 +3487,14 @@ Implemented.
         agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
 
         let head_before = head_count(root);
-        let recovered =
-            crate::repair::recover_empty_response_for_strict_closeout(&doc, false, false, false)
-                .unwrap();
+        let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
+            crate::repair_coordinator_effects(),
+            &doc,
+            false,
+            false,
+            Some(false),
+        )
+        .unwrap();
         assert!(
             !recovered,
             "non-strict empty-stdin path must not silently auto-commit dedupe drift"
@@ -3547,7 +3569,10 @@ Implemented.
                         "test_socket_listener",
                     );
                 }
-                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                )
             });
         });
         for _ in 0..100 {
@@ -3577,7 +3602,7 @@ Implemented.
         };
 
         agent_doc_write_converge_io::repair_ipc_decision_visible_state(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
             &decision,
             Some("live-drift-1"),
@@ -3646,7 +3671,7 @@ Implemented.
         };
 
         let err = agent_doc_write_converge_io::repair_ipc_decision_visible_state(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             &doc,
             &decision,
             Some("live-drift-2"),

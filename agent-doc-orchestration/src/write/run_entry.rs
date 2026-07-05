@@ -1,6 +1,9 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_document::write_normalization::{
+    cleanup_resolved_backlog_prompts_after_response, strip_boundary_for_dedup,
+};
 use agent_doc_document_realtime::write_policy::{
     SnapshotPersistMode, committed_snapshot_union_excluding_carry_forward,
     snapshot_content_to_persist, snapshot_persist_mode, snapshot_persist_mode_with_current,
@@ -13,7 +16,8 @@ use agent_doc_template::response_materialization::sanitize_template_patchback_re
 use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;
 use agent_doc_template_io as template_io;
 use agent_doc_template_io::{
-    enforce_imperative_response_contract, normalize_user_prompts_in_exchange_safe,
+    enforce_imperative_response_contract, lift_pending_from_exchange_safe,
+    normalize_template_structure_or_fail_preserving, normalize_user_prompts_in_exchange_safe,
     template_mode_overrides_for_current_doc,
 };
 use agent_doc_write_ipc_io::build_ipc_patches_json;
@@ -2017,11 +2021,6 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
 /// Used by `repair` to apply orphaned template responses.
 pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     apply_template_from_string_with_options(file, response, TemplateApplyOptions::default())
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct TemplateApplyOptions {
-    pub force_disk: bool,
 }
 
 pub fn apply_template_from_string_with_options(

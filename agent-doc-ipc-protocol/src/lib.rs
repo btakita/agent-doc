@@ -112,63 +112,73 @@ pub fn callback_response_matches_request(
         .unwrap_or(true)
 }
 
-/// Classification of a plugin-sent IPC ack line.
+/// Classification of a plugin-sent IPC receipt line.
 ///
-/// The plugin sends a JSON ack after applying a patch. `Ok` means the patch was
-/// applied normally. `AlreadyApplied` means the plugin detected the response
-/// body is already present in the live buffer and chose not to re-apply it.
-/// `Failed` covers any other `status: error` ack.
+/// Maintained plugins return a JSON receipt after applying a patch. `Applied`
+/// means the patch reached the editor buffer. `AlreadyApplied` means the plugin
+/// detected the response body is already present and chose not to re-apply it.
+/// `Rejected` covers explicit terminal apply rejection. `Unsupported` covers
+/// legacy ACK lines and malformed/unknown responses so old plugins fail closed
+/// with an update/reinstall error instead of seeding compatibility proof.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AckClassification {
-    Ok,
+pub enum SocketReceiptClassification {
+    Applied,
     AlreadyApplied,
-    Failed,
-    /// Early `pending`/`accepted` ack: the listener received the patch but has
+    Rejected,
+    /// Early `accepted`/`observed` receipt: the listener received the patch but has
     /// not applied it yet. Liveness only; the sender must keep waiting for a
-    /// terminal ack.
+    /// terminal receipt.
     Pending,
+    Unsupported,
 }
 
-/// Classify a plugin-sent IPC ack line.
-pub fn classify_ack(ack: &str) -> AckClassification {
-    let Some(value) = serde_json::from_str::<serde_json::Value>(ack).ok() else {
-        return AckClassification::Ok;
+/// Classify a plugin-sent IPC receipt line.
+pub fn classify_socket_receipt(receipt: &str) -> SocketReceiptClassification {
+    let Some(value) = serde_json::from_str::<serde_json::Value>(receipt).ok() else {
+        return SocketReceiptClassification::Unsupported;
     };
+    let Some(receipt_type) = value.get("type").and_then(|t| t.as_str()) else {
+        return SocketReceiptClassification::Unsupported;
+    };
+    if !receipt_type.eq_ignore_ascii_case("receipt") {
+        return SocketReceiptClassification::Unsupported;
+    }
     let status = value.get("status").and_then(|s| s.as_str());
-    if let Some(s) = status
-        && (s.eq_ignore_ascii_case("pending") || s.eq_ignore_ascii_case("accepted"))
-    {
-        return AckClassification::Pending;
-    }
-    let status_is_error = status
-        .map(|s| s.eq_ignore_ascii_case("error"))
-        .unwrap_or(false);
-    if !status_is_error {
-        return AckClassification::Ok;
-    }
     let reason = value
         .get("reason")
         .and_then(|r| r.as_str())
         .map(|r| r.to_ascii_lowercase());
-    match reason.as_deref() {
-        Some("already_applied") => AckClassification::AlreadyApplied,
-        _ => AckClassification::Failed,
+    if reason.as_deref() == Some("already_applied") {
+        return SocketReceiptClassification::AlreadyApplied;
+    }
+    if let Some(s) = status
+        && (s.eq_ignore_ascii_case("pending")
+            || s.eq_ignore_ascii_case("observed")
+            || s.eq_ignore_ascii_case("accepted"))
+    {
+        return SocketReceiptClassification::Pending;
+    }
+    match status {
+        Some(s) if s.eq_ignore_ascii_case("applied") => SocketReceiptClassification::Applied,
+        Some(s) if s.eq_ignore_ascii_case("rejected") => SocketReceiptClassification::Rejected,
+        _ => SocketReceiptClassification::Unsupported,
     }
 }
 
-/// True when a socket-send error message reports an `already_applied` ack.
-pub fn is_already_applied_ack_error_message(message: &str) -> bool {
-    message.starts_with("IPC ack already_applied")
+/// True when a socket-send error message reports an `already_applied` receipt.
+pub fn is_already_applied_receipt_error_message(message: &str) -> bool {
+    message.starts_with("IPC receipt already_applied")
 }
 
-pub fn is_socket_ack_timeout_error(message: impl AsRef<str>) -> bool {
-    // Duration-agnostic: the sender's ack timeout budget is configurable, so
+pub fn is_socket_receipt_timeout_error(message: impl AsRef<str>) -> bool {
+    // Duration-agnostic: the sender's receipt timeout budget is configurable, so
     // match the stable prefix rather than a hard-coded "(2s)".
-    message.as_ref().contains("IPC ack timeout")
+    message.as_ref().contains("IPC receipt timeout")
 }
 
 pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
-    message.as_ref().contains("IPC ack status error")
+    message.as_ref().contains("IPC receipt rejected")
+        || message.as_ref().contains("IPC receipt unsupported")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -490,12 +500,15 @@ pub fn effective_unmatched_for_patch_payload(
     }
 }
 
-/// Tag a `patch` message with the `early_ack` opt-in when enabled.
+/// Tag a `patch` message with the `early_receipt` opt-in when enabled.
 ///
 /// Non-patch traffic is returned unchanged so queue convergence, VCS refreshes,
 /// and read-only live-buffer proof requests never accidentally request a
-/// two-phase patch ack.
-pub fn early_ack_tagged_message(message: &serde_json::Value, enabled: bool) -> serde_json::Value {
+/// two-phase patch receipt.
+pub fn early_receipt_tagged_message(
+    message: &serde_json::Value,
+    enabled: bool,
+) -> serde_json::Value {
     if !enabled {
         return message.clone();
     }
@@ -509,29 +522,29 @@ pub fn early_ack_tagged_message(message: &serde_json::Value, enabled: bool) -> s
     }
     let mut tagged = message.clone();
     if let Some(obj) = tagged.as_object_mut() {
-        obj.insert("early_ack".to_string(), serde_json::Value::Bool(true));
+        obj.insert("early_receipt".to_string(), serde_json::Value::Bool(true));
     }
     tagged
 }
 
-/// True when an incoming listener message opts into early-ack.
-pub fn message_requests_early_ack(message: &str) -> bool {
+/// True when an incoming listener message opts into early receipt.
+pub fn message_requests_early_receipt(message: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(message)
         .ok()
-        .and_then(|v| v.get("early_ack").and_then(|e| e.as_bool()))
+        .and_then(|v| v.get("early_receipt").and_then(|e| e.as_bool()))
         .unwrap_or(false)
 }
 
-/// The early `pending` ack line emitted by an early-ack-aware listener on patch
+/// The early `accepted` receipt line emitted by an early-receipt-aware listener on patch
 /// receipt before the patch is applied.
-pub fn early_ack_line() -> &'static str {
-    r#"{"type":"ack","status":"pending"}"#
+pub fn early_receipt_line() -> &'static str {
+    r#"{"type":"receipt","status":"accepted"}"#
 }
 
-/// Ops-log marker recorded when an early `pending` ack is emitted before the
+/// Ops-log marker recorded when an early `accepted` receipt is emitted before the
 /// blocking apply handler runs.
-pub fn early_ack_ops_marker() -> &'static str {
-    "[ipc-socket] early_ack_pending emitted before apply"
+pub fn early_receipt_ops_marker() -> &'static str {
+    "[ipc-socket] early_receipt_accepted emitted before apply"
 }
 
 /// Ops-log marker emitted when a listener connection is accepted and handed to
@@ -884,151 +897,176 @@ impl FullContentIpcMode {
 #[cfg(test)]
 mod tests {
     use super::{
-        AckClassification, AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint,
-        FullContentIpcMode, FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision,
-        IpcSnapshotSource, build_ipc_node_patches_json, callback_request,
+        AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
+        FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource,
+        SocketReceiptClassification, build_ipc_node_patches_json, callback_request,
         callback_request_is_expired, callback_response, callback_response_matches_request,
-        callback_urgency_for_elapsed, classify_ack, early_ack_line, early_ack_ops_marker,
-        early_ack_tagged_message, effective_unmatched_for_patch_payload,
-        existing_patch_is_reposition_only, ipc_accept_thread_ops_marker,
-        is_already_applied_ack_error_message, is_socket_ack_timeout_error, is_socket_status_error,
-        message_requests_early_ack, normalization_repair_patch_message, patch_message,
-        pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
-        refresh_content_message, reload_lib_message, reposition_message, save_document_message,
-        vcs_refresh_message, vcs_refresh_probe_message,
+        callback_urgency_for_elapsed, classify_socket_receipt, early_receipt_line,
+        early_receipt_ops_marker, early_receipt_tagged_message,
+        effective_unmatched_for_patch_payload, existing_patch_is_reposition_only,
+        ipc_accept_thread_ops_marker, is_already_applied_receipt_error_message,
+        is_socket_receipt_timeout_error, is_socket_status_error, message_requests_early_receipt,
+        normalization_repair_patch_message, patch_message, pending_callback_from_request,
+        publish_live_buffer_message, queue_convergence_message, refresh_content_message,
+        reload_lib_message, reposition_message, save_document_message, vcs_refresh_message,
+        vcs_refresh_probe_message,
     };
 
     #[test]
-    fn classify_ack_treats_pending_status_as_pending() {
+    fn classify_socket_receipt_treats_pending_status_as_pending() {
         assert_eq!(
-            classify_ack(r#"{"type":"ack","status":"pending"}"#),
-            AckClassification::Pending
+            classify_socket_receipt(r#"{"type":"receipt","status":"pending"}"#),
+            SocketReceiptClassification::Pending
         );
         assert_eq!(
-            classify_ack(r#"{"type":"ack","status":"accepted"}"#),
-            AckClassification::Pending
+            classify_socket_receipt(r#"{"type":"receipt","status":"accepted"}"#),
+            SocketReceiptClassification::Pending
         );
-        assert_eq!(classify_ack(early_ack_line()), AckClassification::Pending);
+        assert_eq!(
+            classify_socket_receipt(early_receipt_line()),
+            SocketReceiptClassification::Pending
+        );
     }
 
     #[test]
-    fn classify_ack_treats_ok_status_as_ok() {
-        let ack = r#"{"type":"ack","status":"ok","id":"patch-123"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::Ok);
+    fn classify_socket_receipt_treats_applied_status_as_applied() {
+        let receipt = r#"{"type":"receipt","status":"applied","id":"patch-123"}"#;
+        assert_eq!(
+            classify_socket_receipt(receipt),
+            SocketReceiptClassification::Applied
+        );
     }
 
     #[test]
-    fn classify_ack_treats_ack_without_status_as_ok() {
-        let ack = r#"{"type":"ack","id":"patch-123"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::Ok);
+    fn classify_socket_receipt_treats_legacy_ack_as_unsupported() {
+        let legacy_ack = r#"{"type":"ack","status":"applied","id":"patch-123"}"#;
+        assert_eq!(
+            classify_socket_receipt(legacy_ack),
+            SocketReceiptClassification::Unsupported
+        );
     }
 
     #[test]
-    fn classify_ack_treats_already_applied_reason_as_already_applied() {
-        let ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::AlreadyApplied);
+    fn classify_socket_receipt_treats_already_applied_reason_as_already_applied() {
+        let receipt = r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#;
+        assert_eq!(
+            classify_socket_receipt(receipt),
+            SocketReceiptClassification::AlreadyApplied
+        );
     }
 
     #[test]
-    fn classify_ack_treats_already_applied_reason_uppercase_as_already_applied() {
-        let ack = r#"{"type":"ack","status":"ERROR","reason":"Already_Applied"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::AlreadyApplied);
+    fn classify_socket_receipt_treats_already_applied_reason_uppercase_as_already_applied() {
+        let receipt = r#"{"type":"receipt","status":"APPLIED","reason":"Already_Applied"}"#;
+        assert_eq!(
+            classify_socket_receipt(receipt),
+            SocketReceiptClassification::AlreadyApplied
+        );
     }
 
     #[test]
-    fn classify_ack_treats_other_error_reasons_as_failed() {
-        let ack = r#"{"type":"ack","status":"error","reason":"apply_failed"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::Failed);
+    fn classify_socket_receipt_treats_rejected_status_as_rejected() {
+        let receipt = r#"{"type":"receipt","status":"rejected","reason":"apply_failed"}"#;
+        assert_eq!(
+            classify_socket_receipt(receipt),
+            SocketReceiptClassification::Rejected
+        );
     }
 
     #[test]
-    fn classify_ack_treats_error_status_without_reason_as_failed() {
-        let ack = r#"{"type":"ack","status":"error"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::Failed);
+    fn classify_socket_receipt_treats_unknown_receipt_status_as_unsupported() {
+        let receipt = r#"{"type":"receipt","status":"error"}"#;
+        assert_eq!(
+            classify_socket_receipt(receipt),
+            SocketReceiptClassification::Unsupported
+        );
     }
 
     #[test]
-    fn classify_ack_treats_malformed_json_as_ok() {
-        let ack = "not json at all";
-        assert_eq!(classify_ack(ack), AckClassification::Ok);
+    fn classify_socket_receipt_treats_malformed_json_as_unsupported() {
+        let receipt = "not json at all";
+        assert_eq!(
+            classify_socket_receipt(receipt),
+            SocketReceiptClassification::Unsupported
+        );
     }
 
     #[test]
-    fn already_applied_ack_error_message_matches_socket_send_error_shape() {
-        assert!(is_already_applied_ack_error_message(concat!(
-            "IPC ack already_applied: ",
-            r#"{"type":"ack","status":"error","reason":"already_applied"}"#
+    fn already_applied_receipt_error_message_matches_socket_send_error_shape() {
+        assert!(is_already_applied_receipt_error_message(concat!(
+            "IPC receipt already_applied: ",
+            r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#
         )));
     }
 
     #[test]
-    fn already_applied_ack_error_message_rejects_other_socket_errors() {
-        assert!(!is_already_applied_ack_error_message(
-            "IPC ack status error: something else"
+    fn already_applied_receipt_error_message_rejects_other_socket_errors() {
+        assert!(!is_already_applied_receipt_error_message(
+            "IPC receipt rejected: something else"
         ));
-        assert!(!is_already_applied_ack_error_message(
-            "IPC ack timeout (2s)"
+        assert!(!is_already_applied_receipt_error_message(
+            "IPC receipt timeout (2s)"
         ));
-        assert!(!is_already_applied_ack_error_message(
-            r#"{"type":"ack","status":"error","reason":"already_applied"}"#
+        assert!(!is_already_applied_receipt_error_message(
+            r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#
         ));
     }
 
     #[test]
-    fn is_socket_ack_timeout_error_is_duration_agnostic() {
-        assert!(is_socket_ack_timeout_error("IPC ack timeout (2s)"));
-        assert!(is_socket_ack_timeout_error("IPC ack timeout (6s)"));
-        assert!(!is_socket_ack_timeout_error(
-            "IPC ack status error: something else"
+    fn is_socket_receipt_timeout_error_is_duration_agnostic() {
+        assert!(is_socket_receipt_timeout_error("IPC receipt timeout (2s)"));
+        assert!(is_socket_receipt_timeout_error("IPC receipt timeout (6s)"));
+        assert!(!is_socket_receipt_timeout_error(
+            "IPC receipt rejected: something else"
         ));
     }
 
     #[test]
     fn is_socket_status_error_matches_terminal_apply_rejection() {
         assert!(is_socket_status_error(
-            r#"IPC ack status error: {"type":"ack","status":"error"}"#
+            r#"IPC receipt rejected: {"type":"receipt","status":"rejected"}"#
         ));
-        assert!(!is_socket_status_error("IPC ack timeout (6s)"));
+        assert!(!is_socket_status_error("IPC receipt timeout (6s)"));
         assert!(!is_socket_status_error(
-            r#"IPC ack already_applied: {"type":"ack","status":"error","reason":"already_applied"}"#
+            r#"IPC receipt already_applied: {"type":"receipt","status":"applied","reason":"already_applied"}"#
         ));
     }
 
     #[test]
-    fn message_requests_early_ack_reads_flag() {
-        assert!(message_requests_early_ack(
-            r#"{"type":"patch","early_ack":true}"#
+    fn message_requests_early_receipt_reads_flag() {
+        assert!(message_requests_early_receipt(
+            r#"{"type":"patch","early_receipt":true}"#
         ));
-        assert!(!message_requests_early_ack(r#"{"type":"patch"}"#));
-        assert!(!message_requests_early_ack(
-            r#"{"type":"patch","early_ack":false}"#
+        assert!(!message_requests_early_receipt(r#"{"type":"patch"}"#));
+        assert!(!message_requests_early_receipt(
+            r#"{"type":"patch","early_receipt":false}"#
         ));
-        assert!(!message_requests_early_ack("not json"));
+        assert!(!message_requests_early_receipt("not json"));
     }
 
     #[test]
-    fn early_ack_tagging_marks_only_enabled_patch_messages() {
+    fn early_receipt_tagging_marks_only_enabled_patch_messages() {
         let patch = serde_json::json!({"type": "patch", "file": "x.md"});
-        let tagged = early_ack_tagged_message(&patch, true);
-        assert_eq!(tagged["early_ack"], serde_json::Value::Bool(true));
+        let tagged = early_receipt_tagged_message(&patch, true);
+        assert_eq!(tagged["early_receipt"], serde_json::Value::Bool(true));
         assert_eq!(tagged["type"], "patch");
         assert_eq!(tagged["file"], "x.md");
-        assert!(message_requests_early_ack(&tagged.to_string()));
+        assert!(message_requests_early_receipt(&tagged.to_string()));
 
-        assert_eq!(early_ack_tagged_message(&patch, false), patch);
+        assert_eq!(early_receipt_tagged_message(&patch, false), patch);
 
         let other = serde_json::json!({"type": "vcs_refresh"});
-        assert_eq!(early_ack_tagged_message(&other, true), other);
+        assert_eq!(early_receipt_tagged_message(&other, true), other);
     }
 
     #[test]
-    fn early_ack_ops_marker_carries_predicate_token() {
-        let marker = early_ack_ops_marker();
+    fn early_receipt_ops_marker_carries_predicate_token() {
+        let marker = early_receipt_ops_marker();
         assert!(
-            marker.contains("early_ack_pending"),
+            marker.contains("early_receipt_accepted"),
             "ops marker must carry the predicate token: {marker}"
         );
-        assert!(!early_ack_line().contains("early_ack_pending"));
+        assert!(!early_receipt_line().contains("early_receipt_accepted"));
     }
 
     #[test]

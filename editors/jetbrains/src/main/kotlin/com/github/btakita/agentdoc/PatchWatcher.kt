@@ -462,12 +462,12 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Returns true if handled, false on error.
      */
     /**
-     * Handle a socket IPC message and return the v2 ack outcome.
+     * Handle a socket IPC message and return the v2 receipt outcome.
      *
      * Return values match the FFI v2 contract:
-     * - 0 → ack `{"status":"error"}` (apply failed)
-     * - 1 → ack `{"status":"ok"}` (apply succeeded with content change)
-     * - 2 → ack `{"status":"error","reason":"already_applied"}` (patch text
+     * - 0 → receipt `{"status":"rejected"}` (apply failed)
+     * - 1 → receipt `{"status":"applied"}` (apply succeeded with content change)
+     * - 2 → receipt `{"status":"applied","reason":"already_applied"}` (patch text
      *   already present in live buffer; binary skips file-IPC fallback so a
      *   duplicate response heading cannot land)
      *
@@ -1004,23 +1004,19 @@ class PatchWatcher(private val project: Project) : Disposable {
                     LOG.warn("Patch blocked by File Cache Conflict; deleted queued payload and left response for binary retry: ${patchFile.name} $UI_OUTCOME_REAL_COMPONENT_CONFLICT")
                     patchFile.delete()
                 } else {
+                    StateProjectionBridge.recordEditorPatchRejected(
+                        patch.file,
+                        patch.patchId,
+                        stateGeneration,
+                        "file_apply_failed",
+                    )
                     StateProjectionBridge.recordEditorRetryRequested(
                         patch.file,
                         patch.patchId,
                         stateGeneration,
                         "file_apply_failed",
                     )
-                    // #af88 file-IPC negative-ack: signal the apply failure to the
-                    // binary with a sibling <patch>.nack so its poll fails closed
-                    // immediately instead of waiting out the full no_ack timeout.
-                    // Leave the JSON patch in place — the binary removes both on nack.
-                    try {
-                        File(patchFile.parentFile, patchFile.nameWithoutExtension + ".nack")
-                            .writeText("file_apply_failed")
-                    } catch (e: Exception) {
-                        LOG.warn("Failed to write nack sidecar for ${patchFile.name}", e)
-                    }
-                    LOG.warn("Patch not applied, wrote nack + left file for retry: ${patchFile.name}")
+                    LOG.warn("Patch not applied, recorded lazily rejection + left file for retry: ${patchFile.name}")
                 }
             }
         } catch (e: Exception) {

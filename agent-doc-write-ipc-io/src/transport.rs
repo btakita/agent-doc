@@ -11,7 +11,7 @@ use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, FullContentIpcMode, IpcSnapshotSource,
     build_ipc_node_patches_json, effective_unmatched_for_patch_payload,
-    is_already_applied_ack_error_message, is_socket_ack_timeout_error,
+    is_already_applied_receipt_error_message, is_socket_receipt_timeout_error,
 };
 use agent_doc_template as template;
 use agent_doc_template::stale_baseline::patch_touches_exchange;
@@ -729,9 +729,9 @@ fn try_ipc_inner(
                 }
             }
             Ok(None) => {
-                eprintln!("[write] socket IPC sent but no ack — falling back to file IPC");
+                eprintln!("[write] socket IPC sent but no receipt — falling back to file IPC");
             }
-            Err(e) if is_already_applied_ack_error_message(&e.to_string()) => {
+            Err(e) if is_already_applied_receipt_error_message(&e.to_string()) => {
                 // The plugin detected the response body is already present
                 // in the live buffer and chose not to re-apply it. Re-writing
                 // through the file-IPC fallback would create a duplicate
@@ -791,7 +791,7 @@ fn try_ipc_inner(
                     "[write] socket IPC failed: {} — falling back to file IPC",
                     e
                 );
-                if is_socket_ack_timeout_error(e.to_string()) {
+                if is_socket_receipt_timeout_error(e.to_string()) {
                     let degraded = record_ipc_socket_ack_timeout(
                         &project_root,
                         file,
@@ -808,7 +808,7 @@ fn try_ipc_inner(
                         // degraded write never manufactures a File Cache Conflict.
                         // File-IPC timeout now fails closed so the editor remains authoritative.
                         eprintln!(
-                            "[write] IPC socket degraded for {} after repeated socket ack timeouts — falling back to file-IPC patch queue (no automatic disk fallback)",
+                            "[write] IPC socket degraded for {} after repeated socket receipt timeouts — falling back to file-IPC patch queue (no automatic disk fallback)",
                             file.display()
                         );
                         log_ipc_dewedge_prefer_file_ipc(file, "socket_ipc_timeout");
@@ -971,8 +971,8 @@ fn try_ipc_inner(
     // of the live buffer.
     //
     // The socket-IPC path catches this via
-    // `agent_doc_ipc_protocol::is_already_applied_ack_error_message` when the
-    // plugin sends `{"type":"ack","status":"error","reason":"already_applied"}`.
+    // `agent_doc_ipc_protocol::is_already_applied_receipt_error_message` when the
+    // plugin sends `{"type":"receipt","status":"applied","reason":"already_applied"}`.
     // Until every plugin emits that ack (`#ipcpluginalready`), the file-IPC
     // fallback hash-compares response-patch outcomes against the current file:
     // if applying the response patches to the current file is a structural

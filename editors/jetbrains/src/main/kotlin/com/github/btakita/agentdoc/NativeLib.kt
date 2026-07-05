@@ -364,17 +364,17 @@ interface AgentDocLib : Library {
     /**
      * Start the IPC socket listener on a background thread.
      * The callback receives each JSON message (read-only, do NOT free) and returns
-     * true if handled, false on error. The listener generates ack responses internally.
+     * true if handled, false on error. The listener generates receipt responses internally.
      */
     fun agent_doc_start_ipc_listener(project_root: String, callback: IpcMessageCallback): Boolean
 
     /**
-     * V2 of [agent_doc_start_ipc_listener] with extended ack-result encoding.
+     * V2 of [agent_doc_start_ipc_listener] with extended receipt-result encoding.
      *
      * The callback returns one of:
-     * - `0` → ack `{"type":"ack","status":"error"}` (apply failed)
-     * - `1` → ack `{"type":"ack","status":"ok"}` (apply succeeded)
-     * - `2` → ack `{"type":"ack","status":"error","reason":"already_applied"}`
+     * - `0` → receipt `{"type":"receipt","status":"rejected"}` (apply failed)
+     * - `1` → receipt `{"type":"receipt","status":"applied"}` (apply succeeded)
+     * - `2` → receipt `{"type":"receipt","status":"applied","reason":"already_applied"}`
      *
      * Plugins prefer v2 so the binary can recognise `already_applied` and skip
      * the file-IPC fallback that would otherwise stack a duplicate response
@@ -441,10 +441,10 @@ interface AgentDocLib : Library {
         fun invoke(message: Pointer): Boolean
     }
 
-    /**
+     /**
      * V2 callback interface for socket IPC messages with already-applied signal.
      * Return one of: 0=error, 1=ok, 2=already_applied. See
-     * [agent_doc_start_ipc_listener_v2] for the wire-level ack mapping.
+     * [agent_doc_start_ipc_listener_v2] for the wire-level receipt mapping.
      */
     interface IpcMessageCallbackV2 : Callback {
         fun invoke(message: Pointer): Int

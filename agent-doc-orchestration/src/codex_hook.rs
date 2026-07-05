@@ -390,7 +390,7 @@ fn consume_recovered_queue_head(
         file,
         queue_completion_ids,
         force_disk_without_listener,
-        &crate::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
     )
 }
 
@@ -473,7 +473,11 @@ fn try_recover_repeated_queue_head_response(
         prompt
     );
 
-    let repair_outcome = crate::repair::run_with_queue_completion_ids(file, &queue_completion_ids)?;
+    let repair_outcome = agent_doc_repair_io::run_with_queue_completion_ids(
+        crate::repair_coordinator_effects(),
+        file,
+        &queue_completion_ids,
+    )?;
     if repair_outcome.replayed_response() {
         note.push_str(" The response was written through the normal repair/write path.");
     } else if repair_outcome == agent_doc_turn::repair::RepairOutcome::AlreadyApplied {
@@ -513,7 +517,8 @@ fn try_recover_repeated_queue_head_response(
         });
     }
 
-    match crate::write::complete_required_closeout(file) {
+    match agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
+    {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
         }
@@ -972,7 +977,11 @@ fn attempt_stop_closeout(
         agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {}
     }
 
-    let repair_outcome = crate::repair::run_with_queue_completion_ids(file, &queue_completion_ids)?;
+    let repair_outcome = agent_doc_repair_io::run_with_queue_completion_ids(
+        crate::repair_coordinator_effects(),
+        file,
+        &queue_completion_ids,
+    )?;
     if repair_outcome.replayed_response() {
         note.push_str(" The hook replayed the response through the normal write path.");
     } else if repair_outcome.repaired() {
@@ -1008,7 +1017,8 @@ fn attempt_stop_closeout(
         return Ok(StopCloseAttempt::StillOpen { note });
     }
 
-    match crate::write::complete_required_closeout(file) {
+    match agent_doc_flow_io::closeout::complete_required_closeout(file, &crate::closeout_effects())
+    {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
         }

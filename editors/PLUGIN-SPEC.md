@@ -29,7 +29,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 1. Read and parse patch JSON file.
 2. Open the target document via editor API (`FileDocumentManager` for JB, `workspace.openTextDocument` for VSCode).
 3. Wait for the shared typing debounce before computing or applying an editor-visible mutation. If the bounded wait times out, do not mutate the document; leave file-watch patches for retry and let socket delivery fail closed.
-4. Capture an editor apply proof from the exact buffer content and editor generation (`Document.modificationStamp` / `TextDocument.version`). Re-check the proof immediately before every visible mutation. If the buffer text or generation changed, reject the patch without ACK so live typing cannot be overwritten by a stale IPC apply.
+4. Capture an editor apply proof from the exact buffer content and editor generation (`Document.modificationStamp` / `TextDocument.version`). Re-check the proof immediately before every visible mutation. If the buffer text or generation changed, reject the patch without publishing a lazily receipt so live typing cannot be overwritten by a stale IPC apply.
 5. If `fullContent` is non-empty: do not mutate the editor buffer. File-watch payloads may be deleted as disabled stale/foreign patches so they cannot retry indefinitely; socket payloads fail closed.
 6. Otherwise, apply structured patches:
    a. Apply `frontmatter` field: merge YAML key/value pairs into existing frontmatter block (`---\n...\n---\n`). Preserve key order; append new keys.
@@ -205,7 +205,7 @@ Three states must be reconciled:
 ### 4.1 Patch File Format
 
 - **Path:** `.agent-doc/patches/<sha256_hash>.json`
-- **Lifecycle:** CLI writes file, plugin reads + applies + deletes (ACK). CLI polls for deletion with a 2-second timeout.
+- **Lifecycle:** CLI writes file, plugin reads, applies through the editor API, publishes a lazily visible-write receipt/projection, then deletes the file as a consumption signal. CLI treats deletion without a matching lazily receipt as unproven delivery.
 
 **JSON schema:**
 
@@ -246,7 +246,7 @@ Three states must be reconciled:
 
 - **Path:** `.agent-doc/crdt/<sha256_hash>.yrs`
 - **Format:** Binary Yrs state vector encoding.
-- **Lifecycle:** Same ACK-by-deletion pattern as patch files.
+- **Lifecycle:** Same consumption-by-deletion pattern as patch files; durable delivery proof must come from the typed state/receipt projection, not deletion alone.
 
 ## 5. Error Handling
 
@@ -279,7 +279,7 @@ Each plugin implementation should have tests (or manual test procedures) coverin
 6. **Frontmatter merge:** New keys are appended, existing keys are updated, key order is preserved.
 7. **Missing component graceful fallback:** Patch for a non-existent component is skipped without error; `unmatched` falls back from `exchange` to `output`.
 8. **File-not-found retry:** Target file not in VFS triggers 200ms wait + VFS refresh + retry.
-9. **ACK protocol:** Patch file is deleted only after successful application; left in place on failure.
+9. **Receipt protocol:** Patch file is deleted only after successful application and lazily receipt publication; left in place on failure.
 10. **Concurrent edit safety:** Patch application while user is typing does not corrupt the document or lose user edits. A typing-debounce timeout is a no-mutation result, not permission to apply the latest patch anyway.
 11. **Double-invocation guard:** Rapid submit/claim calls do not produce duplicate CLI invocations.
 12. **`agent:backlog` component:** A patch targeting `agent:backlog` (or legacy `agent:pending`) applies in replace mode, overwriting the checkbox list rather than appending to it.

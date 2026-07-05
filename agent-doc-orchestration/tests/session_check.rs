@@ -1751,7 +1751,7 @@ Body\n\
         let root_clone = root.clone();
         let server = std::thread::spawn(move || {
             agent_doc_ipc_io::start_listener(&root_clone, |_msg| {
-                Some(serde_json::json!({"type": "ack"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });

@@ -7,7 +7,7 @@ pub use transport::try_ipc_with_effects;
 use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
-use agent_doc_ipc_protocol::{existing_patch_is_reposition_only, is_socket_ack_timeout_error};
+use agent_doc_ipc_protocol::{existing_patch_is_reposition_only, is_socket_receipt_timeout_error};
 use agent_doc_template::response_materialization::extract_response_headings_from_patches;
 use agent_doc_template::stale_baseline::is_append_mode_component;
 use agent_doc_write_converge_io::{
@@ -399,7 +399,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             true
         }
         Ok(false) => {
-            eprintln!("[commit] IPC reposition: no ack (non-fatal)");
+            eprintln!("[commit] IPC reposition: no receipt (non-fatal)");
             match queue_file_ipc_reposition_boundary(
                 file,
                 boundary_id.as_deref(),
@@ -416,11 +416,11 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         }
         Err(e) => {
             eprintln!("[commit] IPC reposition failed (non-fatal): {}", e);
-            if is_socket_ack_timeout_error(e.to_string()) {
+            if is_socket_receipt_timeout_error(e.to_string()) {
                 match record_ipc_socket_ack_timeout(&project_root, file, None, "reposition") {
                     Ok(true) => {
                         eprintln!(
-                            "[commit] IPC listener degraded for {} after repeated reposition ack timeouts",
+                            "[commit] IPC listener degraded for {} after repeated reposition receipt timeouts",
                             file.display()
                         );
                         log_ipc_dewedge_direct_disk_skip(file, "reposition_timeout");

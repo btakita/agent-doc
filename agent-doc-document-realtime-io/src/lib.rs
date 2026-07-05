@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use std::path::Path;
 
 use agent_doc_document_realtime::{
     BufferState, Reconciliation,
@@ -34,6 +35,299 @@ use agent_doc_document_realtime::{
 };
 
 static DOCUMENT_AUTHORITY_EPOCH: AtomicU64 = AtomicU64::new(1);
+
+pub struct SessionActorWriteQueueSubmitter;
+
+pub static SESSION_ACTOR_WRITE_QUEUE: SessionActorWriteQueueSubmitter =
+    SessionActorWriteQueueSubmitter;
+
+impl agent_doc_queue_io::write_queue::DocumentWriteQueueSubmitter
+    for SessionActorWriteQueueSubmitter
+{
+    fn submit<R, F>(
+        &self,
+        base_dir: &Path,
+        file: &str,
+        kind: agent_doc_document_realtime::session_ops::SessionOpKind,
+        job: F,
+    ) -> Result<R>
+    where
+        R: Send + 'static,
+        F: FnOnce() -> R + Send + 'static,
+    {
+        let actor = agent_doc_session_actor_io::document_actor_in(base_dir, file);
+        actor.submit(kind, move |_ctx| job())
+    }
+}
+
+pub struct RuntimeWriteConvergenceEffects;
+
+pub static RUNTIME_WRITE_CONVERGENCE_EFFECTS: RuntimeWriteConvergenceEffects =
+    RuntimeWriteConvergenceEffects;
+
+impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConvergenceEffects {
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        atomic_write_through_authority(file, content)
+    }
+
+    fn guard_visible_write_idle_and_current(
+        &self,
+        file: &Path,
+        source: &str,
+        expected_current: &str,
+    ) -> Result<()> {
+        guard_visible_write_idle_and_current(file, source, expected_current)
+    }
+
+    fn atomic_write_if_current(
+        &self,
+        file: &Path,
+        content: &str,
+        expected_current: &str,
+        source: &str,
+    ) -> Result<()> {
+        atomic_write_if_current_through_authority(file, content, expected_current, source)
+    }
+
+    fn cycle_already_committed(&self, file: &Path) -> Option<String> {
+        agent_doc_flow_io::closeout::cycle_already_committed(file)
+    }
+
+    fn log_file_ipc_already_committed(&self, file: &Path, _cycle_id: &str) {
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
+            file,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
+        );
+    }
+
+    fn cleanup_fallback_patch_files(&self, file: &Path) {
+        agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
+    }
+
+    fn file_ipc_patch_rejected(&self, file: &Path, patch_id: &str) -> Option<String> {
+        let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let projection =
+            agent_doc_controller_io::project_controller::load_state_backbone_projection(
+                &project_root,
+            )
+            .ok()?;
+        let document = projection.document(&document_hash)?;
+        let patch = document.transport.patches.get(patch_id)?;
+        if patch.phase == agent_doc_state_backbone::TransportPatchPhase::Rejected {
+            return Some(
+                document
+                    .transport
+                    .last_rejected_reason
+                    .clone()
+                    .unwrap_or_else(|| "editor_patch_rejected".to_string()),
+            );
+        }
+        None
+    }
+
+    fn log_file_ipc_proof_failure(
+        &self,
+        file: &Path,
+        patch_id: Option<&str>,
+        invariant: &str,
+        recovery: &str,
+        detail: &str,
+    ) {
+        eprintln!(
+            "[write] IPC proof insufficient for {}: source=file_ipc patch_id={} invariant={} recovery={}{}{}",
+            file.display(),
+            patch_id.unwrap_or("-"),
+            invariant,
+            recovery,
+            if detail.is_empty() { "" } else { " " },
+            detail
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_proof_insufficient file={} source=file_ipc patch_id={} invariant={} recovery={}{}{}",
+                file.display(),
+                patch_id.unwrap_or("-"),
+                invariant,
+                recovery,
+                if detail.is_empty() { "" } else { " " },
+                detail
+            ),
+        );
+        if recovery.contains("retry_without_disk_write") {
+            let _ = agent_doc_write_converge_io::schedule_stale_supervisor_pcp_recycle(
+                file, "file_ipc",
+            );
+        }
+    }
+}
+
+pub struct RuntimeQueueConsumeWritebackEffects;
+
+pub static RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS: RuntimeQueueConsumeWritebackEffects =
+    RuntimeQueueConsumeWritebackEffects;
+
+impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects
+    for RuntimeQueueConsumeWritebackEffects
+{
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        atomic_write_through_authority(file, content)
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        agent_doc_write_converge_io::converge_document_or_disk(
+            &RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            target_content,
+            source_content,
+            reason,
+        )
+    }
+}
+
+pub struct RuntimePipelineFrontmatterEffects;
+
+pub static RUNTIME_PIPELINE_FRONTMATTER_EFFECTS: RuntimePipelineFrontmatterEffects =
+    RuntimePipelineFrontmatterEffects;
+
+impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
+    for RuntimePipelineFrontmatterEffects
+{
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        current_content: &str,
+        target_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            current_content,
+            target_content,
+            reason,
+        )
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
+pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> {
+    if agent_doc_document_realtime::write_authority::is_visible_document(path)
+        && !agent_doc_document_realtime::write_authority::within_owner_scope()
+    {
+        log_fence_count_drop_if_any(path, content);
+        let base_dir = agent_doc_project_root_io::project_root_containing(path)
+            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let file = path.to_string_lossy().to_string();
+        let result = agent_doc_queue_io::write_queue::serialized_atomic_write_with(
+            &SESSION_ACTOR_WRITE_QUEUE,
+            &base_dir,
+            &file,
+            path,
+            content,
+            atomic_write_through_authority,
+        );
+        if result.is_ok() {
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "write_authority action=routed transport=write_queue len={} hash={}",
+                    content.len(),
+                    agent_doc_hash::content_hash(content)
+                ),
+            );
+        }
+        return result;
+    }
+
+    atomic_write_authority_raw(path, content)
+}
+
+pub fn atomic_write_if_current_through_authority(
+    path: &Path,
+    content: &str,
+    expected_current: &str,
+    source: &str,
+) -> Result<()> {
+    guard_visible_write_idle_and_current(path, source, expected_current)?;
+    atomic_write_through_authority(path, content)
+}
+
+fn atomic_write_authority_raw(path: &Path, content: &str) -> Result<()> {
+    use std::io::Write;
+
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
+    tmp.write_all(content.as_bytes())
+        .with_context(|| "failed to write temp file")?;
+    tmp.persist(path)
+        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
+    record_document_write_provenance(path, content);
+    Ok(())
+}
+
+pub fn record_document_write_provenance(path: &Path, content: &str) {
+    if !agent_doc_document_realtime::write_authority::is_visible_document(path) {
+        return;
+    }
+    let canonical = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let write_id = uuid::Uuid::new_v4().to_string();
+    let hash = agent_doc_hash::content_hash(content);
+    if let Err(e) = agent_doc_debounce::record_write_provenance(
+        &canonical,
+        content.len(),
+        &hash,
+        &write_id,
+        "agent",
+    ) {
+        eprintln!(
+            "[write] WARNING: failed to record write provenance for {}: {}",
+            path.display(),
+            e
+        );
+    }
+}
+
+fn log_fence_count_drop_if_any(path: &Path, new_content: &str) {
+    let Some(old_content) = std::fs::read_to_string(path).ok() else {
+        return;
+    };
+    let old_fences =
+        agent_doc_document::write_normalization::count_code_fence_openings(&old_content);
+    let new_fences =
+        agent_doc_document::write_normalization::count_code_fence_openings(new_content);
+    if new_fences < old_fences {
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "fence_count_dropped file={} old_fences={} new_fences={} old_len={} new_len={}",
+                path.display(),
+                old_fences,
+                new_fences,
+                old_content.len(),
+                new_content.len(),
+            ),
+        );
+    }
+}
 
 // ── Rung 2 (`#rtwfeed`): durable, staleness-gated editor-buffer feed ──
 //

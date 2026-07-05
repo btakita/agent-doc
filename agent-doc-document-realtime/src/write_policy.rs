@@ -1786,7 +1786,7 @@ fn stale_queue_prompt_exchange_artifact(line: &str) -> bool {
     trimmed.starts_with('>') || trimmed == "❯ >"
 }
 
-pub fn classify_ack_mismatch_recovery(
+pub fn classify_socket_receipt_mismatch_recovery(
     target: &str,
     recovered: &str,
     normalize_transient_markers: impl Fn(&str) -> String,
@@ -3569,7 +3569,7 @@ Working.
         );
 
         assert_eq!(
-            classify_ack_mismatch_recovery(&target, &recovered, identity_normalize),
+            classify_socket_receipt_mismatch_recovery(&target, &recovered, identity_normalize),
             Some(AckMismatchRecovery::RevertUntrustedAckToCurrent)
         );
     }
@@ -3583,7 +3583,7 @@ Working.
         let recovered = doc_with_exchange("❯ do [#head]\n", "- do [#head]\n");
 
         assert_eq!(
-            classify_ack_mismatch_recovery(&target, &recovered, identity_normalize),
+            classify_socket_receipt_mismatch_recovery(&target, &recovered, identity_normalize),
             Some(AckMismatchRecovery::ReplayMissingAgentResponseToTarget)
         );
     }
@@ -3596,7 +3596,7 @@ Working.
             doc_with_exchange(&format!("{exchange}❯ do [#followup]\n"), "- do [#head]\n");
 
         assert_eq!(
-            classify_ack_mismatch_recovery(&target, &recovered, identity_normalize),
+            classify_socket_receipt_mismatch_recovery(&target, &recovered, identity_normalize),
             None
         );
     }

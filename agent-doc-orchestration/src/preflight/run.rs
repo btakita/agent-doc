@@ -169,7 +169,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     {
         let migrated = frontmatter::strip_deprecated_queue_active_line(&current);
         if migrated != current {
-            match crate::write::atomic_write_pub(file, &migrated) {
+            match agent_doc_document_realtime_io::atomic_write_through_authority(file, &migrated) {
                 Ok(()) => {
                     if let Err(err) =
                         agent_doc_snapshot_io::save(file, &migrated, agent_doc_ops_log_io::log_op)
@@ -248,7 +248,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         || if options.probe {
             false
         } else {
-            match repair::run(file) {
+            match agent_doc_repair_io::run(crate::repair_coordinator_effects(), file) {
                 Ok(outcome) => outcome.repaired(),
                 Err(e) => {
                     let message = e.to_string();
@@ -270,7 +270,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !options.probe
         && let Err(e) = agent_doc_workflow_io::document_init::ensure_initialized(
             file,
-            crate::git::commit,
+            agent_doc_commit_io::commit,
             agent_doc_ops_log_io::log_op,
         )
     {
@@ -354,7 +354,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         || if options.probe {
             false
         } else {
-            match git::commit(file) {
+            match agent_doc_commit_io::commit(file) {
                 Ok(did_commit) => {
                     if did_commit {
                         rc.invalidate_head_content();
@@ -376,7 +376,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         && let Some(repaired_doc) =
             relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?
     {
-        crate::write::atomic_write_pub(file, &repaired_doc)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &repaired_doc)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -493,7 +493,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                         );
                         continue;
                     }
-                    match git::commit(&doc_path) {
+                    match agent_doc_commit_io::commit(&doc_path) {
                         Ok(true) => {
                             eprintln!("[preflight] sweep: committed {}", doc_path.display())
                         }
@@ -3112,7 +3112,7 @@ mod tests {
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-        crate::git::commit(&doc).unwrap();
+        agent_doc_commit_io::commit(&doc).unwrap();
         let prior =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello again\n").unwrap();

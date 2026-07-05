@@ -1133,7 +1133,7 @@ fn agent_doc_test_support_owns_orchestration_test_helpers() {
         "pub fn launch_mock_registered_agent_doc(",
         "pub fn seed_live_plugin_owner_lease(",
         "pub fn init_repo_with_doc(",
-        "pub fn start_live_prompt_drift_ack_listener(",
+        "pub fn start_live_prompt_drift_receipt_listener(",
         "pub fn queue_consume_convergence_source()",
     ] {
         assert!(
@@ -1168,7 +1168,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     const TOKEN_BUDGET_TOLERANCE: usize = 4;
     let hot_paths = [
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
         "agent-doc-document/src/commit_normalization.rs",
         "agent-doc-git-io/src/dirs.rs",
@@ -1269,7 +1269,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // strip_head_markers policy/tests moved from git into the focused
         // `agent-doc-document::transient_markers` module. The removed tokens are
         // document-normalization names, not removed flow guard boundaries.
-        ("agent-doc-orchestration/src/git.rs", "guard_") => 15,
+        ("agent-doc-commit-io/src/lib.rs", "guard_") => 15,
         // #safe-mutation-extract: safe out-of-band mutation classification moved
         // into the focused realtime write policy crate. The four `guard_` tokens
         // are the existing transient marker stripper name/call plus two policy
@@ -1305,7 +1305,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // logs the audited allowance when the staged snapshot already matches a
         // synced operator-authoritative live buffer. This is a proof diagnostic
         // for the existing pre-stage guard path, not a new ad hoc flow branch.
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 10,
+        ("agent-doc-commit-io/src/lib.rs", "reason=") => 10,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it
@@ -1824,7 +1824,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the snapshot, consume reconciles (document wins) instead of bailing
         // (#finalize-divergence-orphans-committed-head / IPC-CRDT resilience).
         // +2 for the audited `ipc_listener_degraded_direct_disk ... reason=repeated_ack_timeout`
-        // diagnostics: repeated socket IPC ack timeouts de-wedge the current
+        // diagnostics: repeated socket IPC receipt timeouts de-wedge the current
         // document/session away from socket/file IPC and onto the direct-disk path.
         // +1 for the audited `ipc_socket_degraded_prefer_file_ipc ... reason=repeated_ack_timeout`
         // diagnostic (#ipc-degraded-prefers-file-ipc): a latched-degraded socket
@@ -2619,7 +2619,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent_doc_hooks_io::fire_post_write_with_effects(",
         ),
         (
-            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-commit-io/src/lib.rs",
             "agent_doc_hooks_io::fire_post_commit(file, session_id, None)",
         ),
         (
@@ -2631,7 +2631,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent_doc_hooks_io::fire_doc_event(file, \"post_write\")",
         ),
         (
-            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-commit-io/src/lib.rs",
             "agent_doc_hooks_io::fire_doc_event(file, event)",
         ),
         (
@@ -3472,7 +3472,6 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
 
     let repair =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
-    let git = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let commit_io =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -3511,17 +3510,22 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         );
     }
     assert!(
-        !git.contains("pub fn repair_committed_historical_snapshot_drift(")
+        !commit_io.contains("pub fn repair_committed_historical_snapshot_drift(")
             && commit_io
                 .contains("agent_doc_repair_io::repair_committed_historical_snapshot_drift("),
         "commit lifecycle must call focused repair IO for committed historical snapshot drift repair"
     );
+    let codex_hook =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
     assert!(
         repair_io.contains("pub fn save_blocked_repair_payload(")
             && repair_io.contains("pub fn run_with_queue_completion_ids<")
-            && repair.contains("agent_doc_repair_io::run_with_queue_completion_ids(")
-            && repair.contains("agent_doc_repair_io::RepairCoordinatorEffects"),
-        "repair.rs should only adapt into the focused repair IO coordinator"
+            && codex_hook.contains("agent_doc_repair_io::run_with_queue_completion_ids(")
+            && repair
+                .contains("agent_doc_repair_io::run(crate::repair_coordinator_effects(), file)")
+            && repair
+                .contains("agent_doc_repair_io::repair(crate::repair_coordinator_effects(), file)"),
+        "repair callers should adapt into the focused repair IO coordinator"
     );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -3599,8 +3603,8 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
     }
     for forbidden in [
         "let outcome = run(file)?;",
-        "write::recover_missing_committed_head_response(file)?",
-        "write::recover_dedupe_only_drift(file)?",
+        "write::recover_missing_committed_head_response",
+        "write::recover_dedupe_only_drift",
         "committing pending mutations without a response body",
     ] {
         assert!(
@@ -3630,9 +3634,10 @@ fn test_orchestration_write_uses_closeout_commit_adapter() {
         "write.rs must not call git directly; commit ownership belongs behind closeout effects"
     );
     assert!(
-        write.contains("fn commit_via_closeout_effects(")
-            && write.contains("CloseoutEffects::commit(&crate::closeout_effects(), file)"),
-        "write.rs should route commit boundaries through the injected closeout effects adapter"
+        !write.contains("fn commit_via_closeout_effects(")
+            && write.contains("agent_doc_flow_io::closeout::CloseoutEffects::commit(")
+            && write.contains("&crate::closeout_effects()"),
+        "write.rs should route commit boundaries through the injected closeout effects adapter without a local helper facade"
     );
 }
 
@@ -4053,8 +4058,6 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             "agent-doc-queue must own queue replay-normalization policy: {required_snippet}"
         );
     }
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let commit_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
@@ -4063,8 +4066,8 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "fn preserved_queue_additions_neutralized_by_replay(",
     ] {
         assert!(
-            !git_source.contains(forbidden_snippet),
-            "git.rs must not re-own queue replay-normalization policy: {forbidden_snippet}"
+            !commit_io_source.contains(forbidden_snippet),
+            "commit-io must not re-own queue replay-normalization policy: {forbidden_snippet}"
         );
     }
     assert!(
@@ -4444,8 +4447,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
 
     let queue_io_consume =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
-    let orchestration_git =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     let orchestration_git_tests =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/git.rs")).unwrap();
     let orchestration_preflight =
@@ -4494,8 +4497,9 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
             && queue_io_consume.contains("agent_doc_capture_io::load_by_id(")
             && orchestration_git_tests
                 .contains("queue_consume::strike_answered_free_text_heads_at_commit_seam(")
-            && !orchestration_git.contains("fn strike_answered_free_text_heads_at_commit_seam(")
-            && !orchestration_git.contains("fn capture_response_body_for("),
+            && commit_io.contains("queue_consume::strike_answered_free_text_heads_at_commit_seam(")
+            && !commit_io.contains("fn strike_answered_free_text_heads_at_commit_seam(")
+            && !commit_io.contains("fn capture_response_body_for("),
         "agent-doc-queue-io should own the commit-seam answered free-text queue strike IO graph"
     );
     let orchestration_write_run_entry =
@@ -5176,7 +5180,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-flow-io closeout should call focused flow latency formatting directly"
     );
     for relative in [
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
@@ -5914,11 +5918,14 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         write_source.contains("agent_doc_turn::response_replay::response_already_applied"),
         "orchestration write should call focused response replay policy directly"
     );
+    let repair_runtime_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-runtime-io/src/lib.rs")).unwrap();
     assert!(
-        write_source.contains("use agent_doc_turn::response_replay::{")
-            && write_source.contains("dedupe_responses")
-            && write_source.contains("response_materialized_in_content"),
-        "orchestration write should import focused response replay policy directly"
+        write_source
+            .contains("use agent_doc_turn::response_replay::response_materialized_in_content")
+            && repair_runtime_source
+                .contains("use agent_doc_turn::response_replay::dedupe_responses;"),
+        "write and repair runtime IO should import focused response replay policy directly from the owning module"
     );
     let response_replay_io =
         fs::read_to_string(manifest_dir.join("agent-doc-response-replay-io/src/lib.rs")).unwrap();
@@ -7063,27 +7070,25 @@ fn test_agent_doc_queue_io_owns_write_queue_serialization_policy() {
             .exists(),
         "orchestration must not keep a write_queue module after the focused queue IO extraction"
     );
-    let orchestration_lib =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
-    let orchestration_write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let realtime_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     for required_snippet in [
         "agent_doc_queue_io::write_queue::DocumentWriteQueueSubmitter",
         "SessionActorWriteQueueSubmitter",
         "document_actor_in(",
     ] {
         assert!(
-            orchestration_lib.contains(required_snippet),
-            "orchestration root should only adapt queue IO to the local session actor effect: {required_snippet}"
+            realtime_io.contains(required_snippet),
+            "realtime IO should adapt queue IO to the session actor effect: {required_snippet}"
         );
     }
     for required_snippet in [
         "serialized_atomic_write_with(",
-        "crate::write::atomic_write_pub",
+        "atomic_write_through_authority,",
     ] {
         assert!(
-            orchestration_write.contains(required_snippet),
-            "write.rs should call focused queue IO directly for serialized writes: {required_snippet}"
+            realtime_io.contains(required_snippet),
+            "realtime IO should call focused queue IO directly for serialized writes: {required_snippet}"
         );
     }
 }
@@ -10760,7 +10765,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Write editor convergence IO graph",
             "agent-doc-orchestration/src/write/converge.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Move the file-IPC poller and its status/NACK/content validation",
+            "Move the file-IPC poller and its status/rejection-receipt/content validation",
         ),
         (
             "Write file-IPC delivery proof loop",
@@ -11162,7 +11167,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Repair template normalization IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
-            "Move `repair_response_prompt_order_for_file` and `normalize_template_structure_or_fail_preserving` out of `write.rs`",
+            "Move `normalize_template_structure_or_fail_preserving` out of `RepairTemplateWriteEffects`",
         ),
         (
             "Git pre-stage response/prompt artifact repair IO graph",
@@ -11247,6 +11252,102 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/git.rs",
             "agent-doc-orchestration/tests/git.rs",
             "Move the remaining commit-boundary tests into `agent-doc-commit-io` and focused `agent-doc-git-io` fixtures",
+        ),
+        (
+            "Git commit runtime facade deletion",
+            "agent-doc-orchestration/src/git.rs",
+            "agent-doc-commit-io/src/lib.rs",
+            "Move the integration test suite from `agent-doc-orchestration/tests/git.rs` into focused `agent-doc-commit-io`/`agent-doc-git-io` fixtures",
+        ),
+        (
+            "Preflight maintenance runtime write-effect adapter graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-runtime-io/src/lib.rs",
+            "Split the runtime adapter once write command extraction lands",
+        ),
+        (
+            "Preflight direct write-authority and template-normalization edge removal",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-document-realtime-io::atomic_write_through_authority",
+            "relocate the write.rs template-normalization tests beside `agent-doc-template-io`",
+        ),
+        (
+            "Repair empty-response recovery callback inversion",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-repair-io",
+            "Split the remaining write-command replay bridge after `CommandOptions`/`CommitMode` leave `write.rs`",
+        ),
+        (
+            "Route document-prep write-authority edge removal",
+            "agent-doc-orchestration/src/route.rs",
+            "agent-doc-document-realtime-io::{atomic_write_through_authority,RUNTIME_WRITE_CONVERGENCE_EFFECTS}",
+            "Split direct route repair closeout from document-prep writes",
+        ),
+        (
+            "Codex hook write-authority edge removal",
+            "agent-doc-orchestration/src/codex_hook.rs",
+            "agent-doc-document-realtime-io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS",
+            "Split repeated-queue recovery note formatting from closeout side effects",
+        ),
+        (
+            "Start idle-queue writeback edge removal",
+            "agent-doc-orchestration/src/start.rs",
+            "agent-doc-document-realtime-io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS",
+            "Move idle queue completion into a focused start runtime IO adapter",
+        ),
+        (
+            "Write IPC transport convergence effect-provider edge removal",
+            "agent-doc-orchestration/src/write/ipc/transport.rs",
+            "agent-doc-document-realtime-io::RUNTIME_WRITE_CONVERGENCE_EFFECTS",
+            "Move the remaining write IPC transport graph into focused write IPC runtime IO",
+        ),
+        (
+            "Crate-root runtime write-provider edge removal",
+            "agent-doc-orchestration/src/lib.rs",
+            "agent-doc-document-realtime-io::{RUNTIME_WRITE_CONVERGENCE_EFFECTS,RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,atomic_write_through_authority,record_document_write_provenance}",
+            "Move `OrchestrationRepairReplayWriteEffects` into a focused repair/write runtime adapter",
+        ),
+        (
+            "Repair runtime recovery callback IO graph",
+            "agent-doc-orchestration/src/repair.rs",
+            "agent-doc-repair-runtime-io/src/lib.rs",
+            "move the remaining strict empty-response bridge after write command DTO extraction",
+        ),
+        (
+            "Repair coordinator direct-call edge removal",
+            "agent-doc-orchestration/src/{preflight.rs,preflight/run.rs,codex_hook.rs,route.rs}",
+            "agent-doc-repair-io::{run,run_with_queue_completion_ids,repair}",
+            "Move `repair_coordinator_effects` into a focused repair runtime adapter",
+        ),
+        (
+            "Template response prompt-order repair IO graph",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-template-io::repair_response_prompt_order_for_file",
+            "Move the remaining response-precedes-prompt rejection guard",
+        ),
+        (
+            "Direct-run compaction diff guard IO graph",
+            "agent-doc-orchestration/src/lib.rs",
+            "agent-doc-run-io::guard_no_exchange_compaction_request_for_diff",
+            "Move the write-path `guard_no_exchange_compaction_request_between` tests",
+        ),
+        (
+            "Write command request DTO graph",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-write-command-io/src/lib.rs",
+            "Move the write command runtime/replay entrypoints",
+        ),
+        (
+            "Write strict empty-response repair back-edge removal",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-repair-io::recover_empty_response_for_strict_closeout",
+            "Move the write-command empty-response recovery bridge",
+        ),
+        (
+            "Preflight output DTO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Split linked-document change detection and output assembly",
         ),
         (
             "Repair recovery coordinator IO graph",
@@ -12591,7 +12692,7 @@ fn test_agent_doc_diff_uses_current_prompt_bearing_api_names() {
 fn test_preflight_output_uses_user_intent_prompt_changes_json_surface() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let preflight_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
@@ -13357,7 +13458,7 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
 
     for relative_path in [
         "src/main.rs",
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-command-io/src/lib.rs",
         "agent-doc-stream-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
@@ -13510,14 +13611,14 @@ fn test_agent_doc_frontmatter_owns_write_mode_detection_policy() {
     let write_run_entry =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
             .unwrap();
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     let git_transient_cleanup =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/transient_cleanup.rs")).unwrap();
     for forbidden in ["fn content_uses_crdt_write(", "fn document_uses_crdt("] {
         assert!(
             !write_run_entry.contains(forbidden)
-                && !git_source.contains(forbidden)
+                && !commit_io_source.contains(forbidden)
                 && !git_transient_cleanup.contains(forbidden),
             "callers must not re-own CRDT write-mode detection: {forbidden}"
         );
@@ -13527,7 +13628,8 @@ fn test_agent_doc_frontmatter_owns_write_mode_detection_policy() {
             .contains("use agent_doc_frontmatter::frontmatter::content_uses_crdt_write;")
             && git_transient_cleanup
                 .contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write(")
-            && !git_source.contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write("),
+            && !commit_io_source
+                .contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write("),
         "write and git transient cleanup should call frontmatter-owned CRDT write-mode detection directly"
     );
 }
@@ -22221,7 +22323,7 @@ fn test_agent_doc_capture_io_owns_response_capture_ledger() {
 }
 
 #[test]
-fn test_agent_doc_ipc_protocol_owns_ack_classification() {
+fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();
@@ -22285,16 +22387,16 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let protocol_source =
         fs::read_to_string(manifest_dir.join("agent-doc-ipc-protocol/src/lib.rs")).unwrap();
     assert!(
-        protocol_source.contains("pub enum AckClassification")
-            && protocol_source.contains("pub fn classify_ack(")
-            && protocol_source.contains("pub fn is_already_applied_ack_error_message("),
-        "agent-doc-ipc-protocol must own plugin IPC ack classification"
+        protocol_source.contains("pub enum SocketReceiptClassification")
+            && protocol_source.contains("pub fn classify_socket_receipt(")
+            && protocol_source.contains("pub fn is_already_applied_receipt_error_message("),
+        "agent-doc-ipc-protocol must own plugin IPC receipt classification"
     );
     for required in [
-        "pub fn early_ack_tagged_message(",
-        "pub fn message_requests_early_ack(",
-        "pub fn early_ack_line(",
-        "pub fn early_ack_ops_marker(",
+        "pub fn early_receipt_tagged_message(",
+        "pub fn message_requests_early_receipt(",
+        "pub fn early_receipt_line(",
+        "pub fn early_receipt_ops_marker(",
         "pub fn ipc_accept_thread_ops_marker(",
         "pub fn patch_message(",
         "pub fn queue_convergence_message(",
@@ -22304,7 +22406,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "pub fn publish_live_buffer_message(",
         "pub fn vcs_refresh_message(",
         "pub fn vcs_refresh_probe_message(",
-        "pub fn is_socket_ack_timeout_error(",
+        "pub fn is_socket_receipt_timeout_error(",
         "pub fn is_socket_status_error(",
         "pub fn existing_patch_is_reposition_only(",
         "pub enum IpcSnapshotSource",
@@ -22441,11 +22543,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         &["agent_doc_project_root_io", "project_root_from_cwd"],
     );
     let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     assert!(
         !git_source.contains("agent_doc_fs::find_project_root(")
             && git_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "git orchestration should call focused project-root IO instead of owning VCS-refresh root discovery"
+        "commit runtime should call focused project-root IO instead of owning VCS-refresh root discovery"
     );
     let admin_source =
         fs::read_to_string(manifest_dir.join("agent-doc-admin-io/src/lib.rs")).unwrap();
@@ -22535,10 +22637,12 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     );
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let realtime_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     assert!(
         !write_source.contains("agent_doc_fs::find_project_root(")
-            && write_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "write should call focused project-root IO instead of owning write-authority root discovery"
+            && realtime_io.contains("agent_doc_project_root_io::project_root_containing("),
+        "realtime IO should call focused project-root IO for write-authority root discovery"
     );
     let flow_closeout_source =
         fs::read_to_string(manifest_dir.join("agent-doc-flow-io/src/closeout.rs")).unwrap();
@@ -22709,10 +22813,10 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         fs::read_to_string(manifest_dir.join("agent-doc-ipc-io/src/lib.rs")).unwrap();
     assert!(
         ipc_io_source.contains("use agent_doc_ipc_protocol::{")
-            && ipc_io_source.contains("AckClassification")
-            && ipc_io_source.contains("classify_ack")
-            && ipc_io_source.contains("early_ack_tagged_message")
-            && ipc_io_source.contains("message_requests_early_ack")
+            && ipc_io_source.contains("SocketReceiptClassification")
+            && ipc_io_source.contains("classify_socket_receipt")
+            && ipc_io_source.contains("early_receipt_tagged_message")
+            && ipc_io_source.contains("message_requests_early_receipt")
             && ipc_io_source.contains("patch_message")
             && ipc_io_source.contains("save_document_message")
             && ipc_io_source.contains("vcs_refresh_message")
@@ -22725,13 +22829,13 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "agent-doc-ipc-io should own socket/file-signal transport while importing protocol vocabulary"
     );
     for forbidden in [
-        "pub enum AckClassification",
-        "pub fn classify_ack(",
+        "pub enum SocketReceiptClassification",
+        "pub fn classify_socket_receipt(",
         "pub fn is_already_applied_error(",
-        "fn early_ack_tagged_message(",
-        "pub fn message_requests_early_ack(",
-        "pub fn early_ack_line(",
-        "pub fn early_ack_ops_marker(",
+        "fn early_receipt_tagged_message(",
+        "pub fn message_requests_early_receipt(",
+        "pub fn early_receipt_line(",
+        "pub fn early_receipt_ops_marker(",
         "pub fn ipc_accept_thread_ops_marker(",
         "pub fn resolve_ipc_project_root(",
         "pub fn resolve_project_root(",
@@ -22899,20 +23003,22 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     }
 
     let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    let orchestration_preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     assert!(
         preflight_source.contains("Vec<agent_doc_ipc_protocol::PendingCallback>")
-            && !preflight_source.contains("Vec<crate::callback::PendingCallback>"),
+            && !orchestration_preflight_source.contains("Vec<crate::callback::PendingCallback>"),
         "preflight should type pending callbacks through the focused IPC protocol crate"
     );
 
     let sim_world_source = fs::read_to_string(manifest_dir.join("src/sim_world.rs")).unwrap();
     assert!(
-        sim_world_source.contains("agent_doc_ipc_protocol::classify_ack(")
+        sim_world_source.contains("agent_doc_ipc_protocol::classify_socket_receipt(")
             && sim_world_source
-                .contains("agent_doc_ipc_protocol::is_already_applied_ack_error_message(")
-            && !sim_world_source.contains("ipc_socket::classify_ack")
-            && !sim_world_source.contains("ipc_socket::AckClassification")
+                .contains("agent_doc_ipc_protocol::is_already_applied_receipt_error_message(")
+            && !sim_world_source.contains("ipc_socket::classify_socket_receipt")
+            && !sim_world_source.contains("ipc_socket::SocketReceiptClassification")
             && !sim_world_source
                 .contains("agent_doc_orchestration::ipc_socket::is_already_applied_error"),
         "root callers should use the focused IPC protocol crate instead of the old orchestration path"
@@ -22921,7 +23027,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let write_ipc_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
     for forbidden in [
-        "fn is_socket_ack_timeout_error(",
+        "fn is_socket_receipt_timeout_error(",
         "fn is_socket_status_error(",
         "fn existing_patch_is_reposition_only(",
         "pub(crate) enum IpcSnapshotSource",
@@ -22950,8 +23056,8 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && write_ipc_transport_source
                 .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor")
             && write_ipc_transport_source.contains("FullContentIpcMode")
-            && write_ipc_transport_source.contains("is_already_applied_ack_error_message")
-            && write_ipc_transport_source.contains("is_socket_ack_timeout_error"),
+            && write_ipc_transport_source.contains("is_already_applied_receipt_error_message")
+            && write_ipc_transport_source.contains("is_socket_receipt_timeout_error"),
         "write IPC transport should import remaining IPC protocol vocabulary from the focused protocol crate"
     );
     assert!(
@@ -22982,7 +23088,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     assert!(
         write_ipc_io_source.contains("use agent_doc_ipc_protocol::{")
             && write_ipc_io_source.contains("existing_patch_is_reposition_only")
-            && write_ipc_io_source.contains("is_socket_ack_timeout_error")
+            && write_ipc_io_source.contains("is_socket_receipt_timeout_error")
             && write_ipc_io_source.contains("pub fn queue_file_ipc_reposition_boundary(")
             && write_ipc_io_source.contains("pub fn try_ipc_reposition_boundary(")
             && write_ipc_io_source.contains("pub fn build_ipc_patches_json(")
@@ -22997,7 +23103,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "pub enum FullContentIpcMode",
         "fn full_content_source_label(",
         "pub(crate) fn full_content_source_label(",
-        "fn is_socket_ack_timeout_error(",
+        "fn is_socket_receipt_timeout_error(",
         "fn existing_patch_is_reposition_only(",
         "crate::ipc_socket::is_already_applied_error",
         "pub use agent_doc_ipc_protocol",
@@ -23021,7 +23127,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
         write_converge_source.contains("use agent_doc_ipc_protocol::{")
-            && write_converge_source.contains("is_socket_ack_timeout_error")
+            && write_converge_source.contains("is_socket_receipt_timeout_error")
             && write_converge_source.contains("is_socket_status_error")
             && write_converge_source.contains("use agent_doc_ipc_io::editor_target::{")
             && write_converge_source.contains("live_editor_delivery_has_operator_authority")
@@ -23029,7 +23135,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "write convergence IO should import socket error classifiers and editor targeting from focused IPC crates"
     );
     for forbidden in [
-        "fn is_socket_ack_timeout_error(",
+        "fn is_socket_receipt_timeout_error(",
         "fn is_socket_status_error(",
     ] {
         assert!(
@@ -23702,7 +23808,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
     }
     for relative in [
         "src/reset.rs",
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
         "agent-doc-compact-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -23778,6 +23884,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-commit-io/src/lib.rs",
         "agent-doc-write-converge-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -24042,10 +24149,10 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
     }
 
     let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     assert!(
         !git_source.contains("mod normalize;") && !git_source.contains("pub use normalize"),
-        "git.rs must call document commit normalization directly, not keep a facade module"
+        "commit-io must call document commit normalization directly, not keep a facade module"
     );
     let git_pre_stage_repair =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/pre_stage_repair.rs")).unwrap();
@@ -24206,8 +24313,6 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "orchestration must not retain the old git normalization module or facade"
     );
 
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let git_policy_source =
         fs::read_to_string(manifest_dir.join("agent-doc-git/src/lib.rs")).unwrap();
     let commit_io_source =
@@ -24242,8 +24347,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "fn non_exchange_change_is_turn_independent(",
     ] {
         assert!(
-            !git_source.contains(forbidden),
-            "git.rs must stay a git adapter, not re-own commit normalization: {forbidden}"
+            !commit_io_source.contains(forbidden),
+            "commit-io must stay a coordinator, not re-own commit normalization: {forbidden}"
         );
     }
     assert!(
@@ -24262,8 +24367,11 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "commit coordinator should call focused non-exchange component drift policy directly"
     );
     assert!(
-        git_source.contains("agent_doc_commit_io::commit_with_outcome("),
-        "git.rs should delegate commit lifecycle policy to agent-doc-commit-io"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && commit_io_source.contains("pub fn commit_with_outcome("),
+        "orchestration git facade should be deleted and commit-io should own the default commit API"
     );
 
     let partial_staging =
@@ -24535,8 +24643,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub fn verify_snapshot_committed(",
     ] {
         assert!(
-            !git_source.contains(forbidden),
-            "orchestration git adapter must not re-own snapshot-vs-HEAD commit verification: {forbidden}"
+            !commit_io_source.contains(forbidden),
+            "commit-io must not re-own snapshot-vs-HEAD commit verification: {forbidden}"
         );
     }
     let git_dirs_source =
@@ -24569,16 +24677,17 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             .exists(),
         "orchestration must not retain a git dirs shim module"
     );
-    let git_adapter_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     assert!(
         commit_io_source.contains("dirs::{narrow_to_submodule, resolve_to_git_root}")
             && commit_io_source.contains("transaction::{"),
         "commit coordinator should import focused git IO helpers directly"
     );
     assert!(
-        git_adapter_source.contains("agent_doc_commit_io::CommitCoordinatorPorts"),
-        "orchestration git adapter should delegate to focused commit coordinator"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && commit_io_source.contains("pub struct CommitCoordinatorPorts"),
+        "orchestration git adapter should be deleted and focused commit coordinator should own ports"
     );
     let doctor_source =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/doctor.rs")).unwrap();
@@ -24652,8 +24761,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub(crate) fn tracked_side_effect_note(",
     ] {
         assert!(
-            !git_adapter_source.contains(forbidden),
-            "orchestration git adapter must not facade git directory/path IO: {forbidden}"
+            !commit_io_source.contains(forbidden),
+            "commit-io must not facade git directory/path IO: {forbidden}"
         );
     }
     assert!(
@@ -24667,8 +24776,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "revision::rev_parse(&super_root, &parent_spec)?",
     ] {
         assert!(
-            !git_adapter_source.contains(forbidden),
-            "orchestration git adapter must not re-own submodule pointer drift IO: {forbidden}"
+            !commit_io_source.contains(forbidden),
+            "commit-io must not re-own submodule pointer drift IO: {forbidden}"
         );
     }
 
@@ -25020,25 +25129,28 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         ),
         "repair IO should import response-body prompt-prefix repair from the focused crate directly"
     );
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let commit_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     let git_post_commit_cleanup =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/post_commit_cleanup.rs"))
             .unwrap();
     assert!(
         git_post_commit_cleanup.contains(
             "use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;"
-        ) && !git_source.contains(
+        ) && !commit_io_source.contains(
             "use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;"
         ),
         "git post-commit cleanup should import exchange-only reposition policy from the focused crate"
     );
     assert!(
-        !git_source.contains("fn redact_exchange_component_content(")
-            && !git_source.contains("fn post_commit_ipc_reposition_only_exchange_safe(")
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && !commit_io_source.contains("fn redact_exchange_component_content(")
+            && !commit_io_source.contains("fn post_commit_ipc_reposition_only_exchange_safe(")
             && !git_post_commit_cleanup
                 .contains("fn post_commit_ipc_reposition_only_exchange_safe("),
-        "git.rs must not re-own exchange-only post-commit IPC policy"
+        "orchestration git facade must be gone and commit/git IO must not re-own exchange-only post-commit IPC policy"
     );
     let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
     assert!(
@@ -25259,7 +25371,7 @@ fn test_agent_doc_element_boundary_owns_boundary_id_lookup() {
     for relative_path in [
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
-        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-commit-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         for forbidden_snippet in [
@@ -25524,7 +25636,7 @@ fn test_agent_doc_document_realtime_owns_ack_mismatch_policy() {
             .unwrap();
     for required in [
         "pub enum AckMismatchRecovery",
-        "pub fn classify_ack_mismatch_recovery",
+        "pub fn classify_socket_receipt_mismatch_recovery",
     ] {
         assert!(
             realtime_write_policy.contains(required),
@@ -25540,7 +25652,7 @@ fn test_agent_doc_document_realtime_owns_ack_mismatch_policy() {
     .unwrap();
     for forbidden in [
         "enum AckMismatchRecovery",
-        "fn classify_ack_mismatch_recovery",
+        "fn classify_socket_receipt_mismatch_recovery",
         "fn missing_agent_response_block",
         "fn stale_queue_prompt_exchange_artifact",
         "fn blank_components_named",
@@ -25553,7 +25665,7 @@ fn test_agent_doc_document_realtime_owns_ack_mismatch_policy() {
     }
     assert!(
         write_converge_source.contains("agent_doc_document_realtime::write_policy::{")
-            && write_converge_source.contains("classify_ack_mismatch_recovery("),
+            && write_converge_source.contains("classify_socket_receipt_mismatch_recovery("),
         "agent-doc-write-converge-io should call the focused realtime ACK-mismatch policy directly"
     );
 }
@@ -25584,8 +25696,6 @@ fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
         "agent-doc-orchestration must not keep a safe_mutation policy module"
     );
 
-    let git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let commit_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
@@ -25599,8 +25709,8 @@ fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
         "fn is_safe_user_follow_up_exchange_growth",
     ] {
         assert!(
-            !git_source.contains(forbidden_snippet),
-            "git.rs must not define or reexport safe mutation classification: {forbidden_snippet}"
+            !commit_io_source.contains(forbidden_snippet),
+            "commit-io must not define or reexport safe mutation classification: {forbidden_snippet}"
         );
     }
     assert!(
@@ -25610,8 +25720,11 @@ fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
         "commit coordinator should call the focused realtime safe mutation policy directly"
     );
     assert!(
-        git_source.contains("agent_doc_commit_io::commit_with_outcome("),
-        "git.rs should delegate commit lifecycle policy instead of duplicating safe mutation checks"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && commit_io_source.contains("pub fn commit_with_outcome("),
+        "orchestration git facade should be deleted and commit-io should own commit lifecycle policy"
     );
 }
 
@@ -25974,7 +26087,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     }
     for relative in [
         "agent-doc-session-actor-io/src/lib.rs",
-        "agent-doc-orchestration/src/lib.rs",
+        "agent-doc-document-realtime-io/src/lib.rs",
         "agent-doc-queue-io/src/write_queue.rs",
         "src/main.rs",
     ] {
@@ -26115,12 +26228,12 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             "visible-write guard must not preserve legacy non-PCP allowances: {forbidden_snippet}"
         );
     }
-    let orchestration_git_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let controller_rpc_source = fs::read_to_string(
         manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
     .unwrap();
+    let git_live_buffer_guard_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/live_buffer_guard.rs")).unwrap();
     for required_snippet in [
         "VisibleWriteMaterializedCarryForwardObserved",
         "record_visible_write_materialized_carry_forward_for_file",
@@ -26130,8 +26243,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     ] {
         assert!(
             controller_rpc_source.contains(required_snippet)
-                || realtime_write_policy.contains(required_snippet)
-                || orchestration_git_source.contains(required_snippet),
+                || realtime_write_policy.contains(required_snippet),
             "visible-write carry-forward proof must stay in PCP/realtime adapters: {required_snippet}"
         );
     }
@@ -26141,7 +26253,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "live_buffer_insertions_are_materialized_in_file",
     ] {
         assert!(
-            !orchestration_git_source.contains(forbidden_snippet),
+            !git_live_buffer_guard_source.contains(forbidden_snippet),
             "commit guard must not preserve legacy non-PCP visible-write allowances: {forbidden_snippet}"
         );
     }
@@ -26905,14 +27017,16 @@ fn test_agent_doc_template_owns_stale_baseline_policy() {
 #[test]
 fn test_commit_lifecycle_policy_has_single_owner() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let git = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
     let commit_io =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
 
     assert!(
-        git.contains("agent_doc_commit_io::commit_with_outcome(")
-            && git.contains("agent_doc_commit_io::CommitCoordinatorPorts"),
-        "git.rs should be the concrete adapter into the focused commit coordinator"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git.rs")
+            .exists()
+            && commit_io.contains("pub fn commit_with_outcome(")
+            && commit_io.contains("pub struct CommitCoordinatorPorts"),
+        "orchestration git facade should be deleted and commit-io should own the commit API and ports"
     );
 
     for required in [
@@ -26925,10 +27039,6 @@ fn test_commit_lifecycle_policy_has_single_owner() {
         assert!(
             commit_io.contains(required),
             "agent-doc-commit-io must own commit lifecycle policy marker: {required}"
-        );
-        assert!(
-            !git.contains(required),
-            "git.rs must not duplicate focused commit lifecycle policy marker: {required}"
         );
     }
 }
@@ -27761,6 +27871,8 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     .unwrap();
     let write_converge_io =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
+    let realtime_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let write_ipc =
@@ -27865,11 +27977,11 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         !write_source.contains("#[cfg(test)]\nmod converge;")
             && !write_source.contains("pub use converge::*;")
             && !write_source.contains("pub(crate) use converge::*;")
-            && write_source.contains("pub static WRITE_CONVERGENCE_EFFECTS")
-            && write_source.contains(
-                "impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceEffects",
+            && write_source.contains("WRITE_CONVERGENCE_EFFECTS")
+            && realtime_io.contains("pub static RUNTIME_WRITE_CONVERGENCE_EFFECTS")
+            && realtime_io.contains(
+                "impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConvergenceEffects",
             )
-            && write_source.contains("fn log_file_ipc_proof_failure(")
             && write_converge_io.contains("#[cfg(test)]\nmod convergence_fixture_tests;")
             && convergence_fixture.contains("Test-only write convergence coverage relocated")
             && !convergence_fixture.contains("fn try_detached_disk_write(")
@@ -27878,7 +27990,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
             && !convergence_fixture.contains("fn live_editor_sidecar_present(")
             && !convergence_fixture.contains("stale_snapshot_reset_drift(snapshot_doc, current_doc)")
             && !convergence_fixture.contains("fn classify_stale_snapshot_visible_rebase"),
-        "production write convergence should live in agent-doc-write-converge-io with orchestration retaining only explicit effects"
+        "write convergence policy should live in write-converge-io with runtime effects in realtime IO"
     );
     for forbidden_snippet in [
         "pub(crate) fn editor_ipc_write_wedged",

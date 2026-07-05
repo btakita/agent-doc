@@ -261,6 +261,24 @@ object StateProjectionBridge {
         }
     }
 
+    fun recordEditorPatchRejected(filePath: String, patchId: String?, generation: Long?, reason: String) {
+        val patch = patchId ?: return
+        val gen = generation ?: return
+        val lib = AgentDocLib.get() ?: run {
+            LOG.warn("[state-projection] incompatible agent-doc native library: missing lazily receipt ABI")
+            return
+        }
+        try {
+            if (lib.agent_doc_editor_patch_rejected(filePath, patch, gen, reason) != 1) {
+                LOG.warn("[state-projection] editor_patch_rejected receipt rejected for patch_id $patch")
+            }
+        } catch (_: UnsatisfiedLinkError) {
+            LOG.warn("[state-projection] incompatible agent-doc native library: missing agent_doc_editor_patch_rejected; reinstall the plugin/native library")
+        } catch (_: NoSuchMethodError) {
+            LOG.warn("[state-projection] incompatible agent-doc native library: missing agent_doc_editor_patch_rejected; reinstall the plugin/native library")
+        }
+    }
+
     fun recordEditorRetryRequested(filePath: String, patchId: String?, generation: Long?, reason: String) {
         val patch = patchId ?: return
         val gen = generation ?: return

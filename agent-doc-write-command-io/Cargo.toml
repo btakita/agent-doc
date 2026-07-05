@@ -1,0 +1,14 @@
+[package]
+name = "agent-doc-write-command-io"
+version = "0.34.67"
+edition = "2024"
+description = "Write command request types for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_write_command_io"
+
+[dependencies]
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+

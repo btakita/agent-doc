@@ -12,7 +12,7 @@ use agent_doc_document::write_normalization::{
 use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, FullContentSourceProof, OperatorReconcileStep, WholeBufferAuthority,
     WholeBufferAuthorityFacts, WholeBufferDelivery, WholeBufferDeliveryAction,
-    classify_ack_mismatch_recovery, decide_whole_buffer_delivery,
+    classify_socket_receipt_mismatch_recovery, decide_whole_buffer_delivery,
     dropped_prompt_lines_after_content_ours, exchange_change_is_safe_historical_reduction,
     first_response_heading, ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
     live_prompt_drift_recovery_target, new_agent_response_headings,
@@ -33,7 +33,7 @@ use agent_doc_ipc_io::editor_target::{
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
     FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource,
-    is_socket_ack_timeout_error, is_socket_status_error,
+    is_socket_receipt_timeout_error, is_socket_status_error,
 };
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, merge_visible_queue_additions_into_content_ours,
@@ -1546,6 +1546,8 @@ pub trait EditorConvergenceEffects {
 
     fn cleanup_fallback_patch_files(&self, file: &Path);
 
+    fn file_ipc_patch_rejected(&self, file: &Path, patch_id: &str) -> Option<String>;
+
     fn log_file_ipc_proof_failure(
         &self,
         file: &Path,
@@ -1953,7 +1955,7 @@ fn file_ipc_delivery_timeout() -> std::time::Duration {
 /// Write a file-IPC patch and prove the plugin consumed it.
 ///
 /// This owns the durable delivery loop: atomic patch write, committed-cycle
-/// fence, negative-delivery marker handling, and no-ack timeout proof logging. The
+/// fence, lazily rejection receipt handling, and no-receipt timeout proof logging. The
 /// caller remains responsible for post-consumption snapshot/response validation.
 pub fn write_file_ipc_and_poll_delivery(
     effects: &dyn EditorConvergenceEffects,
@@ -1999,23 +2001,22 @@ pub fn write_file_ipc_and_poll_delivery(
             return Ok(false);
         }
 
-        let nack_file = patch_file.with_extension("nack");
-        if nack_file.exists() {
-            let detail = std::fs::read_to_string(&nack_file).unwrap_or_default();
-            let _ = std::fs::remove_file(&nack_file);
+        if let Some(patch_id) = patch_id_for_diagnostics
+            && let Some(reason) = effects.file_ipc_patch_rejected(doc_file, patch_id)
+        {
             let _ = std::fs::remove_file(patch_file);
             eprintln!(
-                "[write] IPC negative-ack: plugin rejected patch {} — refusing direct document write",
+                "[write] IPC lazily rejection receipt: plugin rejected patch {} — refusing direct document write",
                 patch_file.display()
             );
             effects.log_file_ipc_proof_failure(
                 doc_file,
                 patch_id_for_diagnostics,
-                "nack",
+                "editor_patch_rejected",
                 "retry_without_disk_write",
                 &format!(
-                    "nack_detail={} patch_file={}",
-                    detail.trim(),
+                    "receipt_reason={} patch_file={}",
+                    reason,
                     patch_file.display()
                 ),
             );
@@ -2776,7 +2777,7 @@ fn refresh_editor_after_ack_mismatch(
     source: &str,
 ) -> AckMismatchRefreshOutcome {
     let stale_hash = agent_doc_hash::content_hash(recovered);
-    let Some(recovery) = classify_ack_mismatch_recovery(
+    let Some(recovery) = classify_socket_receipt_mismatch_recovery(
         target,
         recovered,
         agent_doc_document::transient_markers::normalize_transient_agent_doc_markers,
@@ -4160,11 +4161,11 @@ pub fn try_editor_converge(
             {
                 return Ok(true);
             }
-            if is_socket_ack_timeout_error(err.to_string()) {
+            if is_socket_receipt_timeout_error(err.to_string()) {
                 match record_ipc_socket_ack_timeout(&project_root, file, Some(&patch_id), source) {
                     Ok(true) => {
                         eprintln!(
-                            "[write] IPC listener degraded for {} after repeated {source} ack timeouts",
+                            "[write] IPC listener degraded for {} after repeated {source} receipt timeouts",
                             file.display()
                         );
                         log_write_wedge_requests_supervisor_recycle(file, source);
@@ -4440,10 +4441,10 @@ pub fn ipc_direct_disk_degraded(project_root: &Path, file: &Path) -> Result<bool
     }
     // `#ipc-degrade-self-heal`: the degrade latch is a circuit breaker, not a
     // permanent session verdict. It may clear only when the plugin proves it can
-    // accept AND ack a lightweight message.
-    match agent_doc_ipc_io::probe_listener_ack(project_root, ipc_dewedge_probe_timeout()) {
+    // accept and receipt a lightweight message.
+    match agent_doc_ipc_io::probe_listener_receipt(project_root, ipc_dewedge_probe_timeout()) {
         Ok(true) => {
-            remove_ipc_dewedge_marker(project_root, file, "listener_ack_recovered")?;
+            remove_ipc_dewedge_marker(project_root, file, "listener_receipt_recovered")?;
             return Ok(false);
         }
         Ok(false) => {}
@@ -5017,7 +5018,7 @@ mod tests {
         let root_clone = dir.path().to_path_buf();
         let server = std::thread::spawn(move || {
             let _ = agent_doc_ipc_io::start_listener(&root_clone, |_msg| {
-                Some(r#"{"type":"ack","id":"x"}"#.to_string())
+                Some(r#"{"type":"receipt","status":"applied","id":"x"}"#.to_string())
             });
         });
         std::thread::sleep(std::time::Duration::from_millis(150));

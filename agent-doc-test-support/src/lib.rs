@@ -483,7 +483,7 @@ pub fn drift_content_ours() -> String {
     .to_string()
 }
 
-pub fn start_live_prompt_drift_ack_listener(
+pub fn start_live_prompt_drift_receipt_listener(
     project_root: &Path,
     visible_write_content: String,
 ) -> std::thread::JoinHandle<()> {
@@ -506,12 +506,15 @@ pub fn start_live_prompt_drift_ack_listener(
                         "test_live_prompt_drift_listener",
                     );
             }
-            Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            Some(
+                serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                    .to_string(),
+            )
         });
     })
 }
 
-pub fn start_ack_without_content_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+pub fn start_receipt_without_content_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
     let root = project_root.to_path_buf();
     std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
     std::thread::spawn(move || {
@@ -521,7 +524,10 @@ pub fn start_ack_without_content_listener(project_root: &Path) -> std::thread::J
                 .get("patch_id")
                 .and_then(|value| value.as_str())
                 .unwrap_or("unknown");
-            Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            Some(
+                serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                    .to_string(),
+            )
         });
     })
 }

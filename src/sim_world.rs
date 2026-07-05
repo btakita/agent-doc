@@ -1706,13 +1706,12 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
         "preflight-style recovery must not delete visible scratch comments"
     );
 
-    let direct_write =
-        agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
-            &world.doc,
-            file,
-            Some(&world.snapshot),
-        )
-        .unwrap();
+    let direct_write = agent_doc_template_io::normalize_template_structure_or_fail_preserving(
+        &world.doc,
+        file,
+        Some(&world.snapshot),
+    )
+    .unwrap();
     assert_owned_scratch_comment_preserved(&direct_write, prompt);
 
     let (ipc_handoff, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
@@ -1731,13 +1730,12 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
     let mut repair_world = world;
     repair_world.captured_response = Some(response_patch("comment ownership"));
     repair_world.apply_captured_response().unwrap();
-    let repaired_write =
-        agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
-            &repair_world.doc,
-            file,
-            Some(&repair_world.snapshot),
-        )
-        .unwrap();
+    let repaired_write = agent_doc_template_io::normalize_template_structure_or_fail_preserving(
+        &repair_world.doc,
+        file,
+        Some(&repair_world.snapshot),
+    )
+    .unwrap();
     assert_owned_scratch_comment_preserved(&repaired_write, prompt);
 
     let compacted_exchange = "### Session Summary\n\nCompacted content archived.\n";
@@ -5713,7 +5711,7 @@ fn sync_sim_tmuxbudget_seed_3004_attaches_hidden_requested_pane_and_focuses_visi
 }
 
 #[test]
-fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_not_duplicate_response()
+fn finalize_with_typing_in_post_exchange_comment_and_already_applied_receipt_does_not_duplicate_response()
  {
     // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
     // Phase 1 (deterministic SimWorld repro) + Phase 5 (regression coverage).
@@ -5722,12 +5720,12 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
     //   1. Document baseline = exchange with a prompt + an HTML scratch comment
     //      below `</agent:exchange>` that the user is actively typing into.
     //   2. Agent runs finalize and the plugin had already applied the response
-    //      patch to its live buffer (e.g. via a prior socket retry whose ack
+    //      patch to its live buffer (e.g. via a prior socket retry whose receipt
     //      write was slow).
-    //   3. The plugin's retry ack is the protocol's dedupe signal:
-    //      `{"type":"ack","status":"error","reason":"already_applied"}`.
+    //   3. The plugin's retry receipt is the protocol's dedupe signal:
+    //      `{"type":"receipt","status":"applied","reason":"already_applied"}`.
     //   4. The binary recognizes that signal through
-    //      `agent_doc_ipc_protocol::is_already_applied_ack_error_message`
+    //      `agent_doc_ipc_protocol::is_already_applied_receipt_error_message`
     //      and skips the file-IPC
     //      fallback so it does not re-apply the same response on top of the
     //      live buffer (which would land a duplicate `### Re:` heading and
@@ -5748,16 +5746,17 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
         .expect("plugin already inserted the response patch into the live buffer");
     let live_after_plugin_apply = world.doc.clone();
 
-    let already_applied_ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
+    let already_applied_receipt =
+        r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#;
     assert_eq!(
-        agent_doc_ipc_protocol::classify_ack(already_applied_ack),
-        agent_doc_ipc_protocol::AckClassification::AlreadyApplied,
-        "protocol contract: status=error + reason=already_applied is the dedupe signal"
+        agent_doc_ipc_protocol::classify_socket_receipt(already_applied_receipt),
+        agent_doc_ipc_protocol::SocketReceiptClassification::AlreadyApplied,
+        "protocol contract: receipt reason=already_applied is the dedupe signal"
     );
-    let send_err = format!("IPC ack already_applied: {already_applied_ack}");
+    let send_err = format!("IPC receipt already_applied: {already_applied_receipt}");
     assert!(
-        agent_doc_ipc_protocol::is_already_applied_ack_error_message(&send_err),
-        "send_message wraps already_applied acks in an error the write path can recognize"
+        agent_doc_ipc_protocol::is_already_applied_receipt_error_message(&send_err),
+        "send_message wraps already_applied receipts in an error the write path can recognize"
     );
 
     assert_eq!(
@@ -5814,11 +5813,12 @@ fn cycle_1779845677327_scratch_directives_survive_already_applied_ipc_race() {
         .expect("plugin already inserted the response patch into the live buffer");
     let live_after_plugin_apply = world.doc.clone();
 
-    let already_applied_ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
+    let already_applied_receipt =
+        r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#;
     assert_eq!(
-        agent_doc_ipc_protocol::classify_ack(already_applied_ack),
-        agent_doc_ipc_protocol::AckClassification::AlreadyApplied,
-        "editor plugins must use already_applied so the binary skips file IPC fallback"
+        agent_doc_ipc_protocol::classify_socket_receipt(already_applied_receipt),
+        agent_doc_ipc_protocol::SocketReceiptClassification::AlreadyApplied,
+        "editor plugins must use already_applied receipts so the binary skips file IPC fallback"
     );
 
     assert_eq!(

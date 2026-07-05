@@ -51,6 +51,7 @@ members = [
     "agent-doc-plugin-owner",
     "agent-doc-plugin-owner-io",
     "agent-doc-preflight-io",
+    "agent-doc-preflight-runtime-io",
     "agent-doc-project-config-io",
     "agent-doc-project-root-io",
     "agent-doc-prompt-cache",
@@ -61,6 +62,7 @@ members = [
     "agent-doc-prompt-io",
     "agent-doc-prompt-lines",
     "agent-doc-repair-io",
+    "agent-doc-repair-runtime-io",
     "agent-doc-response-toc",
     "agent-doc-response-toc-io",
     "agent-doc-response-replay-io",
@@ -113,6 +115,7 @@ members = [
     "agent-doc-turn-scope-io",
     "agent-doc-turn-status-io",
     "agent-doc-watch-io",
+    "agent-doc-write-command-io",
     "agent-doc-write-converge-io",
     "agent-doc-write-ipc-io",
     "agent-doc-supervisor",
@@ -166,6 +169,7 @@ agent-doc-capture-io = { path = "agent-doc-capture-io", version = "0.34.67" }
 agent-doc-claim-io = { path = "agent-doc-claim-io", version = "0.34.67" }
 agent-doc-codex-hook-io = { path = "agent-doc-codex-hook-io", version = "0.34.67" }
 agent-doc-compact-io = { path = "agent-doc-compact-io", version = "0.34.67" }
+agent-doc-commit-io = { path = "agent-doc-commit-io", version = "0.34.67" }
 agent-doc-config = { path = "agent-doc-config", version = "0.34.67" }
 agent-doc-controller = { path = "agent-doc-controller", version = "0.34.67" }
 agent-doc-controller-io = { path = "agent-doc-controller-io", version = "0.34.67" }
@@ -212,6 +216,7 @@ agent-doc-owner-pane-io = { path = "agent-doc-owner-pane-io", version = "0.34.67
 agent-doc-process-owner-io = { path = "agent-doc-process-owner-io", version = "0.34.67" }
 agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.67" }
 agent-doc-plugin-owner = { path = "agent-doc-plugin-owner", version = "0.34.67" }
+agent-doc-preflight-io = { path = "agent-doc-preflight-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "agent-doc-project-config-io", version = "0.34.67" }
 agent-doc-project-root-io = { path = "agent-doc-project-root-io", version = "0.34.67" }
 agent-doc-prompt-context = { path = "agent-doc-prompt-context", version = "0.34.67" }
@@ -254,6 +259,7 @@ agent-doc-turn-executor-tmux = { path = "agent-doc-turn-executor-tmux", version 
 agent-doc-turn-scope-io = { path = "agent-doc-turn-scope-io", version = "0.34.67" }
 agent-doc-turn-status-io = { path = "agent-doc-turn-status-io", version = "0.34.67" }
 agent-doc-watch-io = { path = "agent-doc-watch-io", version = "0.34.67" }
+agent-doc-write-command-io = { path = "agent-doc-write-command-io", version = "0.34.67" }
 agent-doc-write-converge-io = { path = "agent-doc-write-converge-io", version = "0.34.67" }
 agent-doc-write-ipc-io = { path = "agent-doc-write-ipc-io", version = "0.34.67" }
 agent-doc-workflow = { path = "agent-doc-workflow", version = "0.34.67" }

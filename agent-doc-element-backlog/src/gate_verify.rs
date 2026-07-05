@@ -16,7 +16,7 @@
 //! touching the `[/<gate_type>]` checkbox grammar:
 //!
 //! ```text
-//! - [/] [#saev] early-ack ... <!-- gate-verify verify="early_ack_pending" disproof="false ack-timeout" set_at="1749526200" -->
+//! - [/] [#saev] early receipt ... <!-- gate-verify verify="early_receipt_accepted" disproof="false receipt-timeout" set_at="1749526200" -->
 //! ```
 //!
 //! Only markers emitted **at or after** `set_at` count, so a stale pre-gate
@@ -38,7 +38,7 @@
 //! formatting, which wraps strings in double quotes — so the scan strips
 //! double-quoted spans from each message before matching. Structured marker
 //! emissions (`[claim] cross-session-reject pane_id=...`,
-//! `[ipc-socket] early_ack_pending ...`, `[s760] clear-decision ...`) are
+//! `[ipc-socket] early_receipt_accepted ...`, `[s760] clear-decision ...`) are
 //! plain unquoted message text and must stay that way to remain provable. The
 //! built-in `s760_clear_decision_clear_true` verifier is stricter than a
 //! substring: it accepts only anchored `[<epoch>] [s760] clear-decision ...`
@@ -493,8 +493,8 @@ mod tests {
     #[test]
     fn parse_ops_line_extracts_epoch_and_message() {
         assert_eq!(
-            parse_ops_line("[1749526200] early_ack_pending emitted"),
-            Some((1749526200, "early_ack_pending emitted"))
+            parse_ops_line("[1749526200] early_receipt_accepted emitted"),
+            Some((1749526200, "early_receipt_accepted emitted"))
         );
         assert_eq!(parse_ops_line("no bracket"), None);
         assert_eq!(parse_ops_line("[notnum] x"), None);
@@ -503,15 +503,15 @@ mod tests {
     #[test]
     fn scan_provable_when_marker_after_gate() {
         let pred = GatePredicate {
-            verify: Some("early_ack_pending".to_string()),
+            verify: Some("early_receipt_accepted".to_string()),
             disproof: None,
             set_at: Some(100),
         };
-        let log = "[90] early_ack_pending stale\n[150] early_ack_pending emitted\n";
+        let log = "[90] early_receipt_accepted stale\n[150] early_receipt_accepted emitted\n";
         assert_eq!(
             scan_ops_log(&pred, log),
             VerifyOutcome::Provable {
-                marker: "early_ack_pending".to_string(),
+                marker: "early_receipt_accepted".to_string(),
                 at: 150
             }
         );
@@ -520,11 +520,11 @@ mod tests {
     #[test]
     fn scan_ignores_marker_before_gate_time() {
         let pred = GatePredicate {
-            verify: Some("early_ack_pending".to_string()),
+            verify: Some("early_receipt_accepted".to_string()),
             disproof: None,
             set_at: Some(200),
         };
-        let log = "[150] early_ack_pending emitted\n";
+        let log = "[150] early_receipt_accepted emitted\n";
         assert_eq!(scan_ops_log(&pred, log), VerifyOutcome::Pending);
     }
 
@@ -705,11 +705,11 @@ mod tests {
     #[test]
     fn annotation_round_trips_with_spaces() {
         let pred = GatePredicate {
-            verify: Some("early_ack_pending".to_string()),
-            disproof: Some("false ack-timeout".to_string()),
+            verify: Some("early_receipt_accepted".to_string()),
+            disproof: Some("false receipt-timeout".to_string()),
             set_at: Some(1749526200),
         };
-        let text = format!("early-ack live verify {}", render_annotation(&pred));
+        let text = format!("early receipt live verify {}", render_annotation(&pred));
         let parsed = parse_gate_predicate(&text).unwrap();
         assert_eq!(parsed, pred);
     }
@@ -766,10 +766,10 @@ mod tests {
     #[test]
     fn parse_predicate_spec_strips_ops_log_prefix() {
         let pred = parse_predicate_spec(
-            "verify=ops_log:early_ack_pending;disproof=ops_log:false ack-timeout",
+            "verify=ops_log:early_receipt_accepted;disproof=ops_log:false receipt-timeout",
         );
-        assert_eq!(pred.verify.as_deref(), Some("early_ack_pending"));
-        assert_eq!(pred.disproof.as_deref(), Some("false ack-timeout"));
+        assert_eq!(pred.verify.as_deref(), Some("early_receipt_accepted"));
+        assert_eq!(pred.disproof.as_deref(), Some("false receipt-timeout"));
         assert_eq!(pred.set_at, None);
     }
 

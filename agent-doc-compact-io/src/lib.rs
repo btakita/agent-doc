@@ -161,7 +161,7 @@ struct TestCompactRuntimeEffects;
 #[cfg(test)]
 impl CompactRuntimeEffects for TestCompactRuntimeEffects {
     fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome> {
-        let outcome = agent_doc_orchestration::git::commit_with_outcome(file)?;
+        let outcome = agent_doc_commit_io::commit_with_outcome(file)?;
         Ok(CompactCommitOutcome {
             did_commit: outcome.did_commit,
             vcs_refresh_signaled: outcome.vcs_refresh_signaled,
@@ -169,7 +169,7 @@ impl CompactRuntimeEffects for TestCompactRuntimeEffects {
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_orchestration::write::atomic_write_pub(file, content)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
     fn try_editor_converge(
@@ -180,7 +180,7 @@ impl CompactRuntimeEffects for TestCompactRuntimeEffects {
         reason: &str,
     ) -> Result<bool> {
         agent_doc_write_converge_io::try_editor_converge(
-            &agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             target_content,
             source_content,
@@ -3068,7 +3068,10 @@ mod tests {
                     let _ = std::fs::write(file_path, &content);
                     record_compact_lazily_receipt(Path::new(file_path), patch_id, &content)?;
                 }
-                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                )
             });
         })
     }
@@ -3114,7 +3117,10 @@ mod tests {
                                 &content,
                             );
                         });
-                        Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                        Some(
+                            serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                                .to_string(),
+                        )
                     }
                     _ => {
                         // Apply the convergence patch to the buffer only (no disk write).
@@ -3145,7 +3151,10 @@ mod tests {
                                 &content,
                             )?;
                         }
-                        Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                        Some(
+                            serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                                .to_string(),
+                        )
                     }
                 }
             });

@@ -222,36 +222,31 @@ use fs2::FileExt;
 use std::cell::RefCell;
 use std::fs::OpenOptions;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[cfg(test)]
 use agent_doc_document::write_normalization::{
-    SplicePendingComponentWarning, splice_pending_component,
-};
-use agent_doc_document::write_normalization::{
-    cleanup_resolved_backlog_prompts_after_response, count_code_fence_openings,
-    latest_response_block_missing_from_current, lift_pending_from_exchange,
-    splice_response_block_into_current_exchange, strip_boundary_for_dedup,
+    SplicePendingComponentWarning, count_code_fence_openings, splice_pending_component,
+    strip_boundary_for_dedup,
 };
 use agent_doc_document_realtime::write_policy::{
     reconcile_visible_write, response_already_in_current,
 };
 pub(crate) use agent_doc_document_realtime_io::{
-    VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS, guard_visible_write_idle_and_current,
-    guard_visible_write_idle_current_or_target, guard_visible_write_reconcile_with_target,
+    VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS, guard_visible_write_idle_current_or_target,
+    guard_visible_write_reconcile_with_target,
 };
 #[cfg(test)]
 use agent_doc_element::element;
 use agent_doc_element_backlog_io::backlog_cmd;
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,
-    repair_response_precedes_prompt_in_exchange as repair_response_prompt_order_in_exchange,
     response_precedes_prompt_in_exchange, strip_prompt_prefix_from_response_body_first_lines,
 };
 use agent_doc_queue::queue_consume::{
     queue_consumption_allowed_for_response, queue_targeted_completion_id_for_current_head,
 };
-use agent_doc_queue_io::queue_consume::{self, QueueConsumeWriteEffects, QueueConsumptionOutcome};
+use agent_doc_queue_io::queue_consume::{self, QueueConsumptionOutcome};
 use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 use agent_doc_workflow::session_cycle::{
     FinalizeRerunCommand, compact_command_hint, finalize_rerun_command_base,
@@ -260,114 +255,22 @@ use agent_doc_workflow::session_cycle::{
 };
 
 use agent_doc_element_exchange_io::DuplicatePromptRepairOptions;
-use agent_doc_flow::types::FlowOutcome;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_template as template;
-use agent_doc_template::structure_guard::TemplateStructureGuardReason;
-use agent_doc_template_io::log_template_structure_guard_event;
+#[cfg(test)]
+use agent_doc_template_io::normalize_template_structure_or_fail;
+use agent_doc_template_io::{
+    log_duplicate_prompt_residue_guard, normalize_template_structure_or_fail_preserving,
+};
 
 use agent_doc_template::stale_baseline::{
     exchange_append_patch_can_rebase_to_head, is_stale_baseline, patch_touches_exchange,
 };
-use agent_doc_turn::response_replay::{dedupe_responses, response_materialized_in_content};
+use agent_doc_turn::response_replay::response_materialized_in_content;
+use agent_doc_write_command_io::{CommandOptions, CommitMode, TemplateApplyOptions};
 
 thread_local! {
     static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
-}
-
-#[derive(Clone, Debug)]
-pub struct CommandOptions {
-    pub file: PathBuf,
-    pub baseline_file: Option<PathBuf>,
-    pub is_template: bool,
-    pub is_stream: bool,
-    pub is_ipc: bool,
-    pub force_disk: bool,
-    pub origin: Option<String>,
-    pub pending_add: Vec<String>,
-    pub pending_add_to: Vec<String>,
-    pub pending_add_gated: Vec<String>,
-    /// `#ah0s`: repeated `<id> <text>` pairs — insert after the anchor id.
-    pub pending_add_after: Vec<String>,
-    /// `#ah0s`: repeated `<id> <text>` pairs — insert before the anchor id.
-    pub pending_add_before: Vec<String>,
-    /// `#ah0s`: tail-insert items (`--pending-add-back` / `--pending-append`).
-    pub pending_add_back: Vec<String>,
-    pub icebox_add: Vec<String>,
-    /// Repeated `<id> <text>` pairs — insert after the anchor id in `agent:icebox`.
-    pub icebox_add_after: Vec<String>,
-    /// Repeated `<id> <text>` pairs — insert before the anchor id in `agent:icebox`.
-    pub icebox_add_before: Vec<String>,
-    /// Tail-insert items into `agent:icebox`.
-    pub icebox_add_back: Vec<String>,
-    /// Edit an icebox item: `id=new text` (repeatable).
-    pub icebox_edit: Vec<String>,
-    /// Clear all icebox items.
-    pub icebox_clear: bool,
-    /// Reorder icebox items by comma-separated hash ids.
-    pub icebox_reorder: Option<String>,
-    pub pending_done: Vec<String>,
-    pub pending_edit: Vec<String>,
-    pub pending_clear: bool,
-    pub pending_reorder: Option<String>,
-    pub pending_gate: Vec<String>,
-    pub pending_ungate: Vec<String>,
-    pub pending_resolve_gate: Vec<String>,
-    pub pending_set_gate_type: Vec<String>,
-    pub pending_set_verify: Vec<String>,
-    pub review_add: Vec<String>,
-    pub review_edit: Vec<String>,
-    /// `#reviewrm`: ids to delete from `agent:review` (clears stale/duplicate
-    /// entries, including same-id collisions, without an ambiguous edit-by-id).
-    pub review_remove: Vec<String>,
-    /// `#reviewrm`: ids to resolve out of `agent:review` into `agent:done`.
-    pub review_resolve: Vec<String>,
-    /// Queue-head completion ids proven by the response/route but not backed by
-    /// a `pending` mutation such as `--done`.
-    pub queue_completion_ids: Vec<String>,
-    pub allow_replace_pending: bool,
-    pub pending_only: bool,
-    pub status: Option<String>,
-    /// Optional CLI override for the agent-doc lint gate. `None` means
-    /// "no CLI override; use frontmatter/config/default precedence".
-    pub lint_override: Option<agent_doc_frontmatter::lint::LintCliMode>,
-    /// Cross-repo sibling commits to run after a successful session-doc commit.
-    /// Must align positionally with `commit_sibling_message`. Empty vector means
-    /// "no sibling commits".
-    pub commit_sibling: Vec<PathBuf>,
-    /// Commit message for each `commit_sibling` entry (same length, same order).
-    pub commit_sibling_message: Vec<String>,
-}
-
-impl CommandOptions {
-    pub fn has_pending_mutation(&self) -> bool {
-        !self.pending_add.is_empty()
-            || !self.pending_add_to.is_empty()
-            || !self.pending_add_gated.is_empty()
-            || !self.pending_add_after.is_empty()
-            || !self.pending_add_before.is_empty()
-            || !self.pending_add_back.is_empty()
-            || !self.icebox_add.is_empty()
-            || !self.icebox_add_after.is_empty()
-            || !self.icebox_add_before.is_empty()
-            || !self.icebox_add_back.is_empty()
-            || !self.icebox_edit.is_empty()
-            || self.icebox_clear
-            || self.icebox_reorder.is_some()
-            || !self.pending_done.is_empty()
-            || !self.pending_edit.is_empty()
-            || self.pending_clear
-            || self.pending_reorder.is_some()
-            || !self.pending_gate.is_empty()
-            || !self.pending_ungate.is_empty()
-            || !self.pending_resolve_gate.is_empty()
-            || !self.pending_set_gate_type.is_empty()
-            || !self.pending_set_verify.is_empty()
-            || !self.review_add.is_empty()
-            || !self.review_edit.is_empty()
-            || !self.review_remove.is_empty()
-            || !self.review_resolve.is_empty()
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -395,13 +298,6 @@ fn pending_write_flags(flags: &WriteFlags) -> agent_doc_session_check_io::Pendin
         force_disk: flags.force_disk,
         rerun_command_base: flags.rerun_command_base.clone(),
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CommitMode {
-    None,
-    BestEffort,
-    Required,
 }
 
 pub(crate) const EMPTY_RESPONSE_ERROR: &str = "empty response — nothing to write";
@@ -734,7 +630,7 @@ fn resolve_commit_mode(
     Ok(CommitMode::BestEffort)
 }
 
-pub fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
+fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
     if agent_doc_diff::detect_exchange_compaction_request(diff_text) {
         anyhow::bail!(
             "bare `compact exchange` directive detected in the current diff; close this turn \
@@ -821,95 +717,12 @@ fn consume_queue_prompts_for_done_ids_closeout(
     }
 }
 
-#[doc(hidden)]
-pub struct QueueConsumeWritebackEffects;
-
-#[doc(hidden)]
-pub static QUEUE_CONSUME_WRITEBACK_EFFECTS: QueueConsumeWritebackEffects =
-    QueueConsumeWritebackEffects;
-
-pub struct WriteConvergenceEffects;
-
-pub static WRITE_CONVERGENCE_EFFECTS: WriteConvergenceEffects = WriteConvergenceEffects;
-
-impl agent_doc_write_converge_io::EditorConvergenceEffects for WriteConvergenceEffects {
-    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        atomic_write_pub(file, content)
-    }
-
-    fn guard_visible_write_idle_and_current(
-        &self,
-        file: &Path,
-        source: &str,
-        expected_current: &str,
-    ) -> Result<()> {
-        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
-            file,
-            source,
-            expected_current,
-        )
-    }
-
-    fn atomic_write_if_current(
-        &self,
-        file: &Path,
-        content: &str,
-        expected_current: &str,
-        source: &str,
-    ) -> Result<()> {
-        atomic_write_if_current_pub(file, content, expected_current, source)
-    }
-
-    fn cycle_already_committed(&self, file: &Path) -> Option<String> {
-        agent_doc_flow_io::closeout::cycle_already_committed(file)
-    }
-
-    fn log_file_ipc_already_committed(&self, file: &Path, _cycle_id: &str) {
-        log_closeout_guard(
-            file,
-            agent_doc_flow::types::FlowStage::TerminalGuard,
-            agent_doc_flow::types::FlowOutcome::Blocked,
-            agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
-        );
-    }
-
-    fn cleanup_fallback_patch_files(&self, file: &Path) {
-        agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
-    }
-
-    fn log_file_ipc_proof_failure(
-        &self,
-        file: &Path,
-        patch_id: Option<&str>,
-        invariant: &str,
-        recovery: &str,
-        detail: &str,
-    ) {
-        log_ipc_proof_failure(file, "file_ipc", patch_id, invariant, recovery, detail);
-    }
-}
-
-impl QueueConsumeWriteEffects for QueueConsumeWritebackEffects {
-    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        atomic_write(file, content)
-    }
-
-    fn converge_document_or_disk(
-        &self,
-        file: &Path,
-        target_content: &str,
-        source_content: &str,
-        reason: &str,
-    ) -> Result<()> {
-        agent_doc_write_converge_io::converge_document_or_disk(
-            &WRITE_CONVERGENCE_EFFECTS,
-            file,
-            target_content,
-            source_content,
-            reason,
-        )
-    }
-}
+pub use agent_doc_document_realtime_io::{
+    RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS as QUEUE_CONSUME_WRITEBACK_EFFECTS,
+    RUNTIME_WRITE_CONVERGENCE_EFFECTS as WRITE_CONVERGENCE_EFFECTS,
+    RuntimeQueueConsumeWritebackEffects as QueueConsumeWritebackEffects,
+    RuntimeWriteConvergenceEffects as WriteConvergenceEffects,
+};
 
 struct WriteStatusEffects;
 
@@ -1324,13 +1137,13 @@ fn run_command_inner(
                 if force_disk {
                     agent_doc_preflight_io::run_pending_maintenance_force_disk(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 } else {
                     agent_doc_preflight_io::run_pending_maintenance(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 }
@@ -1531,13 +1344,13 @@ fn run_command_inner(
                 if force_disk {
                     agent_doc_preflight_io::run_pending_maintenance_force_disk(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 } else {
                     agent_doc_preflight_io::run_pending_maintenance(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 }
@@ -1808,7 +1621,10 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                     }
                     return Ok(());
                 }
-                match commit_via_closeout_effects(file) {
+                match agent_doc_flow_io::closeout::CloseoutEffects::commit(
+                    &crate::closeout_effects(),
+                    file,
+                ) {
                     // `#staleinmem` — record what we just committed so a later
                     // out-of-band disk correction is detectable at the next barrier.
                     Ok(_) => agent_doc_crdt_relay_io::record_committed_baseline_for_file(file),
@@ -1846,77 +1662,6 @@ fn log_closeout_guard(
     reason: agent_doc_turn::closeout_guard::CloseoutGuardReason,
 ) {
     agent_doc_flow_io::closeout::log_closeout_guard_event(file, stage, outcome, reason);
-}
-
-pub(crate) fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
-    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
-        return Ok(false);
-    };
-    let current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    let Some(response_block) = latest_response_block_missing_from_current(&head_content, &current)
-    else {
-        return Ok(false);
-    };
-    let Some(recovered) = splice_response_block_into_current_exchange(&current, &response_block)
-    else {
-        return Ok(false);
-    };
-    if recovered == current {
-        return Ok(false);
-    }
-    eprintln!(
-        "[write] empty response stdin; merged latest committed HEAD response back into visible document for {}",
-        file.display()
-    );
-    guard_visible_write_idle_and_current(file, "recover_committed_head_response", &current)?;
-    atomic_write(file, &recovered)?;
-    agent_doc_snapshot_io::save(file, &recovered, agent_doc_ops_log_io::log_op)?;
-    commit_via_closeout_effects(file)?;
-    Ok(true)
-}
-
-/// When `agent-doc write --commit <FILE>` runs with empty stdin and the
-/// working tree differs from HEAD only by the deletions a fresh
-/// `agent-doc dedupe <FILE>` would produce against HEAD, accept that as a
-/// recoverable closeout: align the snapshot to the current file and commit
-/// through the normal binary path.
-///
-/// Why: when a finalize cycle produces a duplicate response (for example the
-/// IPC retry / file-IPC fallback path adopting a response already in the live
-/// file), the user runs `agent-doc dedupe` to remove the duplicate. The
-/// follow-up `agent-doc write --commit` (no stdin) used to bail with
-/// "empty response — nothing to write", forcing a manual `git commit` and
-/// defeating the binary-owned closeout contract. This branch keeps the
-/// closeout binary-owned by recognizing the dedupe-only drift signature.
-pub(crate) fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
-    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
-        return Ok(false);
-    };
-    let current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    if current == head_content {
-        return Ok(false);
-    }
-    let dedupe_of_head = dedupe_responses(&head_content);
-    if dedupe_of_head == head_content {
-        // HEAD has no duplicates — drift is something else, not a dedupe outcome.
-        return Ok(false);
-    }
-    if dedupe_of_head != current {
-        return Ok(false);
-    }
-    eprintln!(
-        "[write] empty response stdin; current file matches dedupe(HEAD) for {} — committing dedupe-only working-tree drift through the binary closeout path",
-        file.display()
-    );
-    agent_doc_snapshot_io::save(file, &current, agent_doc_ops_log_io::log_op)?;
-    commit_via_closeout_effects(file)?;
-    Ok(true)
-}
-
-fn commit_via_closeout_effects(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::CloseoutEffects::commit(&crate::closeout_effects(), file)
 }
 
 fn ipc_response_materialized_or_fallback(
@@ -1965,141 +1710,6 @@ fn log_partial_response_materialization_for_retry(
     response: &str,
 ) -> Result<()> {
     agent_doc_template_io::log_partial_response_materialization_for_retry(file, source, response)
-}
-
-pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) -> String {
-    match lift_pending_from_exchange(content) {
-        Some(repaired) => {
-            eprintln!(
-                "[write] repaired: lifted agent:pending out of agent:exchange for {}",
-                file.display()
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!("lift_pending_from_exchange file={}", file.display()),
-            );
-            repaired
-        }
-        None => content.to_string(),
-    }
-}
-
-fn log_duplicate_prompt_residue_guard(file: &Path) {
-    log_template_structure_guard_event(
-        file,
-        TemplateStructureGuardReason::DuplicatePromptResidue,
-        FlowOutcome::FailedClosed,
-        agent_doc_ops_log_io::log_op,
-    );
-}
-
-pub fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
-    normalize_template_structure_or_fail_preserving(content, file, None)
-}
-
-pub fn normalize_template_structure_or_fail_preserving(
-    content: &str,
-    file: &Path,
-    preserve_doc: Option<&str>,
-) -> Result<String> {
-    let lifted = lift_pending_from_exchange_safe(content, file);
-    // Defense-in-depth: merge any duplicate exchange openers that may have
-    // survived the patch application phase (e.g., via CRDT/git merge).
-    let deduped_openers = {
-        let mut result = lifted;
-        while let Some(merged) = agent_doc_template::repair_duplicate_exchange_opener(&result)? {
-            eprintln!("[write] normalize_template_structure: merged duplicate exchange opener");
-            result = merged;
-        }
-        result
-    };
-    let (normalized, _) =
-        agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
-            &agent_doc_element::element::strip_backlog_patch_attr(&deduped_openers),
-            file,
-            DuplicatePromptRepairOptions::new("structure").preserving(preserve_doc),
-            agent_doc_ops_log_io::log_op,
-            log_duplicate_prompt_residue_guard,
-        )?;
-    match agent_doc_template::guard_no_conversation_tail_outside_exchange(&normalized) {
-        Ok(()) => Ok(normalized),
-        Err(err)
-            if err.chain().any(|cause| {
-                cause
-                    .to_string()
-                    .contains("closing marker <!-- /agent:exchange --> without matching open")
-            }) =>
-        {
-            if let Some(repaired) =
-                agent_doc_template::repair_duplicate_exchange_close_scaffold(&normalized)?
-            {
-                log_template_structure_guard_event(
-                    file,
-                    TemplateStructureGuardReason::DuplicateScaffoldDropped,
-                    FlowOutcome::Completed,
-                    agent_doc_ops_log_io::log_op,
-                );
-                let (repaired, _) =
-                    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
-                        &repaired,
-                        file,
-                        DuplicatePromptRepairOptions::new("duplicate-scaffold repair")
-                            .preserving(preserve_doc),
-                        agent_doc_ops_log_io::log_op,
-                        log_duplicate_prompt_residue_guard,
-                    )?;
-                agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
-                    .context(format!(
-                        "template structure guard failed for {} after duplicate-scaffold repair",
-                        file.display()
-                    ))?;
-                return Ok(repaired);
-            }
-            if agent_doc_template::repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
-                .is_some()
-            {
-                log_template_structure_guard_event(
-                    file,
-                    TemplateStructureGuardReason::MixedDuplicateScaffoldTail,
-                    FlowOutcome::FailedClosed,
-                    agent_doc_ops_log_io::log_op,
-                );
-                anyhow::bail!(
-                    "mixed duplicate scaffold tail for {}: live conversation text is interleaved with duplicated template scaffold; refusing automatic closeout repair",
-                    file.display()
-                );
-            }
-            if let Some(repaired) =
-                agent_doc_template::repair_duplicate_exchange_close_tail(&normalized)?
-            {
-                log_template_structure_guard_event(
-                    file,
-                    TemplateStructureGuardReason::DuplicateCloseTailMoved,
-                    FlowOutcome::Completed,
-                    agent_doc_ops_log_io::log_op,
-                );
-                let (repaired, _) =
-                    agent_doc_element_exchange_io::repair_duplicate_prompt_artifacts_with_log(
-                        &repaired,
-                        file,
-                        DuplicatePromptRepairOptions::new("duplicate-close repair")
-                            .preserving(preserve_doc),
-                        agent_doc_ops_log_io::log_op,
-                        log_duplicate_prompt_residue_guard,
-                    )?;
-                agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
-                    .context(format!(
-                        "template structure guard failed for {} after duplicate-close repair",
-                        file.display()
-                    ))?;
-                return Ok(repaired);
-            }
-            Err(err)
-                .with_context(|| format!("template structure guard failed for {}", file.display()))
-        }
-        Err(err) => Err(err)
-            .with_context(|| format!("template structure guard failed for {}", file.display())),
-    }
 }
 
 /// Minimum byte count for exchange content before the shrink guard triggers.
@@ -2402,9 +2012,12 @@ fn normalize_final_template_content(
             )?;
         }
     }
-    if let Some(repaired) =
-        repair_response_prompt_order_for_file(&normalized, response, file, Some(base))?
-    {
+    if let Some(repaired) = agent_doc_template_io::repair_response_prompt_order_for_file(
+        &normalized,
+        response,
+        file,
+        Some(base),
+    )? {
         normalized = repaired;
         normalized = normalize_template_structure_or_fail_preserving(
             &normalized,
@@ -2427,34 +2040,9 @@ fn normalize_final_template_content(
     Ok(normalized)
 }
 
-pub(crate) fn repair_response_prompt_order_for_file(
-    doc: &str,
-    response: Option<&str>,
-    file: &Path,
-    prompt_must_exist_in: Option<&str>,
-) -> Result<Option<String>> {
-    let repaired = repair_response_prompt_order_in_exchange(doc, response, prompt_must_exist_in)
-        .with_context(|| {
-            format!(
-                "failed to parse {} for response/prompt order repair",
-                file.display()
-            )
-        })?;
-    if repaired.is_some() {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "response_prompt_order_repaired file={} before_commit=true",
-                file.display()
-            ),
-        );
-    }
-    Ok(repaired)
-}
-
 /// Atomic write: write to temp file then rename. Public for use by compact.
 pub fn atomic_write_pub(path: &Path, content: &str) -> Result<()> {
-    atomic_write(path, content)
+    agent_doc_document_realtime_io::atomic_write_through_authority(path, content)
 }
 
 /// Atomic write guarded by the same visible-buffer proof used by response writes.
@@ -2464,98 +2052,16 @@ pub fn atomic_write_if_current_pub(
     expected_current: &str,
     source: &str,
 ) -> Result<()> {
-    guard_visible_write_idle_and_current(path, source, expected_current)?;
-    atomic_write(path, content)
+    agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+        path,
+        content,
+        expected_current,
+        source,
+    )
 }
 
-/// `#codefence-strip`: best-effort detection log for code-fence loss during
-/// agent-doc document writes. Reads the existing file before the write, counts
-/// opening fence lines (``` or ~~~ at line start after optional whitespace),
-/// and logs an `ops.log` marker when the new content carries strictly fewer
-/// fence openings than the old content. The marker is a detection signal for
-/// the operator, not a hard assertion — a deliberate edit that removes a code
-/// block also fires it. Fails open silently on any IO error.
-fn log_fence_count_drop_if_any(path: &Path, new_content: &str) {
-    let Some(old_content) = std::fs::read_to_string(path).ok() else {
-        return;
-    };
-    let old_fences = count_code_fence_openings(&old_content);
-    let new_fences = count_code_fence_openings(new_content);
-    if new_fences < old_fences {
-        agent_doc_ops_log_io::log_op(
-            path,
-            &format!(
-                "fence_count_dropped file={} old_fences={} new_fences={} old_len={} new_len={}",
-                path.display(),
-                old_fences,
-                new_fences,
-                old_content.len(),
-                new_content.len(),
-            ),
-        );
-    }
-}
-
-/// Atomic write through the 08b document write-authority end state
-/// ([`crate::write_authority`]). Every editor-visible document `.md` write
-/// serializes through the session actor's single ordered write queue
-/// (`agent-doc-queue-io`), so a supervisor write and an agent-finalize write for
-/// the same document can never interleave. This was the `#pcpc5cut` migration
-/// (gated `off → shadow → dual-write → authority → removed`); the cutover is complete
-/// and the `AGENT_DOC_WRITE_AUTHORITY` flag + bare-write bypass were removed, so
-/// routing is now unconditional.
-///
-/// `.agent-doc/` sidecar/snapshot writes and writes already executing on the
-/// session-actor owner thread take the raw path directly (the latter prevents a
-/// re-entrant mailbox deadlock).
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
-    if agent_doc_document_realtime::write_authority::is_visible_document(path)
-        && !agent_doc_document_realtime::write_authority::within_owner_scope()
-    {
-        log_fence_count_drop_if_any(path, content);
-        let base_dir = agent_doc_project_root_io::project_root_containing(path)
-            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
-        let file = path.to_string_lossy().to_string();
-        let result = agent_doc_queue_io::write_queue::serialized_atomic_write_with(
-            &crate::SESSION_ACTOR_WRITE_QUEUE,
-            &base_dir,
-            &file,
-            path,
-            content,
-            crate::write::atomic_write_pub,
-        );
-        if result.is_ok() {
-            // Log after the write lands so the document path canonicalizes
-            // (ops.log root resolution requires the file to exist).
-            agent_doc_ops_log_io::log_op(
-                path,
-                &format!(
-                    "write_authority action=routed transport=write_queue len={} hash={}",
-                    content.len(),
-                    agent_doc_hash::content_hash(content)
-                ),
-            );
-        }
-        return result;
-    }
-
-    atomic_write_raw(path, content)
-}
-
-/// The raw atomic disk write: write to a temp file then rename, recording
-/// write-provenance for editor-visible documents. This is the gate ladder's
-/// `off` path and the path taken inside the ordered write queue.
-fn atomic_write_raw(path: &Path, content: &str) -> Result<()> {
-    use std::io::Write;
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    tmp.write_all(content.as_bytes())
-        .with_context(|| "failed to write temp file")?;
-    tmp.persist(path)
-        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
-    record_document_write_provenance(path, content);
-    Ok(())
+    agent_doc_document_realtime_io::atomic_write_through_authority(path, content)
 }
 
 /// Record write-provenance for agent-doc's own disk write to a session document
@@ -2569,29 +2075,7 @@ fn atomic_write_raw(path: &Path, content: &str) -> Result<()> {
 /// disk change from any agent-doc writer is positively attributed instead of
 /// inferred from the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic.
 pub fn record_document_write_provenance(path: &Path, content: &str) {
-    if !agent_doc_document_realtime::write_authority::is_visible_document(path) {
-        return;
-    }
-    let canonical = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    let write_id = uuid::Uuid::new_v4().to_string();
-    let hash = agent_doc_hash::content_hash(content);
-    if let Err(e) = agent_doc_debounce::record_write_provenance(
-        &canonical,
-        content.len(),
-        &hash,
-        &write_id,
-        "agent",
-    ) {
-        eprintln!(
-            "[write] WARNING: failed to record write provenance for {}: {}",
-            path.display(),
-            e
-        );
-    }
+    agent_doc_document_realtime_io::record_document_write_provenance(path, content);
 }
 
 #[cfg(test)]
@@ -3021,7 +2505,7 @@ mod tests {
         fs::write(&doc, &source).unwrap();
         agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so the
         // non-force consume fails closed (protects the buffer) rather than taking
@@ -3076,7 +2560,7 @@ mod tests {
         fs::write(&doc, &source).unwrap();
         agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
@@ -3088,13 +2572,13 @@ mod tests {
                 if force_disk {
                     agent_doc_preflight_io::run_pending_maintenance_force_disk(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 } else {
                     agent_doc_preflight_io::run_pending_maintenance(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 }
@@ -3121,13 +2605,13 @@ mod tests {
                 if force_disk {
                     agent_doc_preflight_io::run_pending_maintenance_force_disk(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 } else {
                     agent_doc_preflight_io::run_pending_maintenance(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 }
@@ -3196,7 +2680,7 @@ mod tests {
         )
         .unwrap();
 
-        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
@@ -3208,13 +2692,13 @@ mod tests {
                 if force_disk {
                     agent_doc_preflight_io::run_pending_maintenance_force_disk(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 } else {
                     agent_doc_preflight_io::run_pending_maintenance(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 }
@@ -3267,7 +2751,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&source), Some(&source)).unwrap();
         agent_doc_capture_io::capture_response(&doc, "Done.").unwrap();
 
-        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
@@ -3279,13 +2763,13 @@ mod tests {
                 if force_disk {
                     agent_doc_preflight_io::run_pending_maintenance_force_disk(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 } else {
                     agent_doc_preflight_io::run_pending_maintenance(
                         file,
-                        &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
                     )
                     .map(|_| ())
                 }
@@ -5482,7 +4966,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, visible, agent_doc_ops_log_io::log_op).unwrap();
 
         assert!(
-            recover_missing_committed_head_response(&doc).unwrap(),
+            agent_doc_repair_runtime_io::recover_missing_committed_head_response(&doc).unwrap(),
             "missing committed response should be recovered"
         );
 
@@ -5576,8 +5060,14 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
 
         assert!(
-            crate::repair::recover_empty_response_for_strict_closeout(&doc, true, false, false)
-                .unwrap(),
+            agent_doc_repair_io::recover_empty_response_for_strict_closeout(
+                crate::repair_coordinator_effects(),
+                &doc,
+                true,
+                false,
+                Some(false),
+            )
+            .unwrap(),
             "strict empty response recovery should continue past stale preflight repair"
         );
 

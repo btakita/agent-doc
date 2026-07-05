@@ -1714,7 +1714,9 @@ agent response
                 if let Some(full_content) = v.get("fullContent").and_then(|value| value.as_str()) {
                     record_lazily_visible_write_candidate(&listener_doc, patch_id, full_content);
                     listener_repair_payloads.lock().unwrap().push(v.clone());
-                    return Some(serde_json::json!({"type": "ack"}).to_string());
+                    return Some(
+                        serde_json::json!({"type": "receipt", "status": "applied"}).to_string(),
+                    );
                 }
 
                 let patches_empty = v
@@ -1735,10 +1737,12 @@ agent response
                     let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
                     record_lazily_visible_write_candidate(&listener_doc, patch_id, &repaired);
                     listener_repair_payloads.lock().unwrap().push(v.clone());
-                    return Some(serde_json::json!({"type": "ack"}).to_string());
+                    return Some(
+                        serde_json::json!({"type": "receipt", "status": "applied"}).to_string(),
+                    );
                 }
 
-                Some(serde_json::json!({"type": "ack"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             });
         });
         for _ in 0..100 {
@@ -2137,7 +2141,7 @@ Done.
                     let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
                     let _ = std::fs::write(&listener_doc, repaired);
                 }
-                Some(serde_json::json!({"type": "ack"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             });
         });
         for _ in 0..100 {
@@ -3124,7 +3128,7 @@ mod core_tests {
         let root_clone = dir.path().to_path_buf();
         let server = std::thread::spawn(move || {
             let _ = agent_doc_ipc_io::start_listener(&root_clone, |_msg| {
-                Some(r#"{"type":"ack","id":"x"}"#.to_string())
+                Some(r#"{"type":"receipt","status":"applied","id":"x"}"#.to_string())
             });
         });
         std::thread::sleep(std::time::Duration::from_millis(150));
@@ -3146,7 +3150,7 @@ mod core_tests {
         drop(server);
     }
     #[test]
-    fn degraded_latch_does_not_self_heal_when_listener_connects_without_ack() {
+    fn degraded_latch_does_not_self_heal_when_listener_connects_without_receipt() {
         // A wedged editor plugin can leave ipc.sock connectable while its accept
         // / apply path no longer returns acks. The degraded latch must not clear
         // on connect-only evidence; otherwise the next write re-enters the bad
@@ -3167,7 +3171,7 @@ mod core_tests {
 
         assert!(
             ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
-            "connectable but non-acking listener must remain degraded"
+            "connectable but non-receipting listener must remain degraded"
         );
         let marker = dir.path().join(".agent-doc/ipc-degraded").join(format!(
             "{}.json",
@@ -3175,12 +3179,12 @@ mod core_tests {
         ));
         assert!(
             marker.exists(),
-            "non-acking listener must not clear the degraded marker"
+            "non-receipting listener must not clear the degraded marker"
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("ipc_socket_degraded_self_heal_probe_failed")
-                && log.contains("IPC_ack_timeout"),
+                && log.contains("IPC_receipt_timeout"),
             "failed self-heal probe must be observable:\n{log}"
         );
 

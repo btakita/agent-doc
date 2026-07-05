@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use agent_doc_commit_io::commit;
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
-use agent_doc_orchestration::git::commit;
 use agent_doc_queue_io::queue_consume;
 
 #[cfg(test)]
@@ -68,11 +68,15 @@ mod th {
                     .and_then(|p| p.as_str())
                     .unwrap_or("unknown");
                 if let Some(status) = ack_status {
+                    let receipt_status = match status {
+                        "error" | "rejected" => "rejected",
+                        _ => "applied",
+                    };
                     return Some(
                         serde_json::json!({
-                            "type": "ack",
+                            "type": "receipt",
                             "id": patch_id,
-                            "status": status,
+                            "status": receipt_status,
                             "reason": "test_refresh_failed"
                         })
                         .to_string(),
@@ -115,7 +119,10 @@ mod th {
                             "test_socket_listener",
                         );
                 }
-                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                )
             });
             if let Err(err) = result {
                 eprintln!("[test] fake listener stopped: {err:#}");
@@ -1040,7 +1047,7 @@ Duplicate replay should stay live.
         fs::write(&pending, "in-flight").unwrap();
 
         agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
@@ -1970,7 +1977,7 @@ Duplicate replay should stay live.
     }
 
     #[test]
-    fn commit_blocks_already_current_noop_when_live_editor_buffer_ahead_of_disk() {
+    fn commit_ignores_live_buffer_projection_when_crdt_barrier_ready() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
@@ -2000,92 +2007,37 @@ Duplicate replay should stay live.
         )
         .unwrap();
 
-        let editor_visible = format!("{committed}\noperator edit accepted by editor only\n");
+        let editor_visible =
+            format!("{committed}\noperator edit projected by editor sidecar only\n");
         agent_doc_debounce::document_changed_with_content_for_editor(
             &doc.display().to_string(),
             &editor_visible,
             Some("jetbrains:test"),
         );
 
-        let err = commit(&doc).expect_err(
-            "HEAD-current closeout must fail closed while the live editor buffer is ahead of disk",
-        );
+        let did_commit =
+            commit(&doc).expect("live-buffer projection alone must not decide the commit barrier");
         assert!(
-            err.to_string().contains("live editor buffer"),
-            "error should identify the unresolved editor buffer:\n{err}"
+            !did_commit,
+            "HEAD-current closeout should close without a duplicate commit"
         );
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            agent_doc_turn::CyclePhase::ResponseCaptured,
-            "cycle must stay open until the live editor buffer reaches disk"
+            agent_doc_turn::CyclePhase::Committed,
+            "cycle should close when the CRDT barrier is ready"
         );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("commit_blocked_live_buffer_ahead_of_disk file="),
-            "blocked live-buffer closeout should be logged:\n{log}"
+            log.contains("commit_crdt_barrier_ready file=")
+                && log.contains("basis=already_current"),
+            "commit should be guarded by the CRDT barrier, not a live-buffer sidecar:\n{log}"
         );
         assert!(
-            !log.contains("commit_already_current file="),
-            "unflushed live editor buffer must not be recorded as an already-current closeout:\n{log}"
-        );
-    }
-
-    #[test]
-    fn live_buffer_materialized_insertions_allow_force_disk_snapshot_stage() {
-        let staged = concat!(
-            "<!-- agent:exchange -->\n",
-            "### Re: direct disk\n\n",
-            "Handled.\n",
-            "<!-- /agent:exchange -->\n",
-            "<!--\n",
-            "-->\n"
-        );
-        let editor = concat!(
-            "<!-- agent:exchange -->\n",
-            "<!-- /agent:exchange -->\n",
-            "<!--\n",
-            "operator prompt typed in editor\n",
-            "-->\n"
-        );
-        let file = concat!(
-            "<!-- agent:exchange -->\n",
-            "### Re: direct disk\n\n",
-            "Handled.\n",
-            "<!-- /agent:exchange -->\n",
-            "<!--\n",
-            "operator prompt typed in editor\n",
-            "-->\n"
-        );
-        let snapshot = agent_doc_debounce::LiveBufferSnapshot {
-            path: "session.md".to_string(),
-            len: editor.len(),
-            hash: agent_doc_hash::content_hash(editor),
-            timestamp_ms: 1,
-            edit_epoch: 1,
-            last_synced_epoch: 0,
-            state_vector_b64: None,
-            editor_id: Some("jetbrains:test".to_string()),
-            editor_kind: Some("jetbrains".to_string()),
-            editor_version: Some("test".to_string()),
-            capabilities: vec![agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY.to_string()],
-            content: Some(editor.to_string()),
-            no_unsaved_operator_edits: false,
-        };
-
-        assert!(
-            agent_doc_git_io::live_buffer_guard::live_buffer_insertions_are_materialized_in_file(
-                &snapshot, staged, file,
-            ),
-            "operator insertion is present in the visible file and can be left uncommitted"
-        );
-        assert!(
-            !agent_doc_git_io::live_buffer_guard::live_buffer_insertions_are_materialized_in_file(
-                &snapshot, staged, staged,
-            ),
-            "operator insertion missing from disk must still block"
+            !log.contains("commit_blocked_crdt_relay_pending file="),
+            "live-buffer projection alone must not block closeout:\n{log}"
         );
     }
 
@@ -2148,13 +2100,13 @@ Duplicate replay should stay live.
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("commit_live_buffer_ahead_of_disk_allowed file=")
+            log.contains("commit_crdt_barrier_ready file=")
                 && log.contains("basis=already_current"),
-            "already-current synced live-buffer allowance should be logged:\n{log}"
+            "already-current closeout should be guarded by the CRDT barrier, not a live-buffer sidecar:\n{log}"
         );
         assert!(
-            !log.contains("commit_blocked_live_buffer_ahead_of_disk file="),
-            "synced HEAD-equivalent live buffer must not block no-op closeout:\n{log}"
+            !log.contains("commit_blocked_crdt_relay_pending file="),
+            "detached CRDT barrier must not block no-op closeout:\n{log}"
         );
     }
 
@@ -2219,13 +2171,12 @@ Duplicate replay should stay live.
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("commit_live_buffer_ahead_of_disk_allowed file=")
-                && log.contains("reason=staged_snapshot_matches_synced_operator_buffer"),
-            "synced staged live-buffer allowance should be logged:\n{log}"
+            log.contains("commit_crdt_barrier_ready file=") && log.contains("basis=pre_stage"),
+            "staged snapshot commit should be guarded by the CRDT barrier, not a live-buffer sidecar:\n{log}"
         );
         assert!(
-            !log.contains("commit_blocked_live_buffer_ahead_of_disk file="),
-            "staged synced live buffer must not be blocked as stale disk:\n{log}"
+            !log.contains("commit_blocked_crdt_relay_pending file="),
+            "detached CRDT barrier must not block staged snapshot commit:\n{log}"
         );
         let _ = fs::remove_file(agent_doc_ipc_io::socket_path(root));
         drop(listener);
@@ -2272,7 +2223,7 @@ Duplicate replay should stay live.
 
         queue_consume::strike_answered_free_text_heads_at_commit_seam(
             &doc,
-            &agent_doc_orchestration::write::QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
         );
 
         let after = fs::read_to_string(&doc).unwrap();
@@ -2959,7 +2910,7 @@ Duplicate replay should stay live.
         fs::write(&doc, working).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -2999,7 +2950,7 @@ Duplicate replay should stay live.
         fs::write(&doc, &superset).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -3042,7 +2993,7 @@ Duplicate replay should stay live.
         // Working tree already equals HEAD (no edit).
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -3088,7 +3039,7 @@ Duplicate replay should stay live.
         fs::write(&doc, drifted).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -3139,7 +3090,7 @@ Duplicate replay should stay live.
         fs::write(&doc, corrupted).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -3206,7 +3157,7 @@ Duplicate replay should stay live.
         fs::write(&doc, drifted).unwrap();
 
         agent_doc_git_io::post_commit_cleanup::emit_postcommit_worktree_check(
-            &agent_doc_orchestration::git::POST_COMMIT_CLEANUP_EFFECTS,
+            &agent_doc_commit_io::POST_COMMIT_CLEANUP_EFFECTS,
             &doc,
         );
 
@@ -5069,7 +5020,7 @@ Compacted content:\n\
         let root_clone = root.to_path_buf();
         let server = thread::spawn(move || {
             agent_doc_ipc_io::start_listener(&root_clone, |_msg| {
-                Some(serde_json::json!({"type": "ack"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -5077,7 +5028,7 @@ Compacted content:\n\
 
         // Run reposition — should skip working tree because the listener is active.
         let changed = agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
@@ -5170,7 +5121,7 @@ Compacted content:\n\
 
         // Run reposition
         agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
@@ -5273,7 +5224,7 @@ Compacted content:\n\
             .unwrap();
 
         agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
@@ -5340,7 +5291,7 @@ Compacted content:\n\
             .unwrap();
 
         agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
-            &agent_doc_orchestration::git::BOUNDARY_REPOSITION_EFFECTS,
+            &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 

@@ -21,11 +21,11 @@ impl EditorConvergenceEffects for TestWriteConvergenceEffects {
         source: &str,
         expected_current: &str,
     ) -> Result<()> {
-        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
-            file,
-            source,
-            expected_current,
-        )
+        let current = std::fs::read_to_string(file).unwrap_or_default();
+        if current != expected_current {
+            anyhow::bail!("refusing {source} write: document changed before write");
+        }
+        Ok(())
     }
 
     fn atomic_write_if_current(
@@ -35,26 +35,20 @@ impl EditorConvergenceEffects for TestWriteConvergenceEffects {
         expected_current: &str,
         source: &str,
     ) -> Result<()> {
-        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
-            file,
-            source,
-            expected_current,
-        )?;
-        let current = std::fs::read_to_string(file).unwrap_or_default();
-        if current != expected_current {
-            anyhow::bail!("refusing {source} write: document changed before write");
-        }
+        self.guard_visible_write_idle_and_current(file, source, expected_current)?;
         super::atomic_write(file, content)
     }
 
-    fn cycle_already_committed(&self, file: &Path) -> Option<String> {
-        agent_doc_flow_io::closeout::cycle_already_committed(file)
+    fn cycle_already_committed(&self, _file: &Path) -> Option<String> {
+        None
     }
 
     fn log_file_ipc_already_committed(&self, _file: &Path, _cycle_id: &str) {}
 
-    fn cleanup_fallback_patch_files(&self, file: &Path) {
-        agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
+    fn cleanup_fallback_patch_files(&self, _file: &Path) {}
+
+    fn file_ipc_patch_rejected(&self, _file: &Path, _patch_id: &str) -> Option<String> {
+        None
     }
 
     fn log_file_ipc_proof_failure(
@@ -217,7 +211,10 @@ mod core_tests {
                             "test_visible_write_listener",
                         );
                 }
-                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                )
             });
         })
     }
@@ -320,7 +317,7 @@ mod core_tests {
 
         // The fake editor acks with the compacted content, mirroring a JB plugin
         // that applied the exchange `op:replace` and converged its buffer.
-        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
+        let _listener = agent_doc_test_support::start_live_prompt_drift_receipt_listener(
             dir.path(),
             compacted.clone(),
         );
@@ -366,7 +363,7 @@ mod core_tests {
         let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
+        let _listener = agent_doc_test_support::start_live_prompt_drift_receipt_listener(
             dir.path(),
             target.clone(),
         );
@@ -395,11 +392,12 @@ mod core_tests {
 
     #[test]
     fn queue_consume_socket_status_error_falls_back_to_proven_file_ipc() {
-        // A live editor socket can accept a patch, emit the early pending ack,
-        // then reject the terminal apply (`status:error`) because the editor is
-        // busy or the socket-side apply path lost its generation race. That must
-        // not authorize a raw disk write, but it should try the plugin-owned
-        // file-IPC queue in the same cycle and accept it only with visible-write.
+        // A live editor socket can accept a patch, emit the early accepted
+        // receipt, then reject the terminal apply (`status:rejected`) because
+        // the editor is busy or the socket-side apply path lost its generation
+        // race. That must not authorize a raw disk write, but it should try the
+        // plugin-owned file-IPC queue in the same cycle and accept it only with
+        // visible-write.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -432,9 +430,9 @@ mod core_tests {
                     .unwrap_or("unknown");
                 Some(
                     serde_json::json!({
-                        "type": "ack",
+                        "type": "receipt",
                         "id": patch_id,
-                        "status": "error",
+                        "status": "rejected",
                         "reason": "socket_apply_failed"
                     })
                     .to_string(),
@@ -492,7 +490,7 @@ mod core_tests {
         let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
         assert!(
             converged,
-            "socket status:error should retry through proven file IPC before failing closed"
+            "socket status:rejected should retry through proven file IPC before failing closed"
         );
         assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
 
@@ -500,18 +498,18 @@ mod core_tests {
         assert!(
             log.contains("queue_consume_writeback")
                 && log.contains("send_failed")
-                && log.contains("IPC ack status error"),
-            "socket status error should remain auditable:\n{log}"
+                && log.contains("IPC receipt rejected"),
+            "socket receipt rejection should remain auditable:\n{log}"
         );
         assert!(
             log.contains("queue_consume_file_ipc_convergence_attempt")
                 && log.contains("degraded_cause=socket_status_error")
                 && log.contains("transport=file_ipc"),
-            "socket status error should fall back to proven file IPC:\n{log}"
+            "socket receipt rejection should fall back to proven file IPC:\n{log}"
         );
         assert!(
             !log.contains("transport=disk_fallback"),
-            "socket status-error fallback must not raw-write behind the plugin:\n{log}"
+            "socket receipt-rejection fallback must not raw-write behind the plugin:\n{log}"
         );
         assert_eq!(fs::read_to_string(&doc).unwrap(), target);
     }
@@ -788,7 +786,7 @@ mod core_tests {
         let source = agent_doc_test_support::queue_consume_convergence_source();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let converged = try_editor_converge(&doc, &source, &source, "pending_write").unwrap();
@@ -967,7 +965,7 @@ mod core_tests {
                         );
                     published.ok()?;
                 }
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             });
         });
         std::thread::sleep(Duration::from_millis(120));
@@ -1185,7 +1183,7 @@ mod core_tests {
         let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
         // the guard fails closed (protects the buffer) rather than treating the
@@ -1263,7 +1261,7 @@ mod core_tests {
         let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
         // the guard fails closed on unproven delivery.
@@ -1308,7 +1306,7 @@ mod core_tests {
         let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
 
-        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // No plugin-owner lease seeded → no live editor endpoint, but the
         // connectable socket still requires convergence proof.
@@ -1610,7 +1608,7 @@ mod core_tests {
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
-        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
+        let _listener = agent_doc_test_support::start_live_prompt_drift_receipt_listener(
             dir.path(),
             snapshot.clone(),
         );
@@ -1671,7 +1669,7 @@ mod core_tests {
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
-        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
+        let _listener = agent_doc_test_support::start_live_prompt_drift_receipt_listener(
             dir.path(),
             recovery_target.clone(),
         );
@@ -1714,7 +1712,7 @@ mod core_tests {
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
-        let _listener = agent_doc_test_support::start_ack_without_content_listener(dir.path());
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();

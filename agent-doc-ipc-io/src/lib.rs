@@ -27,7 +27,7 @@
 //! - `{"type": "publish_live_buffer", "file": "..."}` — ask the editor to
 //!   republish its current visible-buffer proof without mutating the document
 //! - `{"type": "vcs_refresh"}` — trigger VCS refresh
-//! - `{"type": "ack", "id": "..."}` — acknowledgment from plugin
+//! - `{"type": "receipt", "status": "applied"}` — terminal plugin receipt
 //!
 //! VS Code does not run the socket listener. For read-only live-buffer proof
 //! refreshes it consumes `.agent-doc/patches/publish-live-buffer.signal` with the
@@ -36,10 +36,11 @@
 //! `{type,file,patch_id}` payload as the socket `save_document` message.
 
 use agent_doc_ipc_protocol::{
-    AckClassification, classify_ack, early_ack_line, early_ack_ops_marker,
-    early_ack_tagged_message, ipc_accept_thread_ops_marker, message_requests_early_ack,
-    patch_message, publish_live_buffer_message, queue_convergence_message, refresh_content_message,
-    reposition_message, save_document_message, vcs_refresh_message, vcs_refresh_probe_message,
+    SocketReceiptClassification, classify_socket_receipt, early_receipt_line,
+    early_receipt_ops_marker, early_receipt_tagged_message, ipc_accept_thread_ops_marker,
+    message_requests_early_receipt, patch_message, publish_live_buffer_message,
+    queue_convergence_message, refresh_content_message, reposition_message, save_document_message,
+    vcs_refresh_message, vcs_refresh_probe_message,
 };
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
@@ -60,18 +61,19 @@ pub type OpsLogger = fn(&Path, &str);
 
 fn noop_ops_logger(_: &Path, _: &str) {}
 
-/// How long the sender waits for the plugin's delivery ack before treating the
-/// socket as timed out (`#ipc-ack-timeout-align`).
+/// How long the sender waits for the plugin's delivery receipt before treating the
+/// socket as timed out (`#ipc-receipt-timeout-align`).
 ///
 /// `send_message` connects first, so a dead listener fails fast at
 /// `try_connect`; this budget only applies to a *connected but slow* plugin.
 /// The JB plugin blocks the socket handler on `agent_doc_await_idle(... , 5_000)`
-/// — a typing-debounce wait capped at 5s — before applying the patch and acking.
+/// — a typing-debounce wait capped at 5s — before applying the patch and
+/// returning a receipt.
 /// A 2s budget was below that legitimate apply window, so a plugin that was
-/// merely busy/typing tripped a false "ack timeout" that voted toward the
+/// merely busy/typing tripped a false receipt timeout that voted toward the
 /// de-wedge degrade latch. Align the sender to just above the plugin's idle cap
 /// so only a genuinely wedged listener times out.
-const IPC_ACK_TIMEOUT_SECS: u64 = 6;
+const IPC_RECEIPT_TIMEOUT_SECS: u64 = 6;
 /// Bound the blocking `connect_sync` (`#af88` F). interprocess `ConnectOptions`
 /// exposes no native connect deadline, so we run the connect on a watchdog thread
 /// and give up after this budget rather than parking the caller forever on a
@@ -84,27 +86,26 @@ const IPC_CONNECT_TIMEOUT_SECS: u64 = 3;
 /// clean EOF-style handler exit that releases the inflight slot.
 const IPC_LISTENER_READ_TIMEOUT_SECS: u64 = 30;
 
-/// Early-ack opt-in for the sender (`#ipc-early-ack` / `#saev`, Phase 2).
+/// Early-receipt opt-in for the sender (`#ipc-early-receipt` / `#saev`, Phase 2).
 ///
 /// When `true`, [`send_message`] tags outgoing `patch` messages with
-/// `early_ack: true`, which makes an early-ack-aware [`start_listener`] emit a
-/// `pending` ack the instant it receives the patch (before the blocking apply),
-/// then the terminal ack as usual. The sender's [`send_message`] read loop
+/// `early_receipt: true`, which makes an early-receipt-aware [`start_listener`] emit an
+/// `accepted` receipt the instant it receives the patch (before the blocking apply),
+/// then the terminal receipt as usual. The sender's [`send_message`] read loop
 /// already understands the two-phase sequence regardless of this flag, so the
 /// protocol is fully wired and unit-tested; only the auto-injection of the
 /// opt-in flag onto live closeout patches is gated here.
 ///
 /// Activated (`#saevon`, 2026-06-09): the sender auto-tags live closeout `patch`
-/// messages with `early_ack: true`, so an early-ack-aware listener emits a
-/// `pending` ack on receipt (before the blocking apply) and the sender's
+/// messages with `early_receipt: true`, so an early-receipt-aware listener emits an
+/// `accepted` receipt on receipt (before the blocking apply) and the sender's
 /// liveness probe is decoupled from plugin apply latency. The protocol was
 /// landed dormant and unit-tested before this flip; activation is verified live
 /// under real typing load (`#xkpf` / `#lvb-run`) by grepping `ops.log` for
-/// `[ipc-socket] early-ack pending emitted before apply` with a paired terminal
-/// ack and no `ack_timeout` / `false_success`. Older listeners ignore the
-/// unknown `early_ack` field (skew-safe), so a non-early-ack plugin still gets
-/// exactly the prior single terminal ack.
-const EARLY_ACK_ENABLED: bool = true;
+/// `[ipc-socket] early receipt accepted emitted before apply` with a paired terminal
+/// receipt and no `receipt_timeout` / `false_success`. Older listeners that
+/// still emit legacy ACK lines are rejected as incompatible.
+const EARLY_RECEIPT_ENABLED: bool = true;
 
 /// Get the socket path for a project.
 pub fn socket_path(project_root: &Path) -> PathBuf {
@@ -169,67 +170,68 @@ fn try_connect_with_timeout(
 }
 
 /// Send a JSON message to the plugin via socket IPC.
-/// Returns Ok(response) if the plugin acknowledges, Err if socket unavailable.
+/// Returns Ok(response) if the plugin returns a terminal receipt, Err if socket unavailable.
 pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<Option<String>> {
     send_message_with_timeout(
         project_root,
         message,
-        Duration::from_secs(IPC_ACK_TIMEOUT_SECS),
+        Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
     )
 }
 
-/// Send a JSON message with an explicit ack timeout.
+/// Send a JSON message with an explicit receipt timeout.
 ///
 /// Most production sends use [`send_message`]. The explicit-timeout variant is
 /// reserved for liveness probes that must not clear a degraded-socket latch
 /// just because the OS accepted a connection while the plugin accept/apply loop
-/// is no longer returning acks.
+/// is no longer returning receipts.
 pub fn send_message_with_timeout(
     project_root: &Path,
     message: &serde_json::Value,
-    ack_timeout: Duration,
+    receipt_timeout: Duration,
 ) -> Result<Option<String>> {
     let stream = try_connect(project_root)?;
 
     // Bound the outbound write (wedge A): a plugin that accepted the connection
     // but stopped draining its recv buffer would otherwise block `write_all`
-    // forever - before the bounded ack-read below is ever reached - on a patch
+    // forever - before the bounded receipt-read below is ever reached - on a patch
     // payload larger than the socket buffer. With a send timeout the write fails
     // closed on timeout and the degraded-socket circuit breaker takes over.
-    if let Err(e) = stream.set_send_timeout(Some(ack_timeout)) {
+    if let Err(e) = stream.set_send_timeout(Some(receipt_timeout)) {
         eprintln!("[ipc-socket] warning: failed to set IPC send timeout: {e}");
     }
 
     // interprocess Stream implements Read + Write via halves
     let (reader_half, mut writer_half) = stream.split();
 
-    // Send NDJSON message. When early-ack is enabled, tag outgoing `patch`
-    // messages so an early-ack-aware listener emits a `pending` ack on receipt;
-    // older listeners ignore the unknown field (skew-safe). Non-patch messages
-    // (queue convergence, etc.) are sent verbatim.
-    let outgoing = early_ack_tagged_message(message, EARLY_ACK_ENABLED);
+    // Send NDJSON message. When early receipt is enabled, tag outgoing `patch`
+    // messages so an early-receipt-aware listener emits an `accepted` receipt
+    // before apply. Non-patch messages (queue convergence, etc.) are sent
+    // verbatim.
+    let outgoing = early_receipt_tagged_message(message, EARLY_RECEIPT_ENABLED);
     let mut msg = serde_json::to_string(&outgoing)?;
     msg.push('\n');
     writer_half.write_all(msg.as_bytes())?;
     writer_half.flush()?;
 
-    // Read ack(s) (with manual timeout via thread). The listener may send an
-    // early `pending` ack (liveness only) before the terminal ack, so the reader
-    // thread loops until it yields a non-pending line (terminal ack / EOF /
-    // error). For a single terminal ack — every current plugin — the loop runs
-    // exactly once, identical to the prior single-read behavior.
+    // Read receipt(s) (with manual timeout via thread). The listener may send
+    // an early `accepted` receipt (liveness only) before the terminal receipt,
+    // so the reader thread loops until it yields a non-pending line.
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(reader_half);
         loop {
-            let mut ack_line = String::new();
-            let result = reader.read_line(&mut ack_line);
+            let mut receipt_line = String::new();
+            let result = reader.read_line(&mut receipt_line);
             let stop = match &result {
                 Ok(0) => true,
-                Ok(_) => classify_ack(ack_line.trim()) != AckClassification::Pending,
+                Ok(_) => {
+                    classify_socket_receipt(receipt_line.trim())
+                        != SocketReceiptClassification::Pending
+                }
                 Err(_) => true,
             };
-            if tx.send((result, ack_line)).is_err() {
+            if tx.send((result, receipt_line)).is_err() {
                 break;
             }
             if stop {
@@ -238,36 +240,43 @@ pub fn send_message_with_timeout(
         }
     });
 
-    // Each phase gets its own ack-timeout budget: an early `pending` ack proves
-    // liveness and lets the binary keep waiting for the terminal ack instead of
-    // declaring a false timeout while the plugin is still applying.
+    // Each phase gets its own receipt-timeout budget: an early `accepted`
+    // receipt proves liveness and lets the binary keep waiting for the terminal
+    // receipt instead of declaring a false timeout while the plugin is still
+    // applying.
     loop {
-        match rx.recv_timeout(ack_timeout) {
+        match rx.recv_timeout(receipt_timeout) {
             Ok((Ok(0), _)) => {
                 return Err(anyhow::anyhow!(
-                    "IPC ack: plugin closed connection without responding"
+                    "IPC receipt: plugin closed connection without responding"
                 ));
             }
             Ok((Ok(_), line)) => {
-                let ack = line.trim().to_string();
-                match classify_ack(&ack) {
+                let receipt = line.trim().to_string();
+                match classify_socket_receipt(&receipt) {
                     // Liveness-only: listener received the patch but has not yet
-                    // applied it. Keep waiting for the terminal ack.
-                    AckClassification::Pending => continue,
-                    AckClassification::Ok => return Ok(Some(ack)),
-                    AckClassification::AlreadyApplied => {
-                        return Err(anyhow::anyhow!("IPC ack already_applied: {}", ack));
+                    // applied it. Keep waiting for the terminal receipt.
+                    SocketReceiptClassification::Pending => continue,
+                    SocketReceiptClassification::Applied => return Ok(Some(receipt)),
+                    SocketReceiptClassification::AlreadyApplied => {
+                        return Err(anyhow::anyhow!("IPC receipt already_applied: {}", receipt));
                     }
-                    AckClassification::Failed => {
-                        return Err(anyhow::anyhow!("IPC ack status error: {}", ack));
+                    SocketReceiptClassification::Rejected => {
+                        return Err(anyhow::anyhow!("IPC receipt rejected: {}", receipt));
+                    }
+                    SocketReceiptClassification::Unsupported => {
+                        return Err(anyhow::anyhow!(
+                            "IPC receipt unsupported legacy response: {}; update/reinstall the editor plugin/native library so it publishes lazily transport receipts",
+                            receipt
+                        ));
                     }
                 }
             }
-            Ok((Err(e), _)) => return Err(anyhow::anyhow!("IPC ack read error: {}", e)),
+            Ok((Err(e), _)) => return Err(anyhow::anyhow!("IPC receipt read error: {}", e)),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 return Err(anyhow::anyhow!(
-                    "IPC ack timeout ({}ms)",
-                    ack_timeout.as_millis()
+                    "IPC receipt timeout ({}ms)",
+                    receipt_timeout.as_millis()
                 ));
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -277,8 +286,8 @@ pub fn send_message_with_timeout(
     }
 }
 
-/// Probe whether the socket listener can accept and ack a lightweight message.
-pub fn probe_listener_ack(project_root: &Path, timeout: Duration) -> Result<bool> {
+/// Probe whether the socket listener can accept and receipt a lightweight message.
+pub fn probe_listener_receipt(project_root: &Path, timeout: Duration) -> Result<bool> {
     let message = vcs_refresh_probe_message("ipc_degraded_self_heal");
     send_message_with_timeout(project_root, &message, timeout).map(|_| true)
 }
@@ -322,12 +331,12 @@ pub fn send_patch(
     let message = patch_message(file, patches, frontmatter_yaml);
 
     match send_message(project_root, &message) {
-        Ok(Some(ack)) => {
-            eprintln!("[ipc-socket] patch sent, ack: {}", ack);
+        Ok(Some(receipt)) => {
+            eprintln!("[ipc-socket] patch sent, receipt: {}", receipt);
             Ok(true)
         }
         Ok(None) => {
-            eprintln!("[ipc-socket] patch sent, no ack");
+            eprintln!("[ipc-socket] patch sent, no receipt");
             Ok(true)
         }
         Err(e) => Err(e),
@@ -359,12 +368,12 @@ pub fn send_queue_convergence(
     let message = queue_convergence_message(file, queue_auto, frontmatter_yaml, queue_body);
 
     match send_message(project_root, &message) {
-        Ok(Some(ack)) => {
-            eprintln!("[ipc-socket] queue convergence sent, ack: {}", ack);
+        Ok(Some(receipt)) => {
+            eprintln!("[ipc-socket] queue convergence sent, receipt: {}", receipt);
             Ok(true)
         }
         Ok(None) => {
-            eprintln!("[ipc-socket] queue convergence sent, no ack");
+            eprintln!("[ipc-socket] queue convergence sent, no receipt");
             Ok(true)
         }
         Err(e) => Err(e),
@@ -404,12 +413,12 @@ pub fn send_save_document(project_root: &Path, file: &str, patch_id: &str) -> Re
     let message = save_document_message(file, patch_id);
 
     match send_message(project_root, &message) {
-        Ok(Some(ack)) => {
-            eprintln!("[ipc-socket] save_document sent, ack: {}", ack);
+        Ok(Some(receipt)) => {
+            eprintln!("[ipc-socket] save_document sent, receipt: {}", receipt);
             Ok(true)
         }
         Ok(None) => {
-            eprintln!("[ipc-socket] save_document sent, no ack");
+            eprintln!("[ipc-socket] save_document sent, no receipt");
             Ok(true)
         }
         Err(e) => Err(e),
@@ -525,7 +534,7 @@ where
 /// Start a socket listener with an injected best-effort ops logger.
 ///
 /// This keeps the socket transport independent of orchestration while allowing
-/// production callers to persist accept/early-ack markers to `.agent-doc/logs`.
+/// production callers to persist accept/early-receipt markers to `.agent-doc/logs`.
 #[allow(unreachable_code)]
 pub fn start_listener_with_logger<F>(
     project_root: &Path,
@@ -596,35 +605,27 @@ where
                     while reader.read_line(&mut line).unwrap_or(0) > 0 {
                         let trimmed = line.trim();
                         if !trimmed.is_empty() {
-                            // Early-ack: if the sender opted in, emit a `pending` ack
-                            // the instant we receive the patch — before the blocking
-                            // apply handler runs — so the sender's liveness probe is
-                            // decoupled from apply latency. The terminal ack still
-                            // follows. Senders that do not opt in get only the
-                            // terminal ack, exactly as before.
-                            if message_requests_early_ack(trimmed) {
-                                let mut early = early_ack_line().to_string();
+                            // Early receipt: if the sender opted in, emit an `accepted`
+                            // receipt before the blocking apply handler runs, so the
+                            // sender's liveness probe is decoupled from apply latency.
+                            // The terminal receipt still follows.
+                            if message_requests_early_receipt(trimmed) {
+                                let mut early = early_receipt_line().to_string();
                                 early.push('\n');
                                 if let Err(e) = writer_half.write_all(early.as_bytes()) {
-                                    eprintln!("[ipc-socket] early-ack write error: {}", e);
+                                    eprintln!("[ipc-socket] early receipt write error: {}", e);
                                 } else if let Err(e) = writer_half.flush() {
-                                    eprintln!("[ipc-socket] early-ack flush error: {}", e);
+                                    eprintln!("[ipc-socket] early receipt flush error: {}", e);
                                 } else {
-                                    // #saev prove/disprove: a successful early-ack emit was
-                                    // previously silent (only failures logged), so a live
-                                    // EARLY_ACK_ENABLED run had no grep-able proof the
-                                    // `pending` ack actually went out before the blocking
-                                    // apply. Emit a positive marker on the success path.
+                                    // #saev prove/disprove: a successful early receipt emit
+                                    // must leave grep-able proof that the `accepted` receipt
+                                    // went out before the blocking apply.
                                     eprintln!(
-                                        "[ipc-socket] early-ack pending emitted before apply"
+                                        "[ipc-socket] early receipt accepted emitted before apply"
                                     );
-                                    // #x9ds: the stderr line above is invisible to the
-                                    // ops.log gate-verify scan, and its hyphenated text does
-                                    // not contain the `early_ack_pending` predicate token.
                                     // Also record the marker to ops.log (derived from the
-                                    // listener's project root) so the #saev gate is provable
-                                    // from ops.log once EARLY_ACK_ENABLED is driven live.
-                                    ops_logger(&root_buf, early_ack_ops_marker());
+                                    // listener's project root) so the #saev gate is provable.
+                                    ops_logger(&root_buf, early_receipt_ops_marker());
                                 }
                             }
                             if let Some(response) = handler(trimmed) {
@@ -673,7 +674,10 @@ mod tests {
             start_listener(&root_clone, move |msg| {
                 thread::sleep(Duration::from_millis(600));
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                Some(serde_json::json!({"type":"ack","id":v["type"]}).to_string())
+                Some(
+                    serde_json::json!({"type":"receipt","status":"applied","id":v["type"]})
+                        .to_string(),
+                )
             })
             .ok()
         });
@@ -703,7 +707,10 @@ mod tests {
             .collect();
         for h in handles {
             let r = h.join().unwrap().unwrap();
-            assert!(r.is_some(), "concurrent send should still receive an ack");
+            assert!(
+                r.is_some(),
+                "concurrent send should still receive a receipt"
+            );
         }
         sampler_stop.store(true, std::sync::atomic::Ordering::Relaxed);
         let _ = _sampler.join();
@@ -737,7 +744,10 @@ mod tests {
         let server = thread::spawn(move || {
             start_listener(&root_clone, |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                Some(serde_json::json!({"type": "ack", "id": v["type"]}).to_string())
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": v["type"]})
+                        .to_string(),
+                )
             })
             .ok();
         });
@@ -749,9 +759,10 @@ mod tests {
         let msg = serde_json::json!({"type": "vcs_refresh"});
         let result = send_message(&root, &msg).unwrap();
         assert!(result.is_some());
-        let ack: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-        assert_eq!(ack["type"], "ack");
-        assert_eq!(ack["id"], "vcs_refresh");
+        let receipt: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(receipt["type"], "receipt");
+        assert_eq!(receipt["status"], "applied");
+        assert_eq!(receipt["id"], "vcs_refresh");
 
         // Clean up — remove socket to stop listener
         let _ = std::fs::remove_file(socket_path(&root));
@@ -771,7 +782,7 @@ mod tests {
             start_listener(&root_clone, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 *captured_clone.lock().unwrap() = Some(v);
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -779,7 +790,7 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         let ok = send_save_document(&root, "/tmp/plan.md", "save-pid-123").unwrap();
-        assert!(ok, "save_document should succeed on an ok ack");
+        assert!(ok, "save_document should succeed on an applied receipt");
 
         let msg = captured
             .lock()
@@ -807,7 +818,7 @@ mod tests {
             start_listener(&root_clone, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 *captured_clone.lock().unwrap() = Some(v);
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
@@ -815,7 +826,10 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         let ok = send_publish_live_buffer(&root, "/tmp/plan.md").unwrap();
-        assert!(ok, "publish_live_buffer should succeed on an ok ack");
+        assert!(
+            ok,
+            "publish_live_buffer should succeed on an applied receipt"
+        );
 
         let msg = captured
             .lock()
@@ -879,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn socket_error_ack_is_error() {
+    fn socket_rejected_receipt_is_error() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
@@ -887,7 +901,7 @@ mod tests {
         let root_clone = root.clone();
         let server = thread::spawn(move || {
             start_listener(&root_clone, |_msg| {
-                Some(serde_json::json!({"type": "ack", "status": "error"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "rejected"}).to_string())
             })
             .ok();
         });
@@ -897,8 +911,8 @@ mod tests {
         let msg = serde_json::json!({"type": "patch"});
         let err = send_message(&root, &msg).unwrap_err().to_string();
         assert!(
-            err.contains("IPC ack status error"),
-            "error ack should fail the socket IPC send, got: {err}"
+            err.contains("IPC receipt rejected"),
+            "rejected receipt should fail the socket IPC send, got: {err}"
         );
 
         let _ = std::fs::remove_file(socket_path(&root));
@@ -906,10 +920,11 @@ mod tests {
     }
 
     #[test]
-    fn send_message_handles_early_then_terminal_ack() {
+    fn send_message_handles_early_then_terminal_receipt() {
         // Full two-phase roundtrip: a flagged patch makes the listener emit a
-        // `pending` ack on receipt, then the terminal ack after the handler runs.
-        // send_message must skip the pending ack and return the terminal result.
+        // `accepted` receipt before apply, then the terminal receipt after the
+        // handler runs. send_message must skip the accepted receipt and return
+        // the terminal result.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
@@ -917,24 +932,24 @@ mod tests {
         let root_clone = root.clone();
         let server = thread::spawn(move || {
             start_listener(&root_clone, |msg| {
-                // Prove the early ack already went out before this (apply) runs.
-                assert!(message_requests_early_ack(msg));
+                // Prove the early receipt already went out before this apply runs.
+                assert!(message_requests_early_receipt(msg));
                 thread::sleep(Duration::from_millis(50));
-                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
         });
 
         thread::sleep(Duration::from_millis(100));
 
-        // Manually flagged so the listener early-acks independent of sender
+        // Manually flagged so the listener early-receipts independent of sender
         // auto-injection.
-        let msg = serde_json::json!({"type": "patch", "early_ack": true});
+        let msg = serde_json::json!({"type": "patch", "early_receipt": true});
         let result = send_message(&root, &msg).unwrap();
-        let ack: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        let receipt: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
         assert_eq!(
-            ack["status"], "ok",
-            "terminal ack must be returned, not pending"
+            receipt["status"], "applied",
+            "terminal receipt must be returned, not accepted"
         );
 
         let _ = std::fs::remove_file(socket_path(&root));

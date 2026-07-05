@@ -70,6 +70,7 @@ agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-owner-pane-io = { path = "../agent-doc-owner-pane-io", version = "0.34.67" }
 agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
 agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.67" }
+agent-doc-preflight-runtime-io = { path = "../agent-doc-preflight-runtime-io", version = "0.34.67" }
 agent-doc-process-owner-io = { path = "../agent-doc-process-owner-io", version = "0.34.67" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.67" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
@@ -81,6 +82,7 @@ agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.6
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.67" }
 agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.67" }
+agent-doc-repair-runtime-io = { path = "../agent-doc-repair-runtime-io", version = "0.34.67" }
 agent-doc-response-replay-io = { path = "../agent-doc-response-replay-io", version = "0.34.67" }
 agent-doc-response-toc-io = { path = "../agent-doc-response-toc-io", version = "0.34.67" }
 agent-doc-route-io = { path = "../agent-doc-route-io", version = "0.34.67" }
@@ -121,6 +123,7 @@ agent-doc-watch-io = { path = "../agent-doc-watch-io", version = "0.34.67" }
 agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.67" }
 agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.34.67" }
 agent-doc-work-graph = { path = "../agent-doc-work-graph", version = "0.34.67" }
+agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version = "0.34.67" }
 agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.67" }
 agent-doc-write-ipc-io = { path = "../agent-doc-write-ipc-io", version = "0.34.67" }
 lazily = "0.21"

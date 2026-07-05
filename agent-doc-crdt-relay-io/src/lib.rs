@@ -1621,9 +1621,11 @@ mod tests {
                         &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
                     )
                     .ok()?;
-                    Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                    Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
                 } else {
-                    Some(serde_json::json!({"type": "ack", "status": "error"}).to_string())
+                    Some(
+                        serde_json::json!({"type": "receipt", "status": "rejected"}).to_string(),
+                    )
                 }
             })
             .ok();

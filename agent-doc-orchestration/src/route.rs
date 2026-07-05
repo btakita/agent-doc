@@ -264,7 +264,7 @@ fn route_write_document(
     reason: &str,
 ) -> Result<()> {
     if agent_doc_route_io::invocation::force_disk_route_writes() {
-        crate::write::atomic_write_pub(file, next_content)?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, next_content)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -278,7 +278,7 @@ fn route_write_document(
         Ok(())
     } else {
         agent_doc_write_converge_io::converge_document_or_disk(
-            &crate::write::WRITE_CONVERGENCE_EFFECTS,
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
             next_content,
             previous_content,
@@ -370,20 +370,21 @@ fn route_run_pending_maintenance(file: &Path, force_disk: bool) -> Result<()> {
     if force_disk {
         agent_doc_preflight_io::run_pending_maintenance_force_disk(
             file,
-            &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
         )
         .map(|_| ())
     } else {
         agent_doc_preflight_io::run_pending_maintenance(
             file,
-            &crate::preflight::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+            &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
         )
         .map(|_| ())
     }
 }
 
 fn route_repair_closeout(file: &Path) -> Result<String> {
-    crate::repair::repair(file).map(|outcome| format!("{outcome:?}"))
+    agent_doc_repair_io::repair(crate::repair_coordinator_effects(), file)
+        .map(|outcome| format!("{outcome:?}"))
 }
 
 fn route_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
@@ -1329,7 +1330,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
 
-        let _listener = agent_doc_test_support::start_live_prompt_drift_ack_listener(
+        let _listener = agent_doc_test_support::start_live_prompt_drift_receipt_listener(
             dir.path(),
             expected.into(),
         );

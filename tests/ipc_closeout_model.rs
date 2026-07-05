@@ -695,7 +695,7 @@ fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
         agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
             let payload: Value = serde_json::from_str(msg).ok()?;
             let Some(id) = patch_id(&payload) else {
-                return Some(serde_json::json!({"type": "ack"}).to_string());
+                return Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string());
             };
             let after_apply = apply_payload_to_file(&payload, &doc_for_listener).or_else(|| {
                 let patch = payload
@@ -718,7 +718,7 @@ fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
             )
             .ok()?;
             *seen_for_listener.lock().ok()? = Some(payload);
-            Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            Some(serde_json::json!({"type": "receipt", "status": "applied", "id": id}).to_string())
         })
         .ok();
     });

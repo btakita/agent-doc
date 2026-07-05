@@ -58,10 +58,10 @@ flowchart TB
 | # | Race | Root | Fix |
 |---|------|------|-----|
 | R1 | Two file-watchers / two writers (plugin WatchService + binary disk fallback) → File Cache Conflict | separate processes, no single writer | `#pcpc4` single controller-owned watcher + `#pcp7` demote WatchService to read-only |
-| R2 | EDT/save lag vs ack budget → false ack-timeout / degrade vote | apply latency coupled to sender liveness | `#pcp5` early-ack IPC (`#ipc-ack-timeout-align`/`#ipc-degrade-false-vote` partial) + **`#ipc-early-ack` protocol landed, dormant**: listener emits a `pending` ack on patch receipt (before apply) when the sender opts in; `send_message` skips it and waits for the terminal ack (liveness-only, never a false success). Backward/skew-safe via the `early_ack` message flag. `EARLY_ACK_ENABLED` gates auto-activation — **activated `#saevon` (2026-06-09)**: the sender now auto-tags live closeout `patch` messages, so the `pending` ack fires before the blocking apply on every closeout. A successful early-ack emit logs `[ipc-socket] early-ack pending emitted before apply` to stderr/session-log (previously only failures were logged), so a live run has grep-able proof the `pending` ack went out before the blocking apply; live verification (`#xkpf` / `#lvb-run`) greps that marker with a paired terminal ack and no `ack_timeout` / `false_success`. |
+| R2 | EDT/save lag vs receipt budget → false receipt-timeout / degrade vote | apply latency coupled to sender liveness | `#pcp5` early receipt IPC (`#ipc-receipt-timeout-align`/`#ipc-degrade-false-vote` partial): listener emits an `accepted` receipt on patch receipt (before apply) when the sender opts in with `early_receipt`; `send_message` skips it and waits for the terminal `applied`/`rejected` receipt (liveness-only, never a false success). **Activated `#saevon` (2026-06-09):** the sender auto-tags live closeout `patch` messages, so the accepted receipt fires before the blocking apply on every closeout. A successful early-receipt emit logs `[ipc-socket] early receipt accepted emitted before apply` and the `early_receipt_accepted` ops marker; live verification (`#xkpf` / `#lvb-run`) greps that marker with a paired terminal receipt and no `receipt_timeout` / `false_success`. Legacy ACK-only listener responses are rejected as incompatible plugin/native-library versions. |
 | R3 | Disk fallback manufactures the foreign write IntelliJ flags as a cache conflict when degraded | raw disk write on degrade | **`#ipc-degraded-prefers-file-ipc` ✅** (degraded socket routes through the file-IPC patch queue; plugin applies via Document API; unproven file IPC fails closed for retry) |
 | R4 | mtime-heuristic drift: `live_buffer_diverges_from_content` infers foreign-vs-unsaved from `LIVE_BUFFER_STALE_SKEW_MS` only → real edit fails closed | no provenance / no buffer content | **`#pcp2` write-provenance ✅** + **`#pcp6` editor-buffer content ✅** (fixed) |
-| R5 | TOCTOU between FFI socket handler and WatchService for the same patch | two appliers | `#pcp7` thin apply+ack shim |
+| R5 | TOCTOU between FFI socket handler and WatchService for the same patch | two appliers | `#pcp7` thin apply+receipt shim |
 | R6 | Supervisor self-race: route-owned supervisor races the agent's own finalize → "could not drain the active closeout" / exit 75 | separate-process writers, no in-process queue | **`#pcp3a` drain race-hardening ✅** (mitigation) + `#pcpc3` in-process write queue (root) |
 
 ## Can the Plugin IPC move into the Project Control Pane process?
@@ -72,7 +72,7 @@ needs the IntelliJ/VS Code Document API + EDT to apply patches and read the buff
 (`08b` §"In-process actors") is the **write/watch authority**: the supervisor
 becomes an in-process adapter, the session actor becomes a real message actor
 owning one ordered write queue + one filesystem watcher, and the plugin is demoted
-to a **thin read-only reporter + apply/ack shim** (no autonomous reconcile, no disk
+to a **thin read-only reporter + apply/receipt shim** (no autonomous reconcile, no disk
 write). IPC remains the editor↔controller boundary; what changes is that only one
 authority (the controller's session actor) writes disk and watches the file, so the
 two-writers/two-watchers races (R1/R5) and the supervisor self-race (R6) cannot
@@ -85,7 +85,7 @@ patches, and the controller serializes everything through the write queue.
 ```mermaid
 flowchart TB
     subgraph EditorProc["Editor process"]
-        SHIM["Thin apply+ack shim\n(Document API apply, early-ack)"]
+        SHIM["Thin apply+receipt shim\n(Document API apply, early receipt)"]
         REPORT["Read-only buffer reporter\n(content+version via FFI)"]
     end
 
@@ -100,7 +100,7 @@ flowchart TB
     DOC[(".md document")]
     DB[("`.agent-doc/state.db`")]
 
-    SHIM <-->|IPC: patches / acks| SESS
+    SHIM <-->|IPC: patches / receipts| SESS
     REPORT -->|buffer state| SESS
     SESS -->|sole writer + sole watcher| DOC
     SESS --> STORE

@@ -153,7 +153,9 @@
 //! - (aspirational) `debounce_idle`: file written rapidly → routing waits for mtime to settle
 //! - (aspirational) `autostart_inhibited`: `AGENT_DOC_NO_AUTOSTART` set → returns Err, no pane spawned
 
+#[cfg(test)]
 use anyhow::Result;
+#[cfg(test)]
 use std::path::Path;
 #[cfg(test)]
 use std::time::Duration;
@@ -201,6 +203,7 @@ use agent_doc_route_io::authoritative_actor::{
 use agent_doc_route_io::closeout_drain::{
     classify_route_closeout_block, drain_open_closeout_before_routed_dispatch,
 };
+#[cfg(test)]
 use agent_doc_route_io::command::RouteCommandEffects;
 #[cfg(test)]
 use agent_doc_route_io::command::RouteMode;
@@ -236,7 +239,6 @@ use agent_doc_route_io::queue_dispatch::{
 };
 #[cfg(test)]
 use agent_doc_route_io::runtime_effects::dispatch_only_starting_pane_ready_timeout;
-use agent_doc_route_io::runtime_effects::route_command_effects;
 #[cfg(test)]
 use agent_doc_route_io::runtime_effects::{
     route_closeout_drain_effects, route_dispatch_only_effects, route_queue_effects,
@@ -258,6 +260,7 @@ use tmux_router::Tmux;
 #[cfg(test)]
 use agent_doc_session_registry_io::registration as sessions;
 
+#[cfg(test)]
 fn route_repair_closeout(file: &Path) -> Result<String> {
     agent_doc_repair_io::repair(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
@@ -268,8 +271,9 @@ fn route_repair_closeout(file: &Path) -> Result<String> {
     .map(|outcome| format!("{outcome:?}"))
 }
 
-pub fn runtime_route_command_effects() -> RouteCommandEffects {
-    route_command_effects(route_repair_closeout)
+#[cfg(test)]
+fn runtime_route_command_effects() -> RouteCommandEffects {
+    agent_doc_route_io::runtime_effects::route_command_effects(route_repair_closeout)
 }
 
 #[cfg(test)]

@@ -28669,14 +28669,14 @@ fn test_agent_doc_route_io_owns_route_runtime_effect_bundles() {
     }
     assert!(
         route_io_lib.contains("pub mod runtime_effects;")
-            && route_source.contains("use agent_doc_route_io::runtime_effects::{")
-            && route_source
-                .contains("pub fn runtime_route_command_effects() -> RouteCommandEffects")
+            && route_source.contains("fn runtime_route_command_effects() -> RouteCommandEffects")
             && route_source.contains("route_command_effects(route_repair_closeout)")
-            && main_source
+            && main_source.contains("agent_doc_route_io::runtime_effects::route_command_effects(")
+            && main_source.contains("route_repair_closeout")
+            && !main_source
                 .contains("agent_doc_orchestration::route::runtime_route_command_effects()")
             && !main_source.contains("agent_doc_orchestration::route::route_startup_effects()"),
-        "production route command and remaining orchestration route adapters should consume focused route runtime effects directly"
+        "production route command should consume focused route runtime effects directly while orchestration keeps only a test adapter"
     );
 }
 
@@ -28842,7 +28842,7 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
             && route_runtime_effects.contains("fn route_decide_closeout_recovery(")
             && route_source.contains("#[cfg(test)]\nuse agent_doc_route_io::command::RouteMode;")
             && !route_source.contains("pub use agent_doc_route_io::command::RouteMode;")
-            && route_source.contains("pub fn runtime_route_command_effects() -> RouteCommandEffects")
+            && route_source.contains("#[cfg(test)]\nfn runtime_route_command_effects() -> RouteCommandEffects")
             && route_source.contains("route_command_effects(route_repair_closeout)")
             && route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\nfn run_with_tmux(")
             && !route_source.contains("#[cfg(test)]\npub fn run(")
@@ -28854,10 +28854,12 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
             && route_source.contains("agent_doc_route_io::invocation::run_with_tmux(")
             && main_source.contains("agent_doc_route_io::invocation::run_with_force_disk(")
             && main_source
-                .contains("agent_doc_orchestration::route::runtime_route_command_effects()")
+                .contains("agent_doc_route_io::runtime_effects::route_command_effects(")
+            && main_source.contains("route_repair_closeout")
+            && !main_source.contains("agent_doc_orchestration::route::runtime_route_command_effects()")
             && !main_source.contains("agent_doc_orchestration::route::run_with_force_disk(")
             && !main_source.contains("agent_doc_orchestration::route::RouteMode"),
-        "agent-doc-route-io command/invocation/runtime_effects should own top-level route runtime while orchestration injects only repair closeout"
+        "agent-doc-route-io command/invocation/runtime_effects should own top-level route runtime while main injects only repair closeout"
     );
 }
 

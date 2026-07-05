@@ -137,6 +137,10 @@ impl ClaimRuntimeEffects for CliClaimRuntimeEffects {
     }
 }
 
+fn route_repair_closeout(file: &Path) -> anyhow::Result<String> {
+    agent_doc_orchestration::repair::repair(file).map(|outcome| format!("{outcome:?}"))
+}
+
 struct CliProjectControllerRuntimeEffects;
 
 impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffects
@@ -3566,7 +3570,7 @@ fn try_main() -> anyhow::Result<()> {
                 plain_trigger,
                 wait_for_ready,
                 force_disk,
-                agent_doc_orchestration::route::runtime_route_command_effects(),
+                agent_doc_route_io::runtime_effects::route_command_effects(route_repair_closeout),
             )
         }
         Commands::Prompt { file, answer, all } => {

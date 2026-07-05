@@ -11399,7 +11399,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split `RepairCoordinatorEffects` into replay-write, closeout, session-check, pending/capture source selection, and empty-response recovery ports",
         ),
         (
-            "Preflight cycle-completion coordinator IO graph",
+            "Preflight cycle-completion coordinator and runtime effects",
             "agent-doc-orchestration/src/preflight.rs",
             "agent-doc-preflight-io/src/lib.rs",
             "Split `PreflightCycleCompletionEffects` into repair, commit, session-inspection, and bypassed-response evidence ports",
@@ -19881,6 +19881,10 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         .unwrap_or(&orchestration_preflight);
     let preflight_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+    let preflight_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
+    let preflight_runtime_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/Cargo.toml")).unwrap();
 
     for required in [
         "pub trait PreflightCycleCompletionEffects",
@@ -19911,6 +19915,32 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         );
     }
 
+    for required in [
+        "pub struct RuntimePreflightCycleCompletionEffects",
+        "pub fn preflight_cycle_completion_effects",
+        "RepairIoEffects:",
+        "agent_doc_repair_io::RepairCoordinatorEffects",
+        "repair_effects:",
+        "session_check_effects: SessionCheckEffects",
+        "impl<RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>",
+        "agent_doc_repair_io::run(self.repair_effects, file)",
+        "agent_doc_commit_io::commit(file)",
+        "agent_doc_session_check_io::inspect(file, &self.session_check_effects)",
+        "agent_doc_session_check_io::detect_bypassed_response_write(file)",
+    ] {
+        assert!(
+            preflight_runtime.contains(required),
+            "agent-doc-preflight-runtime-io must own preflight cycle-completion runtime marker: {required}"
+        );
+    }
+
+    for required_dep in ["agent-doc-repair-io ="] {
+        assert!(
+            preflight_runtime_manifest.contains(required_dep),
+            "agent-doc-preflight-runtime-io should declare cycle-completion runtime dependency: {required_dep}"
+        );
+    }
+
     for forbidden in [
         "detect_write_completed_commit_missing(file)?",
         "interrupted_cycle_detected file=",
@@ -19925,6 +19955,10 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         "format_ipc_dogfood_note(diagnostic)",
         "append_deduped_content_to_exchange(",
         "ipc_dogfood_note_appended file=",
+        "struct OrchestrationPreflightCycleCompletionEffects",
+        "impl PreflightCycleCompletionEffects for OrchestrationPreflightCycleCompletionEffects",
+        "agent_doc_session_check_io::inspect(",
+        "agent_doc_session_check_io::detect_bypassed_response_write(file)",
     ] {
         assert!(
             !orchestration_preflight_runtime.contains(forbidden),
@@ -19935,14 +19969,13 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
     assert!(
         orchestration_preflight.contains("agent_doc_preflight_io::enforce_cycle_completion(")
             && orchestration_preflight
-                .contains("struct OrchestrationPreflightCycleCompletionEffects")
-            && orchestration_preflight.contains(
-                "impl PreflightCycleCompletionEffects for OrchestrationPreflightCycleCompletionEffects",
-            )
-            && orchestration_preflight.contains("agent_doc_session_check_io::inspect(")
+                .contains("agent_doc_preflight_runtime_io::preflight_cycle_completion_effects(")
             && orchestration_preflight
-                .contains("agent_doc_session_check_io::detect_bypassed_response_write(file)"),
-        "orchestration preflight.rs should only adapt concrete repair, commit, and session-check effects"
+                .contains("agent_doc_repair_runtime_io::repair_coordinator_effects(")
+            && orchestration_preflight.contains("&crate::repair::REPAIR_REPLAY_WRITE_EFFECTS")
+            && orchestration_preflight
+                .contains("agent_doc_closeout_runtime_io::session_check_effects()"),
+        "orchestration preflight.rs should only inject the temporary repair replay writer and session-check runtime effects"
     );
     assert!(
         preflight_manifest.contains("agent-doc-element-exchange =")

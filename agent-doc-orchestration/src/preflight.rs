@@ -106,7 +106,7 @@ use std::path::Path;
 #[cfg(test)]
 use agent_doc_preflight_io::layout::detect_duplicate_claims;
 use agent_doc_preflight_io::{
-    PreflightCycleCompletionEffects, PreflightOutput, PreflightWarning,
+    PreflightOutput, PreflightWarning,
     layout::{check_layout, maybe_auto_repair_base_index, maybe_auto_resync_on_drift},
 };
 use agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS;
@@ -129,39 +129,13 @@ use agent_doc_session_accretion::SessionAccretionReport;
 fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
     agent_doc_preflight_io::enforce_cycle_completion(
         file,
-        &OrchestrationPreflightCycleCompletionEffects,
-    )
-}
-
-struct OrchestrationPreflightCycleCompletionEffects;
-
-impl PreflightCycleCompletionEffects for OrchestrationPreflightCycleCompletionEffects {
-    fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome> {
-        agent_doc_repair_io::run(
+        &agent_doc_preflight_runtime_io::preflight_cycle_completion_effects(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
                 &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
             ),
-            file,
-        )
-    }
-
-    fn commit(&self, file: &Path) -> Result<bool> {
-        agent_doc_commit_io::commit(file)
-    }
-
-    fn session_interruption(&self, file: &Path) -> Result<Option<String>> {
-        match agent_doc_session_check_io::inspect(
-            file,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
-        )? {
-            agent_doc_session_check_io::SessionCheckStatus::Ok(_) => Ok(None),
-            agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => Ok(Some(reason)),
-        }
-    }
-
-    fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>> {
-        agent_doc_session_check_io::detect_bypassed_response_write(file)
-    }
+            agent_doc_closeout_runtime_io::session_check_effects(),
+        ),
+    )
 }
 
 mod run;

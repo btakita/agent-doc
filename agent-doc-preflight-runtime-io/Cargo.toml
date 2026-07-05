@@ -22,6 +22,7 @@ agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.67" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.67" }
+agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.67" }
 agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.67" }
 agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.67" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }

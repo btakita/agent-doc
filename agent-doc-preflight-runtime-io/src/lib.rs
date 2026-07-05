@@ -12,6 +12,81 @@ pub struct RuntimePreflightMaintenanceWriteEffects;
 pub static PREFLIGHT_MAINTENANCE_WRITE_EFFECTS: RuntimePreflightMaintenanceWriteEffects =
     RuntimePreflightMaintenanceWriteEffects;
 
+pub struct RuntimePreflightCycleCompletionEffects<
+    RepairIoEffects,
+    ReplayWriteEffects,
+    SessionCheckEffects,
+> where
+    RepairIoEffects: agent_doc_repair_io::RepairIoEffects
+        + agent_doc_repair_io::RepairTemplateWriteEffects
+        + 'static,
+    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects + 'static,
+    SessionCheckEffects: agent_doc_session_check_io::SessionCheckEffects,
+{
+    repair_effects:
+        agent_doc_repair_io::RepairCoordinatorEffects<'static, RepairIoEffects, ReplayWriteEffects>,
+    session_check_effects: SessionCheckEffects,
+}
+
+pub fn preflight_cycle_completion_effects<
+    RepairIoEffects,
+    ReplayWriteEffects,
+    SessionCheckEffects,
+>(
+    repair_effects: agent_doc_repair_io::RepairCoordinatorEffects<
+        'static,
+        RepairIoEffects,
+        ReplayWriteEffects,
+    >,
+    session_check_effects: SessionCheckEffects,
+) -> RuntimePreflightCycleCompletionEffects<RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>
+where
+    RepairIoEffects: agent_doc_repair_io::RepairIoEffects
+        + agent_doc_repair_io::RepairTemplateWriteEffects
+        + 'static,
+    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects + 'static,
+    SessionCheckEffects: agent_doc_session_check_io::SessionCheckEffects,
+{
+    RuntimePreflightCycleCompletionEffects {
+        repair_effects,
+        session_check_effects,
+    }
+}
+
+impl<RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>
+    agent_doc_preflight_io::PreflightCycleCompletionEffects
+    for RuntimePreflightCycleCompletionEffects<
+        RepairIoEffects,
+        ReplayWriteEffects,
+        SessionCheckEffects,
+    >
+where
+    RepairIoEffects: agent_doc_repair_io::RepairIoEffects
+        + agent_doc_repair_io::RepairTemplateWriteEffects
+        + 'static,
+    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects + 'static,
+    SessionCheckEffects: agent_doc_session_check_io::SessionCheckEffects,
+{
+    fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome> {
+        agent_doc_repair_io::run(self.repair_effects, file)
+    }
+
+    fn commit(&self, file: &Path) -> Result<bool> {
+        agent_doc_commit_io::commit(file)
+    }
+
+    fn session_interruption(&self, file: &Path) -> Result<Option<String>> {
+        match agent_doc_session_check_io::inspect(file, &self.session_check_effects)? {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_) => Ok(None),
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => Ok(Some(reason)),
+        }
+    }
+
+    fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>> {
+        agent_doc_session_check_io::detect_bypassed_response_write(file)
+    }
+}
+
 impl agent_doc_preflight_io::PreflightMaintenanceWriteEffects
     for RuntimePreflightMaintenanceWriteEffects
 {

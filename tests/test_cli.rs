@@ -11194,6 +11194,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split claim-log path discovery from destructive truncation",
         ),
         (
+            "Preflight baseline content IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Split baseline path resolution from disk/model writes",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
@@ -12648,6 +12654,40 @@ fn test_agent_doc_preflight_io_owns_claims_log_graph() {
         assert!(
             preflight_io.contains(required),
             "agent-doc-preflight-io must own claims-log IO: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_baseline_content_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let preflight_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+
+    assert!(
+        !orchestration_preflight.contains("fn save_baseline_content("),
+        "orchestration preflight must not own baseline content IO"
+    );
+    assert!(
+        orchestration_preflight_run.contains("save_baseline_content(file,")
+            && orchestration_preflight_run.contains("save_baseline_content(&doc,"),
+        "preflight/run should call focused baseline content IO directly"
+    );
+    for required in [
+        "pub fn save_baseline_content(",
+        "agent_doc_fs::baseline_path_for(file)",
+        "agent_doc_snapshot_io::mps_enabled()",
+        "agent_doc_snapshot_io::save_baseline_model(",
+        "agent_doc_ops_log_io::log_op",
+    ] {
+        assert!(
+            preflight_io.contains(required),
+            "agent-doc-preflight-io must own baseline content IO: {required}"
         );
     }
 }

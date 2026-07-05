@@ -306,6 +306,39 @@ pub fn read_and_truncate_claims(file: &Path) -> Vec<String> {
     claims
 }
 
+pub fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
+    let baseline_path = match agent_doc_fs::baseline_path_for(file) {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("[preflight] failed to resolve baseline path: {}", e);
+            return None;
+        }
+    };
+    if let Some(parent) = baseline_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(&baseline_path, content) {
+        Ok(()) => {
+            eprintln!("[preflight] baseline saved: {}", baseline_path.display());
+            if agent_doc_snapshot_io::mps_enabled() {
+                match agent_doc_snapshot_io::save_baseline_model(
+                    file,
+                    content,
+                    agent_doc_ops_log_io::log_op,
+                ) {
+                    Ok(()) => {}
+                    Err(e) => eprintln!("[preflight] #mps baseline model pin failed: {}", e),
+                }
+            }
+            Some(baseline_path.to_string_lossy().to_string())
+        }
+        Err(e) => {
+            eprintln!("[preflight] failed to save baseline: {}", e);
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
     /// Non-blocking warnings the skill should surface before responding.

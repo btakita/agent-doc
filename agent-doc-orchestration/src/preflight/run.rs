@@ -264,7 +264,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         || if options.probe {
             false
         } else {
-            match agent_doc_repair_io::run(crate::repair_coordinator_effects(), file) {
+            match agent_doc_repair_io::run(
+                agent_doc_repair_runtime_io::repair_coordinator_effects(
+                    &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+                ),
+                file,
+            ) {
                 Ok(outcome) => outcome.repaired(),
                 Err(e) => {
                     let message = e.to_string();

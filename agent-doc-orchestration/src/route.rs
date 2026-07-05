@@ -299,8 +299,13 @@ fn route_run_pending_maintenance(file: &Path, force_disk: bool) -> Result<()> {
 }
 
 fn route_repair_closeout(file: &Path) -> Result<String> {
-    agent_doc_repair_io::repair(crate::repair_coordinator_effects(), file)
-        .map(|outcome| format!("{outcome:?}"))
+    agent_doc_repair_io::repair(
+        agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+        ),
+        file,
+    )
+    .map(|outcome| format!("{outcome:?}"))
 }
 
 fn route_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {

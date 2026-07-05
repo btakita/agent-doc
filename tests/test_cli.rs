@@ -3521,10 +3521,9 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         repair_io.contains("pub fn save_blocked_repair_payload(")
             && repair_io.contains("pub fn run_with_queue_completion_ids<")
             && codex_hook.contains("agent_doc_repair_io::run_with_queue_completion_ids(")
-            && repair
-                .contains("agent_doc_repair_io::run(crate::repair_coordinator_effects(), file)")
-            && repair
-                .contains("agent_doc_repair_io::repair(crate::repair_coordinator_effects(), file)"),
+            && repair.contains("agent_doc_repair_runtime_io::repair_coordinator_effects(")
+            && repair.contains("agent_doc_repair_io::run(")
+            && repair.contains("agent_doc_repair_io::repair("),
         "repair callers should adapt into the focused repair IO coordinator"
     );
     let closeout_runtime =
@@ -11325,7 +11324,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Crate-root runtime write-provider edge removal",
             "agent-doc-orchestration/src/lib.rs",
             "agent-doc-document-realtime-io::{RUNTIME_WRITE_CONVERGENCE_EFFECTS,RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,atomic_write_through_authority,record_document_write_provenance}",
-            "Move `OrchestrationRepairReplayWriteEffects` into a focused repair/write runtime adapter",
+            "Move the remaining repair write-replay adapter after `write.rs` exits orchestration",
         ),
         (
             "Repair runtime recovery callback IO graph",
@@ -11335,9 +11334,9 @@ fn test_coarse_orchestration_extractions_are_tracked() {
         ),
         (
             "Repair coordinator direct-call edge removal",
-            "agent-doc-orchestration/src/{preflight.rs,preflight/run.rs,codex_hook.rs,route.rs}",
+            "agent-doc-orchestration/src/{lib.rs,preflight.rs,preflight/run.rs,codex_hook.rs,route.rs}",
             "agent-doc-repair-io::{run,run_with_queue_completion_ids,repair}",
-            "Move `repair_coordinator_effects` into a focused repair runtime adapter",
+            "Move the remaining `OrchestrationRepairReplayWriteEffects` write-replay adapter after `write.rs` exits orchestration",
         ),
         (
             "Template response prompt-order repair IO graph",

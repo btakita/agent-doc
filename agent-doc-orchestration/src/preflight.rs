@@ -137,7 +137,12 @@ struct OrchestrationPreflightCycleCompletionEffects;
 
 impl PreflightCycleCompletionEffects for OrchestrationPreflightCycleCompletionEffects {
     fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome> {
-        agent_doc_repair_io::run(crate::repair_coordinator_effects(), file)
+        agent_doc_repair_io::run(
+            agent_doc_repair_runtime_io::repair_coordinator_effects(
+                &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+            ),
+            file,
+        )
     }
 
     fn commit(&self, file: &Path) -> Result<bool> {

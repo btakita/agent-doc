@@ -477,7 +477,9 @@ fn try_recover_repeated_queue_head_response(
     );
 
     let repair_outcome = agent_doc_repair_io::run_with_queue_completion_ids(
-        crate::repair_coordinator_effects(),
+        agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+        ),
         file,
         &queue_completion_ids,
     )?;
@@ -983,7 +985,9 @@ fn attempt_stop_closeout(
     }
 
     let repair_outcome = agent_doc_repair_io::run_with_queue_completion_ids(
-        crate::repair_coordinator_effects(),
+        agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+        ),
         file,
         &queue_completion_ids,
     )?;

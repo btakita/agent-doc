@@ -1601,11 +1601,15 @@ dependencies = [
 name = "agent-doc-repair-runtime-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-closeout-runtime-io",
  "agent-doc-commit-io",
  "agent-doc-document",
  "agent-doc-document-realtime-io",
+ "agent-doc-flow-io",
  "agent-doc-git-io",
  "agent-doc-ops-log-io",
+ "agent-doc-repair-io",
+ "agent-doc-session-check-io",
  "agent-doc-snapshot-io",
  "agent-doc-turn",
  "anyhow",

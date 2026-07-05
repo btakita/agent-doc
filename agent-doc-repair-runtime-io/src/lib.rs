@@ -6,6 +6,40 @@ use agent_doc_document::write_normalization::{
 use agent_doc_turn::response_replay::dedupe_responses;
 use anyhow::{Context, Result};
 
+pub fn repair_coordinator_effects<ReplayWriteEffects>(
+    replay_write_effects: &'static ReplayWriteEffects,
+) -> agent_doc_repair_io::RepairCoordinatorEffects<
+    'static,
+    agent_doc_closeout_runtime_io::RuntimeRepairIoEffects,
+    ReplayWriteEffects,
+>
+where
+    ReplayWriteEffects: agent_doc_repair_io::RepairReplayWriteEffects,
+{
+    agent_doc_repair_io::RepairCoordinatorEffects {
+        repair_io_effects: &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+        replay_write_effects,
+        complete_required_closeout: repair_complete_required_closeout,
+        inspect_session: repair_inspect_session,
+        recover_missing_committed_head_response,
+        recover_dedupe_only_drift,
+    }
+}
+
+fn repair_complete_required_closeout(file: &Path) -> Result<bool> {
+    agent_doc_flow_io::closeout::complete_required_closeout(
+        file,
+        &agent_doc_closeout_runtime_io::closeout_effects(),
+    )
+}
+
+fn repair_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
+    agent_doc_session_check_io::inspect(
+        file,
+        &agent_doc_closeout_runtime_io::session_check_effects(),
+    )
+}
+
 pub fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
     let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);

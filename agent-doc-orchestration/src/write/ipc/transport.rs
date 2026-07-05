@@ -3431,7 +3431,9 @@ Implemented.
 
         let head_before = head_count(root);
         let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
-            crate::repair_coordinator_effects(),
+            agent_doc_repair_runtime_io::repair_coordinator_effects(
+                &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+            ),
             &doc,
             true,
             false,
@@ -3488,7 +3490,9 @@ Implemented.
 
         let head_before = head_count(root);
         let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
-            crate::repair_coordinator_effects(),
+            agent_doc_repair_runtime_io::repair_coordinator_effects(
+                &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+            ),
             &doc,
             false,
             false,

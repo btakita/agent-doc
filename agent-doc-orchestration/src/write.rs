@@ -1614,7 +1614,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
     }
 }
 
-pub fn complete_required_closeout(file: &Path) -> Result<bool> {
+fn complete_required_closeout(file: &Path) -> Result<bool> {
     agent_doc_flow_io::closeout::complete_required_closeout(
         file,
         &agent_doc_closeout_runtime_io::closeout_effects(),

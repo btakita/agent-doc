@@ -11343,6 +11343,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move remaining CLI document-write adapters to focused command IO crates",
         ),
         (
+            "Write required-closeout facade demotion",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-flow-io::closeout::complete_required_closeout",
+            "Split write command commit-boundary sequencing after write command DTO extraction",
+        ),
+        (
             "Repair runtime recovery callback IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-runtime-io/src/lib.rs",
@@ -28922,6 +28928,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
             && !write_source.contains("pub fn atomic_write_pub(")
             && !write_source.contains("pub fn atomic_write_if_current_pub(")
             && !write_source.contains("pub fn record_document_write_provenance(")
+            && !write_source.contains("pub fn complete_required_closeout(")
             && !write_source.contains(
                 "RUNTIME_WRITE_CONVERGENCE_EFFECTS as WRITE_CONVERGENCE_EFFECTS"
             )

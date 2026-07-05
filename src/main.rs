@@ -131,7 +131,7 @@ impl ClaimRuntimeEffects for CliClaimRuntimeEffects {
             file_path,
             context_session,
             col_args,
-            agent_doc_orchestration::route::route_startup_effects(),
+            agent_doc_route_io::runtime_effects::route_startup_effects(),
         )
     }
 }
@@ -176,7 +176,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             session_id,
             file_arg,
             window,
-            agent_doc_orchestration::route::route_startup_effects(),
+            agent_doc_route_io::runtime_effects::route_startup_effects(),
         )
     }
 }
@@ -253,7 +253,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
             file_path,
             context_session,
             col_args,
-            agent_doc_orchestration::route::route_startup_effects(),
+            agent_doc_route_io::runtime_effects::route_startup_effects(),
         )
     }
 }

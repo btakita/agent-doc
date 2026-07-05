@@ -26,6 +26,7 @@ pub mod pane_provenance;
 pub mod pane_resolution;
 pub mod queue_dispatch;
 pub mod restart_handoff;
+pub mod runtime_effects;
 pub mod session_resolution;
 pub mod startup;
 pub mod startup_debounce;

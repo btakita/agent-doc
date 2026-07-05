@@ -155,10 +155,12 @@
 
 use anyhow::Result;
 use std::path::Path;
+#[cfg(test)]
 use std::time::Duration;
 #[cfg(test)]
 use std::time::Instant;
 
+#[cfg(test)]
 use agent_doc_controller::dispatch::dispatch_only_starting_pane_ready_timeout_for_binary;
 #[cfg(test)]
 use agent_doc_controller::dispatch::{
@@ -183,6 +185,7 @@ use agent_doc_controller_io::starting_actor_timeout::{
     record_starting_actor_timeout, starting_actor_timeout_record_identity_matches,
     starting_actor_timeout_record_matches,
 };
+#[cfg(test)]
 use agent_doc_harness::HarnessConfig;
 #[cfg(test)]
 use agent_doc_route_io::authoritative_actor::{
@@ -203,48 +206,44 @@ use agent_doc_route_io::closeout_drain::{
 use agent_doc_route_io::command::RouteCommandEffects;
 #[cfg(test)]
 use agent_doc_route_io::command::RouteMode;
-use agent_doc_route_io::cycle_ack::RouteCycleAckEffects;
 #[cfg(test)]
 use agent_doc_route_io::cycle_ack::pending_prompt_bearing_context_for_route;
+#[cfg(test)]
 use agent_doc_route_io::diagnostics::{
-    emit_busy_route_diagnostic, emit_busy_route_queued_diagnostic,
-    emit_busy_route_queued_diagnostic_from_facts, emit_startup_miss_diagnostic,
+    emit_startup_miss_diagnostic,
     file_route_dispatch_bug_report_with_runtime_effects as file_route_dispatch_bug_report,
 };
 #[cfg(test)]
 use agent_doc_route_io::direct_pane_dispatch::editor_route_attempt_id;
 #[cfg(test)]
 use agent_doc_route_io::dispatch::RouteDispatchBugReportFacts;
-use agent_doc_route_io::dispatch::RouteDispatchEffects;
 #[cfg(test)]
 use agent_doc_route_io::dispatch::send_command_checked;
-pub(crate) use agent_doc_route_io::dispatch_only::{
-    DispatchOnlyQueuedPromptOutcome, DispatchOnlyRouteEffects,
-};
 #[cfg(test)]
 use agent_doc_route_io::dispatch_recovery::resolve_fresh_dispatch_target_after_ready_wait;
 #[cfg(test)]
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
-use agent_doc_route_io::document_prep::RouteDocumentPrepEffects;
 #[cfg(test)]
 use agent_doc_route_io::document_prep::scrub_duplicate_prompt_comments_for_route;
-use agent_doc_route_io::document_write::route_write_document;
+use agent_doc_route_io::pane_resolution::ManagedPaneResolutionEffects;
 #[cfg(test)]
 use agent_doc_route_io::pane_resolution::cleanup_failed_route_panes;
 #[cfg(test)]
 use agent_doc_route_io::pane_resolution::should_preserve_failed_route_pane;
 #[cfg(test)]
 use agent_doc_route_io::pane_resolution::startup_miss_route_facts;
-use agent_doc_route_io::pane_resolution::{
-    ManagedPaneResolutionEffects, RouteBusyPaneRetryEffects,
-};
-use agent_doc_route_io::queue_dispatch::{RouteQueueEffects, enqueue_route_dispatch_prompt};
 #[cfg(test)]
 use agent_doc_route_io::queue_dispatch::{
     activate_existing_route_queue_head, enqueue_exchange_slash_command_for_idle_drain,
-    inactive_route_queue_head,
+    enqueue_route_dispatch_prompt, inactive_route_queue_head,
 };
-use agent_doc_route_io::startup::RouteStartupEffects;
+#[cfg(test)]
+use agent_doc_route_io::runtime_effects::dispatch_only_starting_pane_ready_timeout;
+use agent_doc_route_io::runtime_effects::{
+    route_busy_pane_retry_effects, route_cycle_ack_effects, route_dispatch_effects,
+    route_dispatch_only_effects, route_document_prep_effects, route_queue_effects,
+    route_startup_effects,
+};
 #[cfg(test)]
 use agent_doc_session_registry_io::dispatch_registry::ensure_dispatch_target_matches_file;
 #[cfg(test)]
@@ -262,33 +261,6 @@ use tmux_router::Tmux;
 #[cfg(test)]
 use agent_doc_session_registry_io::registration as sessions;
 
-fn wait_for_ready_override() -> Option<Duration> {
-    agent_doc_route_io::invocation::wait_for_ready_override()
-}
-
-fn route_dispatch_effects() -> RouteDispatchEffects {
-    RouteDispatchEffects {
-        file_route_dispatch_bug_report,
-        emit_busy_route_queued_diagnostic: emit_busy_route_queued_diagnostic_from_facts,
-    }
-}
-
-fn route_cycle_ack_effects() -> RouteCycleAckEffects {
-    RouteCycleAckEffects {
-        route_dispatch_effects: route_dispatch_effects(),
-        emit_startup_miss_diagnostic,
-        emit_busy_route_diagnostic,
-    }
-}
-
-fn route_busy_pane_retry_effects() -> RouteBusyPaneRetryEffects {
-    RouteBusyPaneRetryEffects {
-        route_dispatch_effects: route_dispatch_effects(),
-        route_cycle_ack_effects: route_cycle_ack_effects(),
-        emit_busy_route_diagnostic,
-    }
-}
-
 fn route_managed_pane_resolution_effects() -> ManagedPaneResolutionEffects {
     ManagedPaneResolutionEffects {
         route_dispatch_effects: route_dispatch_effects(),
@@ -299,31 +271,6 @@ fn route_managed_pane_resolution_effects() -> ManagedPaneResolutionEffects {
     }
 }
 
-fn route_dispatch_only_effects() -> DispatchOnlyRouteEffects {
-    DispatchOnlyRouteEffects {
-        route_dispatch_effects: route_dispatch_effects(),
-        enqueue_route_dispatch_prompt: enqueue_route_dispatch_prompt_for_dispatch_only,
-        emit_busy_route_queued_diagnostic,
-        emit_busy_route_diagnostic,
-        dispatch_only_starting_pane_ready_timeout,
-        file_route_dispatch_bug_report,
-    }
-}
-
-pub fn route_startup_effects() -> RouteStartupEffects {
-    RouteStartupEffects {
-        route_dispatch_effects: route_dispatch_effects(),
-        dispatch_only_route_effects: route_dispatch_only_effects(),
-        route_cycle_ack_effects: route_cycle_ack_effects(),
-    }
-}
-
-fn route_queue_effects() -> RouteQueueEffects {
-    RouteQueueEffects {
-        write_document: route_write_document,
-    }
-}
-
 fn route_authoritative_actor_effects() -> RouteAuthoritativeActorEffects {
     RouteAuthoritativeActorEffects {
         closeout_drain_effects: route_closeout_drain_effects(),
@@ -331,13 +278,7 @@ fn route_authoritative_actor_effects() -> RouteAuthoritativeActorEffects {
         route_dispatch_effects: route_dispatch_effects(),
         route_cycle_ack_effects: route_cycle_ack_effects(),
         dispatch_only_route_effects: route_dispatch_only_effects(),
-        wait_for_ready_override,
-    }
-}
-
-fn route_document_prep_effects() -> RouteDocumentPrepEffects {
-    RouteDocumentPrepEffects {
-        write_document: route_write_document,
+        wait_for_ready_override: agent_doc_route_io::invocation::wait_for_ready_override,
     }
 }
 
@@ -381,22 +322,6 @@ fn route_closeout_drain_effects() -> RouteCloseoutDrainEffects {
         inspect_session: route_inspect_session,
         decide_closeout_recovery: route_decide_closeout_recovery,
     }
-}
-
-fn enqueue_route_dispatch_prompt_for_dispatch_only(
-    file: &Path,
-    prompt_text: &str,
-    source: &str,
-    priority: bool,
-) -> Result<DispatchOnlyQueuedPromptOutcome> {
-    let outcome =
-        enqueue_route_dispatch_prompt(file, prompt_text, source, priority, route_queue_effects())?;
-    Ok(DispatchOnlyQueuedPromptOutcome {
-        prompt_text: outcome.prompt_text,
-        appended: outcome.appended,
-        already_present: outcome.already_present,
-        superseded: outcome.superseded,
-    })
 }
 
 pub fn route_command_effects() -> RouteCommandEffects {
@@ -506,15 +431,6 @@ pub fn run_with_tmux_with_options(
         force_disk,
         route_command_effects(),
     )
-}
-
-fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {
-    wait_for_ready_override().unwrap_or_else(|| {
-        dispatch_only_starting_pane_ready_timeout_for_binary(
-            Some(harness.binary.as_str()),
-            cfg!(test),
-        )
-    })
 }
 
 #[cfg(test)]
@@ -3648,7 +3564,7 @@ mod tests {
         let codex = agent_doc_harness::HarnessConfig::codex();
         assert_eq!(
             dispatch_only_starting_pane_ready_timeout(&codex),
-            Duration::from_millis(250)
+            dispatch_only_starting_pane_ready_timeout_for_binary(Some("codex"), false)
         );
 
         let guard = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(60)));
@@ -3660,7 +3576,7 @@ mod tests {
 
         assert_eq!(
             dispatch_only_starting_pane_ready_timeout(&codex),
-            Duration::from_millis(250)
+            dispatch_only_starting_pane_ready_timeout_for_binary(Some("codex"), false)
         );
     }
 }

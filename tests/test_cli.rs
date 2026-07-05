@@ -28337,6 +28337,66 @@ fn test_agent_doc_route_io_owns_route_document_write_authority() {
 }
 
 #[test]
+fn test_agent_doc_route_io_owns_route_runtime_effect_bundles() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
+    let runtime_effects =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/runtime_effects.rs")).unwrap();
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+
+    for forbidden_snippet in [
+        "fn route_dispatch_effects(",
+        "fn route_cycle_ack_effects(",
+        "fn route_busy_pane_retry_effects(",
+        "fn route_queue_effects(",
+        "fn route_document_prep_effects(",
+        "fn route_dispatch_only_effects(",
+        "pub fn route_startup_effects(",
+        "fn enqueue_route_dispatch_prompt_for_dispatch_only(",
+        "fn dispatch_only_starting_pane_ready_timeout(",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own route runtime effect bundle assembly after it moves to route IO: {forbidden_snippet}"
+        );
+    }
+
+    for required_snippet in [
+        "pub fn route_dispatch_effects(",
+        "pub fn route_cycle_ack_effects(",
+        "pub fn route_busy_pane_retry_effects(",
+        "pub fn route_queue_effects(",
+        "pub fn route_document_prep_effects(",
+        "pub fn enqueue_route_dispatch_prompt_for_dispatch_only(",
+        "pub fn dispatch_only_starting_pane_ready_timeout(",
+        "pub fn route_dispatch_only_effects(",
+        "pub fn route_startup_effects(",
+        "file_route_dispatch_bug_report_with_runtime_effects",
+        "route_write_document",
+        "enqueue_route_dispatch_prompt(",
+        "dispatch_only_starting_pane_ready_timeout_for_binary",
+    ] {
+        assert!(
+            runtime_effects.contains(required_snippet),
+            "agent-doc-route-io runtime_effects should own route effect bundle assembly: {required_snippet}"
+        );
+    }
+    assert!(
+        route_io_lib.contains("pub mod runtime_effects;")
+            && route_source.contains("use agent_doc_route_io::runtime_effects::{")
+            && route_source.contains(
+                "wait_for_ready_override: agent_doc_route_io::invocation::wait_for_ready_override"
+            )
+            && main_source.contains("agent_doc_route_io::runtime_effects::route_startup_effects()")
+            && !main_source.contains("agent_doc_orchestration::route::route_startup_effects()"),
+        "production route startup and remaining orchestration route adapters should consume focused route runtime effects directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_route_io_owns_route_closeout_drain() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let route_source =

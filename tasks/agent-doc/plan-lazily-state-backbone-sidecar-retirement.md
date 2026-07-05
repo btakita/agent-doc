@@ -76,18 +76,20 @@ Use the lazily-backed state backbone as the source for document/session state:
   wrapper.
 - Context-schema decision: lazily now has typed context-family primitives so
   `Slot`/`Cell` handles can be bound to a schema instead of being accidentally
-  reused across parallel graphs. Agent-doc should adopt that in two explicit
-  surfaces next: `CycleContext` (rename/replace the short-lived `RunContext`
-  cycle IO graph) and `RealtimeDocumentContext` (a typed
-  `ThreadSafeContext`-backed realtime document graph for cross-thread editor /
-  watcher / actor authority). This checkpoint only lands the lazily primitive
-  and CurrentDocument-backed cache; it does not claim that the rename/adoption is
-  complete.
+  reused across parallel graphs. Agent-doc should use direct typed lazily
+  contexts, not wrapper structs: the short-lived cycle IO graph is
+  `TypedContext<CycleContextSchema>` via the `CycleContext` alias, long-lived
+  actor state is `TypedContext<ActorContextSchema>` via the `ActorContext`
+  alias, and any future realtime document graph should be a typed lazily
+  `ThreadSafeContext` schema rather than `DocumentContext` /
+  `RealtimeDocumentContext` wrappers.
 - Cutover progress: `CycleContext` and `ActorContext` now alias direct
   `lazily::TypedContext` schemas, with memoized Slot/Cell factories living in
-  `agent-doc-run-context-io`. The old `DocumentContext` wrapper is removed, and
-  callers use the typed contexts plus `AgentDocContextExt` while the remaining
-  realtime document graph is still being collapsed into direct lazily contexts.
+  `agent-doc-run-context-io`. The old `DocumentContext` wrapper and the
+  temporary `RunContext` compatibility alias/factory are removed; callers use
+  `CycleContext` / `cycle_context(...)` plus `AgentDocContextExt` while the
+  remaining realtime document graph is still being collapsed into direct lazily
+  contexts.
 - Realtime steering is one such baseline comparison. If the operator edits the
   prompt during an in-flight turn, the current document model is compared with
   the turn baseline and projected as `prompt_target`, `content_edit`,

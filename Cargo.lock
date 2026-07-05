@@ -1340,7 +1340,13 @@ name = "agent-doc-preflight-runtime-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-document-realtime-io",
+ "agent-doc-frontmatter",
+ "agent-doc-ops-log-io",
  "agent-doc-preflight-io",
+ "agent-doc-run-context-io",
+ "agent-doc-snapshot-io",
+ "agent-doc-template",
+ "agent-doc-template-io",
  "agent-doc-write-converge-io",
  "anyhow",
 ]

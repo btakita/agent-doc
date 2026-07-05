@@ -11,6 +11,12 @@ name = "agent_doc_preflight_runtime_io"
 
 [dependencies]
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.67" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.67" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }
+agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.34.67" }
 agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.67" }
 anyhow = "1"

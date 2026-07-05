@@ -3,11 +3,17 @@
 use super::*;
 use agent_doc_diff as diff;
 use agent_doc_diff::semantic::semantic_diff_summary;
+use agent_doc_frontmatter::frontmatter;
 use agent_doc_preflight_io::{
     PendingMaintenanceReport, QueueState, check_linked_docs, enforce_no_dropped_backlog,
     enforce_no_shadow_open_backlog, explicit_backlog_target_requirements, inspect_queue_state,
     read_and_truncate_claims, read_claims, resolve_pipeline_state, run_gate_verify,
     run_pending_maintenance, run_queue_maintenance, save_baseline_content,
+};
+use agent_doc_preflight_runtime_io::{
+    relocate_out_of_exchange_prompt_before_diff,
+    remove_duplicate_answered_exchange_prompt_tail_for_preflight,
+    remove_post_exchange_duplicate_prompt_comments_for_preflight,
 };
 use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_strings};
 use agent_doc_queue::queue_convergence::{

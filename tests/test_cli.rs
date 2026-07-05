@@ -19900,6 +19900,80 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
 }
 
 #[test]
+fn test_agent_doc_preflight_runtime_io_owns_prompt_cleanup_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs")).unwrap();
+    let preflight_runtime_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/Cargo.toml")).unwrap();
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_runtime = orchestration_preflight
+        .split("\n#[cfg(test)]")
+        .next()
+        .unwrap_or(&orchestration_preflight);
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+
+    for required in [
+        "pub fn relocate_out_of_exchange_prompt_before_diff(",
+        "pub fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(",
+        "pub fn remove_post_exchange_duplicate_prompt_comments_for_preflight(",
+        "agent_doc_template::repair_prompt_tail_outside_exchange(",
+        "agent_doc_template::remove_duplicate_answered_exchange_prompt_tail(",
+        "agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(",
+        "agent_doc_document_realtime_io::atomic_write_through_authority(",
+        "agent_doc_snapshot_io::load(file)",
+        "post_exchange_duplicate_prompt_comment_removed file=",
+    ] {
+        assert!(
+            preflight_runtime.contains(required),
+            "agent-doc-preflight-runtime-io must own preflight prompt-cleanup runtime marker: {required}"
+        );
+    }
+
+    for required_dep in [
+        "agent-doc-frontmatter =",
+        "agent-doc-ops-log-io =",
+        "agent-doc-run-context-io =",
+        "agent-doc-snapshot-io =",
+        "agent-doc-template =",
+        "agent-doc-template-io =",
+    ] {
+        assert!(
+            preflight_runtime_manifest.contains(required_dep),
+            "agent-doc-preflight-runtime-io should declare prompt-cleanup runtime dependency: {required_dep}"
+        );
+    }
+
+    for forbidden in [
+        "fn relocate_out_of_exchange_prompt_before_diff(",
+        "fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(",
+        "fn remove_post_exchange_duplicate_prompt_comments_for_preflight(",
+        "agent_doc_template::repair_prompt_tail_outside_exchange(",
+        "agent_doc_template::remove_duplicate_answered_exchange_prompt_tail(",
+        "agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(",
+    ] {
+        assert!(
+            !orchestration_preflight_runtime.contains(forbidden),
+            "orchestration preflight.rs must not re-own prompt-cleanup runtime marker: {forbidden}"
+        );
+    }
+
+    assert!(
+        orchestration_preflight_run.contains(
+            "relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?"
+        ) && orchestration_preflight_run
+            .contains("remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)?")
+            && orchestration_preflight_run.contains(
+                "remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)?"
+            ),
+        "preflight run sequencing should call the focused runtime cleanup helpers"
+    );
+}
+
+#[test]
 fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =

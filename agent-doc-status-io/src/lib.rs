@@ -23,9 +23,43 @@ pub trait StatusWriteEffects {
     fn log_op(&self, file: &Path, message: &str);
 }
 
+pub struct RuntimeStatusWriteEffects;
+
+pub static RUNTIME_STATUS_WRITE_EFFECTS: RuntimeStatusWriteEffects = RuntimeStatusWriteEffects;
+
+impl StatusWriteEffects for RuntimeStatusWriteEffects {
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        previous: &str,
+        updated: &str,
+        phase: &str,
+    ) -> Result<()> {
+        agent_doc_write_converge_io::converge_or_disk_write(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            previous,
+            updated,
+            phase,
+        )
+    }
+
+    fn record_document_write_provenance(&self, file: &Path, updated: &str) {
+        agent_doc_document_realtime_io::record_document_write_provenance(file, updated);
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
+    }
+}
+
 /// Replace the status component content with the provided text.
 pub fn set<E: StatusWriteEffects + ?Sized>(effects: &E, file: &Path, text: &str) -> Result<()> {
     set_with_options(effects, file, text, false)
+}
+
+pub fn set_with_runtime_options(file: &Path, text: &str, force_disk: bool) -> Result<()> {
+    set_with_options(&RUNTIME_STATUS_WRITE_EFFECTS, file, text, force_disk)
 }
 
 pub fn set_with_options<E: StatusWriteEffects + ?Sized>(

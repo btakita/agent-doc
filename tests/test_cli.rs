@@ -24090,9 +24090,16 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         .expect("status IO crate should exist");
     for required in [
         "pub trait StatusWriteEffects",
+        "pub struct RuntimeStatusWriteEffects",
+        "pub static RUNTIME_STATUS_WRITE_EFFECTS",
         "pub fn set<E: StatusWriteEffects + ?Sized>",
+        "pub fn set_with_runtime_options(",
         "pub fn set_with_options<E: StatusWriteEffects + ?Sized>",
         "agent_doc_document::status_projection::replace_status_content",
+        "agent_doc_write_converge_io::converge_or_disk_write(",
+        "agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS",
+        "agent_doc_document_realtime_io::record_document_write_provenance(file, updated)",
+        "agent_doc_ops_log_io::log_op(file, message)",
         "effects.converge_or_disk_write(file, &full_content, &new_doc, \"status_set\")",
         "effects.record_document_write_provenance(file, &new_doc)",
         "effects.log_op(",
@@ -24105,7 +24112,13 @@ fn test_agent_doc_document_owns_status_projection_policy() {
     }
     let status_io_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-status-io/Cargo.toml")).unwrap();
-    for required in ["agent-doc-document", "agent-doc-hash"] {
+    for required in [
+        "agent-doc-document",
+        "agent-doc-document-realtime-io",
+        "agent-doc-hash",
+        "agent-doc-ops-log-io",
+        "agent-doc-write-converge-io",
+    ] {
         assert!(
             status_io_manifest.contains(required),
             "agent-doc-status-io should depend on focused dependency {required}"
@@ -24132,12 +24145,22 @@ fn test_agent_doc_document_owns_status_projection_policy() {
     let orchestration_write =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let status_adapter_start = orchestration_write
-        .find("struct WriteStatusEffects")
-        .expect("write.rs should define the private status effects adapter");
+        .find("fn set_status_with_options")
+        .expect("write.rs should define the status command helper");
     let status_adapter_end = orchestration_write
         .find("pub fn run_command(")
-        .expect("write.rs should define run_command after the status adapter");
+        .expect("write.rs should define run_command after the status helper");
     let status_adapter = &orchestration_write[status_adapter_start..status_adapter_end];
+    for forbidden in [
+        "struct WriteStatusEffects",
+        "impl agent_doc_status_io::StatusWriteEffects for WriteStatusEffects",
+        "const STATUS_EFFECTS",
+    ] {
+        assert!(
+            !orchestration_write.contains(forbidden),
+            "write.rs must not keep a private status runtime effects provider: {forbidden}"
+        );
+    }
     for forbidden in [
         "STALE_SUPERVISOR_STATUS_MARKER",
         "fn find_status_component",
@@ -24156,12 +24179,9 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         );
     }
     assert!(
-        status_adapter.contains("agent_doc_status_io::set_with_options(&STATUS_EFFECTS")
-            && status_adapter.contains("agent_doc_write_converge_io::converge_or_disk_write(")
-            && status_adapter.contains("&WRITE_CONVERGENCE_EFFECTS")
-            && status_adapter.contains("record_document_write_provenance(file, updated)")
-            && status_adapter.contains("agent_doc_ops_log_io::log_op(file, message)"),
-        "write status adapter should only inject orchestration effects into focused status IO"
+        status_adapter.contains("agent_doc_status_io::set_with_runtime_options(")
+            && !status_adapter.contains("agent_doc_status_io::set_with_options(&STATUS_EFFECTS"),
+        "write status adapter should call focused status runtime IO directly"
     );
     for forbidden in [
         "agent_doc_document::status_projection::replace_status_content",

@@ -724,38 +724,8 @@ pub use agent_doc_document_realtime_io::{
     RuntimeWriteConvergenceEffects as WriteConvergenceEffects,
 };
 
-struct WriteStatusEffects;
-
-impl agent_doc_status_io::StatusWriteEffects for WriteStatusEffects {
-    fn converge_or_disk_write(
-        &self,
-        file: &Path,
-        previous: &str,
-        updated: &str,
-        phase: &str,
-    ) -> Result<()> {
-        agent_doc_write_converge_io::converge_or_disk_write(
-            &WRITE_CONVERGENCE_EFFECTS,
-            file,
-            previous,
-            updated,
-            phase,
-        )
-    }
-
-    fn record_document_write_provenance(&self, file: &Path, updated: &str) {
-        record_document_write_provenance(file, updated);
-    }
-
-    fn log_op(&self, file: &Path, message: &str) {
-        agent_doc_ops_log_io::log_op(file, message);
-    }
-}
-
-const STATUS_EFFECTS: WriteStatusEffects = WriteStatusEffects;
-
 fn set_status_with_options(file: &Path, text: &str, force_disk: bool) -> Result<()> {
-    agent_doc_status_io::set_with_options(&STATUS_EFFECTS, file, text, force_disk)
+    agent_doc_status_io::set_with_runtime_options(file, text, force_disk)
 }
 
 pub(crate) fn guard_stale_snapshot_recovery_only(

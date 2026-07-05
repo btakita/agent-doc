@@ -2031,7 +2031,10 @@ name = "agent-doc-status-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-document",
+ "agent-doc-document-realtime-io",
  "agent-doc-hash",
+ "agent-doc-ops-log-io",
+ "agent-doc-write-converge-io",
  "anyhow",
  "tempfile",
 ]

@@ -22,6 +22,37 @@ pub struct RouteDispatchBugReportEffects {
     pub add_backlog_items: AddRouteDispatchBugBacklogItemsFn,
 }
 
+pub fn route_dispatch_bug_force_disk_pending_writes() -> bool {
+    crate::invocation::force_disk_route_writes()
+}
+
+pub fn add_route_dispatch_bug_backlog_items(
+    target_file: &Path,
+    items: &[String],
+    force_disk: bool,
+) -> Result<Vec<String>> {
+    agent_doc_element_backlog_io::with_backlog_command_effects(
+        &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
+        || {
+            agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
+                force_disk,
+                || agent_doc_element_backlog_io::backlog_cmd::add_many(target_file, items, false),
+            )
+        },
+    )
+}
+
+pub fn runtime_route_dispatch_bug_report_effects() -> RouteDispatchBugReportEffects {
+    RouteDispatchBugReportEffects {
+        force_disk_pending_writes: route_dispatch_bug_force_disk_pending_writes,
+        add_backlog_items: add_route_dispatch_bug_backlog_items,
+    }
+}
+
+pub fn file_route_dispatch_bug_report_with_runtime_effects(facts: RouteDispatchBugReportFacts<'_>) {
+    file_route_dispatch_bug_report(facts, runtime_route_dispatch_bug_report_effects());
+}
+
 fn route_current_actor_generation(file: &Path) -> Option<u64> {
     let canonical = file.canonicalize().ok()?;
     let root = agent_doc_project_root_io::project_root_containing(&canonical)?;

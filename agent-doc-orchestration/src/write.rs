@@ -811,7 +811,7 @@ fn apply_pending_and_status_mutations(
 
     if has_pending_ops {
         agent_doc_element_backlog_io::with_backlog_command_effects(
-            &crate::BACKLOG_COMMAND_EFFECTS,
+            &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
             || {
                 backlog_cmd::with_force_disk_pending_writes(options.force_disk, || {
                     if options.pending_clear {
@@ -1365,7 +1365,9 @@ fn run_command_inner(
             file,
             agent_doc_session_check_io::PendingDoneCheckOptions {
                 force_disk: options.force_disk,
-                backlog_effects: Some(&crate::BACKLOG_COMMAND_EFFECTS),
+                backlog_effects: Some(
+                    &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
+                ),
             },
         )?;
     }

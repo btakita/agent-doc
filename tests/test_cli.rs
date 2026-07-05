@@ -15587,7 +15587,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .join("agent-doc-orchestration/src/route/dispatch.rs")
             .exists()
             && !route_source.contains("mod dispatch;")
-            && route_source.contains("use agent_doc_route_io::dispatch::{"),
+            && (route_source.contains("use agent_doc_route_io::dispatch::{")
+                || route_source
+                    .contains("use agent_doc_route_io::dispatch::RouteDispatchEffects;")),
         "orchestration must not keep a route dispatch module after the dispatch transport/proof graph moves to agent-doc-route-io"
     );
     assert!(
@@ -16262,6 +16264,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     assert!(
         route_diagnostics_source.contains("pub struct RouteDispatchBugReportEffects")
             && route_diagnostics_source.contains("pub fn file_route_dispatch_bug_report(")
+            && route_diagnostics_source
+                .contains("pub fn file_route_dispatch_bug_report_with_runtime_effects(")
+            && route_diagnostics_source.contains("pub fn runtime_route_dispatch_bug_report_effects(")
+            && route_diagnostics_source.contains("pub fn add_route_dispatch_bug_backlog_items(")
+            && route_diagnostics_source
+                .contains("agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS")
             && route_diagnostics_source.contains("pub fn emit_startup_miss_diagnostic(")
             && route_diagnostics_source.contains("pub fn emit_busy_route_diagnostic(")
             && route_diagnostics_source.contains("pub fn emit_busy_route_queued_diagnostic(")
@@ -16270,14 +16278,20 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_diagnostics_source.contains("fn route_current_actor_generation(")
             && route_diagnostics_source.contains("fn route_ops_log_path(")
             && route_source.contains("use agent_doc_route_io::diagnostics::{")
-            && route_source.contains("RouteDispatchBugReportEffects")
-            && route_source.contains("route_dispatch_bug_report_effects()")
-            && route_source.contains("file_route_dispatch_bug_report_with_effects("),
-        "route diagnostics and dispatch-bug filing should live in agent-doc-route-io with orchestration only injecting the backlog write callback"
+            && route_source.contains(
+                "file_route_dispatch_bug_report_with_runtime_effects as file_route_dispatch_bug_report"
+            )
+            && !route_source.contains("RouteDispatchBugReportEffects")
+            && !route_source.contains("route_dispatch_bug_report_effects()")
+            && !route_source.contains("file_route_dispatch_bug_report_with_effects("),
+        "route diagnostics and dispatch-bug filing should live in agent-doc-route-io with runtime backlog effects owned outside orchestration"
     );
     for forbidden_snippet in [
         "fn route_current_actor_generation(",
         "fn route_ops_log_path(",
+        "fn add_route_dispatch_bug_backlog_items(",
+        "fn route_dispatch_bug_report_effects(",
+        "fn route_dispatch_bug_force_disk_pending_writes(",
         "fn emit_busy_route_queued_diagnostic_from_facts(",
         "fn emit_startup_miss_diagnostic(",
         "fn emit_busy_route_diagnostic(",
@@ -20745,6 +20759,97 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
     assert!(
         cli.contains("agent_doc_element_review::ReviewListFilter"),
         "CLI should construct review filters from the focused review crate"
+    );
+}
+
+#[test]
+fn test_agent_doc_element_backlog_runtime_io_owns_runtime_backlog_command_effects() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let runtime_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-runtime-io/Cargo.toml"))
+            .unwrap();
+    let runtime_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-runtime-io/src/lib.rs"))
+            .unwrap();
+    let backlog_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/Cargo.toml")).unwrap();
+    let backlog_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/lib.rs")).unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_diagnostics =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/diagnostics.rs")).unwrap();
+
+    for required in [
+        "\"agent-doc-element-backlog-runtime-io\"",
+        "agent-doc-element-backlog-runtime-io = { path = \"agent-doc-element-backlog-runtime-io\"",
+    ] {
+        assert!(
+            workspace_manifest.contains(required),
+            "workspace must expose backlog runtime IO as a first-class focused crate: {required}"
+        );
+    }
+    for required in [
+        "agent-doc-document-realtime-io =",
+        "agent-doc-element-backlog-io =",
+        "agent-doc-write-converge-io =",
+    ] {
+        assert!(
+            runtime_manifest.contains(required),
+            "agent-doc-element-backlog-runtime-io must own runtime backlog write dependencies: {required}"
+        );
+    }
+    for required in [
+        "pub struct RuntimeBacklogCommandEffects",
+        "pub static RUNTIME_BACKLOG_COMMAND_EFFECTS",
+        "impl agent_doc_element_backlog_io::BacklogCommandEffects for RuntimeBacklogCommandEffects",
+        "agent_doc_write_converge_io::converge_or_disk_write(",
+        "agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS",
+        "agent_doc_document_realtime_io::record_document_write_provenance",
+    ] {
+        assert!(
+            runtime_lib.contains(required),
+            "agent-doc-element-backlog-runtime-io must own runtime backlog command effects: {required}"
+        );
+    }
+    for forbidden in [
+        "agent-doc-document-realtime-io =",
+        "agent-doc-write-converge-io =",
+        "RUNTIME_BACKLOG_COMMAND_EFFECTS",
+    ] {
+        assert!(
+            !backlog_io_manifest.contains(forbidden) && !backlog_io_lib.contains(forbidden),
+            "agent-doc-element-backlog-io must stay below runtime document authority dependencies: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "pub(crate) struct BacklogCommandEffects",
+        "pub(crate) static BACKLOG_COMMAND_EFFECTS",
+        "impl agent_doc_element_backlog_io::BacklogCommandEffects for BacklogCommandEffects",
+        "crate::BACKLOG_COMMAND_EFFECTS",
+    ] {
+        assert!(
+            !orchestration_lib.contains(forbidden)
+                && !write_source.contains(forbidden)
+                && !route_source.contains(forbidden),
+            "orchestration must not own or inject backlog command runtime effects after extraction: {forbidden}"
+        );
+    }
+    assert!(
+        write_source.contains("agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS")
+            && route_diagnostics.contains("agent_doc_element_backlog_io::with_backlog_command_effects")
+            && route_diagnostics
+                .contains("agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS")
+            && route_diagnostics.contains("pub fn add_route_dispatch_bug_backlog_items(")
+            && route_source.contains(
+                "file_route_dispatch_bug_report_with_runtime_effects as file_route_dispatch_bug_report"
+            ),
+        "write and route should consume the focused backlog runtime effect provider directly"
     );
 }
 

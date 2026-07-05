@@ -42,32 +42,6 @@ pub mod route;
 pub mod start;
 pub mod write;
 
-pub(crate) struct BacklogCommandEffects;
-
-pub(crate) static BACKLOG_COMMAND_EFFECTS: BacklogCommandEffects = BacklogCommandEffects;
-
-impl agent_doc_element_backlog_io::BacklogCommandEffects for BacklogCommandEffects {
-    fn converge_or_disk_write(
-        &self,
-        file: &std::path::Path,
-        current_content: &str,
-        target_content: &str,
-        reason: &str,
-    ) -> anyhow::Result<()> {
-        agent_doc_write_converge_io::converge_or_disk_write(
-            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
-            file,
-            current_content,
-            target_content,
-            reason,
-        )
-    }
-
-    fn record_document_write_provenance(&self, file: &std::path::Path, content: &str) {
-        agent_doc_document_realtime_io::record_document_write_provenance(file, content);
-    }
-}
-
 pub use agent_doc_document_realtime_io::{
     RUNTIME_PIPELINE_FRONTMATTER_EFFECTS as PIPELINE_FRONTMATTER_EFFECTS,
     RuntimePipelineFrontmatterEffects as PipelineFrontmatterEffects,

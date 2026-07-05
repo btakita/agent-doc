@@ -207,15 +207,17 @@ use agent_doc_route_io::cycle_ack::RouteCycleAckEffects;
 #[cfg(test)]
 use agent_doc_route_io::cycle_ack::pending_prompt_bearing_context_for_route;
 use agent_doc_route_io::diagnostics::{
-    RouteDispatchBugReportEffects, emit_busy_route_diagnostic, emit_busy_route_queued_diagnostic,
+    emit_busy_route_diagnostic, emit_busy_route_queued_diagnostic,
     emit_busy_route_queued_diagnostic_from_facts, emit_startup_miss_diagnostic,
-    file_route_dispatch_bug_report as file_route_dispatch_bug_report_with_effects,
+    file_route_dispatch_bug_report_with_runtime_effects as file_route_dispatch_bug_report,
 };
 #[cfg(test)]
 use agent_doc_route_io::direct_pane_dispatch::editor_route_attempt_id;
 #[cfg(test)]
+use agent_doc_route_io::dispatch::RouteDispatchBugReportFacts;
+use agent_doc_route_io::dispatch::RouteDispatchEffects;
+#[cfg(test)]
 use agent_doc_route_io::dispatch::send_command_checked;
-use agent_doc_route_io::dispatch::{RouteDispatchBugReportFacts, RouteDispatchEffects};
 pub(crate) use agent_doc_route_io::dispatch_only::{
     DispatchOnlyQueuedPromptOutcome, DispatchOnlyRouteEffects,
 };
@@ -373,7 +375,7 @@ fn route_decide_closeout_recovery(
 
 fn route_closeout_drain_effects() -> RouteCloseoutDrainEffects {
     RouteCloseoutDrainEffects {
-        force_disk_route_writes: route_dispatch_bug_force_disk_pending_writes,
+        force_disk_route_writes: agent_doc_route_io::invocation::force_disk_route_writes,
         run_pending_maintenance: route_run_pending_maintenance,
         repair_closeout: route_repair_closeout,
         inspect_session: route_inspect_session,
@@ -395,37 +397,6 @@ fn enqueue_route_dispatch_prompt_for_dispatch_only(
         already_present: outcome.already_present,
         superseded: outcome.superseded,
     })
-}
-
-fn route_dispatch_bug_force_disk_pending_writes() -> bool {
-    agent_doc_route_io::invocation::force_disk_route_writes()
-}
-
-fn add_route_dispatch_bug_backlog_items(
-    target_file: &Path,
-    items: &[String],
-    force_disk: bool,
-) -> Result<Vec<String>> {
-    agent_doc_element_backlog_io::with_backlog_command_effects(
-        &crate::BACKLOG_COMMAND_EFFECTS,
-        || {
-            agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
-                force_disk,
-                || agent_doc_element_backlog_io::backlog_cmd::add_many(target_file, items, false),
-            )
-        },
-    )
-}
-
-fn route_dispatch_bug_report_effects() -> RouteDispatchBugReportEffects {
-    RouteDispatchBugReportEffects {
-        force_disk_pending_writes: route_dispatch_bug_force_disk_pending_writes,
-        add_backlog_items: add_route_dispatch_bug_backlog_items,
-    }
-}
-
-fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
-    file_route_dispatch_bug_report_with_effects(facts, route_dispatch_bug_report_effects());
 }
 
 pub fn route_command_effects() -> RouteCommandEffects {

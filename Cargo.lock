@@ -47,6 +47,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",
+ "agent-doc-element-backlog-runtime-io",
  "agent-doc-element-boundary",
  "agent-doc-element-exchange",
  "agent-doc-element-exchange-io",
@@ -634,6 +635,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-element-backlog-runtime-io"
+version = "0.34.67"
+dependencies = [
+ "agent-doc-document-realtime-io",
+ "agent-doc-element-backlog-io",
+ "agent-doc-write-converge-io",
+ "anyhow",
+]
+
+[[package]]
 name = "agent-doc-element-boundary"
 version = "0.34.67"
 dependencies = [
@@ -1124,6 +1135,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",
+ "agent-doc-element-backlog-runtime-io",
  "agent-doc-element-boundary",
  "agent-doc-element-done",
  "agent-doc-element-exchange",
@@ -1621,6 +1633,8 @@ dependencies = [
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-document-realtime-io",
+ "agent-doc-element-backlog-io",
+ "agent-doc-element-backlog-runtime-io",
  "agent-doc-flow",
  "agent-doc-flow-io",
  "agent-doc-frontmatter",

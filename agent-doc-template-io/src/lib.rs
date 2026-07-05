@@ -154,6 +154,35 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &Path) -> String {
     }
 }
 
+pub fn repair_response_prompt_order_for_file(
+    doc: &str,
+    response: Option<&str>,
+    file: &Path,
+    prompt_must_exist_in: Option<&str>,
+) -> Result<Option<String>> {
+    let repaired = agent_doc_element_exchange::repair_response_precedes_prompt_in_exchange(
+        doc,
+        response,
+        prompt_must_exist_in,
+    )
+    .with_context(|| {
+        format!(
+            "failed to parse {} for response/prompt order repair",
+            file.display()
+        )
+    })?;
+    if repaired.is_some() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "response_prompt_order_repaired file={} before_commit=true",
+                file.display()
+            ),
+        );
+    }
+    Ok(repaired)
+}
+
 pub fn log_duplicate_prompt_residue_guard(file: &Path) {
     log_template_structure_guard_event(
         file,

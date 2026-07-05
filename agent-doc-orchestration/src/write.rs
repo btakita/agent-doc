@@ -241,7 +241,6 @@ use agent_doc_element::element;
 use agent_doc_element_backlog_io::backlog_cmd;
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,
-    repair_response_precedes_prompt_in_exchange as repair_response_prompt_order_in_exchange,
     response_precedes_prompt_in_exchange, strip_prompt_prefix_from_response_body_first_lines,
 };
 use agent_doc_queue::queue_consume::{
@@ -2042,9 +2041,12 @@ fn normalize_final_template_content(
             )?;
         }
     }
-    if let Some(repaired) =
-        repair_response_prompt_order_for_file(&normalized, response, file, Some(base))?
-    {
+    if let Some(repaired) = agent_doc_template_io::repair_response_prompt_order_for_file(
+        &normalized,
+        response,
+        file,
+        Some(base),
+    )? {
         normalized = repaired;
         normalized = normalize_template_structure_or_fail_preserving(
             &normalized,
@@ -2065,31 +2067,6 @@ fn normalize_final_template_content(
         );
     }
     Ok(normalized)
-}
-
-pub(crate) fn repair_response_prompt_order_for_file(
-    doc: &str,
-    response: Option<&str>,
-    file: &Path,
-    prompt_must_exist_in: Option<&str>,
-) -> Result<Option<String>> {
-    let repaired = repair_response_prompt_order_in_exchange(doc, response, prompt_must_exist_in)
-        .with_context(|| {
-            format!(
-                "failed to parse {} for response/prompt order repair",
-                file.display()
-            )
-        })?;
-    if repaired.is_some() {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "response_prompt_order_repaired file={} before_commit=true",
-                file.display()
-            ),
-        );
-    }
-    Ok(repaired)
 }
 
 /// Atomic write: write to temp file then rename. Public for use by compact.

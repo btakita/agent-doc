@@ -139,7 +139,7 @@ impl agent_doc_repair_io::RepairTemplateWriteEffects for OrchestrationRepairIoEf
         file: &std::path::Path,
         fallback_snapshot: Option<&str>,
     ) -> anyhow::Result<Option<String>> {
-        crate::write::repair_response_prompt_order_for_file(
+        agent_doc_template_io::repair_response_prompt_order_for_file(
             content,
             known_response,
             file,

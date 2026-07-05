@@ -10999,7 +10999,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Repair template normalization IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
-            "Move `repair_response_prompt_order_for_file` and `normalize_template_structure_or_fail_preserving` out of `write.rs`",
+            "Move `normalize_template_structure_or_fail_preserving` out of `RepairTemplateWriteEffects`",
         ),
         (
             "Git pre-stage response/prompt artifact repair IO graph",
@@ -11150,6 +11150,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "agent-doc-orchestration/src/{preflight.rs,preflight/run.rs,codex_hook.rs,route.rs}",
             "agent-doc-repair-io::{run,run_with_queue_completion_ids,repair}",
             "Move `repair_coordinator_effects` into a focused repair runtime adapter",
+        ),
+        (
+            "Template response prompt-order repair IO graph",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-template-io::repair_response_prompt_order_for_file",
+            "Move the remaining response-precedes-prompt rejection guard",
         ),
         (
             "Repair recovery coordinator IO graph",

@@ -580,7 +580,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         commit_sibling_message: string_vec_arg(args, "commit_sibling_message")?,
     };
 
-    agent_doc_orchestration::write::run_command_with_response(
+    agent_doc_write_runtime_io::run_command_with_response(
         options,
         agent_doc_write_command_io::CommitMode::Required,
         response,

@@ -934,7 +934,7 @@ mod th {
             mode: ResolvedMode,
         ) -> Result<()> {
             self.finalize_calls.borrow_mut().push(response.to_string());
-            agent_doc_orchestration::write::run_command_with_response(
+            agent_doc_write_runtime_io::run_command_with_response(
                 agent_doc_write_command_io::CommandOptions {
                     file: file.to_path_buf(),
                     baseline_file: None,

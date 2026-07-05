@@ -129,6 +129,7 @@ agent-doc-work-graph = { path = "../agent-doc-work-graph", version = "0.34.67" }
 agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version = "0.34.67" }
 agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.67" }
 agent-doc-write-ipc-io = { path = "../agent-doc-write-ipc-io", version = "0.34.67" }
+agent-doc-write-runtime-io = { path = "../agent-doc-write-runtime-io", version = "0.34.67" }
 lazily = "0.21"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

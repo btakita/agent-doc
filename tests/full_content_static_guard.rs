@@ -122,7 +122,7 @@ fn assert_guard_before_sink(path: &str, anchor: &str, guard: &str, sink: &str) {
 #[test]
 fn production_receivers_only_allow_parser_or_diagnostic_full_content_refs() {
     assert_only_allowlisted_full_content_refs_before(
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
         "#[cfg(test)]",
         &[".get(\"fullContent\")"],
     );
@@ -157,17 +157,17 @@ fn production_receivers_only_allow_parser_or_diagnostic_full_content_refs() {
 #[test]
 fn full_content_values_are_not_reintroduced_into_visible_write_apis() {
     let forbidden = [
-        ("agent-doc-orchestration/src/write.rs", "\"fullContent\":"),
+        ("agent-doc-write-runtime-io/src/lib.rs", "\"fullContent\":"),
         (
-            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-write-runtime-io/src/lib.rs",
             "payload[\"fullContent\"]",
         ),
         (
-            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-write-runtime-io/src/lib.rs",
             "socket_payload[\"fullContent\"]",
         ),
         (
-            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-write-runtime-io/src/lib.rs",
             "ipc_payload[\"fullContent\"]",
         ),
         (

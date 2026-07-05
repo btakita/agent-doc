@@ -39,4 +39,3 @@ pub mod codex_hook;
 pub mod preflight;
 pub mod repair;
 pub mod start;
-pub mod write;

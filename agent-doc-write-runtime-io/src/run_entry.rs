@@ -2085,7 +2085,7 @@ fn strip_exchange_boundary_lines(content: &str) -> String {
 
 /// Apply an append-mode response from a string (not stdin).
 /// Used by `repair` to apply orphaned responses.
-pub(crate) fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
+pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     let response = agent_doc_turn::response_text::strip_assistant_heading(response);
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -2137,7 +2137,7 @@ pub(crate) fn apply_template_from_string(file: &Path, response: &str) -> Result<
     apply_template_from_string_with_options(file, response, TemplateApplyOptions::default())
 }
 
-pub(crate) fn apply_template_from_string_with_options(
+pub fn apply_template_from_string_with_options(
     file: &Path,
     response: &str,
     options: TemplateApplyOptions,

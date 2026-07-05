@@ -12,8 +12,8 @@
 //!   `main` contains no business logic beyond argument destructuring and dispatch.
 //! - `Route` no longer runs a follow-up sync; editor/plugin sync remains the
 //!   authoritative layout path.
-//! - `Write` auto-detects the write strategy from frontmatter when no `--template`/`--stream`
-//!   flag is given; CRDT-mode documents use `agent_doc_orchestration::write::run_stream`, others use `agent_doc_orchestration::write::run`.
+//! - `Write`/`Finalize` build `agent_doc_write_command_io::CommandOptions` and enter through
+//!   the repair-owned empty-response bridge, which calls the extracted write runtime.
 //! - `Prompt --all` runs `agent_doc_prompt_io::run_all()`; otherwise `FILE` is required.
 //! - `History --restore <commit>` calls `history::restore`; bare `History` calls `history::list`.
 //! - `Watch` dispatches to `agent_doc_watch_io::stop`, `agent_doc_watch_io::status`, or the CLI watch effects adapter based on flags.
@@ -32,8 +32,8 @@
 //!
 //! ## Evals
 //! - dispatch_run: `agent-doc run <file>` → `agent_doc_run_io::run` called with correct args
-//! - dispatch_write_crdt_autodetect: CRDT frontmatter + no flags → `agent_doc_orchestration::write::run_stream` selected
-//! - dispatch_write_inline_autodetect: inline frontmatter + no flags → `agent_doc_orchestration::write::run` selected
+//! - dispatch_write_crdt_autodetect: CRDT frontmatter + no flags → stream write mode selected
+//! - dispatch_write_inline_autodetect: inline frontmatter + no flags → inline write mode selected
 //! - dispatch_prompt_all: `--all` → `agent_doc_prompt_io::run_all`, no FILE required
 //! - dispatch_history_restore: `--restore <sha>` → `history::restore` called
 //! - dispatch_watch_stop: `--stop` flag → `agent_doc_watch_io::stop` called

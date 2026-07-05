@@ -85,7 +85,7 @@ impl agent_doc_repair_io::RepairStrictReplayWriteEffects for OrchestrationRepair
         } else {
             agent_doc_write_command_io::CommitMode::None
         };
-        crate::write::run_command_with_response(
+        agent_doc_write_runtime_io::run_command_with_response(
             agent_doc_write_command_io::CommandOptions::repair_replay(
                 file,
                 is_template,
@@ -106,7 +106,7 @@ impl agent_doc_repair_io::RepairFallbackWriteEffects for OrchestrationRepairRepl
         response: &str,
         force_disk: bool,
     ) -> Result<()> {
-        crate::write::apply_template_from_string_with_options(
+        agent_doc_write_runtime_io::run_entry::apply_template_from_string_with_options(
             file,
             response,
             agent_doc_write_command_io::TemplateApplyOptions { force_disk },
@@ -114,7 +114,7 @@ impl agent_doc_repair_io::RepairFallbackWriteEffects for OrchestrationRepairRepl
     }
 
     fn apply_append_from_string(&self, file: &Path, response: &str) -> Result<()> {
-        crate::write::apply_append_from_string(file, response)
+        agent_doc_write_runtime_io::run_entry::apply_append_from_string(file, response)
     }
 }
 
@@ -143,7 +143,7 @@ pub fn run_write_command_with_empty_response_recovery(
     options: agent_doc_write_command_io::CommandOptions,
     commit_mode: agent_doc_write_command_io::CommitMode,
 ) -> Result<()> {
-    crate::write::run_command_with_empty_response_recovery(
+    agent_doc_write_runtime_io::run_command_with_empty_response_recovery(
         options,
         commit_mode,
         recover_empty_response_for_strict_closeout,

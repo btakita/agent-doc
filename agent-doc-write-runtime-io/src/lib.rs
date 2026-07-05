@@ -373,7 +373,7 @@ pub fn run_command_with_response(
     result
 }
 
-pub(crate) fn run_command_with_empty_response_recovery(
+pub fn run_command_with_empty_response_recovery(
     options: CommandOptions,
     commit_mode: CommitMode,
     empty_response_recovery: EmptyResponseRecovery,
@@ -2035,7 +2035,7 @@ fn verify_pane_ownership(file: &Path) -> Result<()> {
     Ok(())
 }
 
-mod run_entry;
+pub mod run_entry;
 pub(crate) use run_entry::*;
 
 #[cfg(test)]
@@ -2185,6 +2185,46 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    struct NoopRepairReplayWriteEffects;
+
+    static NOOP_REPAIR_REPLAY_WRITE_EFFECTS: NoopRepairReplayWriteEffects =
+        NoopRepairReplayWriteEffects;
+
+    impl agent_doc_repair_io::RepairStrictReplayWriteEffects for NoopRepairReplayWriteEffects {
+        fn run_strict_write_replay(
+            &self,
+            _file: &Path,
+            _response: &str,
+            _is_template: bool,
+            _is_stream: bool,
+            _force_disk: bool,
+            _queue_completion_ids: &[String],
+        ) -> Result<()> {
+            anyhow::bail!("unexpected strict replay in write runtime test")
+        }
+    }
+
+    impl agent_doc_repair_io::RepairFallbackWriteEffects for NoopRepairReplayWriteEffects {
+        fn apply_template_from_string(
+            &self,
+            _file: &Path,
+            _response: &str,
+            _force_disk: bool,
+        ) -> Result<()> {
+            anyhow::bail!("unexpected template replay in write runtime test")
+        }
+
+        fn apply_append_from_string(&self, _file: &Path, _response: &str) -> Result<()> {
+            anyhow::bail!("unexpected append replay in write runtime test")
+        }
+    }
+
+    impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects for NoopRepairReplayWriteEffects {
+        fn strike_recovered_free_text_queue_head(&self, _file: &Path) -> Result<()> {
+            Ok(())
+        }
+    }
 
     fn record_test_visible_write_receipt(file: &Path, patch_id: &str, content: &str) {
         let file_key = file.to_string_lossy();
@@ -5165,7 +5205,7 @@ mod tests {
         assert!(
             agent_doc_repair_io::recover_empty_response_for_strict_closeout(
                 agent_doc_repair_runtime_io::repair_coordinator_effects(
-                    &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS
+                    &NOOP_REPAIR_REPLAY_WRITE_EFFECTS
                 ),
                 &doc,
                 true,

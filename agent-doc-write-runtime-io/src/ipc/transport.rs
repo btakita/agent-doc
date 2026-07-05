@@ -233,7 +233,7 @@ mod submodule_patch_routing_tests {
                         agent_doc_template_io::apply_patches(&before, &patches, unmatched, file)
                             .unwrap_or(before);
                     let _ = std::fs::write(file, &after);
-                    crate::write::ipc::transport::record_test_visible_write_receipt(
+                    crate::ipc::transport::record_test_visible_write_receipt(
                         file,
                         patch_id,
                         &after,
@@ -280,7 +280,7 @@ mod submodule_patch_routing_tests {
                     .unwrap_or("unknown");
                 if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
                     let _ = std::fs::write(file_path, &visible_write_content);
-                    crate::write::ipc::transport::record_test_visible_write_receipt(
+                    crate::ipc::transport::record_test_visible_write_receipt(
                         Path::new(file_path),
                         patch_id,
                         &visible_write_content,
@@ -309,7 +309,7 @@ mod submodule_patch_routing_tests {
                     .and_then(|p| p.as_str())
                     .unwrap_or("unknown");
                 if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
-                    crate::write::ipc::transport::record_test_visible_write_receipt(
+                    crate::ipc::transport::record_test_visible_write_receipt(
                         Path::new(file_path),
                         patch_id,
                         &visible_write_content,
@@ -627,7 +627,7 @@ mod submodule_patch_routing_tests {
         );
 
         let patch_id = "already-applied-visible-write";
-        crate::write::ipc::transport::record_test_visible_write_receipt(
+        crate::ipc::transport::record_test_visible_write_receipt(
             &doc,
             patch_id,
             editor_visible_write_content,
@@ -739,7 +739,7 @@ mod submodule_patch_routing_tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-stale-visible-write";
-        crate::write::ipc::transport::record_test_visible_write_receipt(
+        crate::ipc::transport::record_test_visible_write_receipt(
             &doc,
             patch_id,
             content_ours,
@@ -834,7 +834,7 @@ mod submodule_patch_routing_tests {
 
         let patch_id = "already-applied-unsaved-live-editor";
         let editor_id = "jetbrains-test-editor";
-        crate::write::ipc::transport::record_test_visible_write_receipt(
+        crate::ipc::transport::record_test_visible_write_receipt(
             &doc,
             patch_id,
             stale_visible_write_content,
@@ -1213,7 +1213,7 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, disk_now).unwrap();
         let patch_id = "already-applied-not-idle";
-        crate::write::ipc::transport::record_test_visible_write_receipt(
+        crate::ipc::transport::record_test_visible_write_receipt(
             &doc,
             patch_id,
             ack_current,
@@ -2160,6 +2160,46 @@ mod late_fallback_patch_guard_tests {
     use std::fs;
     use std::path::Path;
     use tempfile::TempDir;
+
+    struct NoopRepairReplayWriteEffects;
+
+    static NOOP_REPAIR_REPLAY_WRITE_EFFECTS: NoopRepairReplayWriteEffects =
+        NoopRepairReplayWriteEffects;
+
+    impl agent_doc_repair_io::RepairStrictReplayWriteEffects for NoopRepairReplayWriteEffects {
+        fn run_strict_write_replay(
+            &self,
+            _file: &Path,
+            _response: &str,
+            _is_template: bool,
+            _is_stream: bool,
+            _force_disk: bool,
+            _queue_completion_ids: &[String],
+        ) -> anyhow::Result<()> {
+            anyhow::bail!("unexpected strict replay in write IPC transport test")
+        }
+    }
+
+    impl agent_doc_repair_io::RepairFallbackWriteEffects for NoopRepairReplayWriteEffects {
+        fn apply_template_from_string(
+            &self,
+            _file: &Path,
+            _response: &str,
+            _force_disk: bool,
+        ) -> anyhow::Result<()> {
+            anyhow::bail!("unexpected template replay in write IPC transport test")
+        }
+
+        fn apply_append_from_string(&self, _file: &Path, _response: &str) -> anyhow::Result<()> {
+            anyhow::bail!("unexpected append replay in write IPC transport test")
+        }
+    }
+
+    impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects for NoopRepairReplayWriteEffects {
+        fn strike_recovered_free_text_queue_head(&self, _file: &Path) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
 
     fn try_ipc_full_content(file: &Path, content: &str) -> anyhow::Result<bool> {
         agent_doc_write_converge_io::try_ipc_full_content(
@@ -3202,7 +3242,7 @@ mod late_fallback_patch_guard_tests {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = payload.get("patch_id")?.as_str()?;
                 let file_path = payload.get("file")?.as_str()?;
-                crate::write::ipc::transport::record_test_visible_write_receipt(
+                crate::ipc::transport::record_test_visible_write_receipt(
                     Path::new(file_path),
                     patch_id,
                     "wrong\n",
@@ -3463,7 +3503,7 @@ Implemented.
         let head_before = head_count(root);
         let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
-                &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+                &NOOP_REPAIR_REPLAY_WRITE_EFFECTS,
             ),
             &doc,
             true,
@@ -3522,7 +3562,7 @@ Implemented.
         let head_before = head_count(root);
         let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
-                &crate::repair::REPAIR_REPLAY_WRITE_EFFECTS,
+                &NOOP_REPAIR_REPLAY_WRITE_EFFECTS,
             ),
             &doc,
             false,
@@ -3597,7 +3637,7 @@ Implemented.
                 }
                 if let Some(file_path) = payload.get("file").and_then(|value| value.as_str()) {
                     let _ = std::fs::write(file_path, &content);
-                    crate::write::ipc::transport::record_test_visible_write_receipt(
+                    crate::ipc::transport::record_test_visible_write_receipt(
                         Path::new(file_path),
                         &patch_id,
                         &content,

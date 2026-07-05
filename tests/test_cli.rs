@@ -1193,16 +1193,16 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-session-check-io/src/response_guards.rs",
         "agent-doc-session-check-io/src/detect.rs",
         "agent-doc-workflow/src/session_check.rs",
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
         "agent-doc-queue-io/src/queue_consume.rs",
-        "agent-doc-orchestration/src/write/ipc.rs",
-        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-write-runtime-io/src/ipc.rs",
+        "agent-doc-write-runtime-io/src/ipc/transport.rs",
         "agent-doc-write-ipc-io/src/transport.rs",
         "agent-doc-template-io/src/write_normalize.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-session-check-io/src/write_pending_checks.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
     ];
     let tokens = [
         "guard_",
@@ -1577,7 +1577,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // of orchestration into `agent-doc-session-check-io`. Orchestration keeps
         // visible-write guard adapters and closeout sequencing; the focused
         // session-check IO module owns the pending closeout guard tokens.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 28,
+        ("agent-doc-write-runtime-io/src/lib.rs", "guard_") => 28,
         ("agent-doc-session-check-io/src/write_pending_checks.rs", "guard_") => 6,
         // 3 -> 1 (#template-materialization-policy): raw-response probe
         // construction now lives in `agent-doc-template::response_materialization`,
@@ -1592,8 +1592,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 `reason=`: non-git repair template replay now uses an explicit
         // `apply_template_writeback ... reason=force_disk` marker when the
         // existing repair replay policy elects the audited force-disk transport.
-        ("agent-doc-orchestration/src/write/run_entry.rs", "guard_") => 10,
-        ("agent-doc-orchestration/src/write/run_entry.rs", "reason=") => 2,
+        ("agent-doc-write-runtime-io/src/run_entry.rs", "guard_") => 10,
+        ("agent-doc-write-runtime-io/src/run_entry.rs", "reason=") => 2,
         // queue-prompt consumption, IPC transport/repair, and live-prompt-drift
         // convergence extracted into agent-doc-queue-io/src/queue_consume.rs,
         // write/ipc.rs, and the moved convergence fixture (#splitmods3 large-module split). The moved
@@ -1653,7 +1653,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // response proof; a response-bearing visible union suppresses redelivery
         // but does not make the lazily visible-write receipt snapshot authority
         // when it carries unowned drift.
-        ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 21,
+        ("agent-doc-write-runtime-io/src/ipc.rs", "guard_") => 21,
         // 17 -> 18 (#smconv): +1 production `reason=node_keyed_semantic_merge` on
         // the new `live_prompt_drift_semantic_merged` ops_log — the node-keyed
         // merge success path, mirroring the sibling `#fintol2`
@@ -1697,12 +1697,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // diagnostics for the existing snapshot-adoption recovery, not new flow
         // branches; the convergence decision routes through the realtime model's
         // `operator_reconcile_step`.
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 32,
+        ("agent-doc-write-runtime-io/src/ipc.rs", "reason=") => 32,
         // +1 `guard_` (#fcc0-degraded-file-ipc): focused
         // `FileIpcDeliveryOptions` carries the existing committed-cycle file-IPC
         // poll guard for convergence and transport callers; this is an option for
         // the existing guard, not a new flow guard boundary.
-        ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 9,
+        ("agent-doc-write-runtime-io/src/ipc/transport.rs", "guard_") => 9,
         // 10 -> 14 (#whole-buffer-authority): full-content IPC now logs disabled
         // and authority-rejected outcomes from `decide_whole_buffer_delivery`,
         // plus stale-source regression assertions. The write remains blocked
@@ -1711,7 +1711,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // 14 -> 15 (#visible-write-source-buffer): the stale visible-write regression
         // asserts the same shared `reason=stale_source_buffer` table outcome so a
         // stale receipt cannot overwrite a newer live operator edit.
-        ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 15,
+        ("agent-doc-write-runtime-io/src/ipc/transport.rs", "reason=") => 15,
         // #write-ipc-transport-graph: the production socket-first/file-IPC
         // transport graph moved from orchestration into the focused write IPC
         // crate. These are the existing snapshot-adoption, visible-repair, and
@@ -1870,7 +1870,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // now proves the earlier partial-materialization retry path instead of
         // asserting an extra visible-repair `reason=` literal. The production
         // recovery still logs `recovery=visible_repair_required` in write/ipc.rs.
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 13,
+        ("agent-doc-write-runtime-io/src/lib.rs", "reason=") => 13,
         _ => 0,
     }
 }
@@ -2604,7 +2604,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent_doc_hooks_io::fire_post_write_with_effects(",
         ),
         (
-            "agent-doc-orchestration/src/write/run_entry.rs",
+            "agent-doc-write-runtime-io/src/run_entry.rs",
             "agent_doc_hooks_io::fire_post_write_with_effects(",
         ),
         (
@@ -2616,7 +2616,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent_doc_hooks_io::fire_doc_event(file, \"post_write\")",
         ),
         (
-            "agent-doc-orchestration/src/write/run_entry.rs",
+            "agent-doc-write-runtime-io/src/run_entry.rs",
             "agent_doc_hooks_io::fire_doc_event(file, \"post_write\")",
         ),
         (
@@ -3527,7 +3527,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
     for relative in [
         "agent-doc-orchestration/src/codex_hook.rs",
         "agent-doc-run-io/src/lib.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
         "src/main.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -3559,9 +3559,9 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
     let repair_io =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     let write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let write_run_entry =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     let main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
 
@@ -3625,22 +3625,28 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
         "pub fn run_template(",
         "pub fn run_stream(",
         "pub fn run_ipc(",
-        "pub fn apply_append_from_string(",
         "pub fn apply_template_from_string(",
-        "pub fn apply_template_from_string_with_options(",
     ] {
         assert!(
             !write_run_entry.contains(forbidden),
-            "write/run_entry.rs must not expose public orchestration write facades: {forbidden}"
+            "write/run_entry.rs must not expose public command entrypoint facades: {forbidden}"
         );
     }
+    assert_source_mentions_all(
+        &write_run_entry,
+        "agent-doc-write-runtime-io/src/run_entry.rs",
+        &[
+            "pub fn apply_append_from_string(",
+            "pub fn apply_template_from_string_with_options(",
+        ],
+    );
 }
 
 #[test]
 fn test_orchestration_write_uses_closeout_commit_adapter() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
 
     assert!(
         !write.contains("crate::git::commit("),
@@ -4384,7 +4390,7 @@ fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
         "agent-doc-queue-io/src/queue_consume.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-preflight-io/src/lib.rs",
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -4516,7 +4522,7 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "agent-doc-queue-io should own the commit-seam answered free-text queue strike IO graph"
     );
     let orchestration_write_run_entry =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     assert!(
         orchestration_write_run_entry.contains(
@@ -4558,7 +4564,7 @@ fn test_agent_doc_queue_owns_queue_prompt_drift_policy() {
     }
 
     let orchestration_write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let write_converge =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -5002,7 +5008,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-turn must own carry-forward closeout signal policy: {required}"
     );
     let write_adapter =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let realtime_write_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
             .unwrap();
@@ -5195,10 +5201,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for relative in [
         "agent-doc-commit-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
-        "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
+        "agent-doc-write-runtime-io/src/ipc/transport.rs",
         "agent-doc-session-check-io/src/write_pending_checks.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -5924,7 +5930,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-turn should not add a response_replay root facade"
     );
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     assert!(
         !write_source.contains("pub fn strip_assistant_heading"),
         "orchestration write must not re-own append response heading normalization"
@@ -6000,7 +6006,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "CLI dedupe adapter should only inject writer and snapshot effects"
     );
     assert!(
-        !cli_dedupe_source.contains("agent_doc_orchestration::write::WRITE_CONVERGENCE_EFFECTS"),
+        !cli_dedupe_source.contains("agent_doc_write_runtime_io::WRITE_CONVERGENCE_EFFECTS"),
         "CLI dedupe adapter must not route convergence effects through the orchestration write facade"
     );
     assert!(
@@ -6020,7 +6026,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     let write_ipc =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     let write_converge =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
@@ -6175,7 +6181,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "write::normalize should call focused imperative response contract policy directly"
     );
     for relative in [
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
         "agent-doc-run-io/src/lib.rs",
         "src/orchestrate/dispatch.rs",
     ] {
@@ -6829,7 +6835,7 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
     for relative_path in [
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-queue-io/src/queue_consume.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
@@ -6881,7 +6887,7 @@ fn test_agent_doc_turn_owns_pending_capture_heuristics() {
     }
 
     let write_run_entry =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     assert!(
         write_run_entry.contains("agent_doc_turn::heuristics::future_work_signal"),
@@ -7394,7 +7400,7 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
         "agent-doc-session-accretion-io/src/lib.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-sync-io/src/sync.rs",
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -10094,7 +10100,7 @@ fn test_agent_doc_run_context_io_owns_lazily_document_context_graph() {
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-start-io/src/lib.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -11449,6 +11455,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the write-command empty-response recovery bridge",
         ),
         (
+            "Write command runtime crate extraction",
+            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-write-runtime-io/src/{lib.rs,run_entry.rs,ipc.rs,ipc/transport.rs}",
+            "Split `agent-doc-write-runtime-io` into command entry, repair replay/apply, visible-write convergence, and test-fixture modules",
+        ),
+        (
             "Preflight output DTO graph",
             "agent-doc-orchestration/src/preflight.rs",
             "agent-doc-preflight-io/src/lib.rs",
@@ -11613,7 +11625,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/tests/route.rs",
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();
         assert!(
@@ -11682,7 +11694,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     );
 
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     assert!(
         !write_source.contains("crate::session_check::resolve_"),
         "write.rs must not route guard-mode resolvers through orchestration session_check"
@@ -11775,7 +11787,7 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
         "agent-doc-orchestration/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
         "agent-doc-orchestration/tests/route.rs",
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();
         assert!(
@@ -11951,7 +11963,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         );
     }
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     assert!(
         write_source.contains("use agent_doc_workflow::session_cycle::{")
             && write_source.contains("FinalizeRerunCommand")
@@ -13823,7 +13835,7 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
         "orchestration must not keep a lint_gate facade module"
     );
     let orchestration_write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let orchestration_stream =
         fs::read_to_string(manifest_dir.join("agent-doc-stream-io/src/lib.rs")).unwrap();
     assert!(
@@ -14000,7 +14012,7 @@ fn test_agent_doc_frontmatter_owns_write_mode_detection_policy() {
     );
 
     let write_run_entry =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     let commit_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
@@ -15032,7 +15044,7 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
     );
     for relative in [
         "agent-doc-cycle-state-io/src/lib.rs",
-        "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-write-runtime-io/src/ipc.rs",
         "src/sim_world.rs",
         "src/sim_world/engine.rs",
     ] {
@@ -15064,8 +15076,8 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
     }
     for relative in [
         "agent-doc-run-io/src/lib.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
-        "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
+        "agent-doc-write-runtime-io/src/ipc.rs",
         "src/sim_world/engine.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -15077,8 +15089,8 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
         );
     }
     for relative in [
-        "agent-doc-orchestration/src/write/run_entry.rs",
-        "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
+        "agent-doc-write-runtime-io/src/ipc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -18922,7 +18934,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     let write_ipc =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     assert!(
         !write_converge_io.contains("pub fn write_wedged_from_ipc_failures(")
             && !write_ipc.contains("pub fn write_wedged_from_ipc_failures("),
@@ -21020,7 +21032,7 @@ fn test_agent_doc_element_backlog_runtime_io_owns_runtime_backlog_command_effect
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_diagnostics =
@@ -22333,7 +22345,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let sync_source =
         fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let preflight_layout =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/layout.rs")).unwrap();
     let start_run_source =
@@ -23486,7 +23498,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "repair should call focused project-root IO instead of owning test/sidecar root discovery"
     );
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let realtime_io =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     assert!(
@@ -23748,9 +23760,9 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "agent-doc-ipc-forensics-io should own IPC full-prompt forensic capture sidecars"
     );
     let write_ipc_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let write_converge_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
@@ -23796,7 +23808,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     for relative in [
         "agent-doc-preflight-runtime-io/src/lib.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
-        "agent-doc-orchestration/src/write/ipc.rs",
+        "agent-doc-write-runtime-io/src/ipc.rs",
         "agent-doc-write-ipc-io/src/transport.rs",
         "agent-doc-compact-io/src/lib.rs",
     ] {
@@ -23875,7 +23887,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     );
 
     let write_ipc_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     for forbidden in [
         "fn is_socket_receipt_timeout_error(",
         "fn is_socket_status_error(",
@@ -23897,7 +23909,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     let write_ipc_transport_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/transport.rs")).unwrap();
     let orchestration_write_ipc_transport_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc/transport.rs"))
             .unwrap();
     let write_ipc_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
@@ -23925,13 +23937,13 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     );
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     let write_run_entry_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     assert!(
         main_source.contains("agent_doc_write_ipc_io::try_ipc_with_effects(")
             && main_source
                 .contains("&agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS")
-            && !main_source.contains("agent_doc_orchestration::write::try_ipc(")
+            && !main_source.contains("agent_doc_write_runtime_io::try_ipc(")
             && write_run_entry_source.contains("agent_doc_write_ipc_io::try_ipc_with_effects(")
             && write_run_entry_source
                 .contains("&agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS")
@@ -24315,7 +24327,7 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         "orchestration must not keep a status_cmd facade module"
     );
     let orchestration_write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let status_adapter_start = orchestration_write
         .find("fn set_status_with_options")
         .expect("write.rs should define the status command helper");
@@ -24649,7 +24661,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
     }
     for relative in [
         "src/undo.rs",
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-orchestration/src/repair.rs",
@@ -24667,7 +24679,7 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
         );
     }
     for relative in [
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
         "agent-doc-preflight-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -24760,7 +24772,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         "agent-doc-stream-io/src/lib.rs",
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
         "agent-doc-commit-io/src/lib.rs",
         "agent-doc-write-converge-io/src/lib.rs",
     ] {
@@ -24785,7 +24797,7 @@ fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
         );
     }
     let write_ipc =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     assert!(
         !write_ipc.contains("save_document_snapshot_and_crdt("),
         "write/ipc.rs should not keep IPC snapshot/CRDT persistence helpers after they move to write-converge IO"
@@ -24989,11 +25001,11 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-session-check-io/src/command.rs",
         "agent-doc-session-check-io/src/detect.rs",
         "agent-doc-session-check-io/src/closeout_guards.rs",
-        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
         "agent-doc-write-converge-io/src/convergence_fixture_tests.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
-        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
+        "agent-doc-write-runtime-io/src/ipc/transport.rs",
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-run-context-io/src/lib.rs",
         "agent-doc-document-realtime-io/src/lib.rs",
@@ -25583,7 +25595,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let repair_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
     let git_post_commit_cleanup =
@@ -25672,7 +25684,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     );
 
     let write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     assert!(
         write.contains("agent_doc_git_io::sibling::commit_siblings_for_session_doc"),
         "write commit flow should call git IO sibling commits directly"
@@ -25730,7 +25742,7 @@ fn test_agent_doc_document_owns_singleton_component_repair_policy() {
     );
 
     let write_ipc =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     let write_converge =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -25790,7 +25802,7 @@ fn test_agent_doc_document_owns_write_normalization_policy() {
     );
 
     let write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     for forbidden in [
         "fn normalized_prompt_line(",
         "fn prompt_target_lines(",
@@ -25954,7 +25966,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     );
 
     let write_ipc =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     assert!(
         write_ipc
             .contains("use agent_doc_element_exchange::normalize_exchange_prefixes_for_targets;"),
@@ -25976,13 +25988,13 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     );
 
     let write_main =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     assert!(
         write_main.contains("use agent_doc_element_exchange::{"),
         "write.rs should import exchange prompt/order policy from the focused crate"
     );
     let write_run_entry =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     assert!(
         write_run_entry.contains("use agent_doc_element_exchange::extract_normalization_targets;"),
@@ -26249,8 +26261,8 @@ fn test_agent_doc_element_boundary_owns_boundary_id_lookup() {
     );
 
     for relative_path in [
-        "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
+        "agent-doc-write-runtime-io/src/ipc/transport.rs",
         "agent-doc-commit-io/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
@@ -26641,7 +26653,7 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
     }
 
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let realtime_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     let crdt_relay_io_source =
@@ -26674,10 +26686,10 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
     }
 
     let write_run_entry =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     let write_ipc =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     let write_converge =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     let write_ipc_transport =
@@ -26782,7 +26794,7 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
     ] {
         for helper in old_write_policy_helpers {
             assert!(
-                !source.contains(&format!("agent_doc_orchestration::write::{helper}")),
+                !source.contains(&format!("agent_doc_write_runtime_io::{helper}")),
                 "callers should not use the old orchestration write-policy facade: {helper}"
             );
             assert!(
@@ -27070,7 +27082,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         );
     }
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let realtime_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
@@ -27147,7 +27159,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "orchestration write path must not re-export focused realtime IO guard adapters"
     );
     let write_ipc_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     let write_converge_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     let ipc_protocol_source =
@@ -27184,7 +27196,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "write/ipc.rs should import the focused response-delta detector directly"
     );
     let write_ipc_transport_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc/transport.rs"))
             .unwrap();
     assert!(
         write_converge_io_source.contains(
@@ -27386,8 +27398,8 @@ fn test_patch_pending_compatibility_strings_do_not_remain_in_production_code() {
     let production_files = [
         "src/main.rs",
         "agent-doc-template/src/template.rs",
-        "agent-doc-orchestration/src/write.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-template-io/src/backlog_normalization.rs",
     ];
@@ -27550,7 +27562,7 @@ fn test_agent_doc_template_owns_patchback_policy() {
         "orchestration must not keep an orchestration-batch patchback facade"
     );
     let write_run_entry =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     assert!(
         write_run_entry
@@ -27688,7 +27700,7 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
     )
     .unwrap();
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub struct TemplateResponseWriteProof",
         "pub(crate) struct TemplateResponseWriteProof",
@@ -27754,7 +27766,7 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
     );
 
     let write_ipc =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     let write_ipc_io =
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
     assert!(
@@ -27771,7 +27783,7 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
 
     let focused_callers = [
         "agent-doc-run-io/src/lib.rs",
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
         "agent-doc-write-ipc-io/src/transport.rs",
         "agent-doc-write-ipc-io/src/lib.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
@@ -27815,9 +27827,9 @@ fn test_agent_doc_template_owns_todo_patch_guard_policy() {
     );
 
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let write_run_entry =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     for forbidden in [
         "fn count_markdown_checklist_items(",
@@ -27868,7 +27880,7 @@ fn test_agent_doc_template_owns_stale_baseline_policy() {
     );
 
     let write =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "fn is_append_mode_component(",
         "fn patch_touches_exchange(",
@@ -27963,7 +27975,7 @@ fn test_agent_doc_template_owns_strict_response_heading_policy() {
     }
 
     for relative_path in [
-        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-write-runtime-io/src/run_entry.rs",
         "agent-doc-template-io/src/write_normalize.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
@@ -28075,11 +28087,11 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
     );
     for (relative_path, required_snippet) in [
         (
-            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-write-runtime-io/src/lib.rs",
             "queue_consumption_allowed_for_response",
         ),
         (
-            "agent-doc-orchestration/src/write.rs",
+            "agent-doc-write-runtime-io/src/lib.rs",
             "queue_targeted_completion_id_for_current_head",
         ),
         (
@@ -28912,9 +28924,9 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     let realtime_io =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let write_ipc =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/ipc.rs")).unwrap();
     let write_ipc_transport =
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/transport.rs")).unwrap();
     let idle_watch =
@@ -29596,7 +29608,7 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
     );
 
     let write_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub fn sanitize_component_tags",
         "pub fn sanitize_patches",
@@ -29611,7 +29623,7 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
     }
 
     let write_run_entry =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
             .unwrap();
     let write_materialize = fs::read_to_string(
         manifest_dir.join("agent-doc-template-io/src/response_materialization_io.rs"),
@@ -29623,7 +29635,7 @@ fn test_agent_doc_template_owns_patch_sanitization_policy() {
     let run_source = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
     for (source, content) in [
         (
-            "agent-doc-orchestration/src/write/run_entry.rs",
+            "agent-doc-write-runtime-io/src/run_entry.rs",
             write_run_entry.as_str(),
         ),
         (

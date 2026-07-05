@@ -3526,13 +3526,13 @@ fn try_main() -> anyhow::Result<()> {
             // the plugin created a double-sync glitch (panes bouncing between stash and
             // agent-doc window). The plugin's sync is authoritative for layout.
             let mode = if dispatch_only {
-                agent_doc_orchestration::route::RouteMode::DispatchOnly
+                agent_doc_route_io::command::RouteMode::DispatchOnly
             } else {
-                agent_doc_orchestration::route::RouteMode::Managed
+                agent_doc_route_io::command::RouteMode::Managed
             };
             let wait_for_ready =
                 wait_for_ready.map(|secs| std::time::Duration::from_secs(secs.min(600)));
-            agent_doc_orchestration::route::run_with_force_disk(
+            agent_doc_route_io::invocation::run_with_force_disk(
                 &file,
                 pane.as_deref(),
                 debounce,
@@ -3541,6 +3541,7 @@ fn try_main() -> anyhow::Result<()> {
                 plain_trigger,
                 wait_for_ready,
                 force_disk,
+                agent_doc_orchestration::route::route_command_effects(),
             )
         }
         Commands::Prompt { file, answer, all } => {

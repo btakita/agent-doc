@@ -28284,6 +28284,7 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/command.rs")).unwrap();
     let route_invocation =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/invocation.rs")).unwrap();
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
 
     for forbidden_snippet in [
         "agent_doc_sync_io::resync::prune_with_tmux_timed_in_mode",
@@ -28332,8 +28333,15 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
             && route_invocation.contains("pub fn run_with_tmux_with_options(")
             && route_invocation.contains("command::run_with_tmux_with_options(")
             && route_source.contains("pub use agent_doc_route_io::command::RouteMode;")
+            && route_source.contains("pub fn route_command_effects() -> RouteCommandEffects")
+            && route_source.contains("#[cfg(test)]\npub fn run(")
+            && route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub fn run_with_force_disk(")
+            && route_source.contains("#[cfg(test)]\n#[allow(clippy::too_many_arguments)]\npub fn run_with_tmux(")
             && route_source.contains("agent_doc_route_io::invocation::run_with_tmux_with_options(")
-            && route_source.contains("RouteCommandEffects"),
+            && main_source.contains("agent_doc_route_io::invocation::run_with_force_disk(")
+            && main_source.contains("agent_doc_orchestration::route::route_command_effects()")
+            && !main_source.contains("agent_doc_orchestration::route::run_with_force_disk(")
+            && !main_source.contains("agent_doc_orchestration::route::RouteMode"),
         "agent-doc-route-io command/invocation should own top-level route runtime and invocation state while orchestration injects effect bundles"
     );
 }

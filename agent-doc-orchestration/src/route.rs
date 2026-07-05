@@ -252,6 +252,7 @@ use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eli
 #[cfg(test)]
 use agent_doc_supervisor::route_runtime::{RouteActorState, SupervisorRuntime};
 use agent_doc_turn::closeout_recovery::{CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput};
+#[cfg(test)]
 use tmux_router::Tmux;
 
 #[cfg(test)]
@@ -455,7 +456,7 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
     file_route_dispatch_bug_report_with_effects(facts, route_dispatch_bug_report_effects());
 }
 
-fn route_command_effects() -> RouteCommandEffects {
+pub fn route_command_effects() -> RouteCommandEffects {
     RouteCommandEffects {
         document_prep_effects: route_document_prep_effects(),
         managed_pane_resolution_effects: route_managed_pane_resolution_effects(),
@@ -465,6 +466,7 @@ fn route_command_effects() -> RouteCommandEffects {
     }
 }
 
+#[cfg(test)]
 pub fn run(
     file: &Path,
     pane: Option<&str>,
@@ -486,6 +488,7 @@ pub fn run(
     )
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn run_with_force_disk(
     file: &Path,
@@ -510,6 +513,7 @@ pub fn run_with_force_disk(
     )
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn run_with_tmux(
     file: &Path,
@@ -534,6 +538,7 @@ pub fn run_with_tmux(
     )
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn run_with_tmux_with_options(
     file: &Path,

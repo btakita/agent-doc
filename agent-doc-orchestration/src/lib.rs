@@ -335,7 +335,7 @@ impl agent_doc_run_io::DirectRunEffects for OrchestrationDirectRunEffects {
         file: &std::path::Path,
         diff_text: &str,
     ) -> anyhow::Result<()> {
-        crate::write::guard_no_exchange_compaction_request_for_diff(file, diff_text)
+        agent_doc_run_io::guard_no_exchange_compaction_request_for_diff(file, diff_text)
     }
 
     fn commit(&self, file: &std::path::Path) -> anyhow::Result<bool> {

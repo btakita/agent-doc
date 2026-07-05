@@ -11158,6 +11158,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Move the remaining response-precedes-prompt rejection guard",
         ),
         (
+            "Direct-run compaction diff guard IO graph",
+            "agent-doc-orchestration/src/lib.rs",
+            "agent-doc-run-io::guard_no_exchange_compaction_request_for_diff",
+            "Move the write-path `guard_no_exchange_compaction_request_between` tests",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",

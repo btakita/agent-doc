@@ -26,6 +26,7 @@ use agent_doc_workflow::owner_pane_self_invocation::{
     OwnedPaneSelfInvocation, OwnedPaneSelfInvocationInput, OwnedPaneSelfInvocationKind,
     OwnedPaneSelfInvocationOptions, build_owned_pane_self_invocation,
 };
+use agent_doc_workflow::session_cycle::compact_command_hint;
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::OpenOptions;
@@ -99,6 +100,18 @@ pub trait DirectRunEffects {
     fn complete_required_closeout(&self, file: &Path) -> Result<()>;
 
     fn abandon_recursive_cycle(&self, file: &Path, event: &str, diagnostic: &str) -> Result<()>;
+}
+
+pub fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
+    if diff::detect_exchange_compaction_request(diff_text) {
+        anyhow::bail!(
+            "bare `compact exchange` directive detected in the current diff; close this turn \
+             through the binary compaction path instead: `{}` \
+             (optionally add `--message ...` for a custom checkpoint summary)",
+            compact_command_hint(file)
+        );
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

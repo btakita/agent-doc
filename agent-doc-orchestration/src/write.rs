@@ -730,7 +730,7 @@ fn resolve_commit_mode(
     Ok(CommitMode::BestEffort)
 }
 
-pub fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
+fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
     if agent_doc_diff::detect_exchange_compaction_request(diff_text) {
         anyhow::bail!(
             "bare `compact exchange` directive detected in the current diff; close this turn \

@@ -5914,13 +5914,14 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         write_source.contains("agent_doc_turn::response_replay::response_already_applied"),
         "orchestration write should call focused response replay policy directly"
     );
-    let repair_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    let repair_runtime_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-runtime-io/src/lib.rs")).unwrap();
     assert!(
         write_source
             .contains("use agent_doc_turn::response_replay::response_materialized_in_content")
-            && repair_source.contains("use agent_doc_turn::response_replay::dedupe_responses;"),
-        "orchestration write/repair should import focused response replay policy directly from the owning module"
+            && repair_runtime_source
+                .contains("use agent_doc_turn::response_replay::dedupe_responses;"),
+        "write and repair runtime IO should import focused response replay policy directly from the owning module"
     );
     let response_replay_io =
         fs::read_to_string(manifest_dir.join("agent-doc-response-replay-io/src/lib.rs")).unwrap();

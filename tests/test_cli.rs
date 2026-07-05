@@ -27935,6 +27935,9 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/cycle_ack.rs")).unwrap();
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/src/lib.rs"))
+            .unwrap();
     for forbidden_snippet in [
         "fn queue_prompt_text_for_route_change(",
         "fn operator_prioritize_route_prompt(",
@@ -28002,9 +28005,9 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             && route_cycle_ack.contains("agent_doc_turn::cycle_ack")
             && turn_cycle_ack
                 .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change")
-            && preflight_source
+            && preflight_runtime
                 .contains("agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts")
-            && preflight_source.contains(
+            && preflight_runtime.contains(
                 "agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare",
             )
             && preflight_debounce.contains("agent_doc_debounce::preflight_debounce_max_wait")

@@ -4,7 +4,7 @@ use super::*;
 use agent_doc_diff as diff;
 use agent_doc_diff::semantic::semantic_diff_summary;
 use agent_doc_preflight_io::{
-    PendingMaintenanceReport, QueueState, enforce_no_dropped_backlog,
+    PendingMaintenanceReport, QueueState, check_linked_docs, enforce_no_dropped_backlog,
     enforce_no_shadow_open_backlog, inspect_queue_state, resolve_pipeline_state, run_gate_verify,
     run_pending_maintenance, run_queue_maintenance,
 };

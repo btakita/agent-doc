@@ -11182,6 +11182,12 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Split linked-document change detection and output assembly",
         ),
         (
+            "Preflight linked-document change detection IO graph",
+            "agent-doc-orchestration/src/preflight.rs",
+            "agent-doc-preflight-io/src/lib.rs",
+            "Move output assembly callers onto the focused linked-change detector",
+        ),
+        (
             "Repair recovery coordinator IO graph",
             "agent-doc-orchestration/src/repair.rs",
             "agent-doc-repair-io/src/lib.rs",
@@ -12547,6 +12553,56 @@ fn test_preflight_output_uses_user_intent_prompt_changes_json_surface() {
     assert!(
         !preflight_run_source.contains("\n        prompt_bearing_changes,\n"),
         "preflight run must not populate the removed prompt_bearing_changes JSON field"
+    );
+}
+
+#[test]
+fn test_agent_doc_preflight_io_owns_linked_doc_change_detection_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let preflight_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    let preflight_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+
+    for forbidden in [
+        "fn links_cache_dir(",
+        "fn check_url_link(",
+        "fn check_linked_docs(",
+        "fn recent_commit_summary(",
+        "ureq::Agent",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight must not own linked-doc change detection IO: {forbidden}"
+        );
+    }
+    assert!(
+        !orchestration_manifest.contains("ureq =") && !orchestration_manifest.contains("htmd ="),
+        "orchestration should not carry linked-doc URL fetch/HTML conversion deps"
+    );
+    for required in [
+        "pub fn links_cache_dir(",
+        "pub fn check_url_link(",
+        "pub fn check_linked_docs(",
+        "pub fn recent_commit_summary(",
+        "agent_doc_frontmatter::frontmatter",
+        "agent_doc_git_io::revision::last_commit_mtime",
+        "agent_doc_git_io::revision::recent_commit_lines",
+        "agent_doc_workflow::preflight_policy::url_cache_path",
+        "ureq::Agent",
+    ] {
+        assert!(
+            preflight_io.contains(required),
+            "agent-doc-preflight-io must own linked-doc change detection IO: {required}"
+        );
+    }
+    assert!(
+        preflight_io_manifest.contains("ureq ="),
+        "agent-doc-preflight-io should own URL fetch dependency for linked-doc detection"
     );
 }
 
@@ -22797,7 +22853,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     }
 
     let preflight_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     assert!(
         preflight_source.contains("Vec<agent_doc_ipc_protocol::PendingCallback>")
             && !preflight_source.contains("Vec<crate::callback::PendingCallback>"),

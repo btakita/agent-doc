@@ -838,6 +838,8 @@ fn projected_open_closeout_message(
 }
 
 fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<SessionCheckStatus> {
+    let initial_last_ops_event = agent_doc_ops_log_io::last_ops_event(file)?;
+
     if let Some(replay) = detect_jb_cache_conflict_accept_duplicate_replay(file)? {
         return Ok(SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: found JetBrains File Cache Conflict accept replay duplicate at `{}`; `dedupe(current)` matches committed HEAD. Run `agent-doc preflight {}` to auto-repair, or run `agent-doc dedupe {}` followed by `agent-doc write --commit {}`.",
@@ -1021,8 +1023,18 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                 ));
             }
         }
+        let mut latest_head_response_visible_in_live_buffer = false;
         let latest_head_response_missing = match agent_doc_git_io::revision::show_head(file)? {
             Some(head) => {
+                if let Ok(disk) = std::fs::read_to_string(file)
+                    && let Some(heading) =
+                        agent_doc_document::write_normalization::latest_response_heading_missing_from_current(
+                            &head, &disk,
+                        )
+                    && operator_live_buffer_contains_heading(file, &heading)
+                {
+                    latest_head_response_visible_in_live_buffer = true;
+                }
                 match crate::resolve_current_document_content(file, "latest_head_response_missing")
                 {
                     Ok(working) => {
@@ -1030,8 +1042,15 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                         agent_doc_document::write_normalization::latest_response_heading_missing_from_current(
                             &head, &working,
                         );
-                        heading
-                            .filter(|heading| !operator_live_buffer_contains_heading(file, heading))
+                        match heading {
+                            Some(heading)
+                                if operator_live_buffer_contains_heading(file, &heading) =>
+                            {
+                                latest_head_response_visible_in_live_buffer = true;
+                                None
+                            }
+                            other => other,
+                        }
                     }
                     Err(_) => None,
                 }
@@ -1059,6 +1078,14 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
             )));
         }
         if let Some(marker) = crate::detect_uncommitted_exchange_drift(file)? {
+            if latest_head_response_visible_in_live_buffer {
+                return Ok(SessionCheckStatus::Ok(format!(
+                    "[session-check] ok — cycle `{}` is `{}` ({})",
+                    state.cycle_id,
+                    state.phase.as_str(),
+                    state.last_event
+                )));
+            }
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document has uncommitted exchange changes beyond the committed snapshot: {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle before reporting success.",
                 state.cycle_id,
@@ -1095,7 +1122,7 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
         ));
     }
 
-    match agent_doc_ops_log_io::last_ops_event(file)? {
+    match initial_last_ops_event {
         None => {
             if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {

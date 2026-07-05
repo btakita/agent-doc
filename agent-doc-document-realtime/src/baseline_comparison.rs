@@ -6,8 +6,6 @@
 //! policy. A baseline is not a competing document source; it is an immutable
 //! turn/checkpoint fact used to reason about what changed in the current model.
 
-use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RealtimeSteering {
     None,
@@ -248,181 +246,62 @@ fn prompt_bearing_preview(text: &str) -> String {
 }
 
 pub fn exchange_has_new_appended_content(baseline: &str, current: &str) -> bool {
-    let Some(baseline_exchange) = extract_normalized_exchange_body(baseline) else {
-        return false;
-    };
-    let Some(current_exchange) = extract_normalized_exchange_body(current) else {
-        return false;
-    };
-    if current_exchange == baseline_exchange {
-        return false;
-    }
-    let baseline_lines: Vec<&str> = baseline_exchange.lines().collect();
-    let current_lines: Vec<&str> = current_exchange.lines().collect();
-    if current_lines.len() <= baseline_lines.len() {
-        return false;
-    }
-    for (i, line) in baseline_lines.iter().enumerate() {
-        if current_lines.get(i) != Some(line) {
-            return false;
-        }
-    }
-    let appended: String = current_lines[baseline_lines.len()..].join("\n");
-    if appended
-        .lines()
-        .map(str::trim)
-        .any(is_exchange_response_heading)
-    {
-        return true;
-    }
-    if appended.lines().any(text_line_looks_like_prompt_target) {
-        return false;
-    }
-    true
+    agent_doc_turn::document_drift::exchange_has_new_appended_content(baseline, current)
 }
 
 pub fn extract_normalized_exchange_body(doc: &str) -> Option<String> {
-    let (_, body) = agent_doc_frontmatter::frontmatter::parse(doc).ok()?;
-    let components = agent_doc_element::element::parse(body).ok()?;
-    for component in &components {
-        if component.name == "exchange" {
-            return Some(component.content(body).to_string());
-        }
-    }
-    None
+    agent_doc_turn::document_drift::extract_normalized_exchange_body(doc)
 }
 
 pub fn exchange_only_promptless_content_delta(baseline: &str, current: &str) -> bool {
-    if baseline == current {
-        return true;
-    }
-    let Some(baseline_masked) = mask_exchange_component_content(baseline) else {
-        return false;
-    };
-    let Some(current_masked) = mask_exchange_component_content(current) else {
-        return false;
-    };
-    normalize_transient_markers(&baseline_masked) == normalize_transient_markers(&current_masked)
+    agent_doc_turn::document_drift::exchange_only_promptless_content_drift(baseline, current)
 }
 
 pub fn active_session_delta_is_only_exchange_or_backlog_metadata(
     baseline: &str,
     current: &str,
 ) -> bool {
-    let Some(baseline_masked) = mask_components_by_name(baseline, &["exchange", "backlog"]) else {
-        return false;
-    };
-    let Some(current_masked) = mask_components_by_name(current, &["exchange", "backlog"]) else {
-        return false;
-    };
-    normalize_transient_markers(&baseline_masked) == normalize_transient_markers(&current_masked)
+    agent_doc_turn::document_drift::active_session_drift_is_only_exchange_or_backlog_metadata(
+        baseline, current,
+    )
 }
 
 pub fn promptless_comment_only_delta(baseline: &str, current: &str) -> bool {
-    if baseline == current {
-        return true;
-    }
-    normalize_transient_markers(&agent_doc_diff::strip_comments(baseline))
-        == normalize_transient_markers(&agent_doc_diff::strip_comments(current))
+    agent_doc_turn::document_drift::promptless_comment_only_drift(baseline, current)
 }
 
 pub fn detect_bypassed_response_write_between(
     snapshot_doc: &str,
     current_doc: &str,
 ) -> Option<String> {
-    let snap_norm = normalize_transient_markers(snapshot_doc);
-    let cur_norm = normalize_transient_markers(current_doc);
-    if cur_norm == snap_norm {
-        return None;
-    }
-    if !has_new_response_heading_marker(&snap_norm, &cur_norm) {
-        return None;
-    }
-
-    let diff_text = agent_doc_diff::unified_diff_from_contents(&snap_norm, &cur_norm)?;
-
-    let diff = similar::TextDiff::from_lines(&snap_norm, &cur_norm);
-    for change in diff.iter_all_changes() {
-        if change.tag() != similar::ChangeTag::Insert {
-            continue;
-        }
-        let trimmed = change.value().trim();
-        if is_binary_authored_recovery_diagnostic_heading(trimmed) {
-            continue;
-        }
-        if is_direct_response_patchback_heading(trimmed) {
-            if let Some(bare_target) =
-                agent_doc_diff::first_bare_prompt_prefix_target_before_marker(&diff_text, trimmed)
-            {
-                return Some(format!(
-                    "{} (bare prompt target missing `❯ `: {})",
-                    trimmed, bare_target
-                ));
-            }
-            return Some(trimmed.to_string());
-        }
-    }
-    None
+    agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+        snapshot_doc,
+        current_doc,
+    )
 }
 
 pub fn is_exchange_response_heading(trimmed: &str) -> bool {
-    trimmed == "## Assistant"
-        || trimmed.starts_with("### Re:")
-        || trimmed.starts_with("#### Re:")
-        || trimmed.starts_with("##### Re:")
-        || trimmed.starts_with("###### Re:")
+    agent_doc_turn::closeout_signal::is_exchange_response_heading(trimmed)
 }
 
 pub fn is_direct_response_patchback_heading(trimmed: &str) -> bool {
-    trimmed.starts_with("### Re:") || trimmed == "## Assistant"
+    agent_doc_turn::closeout_signal::is_direct_response_patchback_heading(trimmed)
 }
 
 pub fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) -> bool {
-    let snapshot_counts = response_heading_marker_counts(snapshot_doc);
-    let current_counts = response_heading_marker_counts(current_doc);
-    current_counts
-        .into_iter()
-        .any(|(marker, count)| count > snapshot_counts.get(&marker).copied().unwrap_or(0))
-}
-
-fn response_heading_marker_counts(doc: &str) -> std::collections::BTreeMap<String, usize> {
-    let mut counts = std::collections::BTreeMap::new();
-    for line in doc.lines() {
-        let trimmed = line.trim();
-        if is_direct_response_patchback_heading(trimmed) {
-            *counts.entry(trimmed.to_string()).or_insert(0) += 1;
-        }
-    }
-    counts
+    agent_doc_turn::closeout_signal::has_new_response_heading_marker(snapshot_doc, current_doc)
 }
 
 pub fn is_binary_authored_recovery_diagnostic_heading(trimmed: &str) -> bool {
-    (trimmed.starts_with("### Re:")
-        || trimmed.starts_with("#### Re:")
-        || trimmed.starts_with("##### Re:"))
-        && trimmed.contains("interrupted-cycle recovery")
+    agent_doc_turn::closeout_signal::is_binary_authored_recovery_diagnostic_heading(trimmed)
 }
 
 pub fn mask_exchange_component_content(doc: &str) -> Option<String> {
-    mask_components_by_name(doc, &["exchange"])
+    agent_doc_turn::document_drift::mask_exchange_component_content(doc)
 }
 
 pub fn mask_components_by_name(doc: &str, names: &[&str]) -> Option<String> {
-    let components = agent_doc_element::element::parse(doc).ok()?;
-    let mut masked = doc.to_string();
-    let mut saw_target = false;
-    for component in components.iter().rev() {
-        if !names.contains(&component.name.as_str()) {
-            continue;
-        }
-        saw_target = true;
-        masked.replace_range(component.open_end..component.close_start, "\n");
-    }
-    saw_target.then_some(masked)
-}
-
-fn normalize_transient_markers(doc: &str) -> String {
-    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(doc)
+    agent_doc_turn::document_drift::mask_components_by_name(doc, names)
 }
 
 #[cfg(test)]

@@ -5534,20 +5534,21 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for required in [
         "agent_doc_document_realtime::baseline_comparison::BaselineComparison",
         "BaselineComparison::new(&snapshot, &current)",
-        "active_session_delta_is_only_exchange_or_backlog_metadata",
+        "use agent_doc_turn::document_drift::{",
+        "active_session_drift_is_only_exchange_or_backlog_metadata",
         "exchange_has_new_appended_content",
-        "exchange_only_promptless_content_delta",
-        "promptless_comment_only_delta",
+        "exchange_only_promptless_content_drift",
+        "promptless_comment_only_drift",
     ] {
         assert!(
             closeout_guards.contains(required),
-            "closeout_guards should call focused realtime baseline comparison policy directly: {required}"
+            "closeout_guards should call focused document drift policy directly: {required}"
         );
     }
     assert!(
         closeout_guards
-            .contains("agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between"),
-        "closeout_guards should call focused realtime bypassed-response classifier directly"
+            .contains("agent_doc_turn::document_drift::detect_bypassed_response_write_between"),
+        "closeout_guards should call focused document-drift bypassed-response classifier directly"
     );
     let workflow_session_check =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/session_check.rs")).unwrap();
@@ -6298,6 +6299,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         "pub fn latest_ipc_proof_diagnostic(",
         "pub fn latest_ipc_proof_diagnostic_hint(",
         "pub fn detect_write_completed_commit_missing(",
+        "pub fn latest_unclosed_write_completed_commit_missing(",
         "agent_doc_project_root_io::project_root_containing(",
         "agent_doc_frontmatter::frontmatter::parse(",
         "agent_doc_cycle_state_io::load(",
@@ -6424,7 +6426,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         (
             "agent-doc-repair-io/src/lib.rs",
             repair_source.as_str(),
-            "agent_doc_ops_log_io::detect_write_completed_commit_missing(",
+            "agent_doc_ops_log_io::latest_unclosed_write_completed_commit_missing(",
         ),
     ] {
         assert!(
@@ -13415,10 +13417,9 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-turn document drift should call the focused diff helper directly"
     );
     assert!(
-        closeout_guards.contains(
-            "agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between",
-        ),
-        "session_check closeout guards should adapt current-document IO into the focused realtime drift classifier"
+        closeout_guards
+            .contains("agent_doc_turn::document_drift::detect_bypassed_response_write_between",),
+        "session_check closeout guards should adapt current-document IO into the focused document-drift classifier"
     );
 }
 
@@ -20212,15 +20213,16 @@ fn test_agent_doc_preflight_runtime_io_owns_prompt_cleanup_graph() {
         );
     }
 
-    assert!(
-        orchestration_preflight_run.contains("relocate_out_of_exchange_prompt_before_diff(file)?")
-            && orchestration_preflight_run
-                .contains("remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)?")
-            && orchestration_preflight_run.contains(
-                "remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)?"
-            ),
-        "preflight run sequencing should call the focused runtime cleanup helpers"
-    );
+    for required_call in [
+        "relocate_out_of_exchange_prompt_before_diff(file)?",
+        "remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)?",
+        "remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)?",
+    ] {
+        assert!(
+            orchestration_preflight_run.contains(required_call),
+            "preflight run sequencing should call focused runtime cleanup helper: {required_call}"
+        );
+    }
 }
 
 #[test]

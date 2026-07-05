@@ -203,17 +203,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     let has_pending_response = pending_response.is_some();
     let capture = agent_doc_capture_io::load_active(&canonical)?
         .filter(|capture| capture_state_is_repairable(capture.state));
-    let doc_content = if repair_replay_force_disk_with_override(file, force_disk_override) {
-        agent_doc_document_realtime_io::resolve_disk_current_document_content(
-            file,
-            "repair_current_document",
-        )?
-    } else {
-        agent_doc_document_realtime_io::try_resolve_current_document_content(
-            file,
-            "repair_current_document",
-        )?
-    };
+    let doc_content = repair_current_document_content(
+        &canonical,
+        "repair_current_document",
+        force_disk_override,
+    )?;
     let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let historical_capture = if !has_pending_response && capture.is_none() {
         historical_committed_capture_replay(&canonical, &doc_content)?
@@ -244,11 +238,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     {
         let outcome = repair_stale_preflight_started_cycle(effects.repair_io_effects, file)?;
         if outcome != RepairOutcome::Noop {
-            let refreshed_content =
-                agent_doc_document_realtime_io::try_resolve_current_document_content(
-                    file,
-                    "repair_after_stale_preflight",
-                )?;
+            let refreshed_content = repair_current_document_content(
+                &canonical,
+                "repair_after_stale_preflight",
+                force_disk_override,
+            )?;
             let response_prefix_repaired_doc = repair_response_body_prompt_prefixes_if_needed(
                 effects.repair_io_effects,
                 file,
@@ -407,6 +401,18 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             force_disk_override,
         },
     )
+}
+
+fn repair_current_document_content(
+    file: &Path,
+    source: &str,
+    force_disk_override: Option<bool>,
+) -> Result<String> {
+    if force_disk_override == Some(true) {
+        return std::fs::read_to_string(file)
+            .with_context(|| format!("{source}: failed to read {}", file.display()));
+    }
+    agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
 }
 
 pub fn repair<R: RepairIoEffects + RepairTemplateWriteEffects, W: RepairReplayWriteEffects>(
@@ -1609,7 +1615,7 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     ) == agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
         &head_doc,
     ) {
-        agent_doc_snapshot_io::save(file, &current_doc, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1721,7 +1727,7 @@ pub fn recover_missing_commit_boundary(
     let has_missing_commit_event = if has_open_commit_boundary {
         false
     } else {
-        agent_doc_ops_log_io::detect_write_completed_commit_missing(file)?.is_some()
+        agent_doc_ops_log_io::latest_unclosed_write_completed_commit_missing(file)?.is_some()
     };
     if !has_open_commit_boundary && !has_missing_commit_event {
         return Ok(None);

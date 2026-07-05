@@ -592,7 +592,15 @@ pub fn record_terminal_closeout_proof(
     let file_hash = agent_doc_hash::content_hash(file_content);
     let snapshot_hash = agent_doc_hash::content_hash(&snapshot_content);
     let head_hash = agent_doc_hash::content_hash(&head_content);
-    if snapshot_hash != head_hash {
+    let snapshot_head_raw_match = snapshot_hash == head_hash;
+    let snapshot_head_transient_match = matches!(
+        agent_doc_snapshot_io::snapshot_commit_status_from_contents(
+            Some(&snapshot_content),
+            Some(&head_content),
+        ),
+        agent_doc_snapshot_io::SnapshotCommitStatus::Committed
+    );
+    if !snapshot_head_raw_match && !snapshot_head_transient_match {
         anyhow::bail!(
             "terminal proof mismatch for {}: file_hash={} snapshot_hash={} head_hash={}",
             file.display(),
@@ -601,10 +609,14 @@ pub fn record_terminal_closeout_proof(
             head_hash
         );
     }
-    let agreement = if file_hash == snapshot_hash {
+    let agreement = if file_hash == snapshot_hash && snapshot_head_raw_match {
         "file_snapshot_head"
-    } else {
+    } else if file_hash == snapshot_hash {
+        "file_snapshot_transient_head"
+    } else if snapshot_head_raw_match {
         "snapshot_head_visible_drift"
+    } else {
+        "snapshot_transient_head_visible_drift"
     };
     let state_file_hash_matches = state.file_hash.as_deref() == Some(file_hash.as_str());
     let state_snapshot_hash_matches =

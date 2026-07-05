@@ -696,8 +696,30 @@ pub(crate) fn run_stream(
         )?;
     }
     let pending_flags = super::pending_write_flags(&flags);
-    agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
-    agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
+    if let Err(err) =
+        agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)
+    {
+        retain_ipc_patch_for_retry_error(
+            file,
+            baseline,
+            &response,
+            &err,
+            "prewrite_pending_capture_check",
+        )?;
+        return Err(err);
+    }
+    if let Err(err) =
+        agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)
+    {
+        retain_ipc_patch_for_retry_error(
+            file,
+            baseline,
+            &response,
+            &err,
+            "prewrite_pending_done_check",
+        )?;
+        return Err(err);
+    }
 
     agent_doc_template::response_materialization::reject_marker_response_with_zero_patches(
         parsed_marker_count,
@@ -1724,6 +1746,25 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         drop(doc_lock);
         agent_doc_repair_io::pending::clear_pending(file)?;
         return Ok(());
+    }
+
+    if !patch_file.exists()
+        && let Err(retain_err) =
+            retain_ipc_patch_for_editor_authority_retry(file, baseline, &response)
+    {
+        eprintln!(
+            "[write] warning: failed to recreate IPC retry patch for {}: {}",
+            file.display(),
+            retain_err
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "run_ipc_retry_patch_recreate_failed file={} error={} recovery=retry_without_disk_write",
+                file.display(),
+                retain_err
+            ),
+        );
     }
 
     drop(doc_lock);

@@ -304,6 +304,33 @@ pub fn detect_write_completed_commit_missing(file: &Path) -> Result<Option<Strin
     Ok(last_ops_event(file)?.filter(|event| is_write_completed_commit_missing_event(event)))
 }
 
+pub fn latest_unclosed_write_completed_commit_missing(file: &Path) -> Result<Option<String>> {
+    let Some((canonical, requested_display, content)) = ops_log_context_for_file(file)? else {
+        return Ok(None);
+    };
+    let canonical_display = canonical.display().to_string();
+    for event in content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .map(strip_timestamp_prefix)
+        .filter(|event| {
+            event.contains(&format!("file={canonical_display}"))
+                || event.contains(&format!("file={requested_display}"))
+        })
+    {
+        if is_write_completed_commit_missing_event(event) {
+            return Ok(Some(event.to_string()));
+        }
+        if event.starts_with("commit_success ")
+            || event.starts_with("repair_commit_boundary_recovered ")
+        {
+            return Ok(None);
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,6 +552,28 @@ mod tests {
                 .unwrap()
                 .unwrap(),
             "snapshot_saved_file_ipc file=x snap_len=10"
+        );
+    }
+
+    #[test]
+    fn latest_unclosed_write_completed_commit_missing_skips_read_diagnostics() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/ops.log"),
+            format!(
+                "[100] ipc_write_consumed file={} patches=1\n[101] realtime_doc_resolve authority=disk file={}\n",
+                doc.display(),
+                doc.display()
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            latest_unclosed_write_completed_commit_missing(&doc)
+                .unwrap()
+                .unwrap(),
+            format!("ipc_write_consumed file={} patches=1", doc.display())
         );
     }
 }

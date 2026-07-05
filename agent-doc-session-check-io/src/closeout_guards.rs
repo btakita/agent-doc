@@ -2,6 +2,10 @@ use std::path::Path;
 
 use agent_doc_document_realtime::baseline_comparison::BaselineComparison;
 use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
+use agent_doc_turn::document_drift::{
+    active_session_drift_is_only_exchange_or_backlog_metadata, exchange_has_new_appended_content,
+    exchange_only_promptless_content_drift, promptless_comment_only_drift,
+};
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 
@@ -222,14 +226,14 @@ pub fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<Str
 
     let prompt_marker = crate::detect_unstarted_prompt_bearing_diff(file)?;
     if prompt_marker.is_none()
-        && comparison.active_session_delta_is_only_exchange_or_backlog_metadata()
+        && active_session_drift_is_only_exchange_or_backlog_metadata(&snapshot, &current)
     {
         return Ok(None);
     }
-    if prompt_marker.is_none() && comparison.promptless_comment_only_delta() {
+    if prompt_marker.is_none() && promptless_comment_only_drift(&snapshot, &current) {
         return Ok(None);
     }
-    if prompt_marker.is_none() && comparison.exchange_only_promptless_content_delta() {
+    if prompt_marker.is_none() && exchange_only_promptless_content_drift(&snapshot, &current) {
         return Ok(None);
     }
     let prompt_preview = session
@@ -280,7 +284,11 @@ pub fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> 
     if comparison.normalized_exchange_equal() {
         return Ok(None);
     }
-    if !comparison.exchange_has_new_appended_content() {
+    let snapshot_exchange =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&snapshot);
+    let current_exchange =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&current);
+    if !exchange_has_new_appended_content(&snapshot_exchange, &current_exchange) {
         return Ok(None);
     }
     let prompt_marker = crate::detect_unstarted_prompt_bearing_diff(file)?;
@@ -341,11 +349,7 @@ pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
         return Ok(None);
     };
     let current = crate::resolve_current_document_content(file, "bypassed_response_write")?;
-    Ok(
-        agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
-            &snapshot, &current,
-        ),
-    )
+    Ok(agent_doc_turn::document_drift::detect_bypassed_response_write_between(&snapshot, &current))
 }
 
 /// `#prompt-preempts-auto-queue`: snapshot-independent detection of a live

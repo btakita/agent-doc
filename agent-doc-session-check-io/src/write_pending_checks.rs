@@ -424,11 +424,11 @@ pub struct PendingDoneCheckOptions {
 }
 
 fn malformed_tracked_item_refs_completed_by_response(
-    doc: &agent_doc_document_realtime_io::CurrentDocument,
+    doc_content: &str,
     response_text: &str,
 ) -> Result<Vec<String>> {
     Ok(
-        agent_doc_element_backlog::backlog::malformed_tracked_item_refs(doc.content())
+        agent_doc_element_backlog::backlog::malformed_tracked_item_refs(doc_content)
             .into_iter()
             .filter(|item| {
                 agent_doc_turn::closeout_signal::response_clearly_completes_pending_id(
@@ -468,12 +468,13 @@ pub fn precommit_pending_done_check_with_options(
 
     let response_text =
         agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
-    let doc = crate::resolve_current_document_with_force_disk(
+    let doc_content = crate::resolve_current_document_content_with_force_disk(
         file,
         "precommit_pending_done_check",
         options.force_disk,
     )?;
-    let malformed = malformed_tracked_item_refs_completed_by_response(&doc, &response_text)?;
+    let malformed =
+        malformed_tracked_item_refs_completed_by_response(&doc_content, &response_text)?;
     if !malformed.is_empty() {
         log_closeout_guard(
             file,
@@ -489,7 +490,7 @@ pub fn precommit_pending_done_check_with_options(
         );
     }
     let open_tracked_work_ids =
-        agent_doc_document::tracked_work_projection::open_tracked_work_ids(doc.content());
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&doc_content);
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids(
         &response_text,
         &state.pending_done_ids,
@@ -589,13 +590,13 @@ pub fn prewrite_pending_done_check(
     }
 
     let response_text = agent_doc_turn::closeout_signal::response_text_for_guards(response_body);
-    let doc = crate::resolve_current_document_with_force_disk(
+    let doc_content = crate::resolve_current_document_content_with_force_disk(
         file,
         "prewrite_pending_done_check",
         flags.force_disk,
     )?;
-    let file = doc.key().as_path();
-    let malformed = malformed_tracked_item_refs_completed_by_response(&doc, &response_text)?;
+    let malformed =
+        malformed_tracked_item_refs_completed_by_response(&doc_content, &response_text)?;
     if !malformed.is_empty() {
         log_closeout_guard(
             file,
@@ -614,7 +615,7 @@ pub fn prewrite_pending_done_check(
         return Ok(());
     }
     let open_tracked_work_ids =
-        agent_doc_document::tracked_work_projection::open_tracked_work_ids(doc.content());
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&doc_content);
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids(
         &response_text,
         &recorded_done_ids,
@@ -671,7 +672,8 @@ pub fn auto_apply_pending_done_if_enabled(
     current_content: &mut String,
     backlog_effects: &'static dyn agent_doc_element_backlog_io::BacklogCommandEffects,
 ) -> Result<()> {
-    if !flags.strict_closeout || !crate::resolve_auto_done(file)? {
+    if !flags.strict_closeout || !crate::resolve_auto_done_with_force_disk(file, flags.force_disk)?
+    {
         return Ok(());
     }
     if agent_doc_turn::closeout_signal::pending_done_suppressed(response_body) {
@@ -690,10 +692,13 @@ pub fn auto_apply_pending_done_if_enabled(
         .unwrap_or_default();
     kept_open_ids.extend(flags.pending_kept_open_ids.clone());
 
-    let doc = crate::resolve_current_document(file, "auto_apply_pending_done_if_enabled")?;
-    let file = doc.key().as_path();
+    let doc_content = crate::resolve_current_document_content_with_force_disk(
+        file,
+        "auto_apply_pending_done_if_enabled",
+        flags.force_disk,
+    )?;
     let open_tracked_work_ids =
-        agent_doc_document::tracked_work_projection::open_tracked_work_ids(doc.content());
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&doc_content);
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_decision(
         agent_doc_turn::closeout_signal::TrackedWorkCompletionEvidence {
             response_body,
@@ -722,9 +727,11 @@ pub fn auto_apply_pending_done_if_enabled(
     })?;
     agent_doc_cycle_state_io::record_pending_done_ids(file, &missing)?;
     agent_doc_cycle_state_io::mark_pending_mutations(file)?;
-    *current_content =
-        crate::resolve_current_document(file, "auto_apply_pending_done_if_enabled_refresh")?
-            .into_content();
+    *current_content = crate::resolve_current_document_content_with_force_disk(
+        file,
+        "auto_apply_pending_done_if_enabled_refresh",
+        flags.force_disk,
+    )?;
     eprintln!(
         "[finalize] auto_done: recorded {}",
         missing
@@ -818,46 +825,48 @@ fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Resul
         return Ok(true);
     }
 
-    let doc = match crate::resolve_current_document_with_force_disk(
+    let content = match crate::resolve_current_document_content_with_force_disk(
         file,
         "closeout_pending_maintenance_required",
         force_disk,
     ) {
-        Ok(doc) => doc,
-        Err(err) if !force_disk && current_document_resolution_needs_editor_retry(&err) => {
-            if agent_doc_snapshot_io::load(file)?
-                .as_deref()
-                .is_some_and(|snapshot| !document_has_done_tracked_work(snapshot))
-            {
+        Ok(content) => content,
+        Err(err) if !force_disk && editor_authority_resolution_unavailable(&err) => {
+            let Ok(disk_content) = std::fs::read_to_string(file) else {
+                return Err(err);
+            };
+            if !content_requires_closeout_pending_maintenance(&disk_content) {
                 return Ok(false);
             }
+            let reason = editor_authority_resolution_reason(&err);
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "closeout_pending_maintenance_deferred file={} reason=editor_authority_unavailable recovery=retry_without_disk_write",
-                    file.display()
+                    "visible_write_editor_authority_unavailable file={} source=pending_maintenance reason={}",
+                    file.display(),
+                    reason
                 ),
             );
-            return Err(err);
+            anyhow::bail!(
+                "editor is the current authority for {}; editor authority unavailable: {}; disk is a non-authoritative replica and was not read",
+                file.display(),
+                if reason == "sync_pending" {
+                    "editor_sync_pending"
+                } else {
+                    "editor_attached_model_missing"
+                }
+            );
         }
         Err(err) => return Err(err),
     };
-    Ok(document_has_done_tracked_work(doc.content()))
+    Ok(content_requires_closeout_pending_maintenance(&content))
 }
 
-fn current_document_resolution_needs_editor_retry(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let message = cause.to_string();
-        message.contains("retry_without_disk_write")
-            || message.contains("disk is not consulted until the editor is detached")
-            || message.contains("disk remained non-authoritative")
-    })
-}
-
-fn document_has_done_tracked_work(content: &str) -> bool {
+fn content_requires_closeout_pending_maintenance(content: &str) -> bool {
     let Ok(components) = agent_doc_element::element::parse(content) else {
         return false;
     };
+
     components
         .iter()
         .filter(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
@@ -866,6 +875,30 @@ fn document_has_done_tracked_work(content: &str) -> bool {
                 agent_doc_element_backlog::backlog::parse_items(component.content(content));
             items.iter().any(|item| item.is_done())
         })
+}
+
+fn editor_authority_resolution_unavailable(err: &anyhow::Error) -> bool {
+    let detail = err
+        .chain()
+        .map(|cause| cause.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    detail.contains("editor_attached_model_missing")
+        || detail.contains("editor_sync_pending")
+        || detail.contains("recovery=retry_without_disk_write")
+}
+
+fn editor_authority_resolution_reason(err: &anyhow::Error) -> &'static str {
+    let detail = err
+        .chain()
+        .map(|cause| cause.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if detail.contains("editor_sync_pending") {
+        "sync_pending"
+    } else {
+        "missing_replica"
+    }
 }
 
 #[cfg(test)]

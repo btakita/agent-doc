@@ -180,6 +180,9 @@ pub fn check_snapshot_committed_guard(
             snapshot_len,
             head_len,
         } => {
+            if latest_head_response_visible_in_operator_live_buffer(file)? {
+                return Ok(GuardResult::None);
+            }
             // Phase 3 (#jbccc3): silently treat the auto-recoverable cancel
             // pattern as a non-error here. Standalone `session-check` is then
             // free to surface OK while preflight runs the binary-owned commit
@@ -237,6 +240,23 @@ fn current_document_matches_head(file: &Path) -> Result<bool> {
         return Ok(crate::operator_live_buffer_contains_heading(file, &heading));
     }
     Ok(false)
+}
+
+fn latest_head_response_visible_in_operator_live_buffer(file: &Path) -> Result<bool> {
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(false);
+    };
+    let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
+        return Ok(false);
+    };
+    let Some(heading) =
+        agent_doc_document::write_normalization::latest_response_heading_missing_from_current(
+            &head, &snapshot,
+        )
+    else {
+        return Ok(false);
+    };
+    Ok(crate::operator_live_buffer_contains_heading(file, &heading))
 }
 
 /// `#codex-final-response-not-written`: a completed turn that committed real

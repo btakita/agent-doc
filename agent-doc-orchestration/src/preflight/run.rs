@@ -400,7 +400,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             }
         };
     if !options.probe && committed {
-        maybe_record_preflight_terminal_closeout_proof(file, did_commit_this_preflight);
+        maybe_record_preflight_terminal_closeout_proof(
+            file,
+            did_commit_this_preflight || committed_prior,
+        );
     }
 
     if !options.probe && relocate_out_of_exchange_prompt_before_diff(file)? {

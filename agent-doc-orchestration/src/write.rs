@@ -243,7 +243,7 @@ use agent_doc_element_exchange::{
 use agent_doc_queue::queue_consume::{
     queue_consumption_allowed_for_response, queue_targeted_completion_id_for_current_head,
 };
-use agent_doc_queue_io::queue_consume::{self, QueueConsumptionOutcome};
+use agent_doc_queue_io::queue_consume::{self, QueueConsumeWriteEffects, QueueConsumptionOutcome};
 use agent_doc_template_io::normalize_user_prompts_in_exchange_safe;
 use agent_doc_workflow::session_cycle::{
     FinalizeRerunCommand, compact_command_hint, finalize_rerun_command_base,
@@ -287,6 +287,46 @@ fn resolve_force_disk_document(
     source: &'static str,
 ) -> Result<agent_doc_document_realtime::CurrentDocument> {
     agent_doc_document_realtime_io::resolve_disk_current_document(file, source)
+}
+
+struct ForceDiskQueueConsumeWritebackEffects;
+
+static FORCE_DISK_QUEUE_CONSUME_WRITEBACK_EFFECTS: ForceDiskQueueConsumeWritebackEffects =
+    ForceDiskQueueConsumeWritebackEffects;
+
+impl QueueConsumeWriteEffects for ForceDiskQueueConsumeWritebackEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        std::fs::read_to_string(file)
+            .with_context(|| format!("{source}: failed to read {}", file.display()))
+    }
+
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        agent_doc_write_converge_io::converge_document_or_disk(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            target_content,
+            source_content,
+            reason,
+        )
+    }
+}
+
+fn queue_consume_writeback_effects(force_disk: bool) -> &'static dyn QueueConsumeWriteEffects {
+    if force_disk {
+        &FORCE_DISK_QUEUE_CONSUME_WRITEBACK_EFFECTS
+    } else {
+        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -731,19 +771,28 @@ fn consume_queue_prompts_for_done_ids_closeout(
     done_ids: &[String],
     force_disk: bool,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    if force_disk {
+    let result = if force_disk {
         queue_consume::consume_queue_prompts_with_outcome(
             file,
             done_ids,
             true,
-            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            queue_consume_writeback_effects(true),
         )
     } else {
         queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
             file,
             done_ids,
-            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            queue_consume_writeback_effects(false),
         )
+    };
+    match result {
+        Err(err) if !force_disk && error_requests_retry_without_disk(&err) => {
+            Err(err.context(format!(
+                "queue_consume: refused direct disk write for {} while editor authority is unavailable",
+                file.display()
+            )))
+        }
+        other => other,
     }
 }
 
@@ -1105,11 +1154,12 @@ fn run_command_inner(
         &options.review_edit,
         options.pending_reorder.as_deref(),
     );
+    let metadata_force_disk = options.force_disk || options.is_ipc;
     let mut commit_mode = match resolve_commit_mode(
         file,
         commit_mode,
         options.pending_only,
-        options.force_disk,
+        metadata_force_disk,
     ) {
         Ok(mode) => mode,
         Err(err) if options.is_ipc && error_requests_retry_without_disk(&err) => {
@@ -1142,7 +1192,7 @@ fn run_command_inner(
         Err(err) => return Err(err),
     };
     if commit_mode == CommitMode::Required && !agent_doc_git_io::status::is_in_git_repo(file) {
-        if is_session_document_with_force_disk(file, options.force_disk)? {
+        if is_session_document_with_force_disk(file, metadata_force_disk)? {
             anyhow::bail!(
                 "write --commit requires a git repository for session documents so the cycle can reach a committed state"
             );
@@ -1257,42 +1307,32 @@ fn run_command_inner(
         None => read_explicit_baseline(file, options.baseline_file.as_deref())?,
     };
 
-    let current_doc = if options.force_disk {
-        resolve_force_disk_document(file, "pre_write_guards")?
+    let current_content = if options.force_disk {
+        Some(resolve_force_disk_document(file, "pre_write_guards")?.into_content())
     } else {
         match resolve_current_document(file, "pre_write_guards") {
-            Ok(current) => current,
+            Ok(current) => Some(current.into_content()),
             Err(err) if options.is_ipc && error_requests_retry_without_disk(&err) => {
-                let response = read_response_input()?;
-                if !response.trim().is_empty()
-                    && let Err(retain_err) = retain_ipc_patch_for_editor_authority_retry(
-                        file,
-                        baseline.as_deref(),
-                        &response,
-                    )
-                {
-                    eprintln!(
-                        "[write] warning: failed to retain IPC retry patch for {}: {}",
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "pre_write_guards_deferred_to_ipc_retry file={} error={} recovery=retry_without_disk_write",
                         file.display(),
-                        retain_err
-                    );
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "pre_write_guard_ipc_retry_patch_retention_failed file={} error={} recovery=retry_without_disk_write",
-                            file.display(),
-                            retain_err
-                        ),
-                    );
-                }
-                return Err(err);
+                        err
+                    ),
+                );
+                None
             }
             Err(err) => return Err(err),
         }
     };
-    let current_content = current_doc.content();
-    guard_no_exchange_compaction_request_between(file, baseline.as_deref(), current_content)?;
+    if let Some(current_content) = current_content.as_deref() {
+        guard_no_exchange_compaction_request_between(file, baseline.as_deref(), current_content)?;
+    }
     let current_resolved_mode = if options.is_template || (!options.is_ipc && !options.is_stream) {
+        let current_content = current_content
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("pre_write_guards unavailable before non-IPC write"))?;
         let (fm, _) = frontmatter::parse(current_content)?;
         Some(fm.resolve_mode())
     } else {
@@ -1466,6 +1506,18 @@ fn run_command_inner(
         let response_body = agent_doc_capture_io::load_active(file)?
             .map(|capture| capture.response_body)
             .unwrap_or_default();
+        let refreshed_current_content;
+        let current_content_for_queue = match current_content.as_deref() {
+            Some(content) => content,
+            None => {
+                refreshed_current_content = if options.force_disk {
+                    resolve_force_disk_document(file, "queue_consumption")?.into_content()
+                } else {
+                    resolve_current_document(file, "queue_consumption")?.into_content()
+                };
+                refreshed_current_content.as_str()
+            }
+        };
         let mut queue_completion_ids = agent_doc_queue::queue_heads::explicit_queue_completion_ids(
             &options.pending_done,
             &options.pending_gate,
@@ -1476,7 +1528,7 @@ fn run_command_inner(
         let queue_consumption_allowed = queue_consumption_allowed_for_response(
             file,
             baseline.as_deref(),
-            current_content,
+            current_content_for_queue,
             &response_body,
             &queue_completion_ids,
         )?;
@@ -1484,7 +1536,7 @@ fn run_command_inner(
             && let Some(head_id) = queue_targeted_completion_id_for_current_head(
                 file,
                 baseline.as_deref(),
-                current_content,
+                current_content_for_queue,
                 &response_body,
                 &options.pending_done,
             )?
@@ -1509,7 +1561,7 @@ fn run_command_inner(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
-                        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                        queue_consume_writeback_effects(options.force_disk),
                     ) {
                         eprintln!("[queue] warning: done-id marking failed: {}", e);
                     }
@@ -1518,7 +1570,7 @@ fn run_command_inner(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
-                        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                        queue_consume_writeback_effects(options.force_disk),
                     ) {
                         Ok(0) => {
                             eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?)
@@ -1539,14 +1591,14 @@ fn run_command_inner(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
-                        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                        queue_consume_writeback_effects(options.force_disk),
                     )?;
                 } else {
                     let marked = queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
                         &queue_completion_ids,
                         options.force_disk,
-                        &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                        queue_consume_writeback_effects(options.force_disk),
                     )?;
                     if marked == 0 {
                         eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?);
@@ -1569,7 +1621,7 @@ fn run_command_inner(
                 file,
                 &response_body,
                 options.force_disk,
-                &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                queue_consume_writeback_effects(options.force_disk),
             ) {
                 Ok(0) => {}
                 Ok(n) => eprintln!("[queue] struck {n} answered free-text head(s) (#ftstrike)"),
@@ -2771,9 +2823,9 @@ mod tests {
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("closeout_pending_maintenance_deferred")
-                && log.contains("reason=editor_authority_unavailable")
-                && log.contains("recovery=retry_without_disk_write"),
+            log.contains("visible_write_editor_authority_unavailable")
+                && log.contains("source=pending_maintenance")
+                && log.contains("reason=missing_replica"),
             "defer should be attributed to editor authority resolution:\n{log}"
         );
         assert!(

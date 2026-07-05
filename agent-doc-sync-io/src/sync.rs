@@ -266,7 +266,7 @@ fn parse_frontmatter_for_sync<'a>(
     file: &Path,
     phase: &str,
 ) -> Result<(frontmatter::Frontmatter, &'a str)> {
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     agent_doc_frontmatter_io::session::parse_for_file_with_context(content, file, &rc.ssh_context())
         .map_err(|err| anyhow::anyhow!("sync {} frontmatter: {}", phase, err))
 }

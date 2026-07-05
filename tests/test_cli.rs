@@ -7809,7 +7809,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         assert!(
             source.contains("agent_doc_prompt_context_io::build_document_section_with_ssh_context")
                 && source.contains(".ssh_context()"),
-            "{relative} should adapt cached RunContext SSH context into prompt-context IO directly"
+            "{relative} should adapt cached CycleContext SSH context into prompt-context IO directly"
         );
     }
     let combined_prompt_context_callers =
@@ -10036,7 +10036,7 @@ fn test_agent_doc_run_context_io_owns_lazily_document_context_graph() {
         "lazily::define_schema!(pub ActorContextSchema);",
         "pub type CycleContext = TypedContext<CycleContextSchema>",
         "pub type ActorContext = TypedContext<ActorContextSchema>",
-        "pub fn run_context(file_path: PathBuf) -> RunContext",
+        "pub fn cycle_context(file_path: PathBuf) -> CycleContext",
         "pub fn actor_context_for_project_root(project_root: PathBuf) -> ActorContext",
         "pub trait AgentDocContextExt",
         "fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus",
@@ -10097,13 +10097,13 @@ fn test_agent_doc_run_context_io_owns_lazily_document_context_graph() {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             (source.contains("agent_doc_run_context_io::CycleContext")
-                || source.contains("agent_doc_run_context_io::RunContext")
-                || source.contains("agent_doc_run_context_io::run_context")
+                || source.contains("agent_doc_run_context_io::CycleContext")
+                || source.contains("agent_doc_run_context_io::cycle_context")
                 || source.contains("agent_doc_run_context_io::AgentDocContextExt")
-                || source.contains("agent_doc_run_context_io::{AgentDocContextExt, RunContext}")
-                || source.contains("agent_doc_run_context_io::{RunContext, AgentDocContextExt}"))
-                && !source.contains("agent_doc_orchestration::graph::RunContext")
-                && !source.contains("crate::graph::RunContext"),
+                || source.contains("agent_doc_run_context_io::{AgentDocContextExt, CycleContext}")
+                || source.contains("agent_doc_run_context_io::{CycleContext, AgentDocContextExt}"))
+                && !source.contains("agent_doc_orchestration::graph::CycleContext")
+                && !source.contains("crate::graph::CycleContext"),
             "{relative} should use the focused document-context crate directly"
         );
     }
@@ -10778,7 +10778,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Lazily run-context graph",
             "agent-doc-orchestration/src/graph.rs",
             "agent-doc-run-context-io/src/lib.rs",
-            "Split short-lived CLI `RunContext` slots from long-lived `ActorContext`",
+            "Split short-lived CLI `CycleContext` slots from long-lived `ActorContext`",
         ),
         (
             "Queue continuation host IO",
@@ -14284,7 +14284,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     let route_startup_harness =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_harness.rs")).unwrap();
     assert!(
-        route_startup_harness.contains("agent_doc_run_context_io::run_context")
+        route_startup_harness.contains("agent_doc_run_context_io::cycle_context")
             && route_startup_harness.contains("HarnessConfig::from_context"),
         "agent-doc-route-io startup harness resolution should own frontmatter/global config adaptation"
     );

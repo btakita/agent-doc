@@ -237,7 +237,7 @@ This no-duplicate-editor-pane invariant is owned by the sync claim-tracking
 `tmux-router` per-column pane dedup. It is independent of the `lazily-rs`
 dependency graph: the only
 `lazily-rs` use on the sync path is `parse_frontmatter_for_sync`, which
-constructs a fresh per-invocation `RunContext` (each slot computes at most once,
+constructs a fresh per-invocation `CycleContext` (each slot computes at most once,
 then drops), so no lazily-cached state survives across sync runs to drive
 duplicate pane creation, and `tmux-router` does not depend on `lazily-rs` at
 all.

@@ -217,7 +217,7 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
 
     // Build prompt
     let session_accretion = agent_doc_session_accretion_io::inspect(file).ok();
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let ssh_context = rc.ssh_context();
     let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
         file,
@@ -329,7 +329,7 @@ fn stream_loop(
     thinking_cfg: Option<&ThinkingConfig>,
     effects: Arc<dyn StreamRuntimeEffects>,
 ) -> Result<StreamResult> {
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let buffer = Arc::new(Mutex::new(String::new()));
     let thinking_buffer = Arc::new(Mutex::new(String::new()));
     let (done_tx, done_rx) = mpsc::channel::<()>();
@@ -549,7 +549,7 @@ pub fn flush_to_document(
     _baseline: &str,
     effects: &dyn StreamRuntimeEffects,
 ) -> Result<()> {
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     // Build a patch block targeting the component
     let patch_response = format!(
         "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->\n",

@@ -55,7 +55,7 @@ pub fn patch_response_headings_already_in_head(
     if headings.is_empty() {
         return true;
     }
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let Some(head) = rc.head_content() else {
         return false;
     };

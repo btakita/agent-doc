@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
+use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 
 use crate::resolve_pending_done_guard_mode_with_context;
 
-pub fn check_no_response_active_queue_head(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_no_response_active_queue_head(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
@@ -94,7 +94,7 @@ pub fn check_no_response_active_queue_head(file: &Path, rc: &RunContext) -> Resu
 /// finds the `### Re: ... #id` heading in the live exchange or a HEAD compact archive.
 pub fn check_reaped_queue_head_without_response(
     file: &Path,
-    rc: &RunContext,
+    rc: &CycleContext,
 ) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {

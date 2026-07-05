@@ -139,7 +139,7 @@ pub fn managed_capability_proof_status(
 ) -> Result<ManagedCapabilityProofStatus> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let fm = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
         file,

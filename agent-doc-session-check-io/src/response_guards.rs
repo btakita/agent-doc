@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
+use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 
@@ -11,7 +11,7 @@ use anyhow::Result;
 /// lifecycle outcome this cycle). A preserved queue line (reached HEAD's queue
 /// or exchange) or a consumed head clears the marker; a silently-deleted user
 /// queue edit fails closed.
-pub fn check_dropped_queue_prompt_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_dropped_queue_prompt_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
@@ -65,7 +65,7 @@ pub fn check_dropped_queue_prompt_guard(file: &Path, rc: &RunContext) -> Result<
 /// closed naming the contaminating candidate.
 pub fn check_queue_response_contamination_guard(
     file: &Path,
-    rc: &RunContext,
+    rc: &CycleContext,
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached content + parsed components.
     let content = rc.doc_content();
@@ -103,7 +103,7 @@ pub fn check_queue_response_contamination_guard(
 /// persisted at adoption time, so this guard catches the silent-loss class even
 /// when the editor overwrote the disk prompt via IPC buffer convergence before
 /// the post-commit disk diff could observe it.
-pub fn check_dropped_exchange_prompt_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_dropped_exchange_prompt_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
@@ -141,7 +141,10 @@ pub fn check_dropped_exchange_prompt_guard(file: &Path, rc: &RunContext) -> Resu
     )
 }
 
-pub fn check_completed_pending_reap_guard(_file: &Path, rc: &RunContext) -> Result<Option<String>> {
+pub fn check_completed_pending_reap_guard(
+    _file: &Path,
+    rc: &CycleContext,
+) -> Result<Option<String>> {
     // Phase 6 (#lr-content-6): cached content + parsed components.
     let content = rc.doc_content();
     let components = rc.components();
@@ -164,7 +167,7 @@ pub fn check_completed_pending_reap_guard(_file: &Path, rc: &RunContext) -> Resu
 
 pub fn check_snapshot_committed_guard(
     file: &Path,
-    rc: &RunContext,
+    rc: &CycleContext,
     recovery_hint: impl FnOnce(&Path) -> String,
 ) -> Result<GuardResult> {
     use agent_doc_snapshot_io::SnapshotCommitStatus;

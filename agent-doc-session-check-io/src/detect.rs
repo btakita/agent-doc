@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
+use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 use agent_doc_turn::response_replay::{
     JbCacheConflictAcceptDuplicateReplay, LateIpcResponseOverapplication,
     classify_jb_cache_conflict_accept_duplicate_replay, classify_late_ipc_response_overapplication,
@@ -19,13 +19,13 @@ use anyhow::Result;
 pub fn detect_jb_cache_conflict_accept_duplicate_replay(
     file: &Path,
 ) -> Result<Option<JbCacheConflictAcceptDuplicateReplay>> {
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     detect_jb_cache_conflict_accept_duplicate_replay_with_context(file, &rc)
 }
 
 pub fn detect_jb_cache_conflict_accept_duplicate_replay_with_context(
     file: &Path,
-    rc: &RunContext,
+    rc: &CycleContext,
 ) -> Result<Option<JbCacheConflictAcceptDuplicateReplay>> {
     let current =
         crate::resolve_current_document_content(file, "jb_cache_conflict_accept_duplicate")?;
@@ -46,13 +46,13 @@ pub fn detect_jb_cache_conflict_accept_duplicate_replay_with_context(
 pub fn detect_late_ipc_response_overapplication(
     file: &Path,
 ) -> Result<Option<LateIpcResponseOverapplication>> {
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     detect_late_ipc_response_overapplication_with_context(file, &rc)
 }
 
 pub fn detect_late_ipc_response_overapplication_with_context(
     file: &Path,
-    rc: &RunContext,
+    rc: &CycleContext,
 ) -> Result<Option<LateIpcResponseOverapplication>> {
     let current =
         crate::resolve_current_document_content(file, "late_ipc_response_overapplication")?;
@@ -76,7 +76,10 @@ pub fn check_parent_submodule_pointer_guard(file: &Path) -> Result<GuardResult> 
     Ok(GuardResult::Error(msg))
 }
 
-pub fn check_prompt_only_exchange_tail_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_prompt_only_exchange_tail_guard(
+    file: &Path,
+    rc: &CycleContext,
+) -> Result<GuardResult> {
     let content = rc.doc_content();
     let file_display = file.display().to_string();
     Ok(
@@ -94,13 +97,13 @@ pub fn check_prompt_only_exchange_tail_guard(file: &Path, rc: &RunContext) -> Re
 /// response, `HEAD` does not, and the working tree matches the snapshot modulo
 /// transient `(HEAD)` / boundary markers.
 pub fn detect_jb_cache_conflict_cancel_recoverable(file: &Path) -> Result<bool> {
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     detect_jb_cache_conflict_cancel_recoverable_with_context(file, &rc)
 }
 
 pub fn detect_jb_cache_conflict_cancel_recoverable_with_context(
     file: &Path,
-    rc: &RunContext,
+    rc: &CycleContext,
 ) -> Result<bool> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);

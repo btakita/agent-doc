@@ -1,11 +1,14 @@
 use std::path::Path;
 
 use agent_doc_document_realtime::baseline_comparison::BaselineComparison;
-use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
+use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 
-pub fn check_blocked_closeout_followup_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_blocked_closeout_followup_guard(
+    file: &Path,
+    rc: &CycleContext,
+) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = crate::resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
@@ -81,7 +84,7 @@ pub fn check_blocked_closeout_followup_guard(file: &Path, rc: &RunContext) -> Re
 ///
 /// Warn-first advisory only — it never blocks closeout. Suppressible via a
 /// `<!-- no-gated-phase-split-guard -->` response marker.
-pub fn check_gated_phase_split_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_gated_phase_split_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };

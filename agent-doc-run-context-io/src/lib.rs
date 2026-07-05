@@ -39,8 +39,6 @@ lazily::define_schema!(pub CycleContextSchema);
 lazily::define_schema!(pub ActorContextSchema);
 
 pub type CycleContext = TypedContext<CycleContextSchema>;
-/// Compatibility alias while call sites are renamed to `CycleContext`.
-pub type RunContext = CycleContext;
 pub type ActorContext = TypedContext<ActorContextSchema>;
 
 pub type FilePathCell<Schema> = TypedCellHandle<Schema, PathBuf>;
@@ -378,10 +376,6 @@ pub fn cycle_context(file_path: PathBuf) -> CycleContext {
     let ctx = CycleContext::new();
     ctx.set(file_path_cell(&ctx), file_path);
     ctx
-}
-
-pub fn run_context(file_path: PathBuf) -> RunContext {
-    cycle_context(file_path)
 }
 
 pub fn actor_context(file_path: PathBuf) -> ActorContext {
@@ -800,7 +794,7 @@ mod tests {
         let doc = dir.path().join("nested/deep/file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
 
         let root = rc.project_root().unwrap();
         assert_eq!(root, dir.path());
@@ -816,7 +810,7 @@ mod tests {
         let doc = dir.path().join("nested/file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let root = rc.project_root();
         assert!(root.is_some());
@@ -832,7 +826,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         assert!(!rc.is_project_root_cached());
         let root = rc.project_root();
@@ -849,7 +843,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let snap = rc.snapshot_path().unwrap();
         assert_eq!(snap, dir.path().join(".agent-doc").join("snapshots"));
@@ -863,7 +857,7 @@ mod tests {
         let doc = dir.path().join("nested/deep/file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let rel = rc.doc_relative().unwrap();
         assert_eq!(rel, "nested/deep/file.md");
@@ -881,7 +875,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let ssh = rc.ssh_context();
         assert_eq!(ssh.config.tmux_session.as_deref(), Some("test"));
@@ -900,7 +894,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let cfg = rc.project_config();
         assert_eq!(cfg.tmux_session.as_deref(), Some("my-session"));
@@ -914,7 +908,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let _root = rc.project_root();
         assert!(rc.is_project_root_cached());
@@ -935,7 +929,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let _root = rc.project_root();
         let _cfg = rc.project_config();
@@ -956,7 +950,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let _root = rc.project_root();
         let _cfg = rc.project_config();
@@ -1026,7 +1020,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let rel = rc.doc_relative();
         let root = rc.project_root();
@@ -1046,7 +1040,7 @@ mod tests {
         )
         .unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
         rc.set_doc_content(std::fs::read_to_string(&doc).unwrap());
 
         let fm = rc.frontmatter();
@@ -1064,7 +1058,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "disk replica\n").unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
         let current = CurrentDocument::new(
             doc.clone(),
             reconcile_current_doc(
@@ -1094,7 +1088,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "no frontmatter here\n").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
         rc.set_doc_content("no frontmatter here\n".to_string());
 
         let fm = rc.frontmatter();
@@ -1109,7 +1103,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "plain text\n").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
         rc.set_doc_content("plain text\n".to_string());
 
         let comps = rc.components();
@@ -1123,7 +1117,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         let hash1 = rc.doc_hash();
         let hash2 = rc.doc_hash();
@@ -1138,7 +1132,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
 
         let graph_hash = rc.doc_hash();
         let canonical = doc.canonicalize().unwrap();
@@ -1153,7 +1147,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
 
         assert_eq!(
             rc.snapshot_path_for(),
@@ -1168,7 +1162,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
 
         assert_eq!(
             rc.lock_path_for(),
@@ -1183,7 +1177,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
 
         assert_eq!(
             rc.baseline_path_for(),
@@ -1198,7 +1192,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
 
         assert_eq!(
             rc.pending_path_for(),
@@ -1217,7 +1211,7 @@ mod tests {
         )
         .unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
         rc.set_doc_content(std::fs::read_to_string(&doc).unwrap());
 
         let _fm = rc.frontmatter();
@@ -1238,7 +1232,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
 
         assert!(!rc.is_doc_hash_cached());
         let _hash = rc.doc_hash();
@@ -1258,7 +1252,7 @@ mod tests {
         std::fs::write(&doc, "hello").unwrap();
         agent_doc_snapshot_io::save(&doc, "snapshot body", agent_doc_ops_log_io::log_op).unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
         assert!(!rc.is_snapshot_content_cached());
         let content = rc.snapshot_content().expect("snapshot present");
         assert_eq!(content.as_str(), "snapshot body");
@@ -1275,7 +1269,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "hello").unwrap();
 
-        let rc = run_context(doc);
+        let rc = cycle_context(doc);
         assert!(rc.snapshot_content().is_none());
         assert!(rc.is_snapshot_content_cached(), "the None result is cached");
     }
@@ -1287,7 +1281,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "hello").unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
         // No sidecar yet → None, and the None is cached.
         assert!(rc.cycle_state().is_none());
         assert!(rc.is_cycle_state_cached());
@@ -1317,7 +1311,7 @@ mod tests {
         std::fs::write(&doc, "first\n").unwrap();
         commit_path(dir.path(), "file.md", "first");
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
         assert!(!rc.is_head_content_cached());
         let first = rc.head_content().expect("tracked file has HEAD content");
         assert_eq!(first.as_str(), "first\n");
@@ -1353,7 +1347,7 @@ mod tests {
         agent_doc_snapshot_io::save(&doc, "committed\n", agent_doc_ops_log_io::log_op).unwrap();
         commit_path(dir.path(), "file.md", "add doc");
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
         assert!(!rc.is_snapshot_commit_status_cached());
         assert_eq!(
             rc.snapshot_commit_status(),
@@ -1402,7 +1396,7 @@ mod tests {
         }
         unsafe { std::env::set_var("CODEX_THREAD_ID", "thread-1") };
 
-        let rc = run_context(PathBuf::from("doc.md"));
+        let rc = cycle_context(PathBuf::from("doc.md"));
         assert!(!rc.is_harness_cached());
         assert_eq!(rc.harness(), "codex");
         assert!(rc.is_harness_cached());
@@ -1414,7 +1408,7 @@ mod tests {
         assert_eq!(
             rc.harness(),
             "codex",
-            "cached harness should not change during one RunContext"
+            "cached harness should not change during one CycleContext"
         );
 
         unsafe { std::env::remove_var("OPENCODE") };
@@ -1435,7 +1429,7 @@ mod tests {
         .unwrap();
         let _xdg = EnvVarRestore::set("XDG_CONFIG_HOME", config_root.path());
 
-        let rc = run_context(PathBuf::from("doc.md"));
+        let rc = cycle_context(PathBuf::from("doc.md"));
         assert!(!rc.is_global_config_cached());
         let first = rc.global_config();
         assert_eq!(first.default_agent.as_deref(), Some("claude"));
@@ -1470,7 +1464,7 @@ mod tests {
         first_registry.insert("first".to_string(), registry_entry("%1", "first", &doc));
         agent_doc_session_registry_io::save_in(dir.path(), &first_registry).unwrap();
 
-        let rc = run_context(doc.clone());
+        let rc = cycle_context(doc.clone());
         assert!(!rc.is_session_registry_cached());
         let first = rc.session_registry();
         assert!(first.values().any(|entry| entry.pane == "%1"));

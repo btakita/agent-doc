@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
+use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 
 use crate::resolve_pending_done_guard_mode_with_context;
 
-pub fn check_expect_done_or_gate_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_expect_done_or_gate_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
@@ -80,7 +80,7 @@ pub fn check_expect_done_or_gate_guard(file: &Path, rc: &RunContext) -> Result<G
 /// cycle never targeted it, fail closed and name each lost id so the queue can
 /// be restored. Suppress an intentional user removal with
 /// `<!-- no-queue-removal-guard -->`.
-pub fn check_queue_head_removal_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_queue_head_removal_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
@@ -180,7 +180,10 @@ pub fn check_queue_head_removal_guard(file: &Path, rc: &RunContext) -> Result<Gu
 /// or (b) a committed `### Re:` response exists that plausibly answers it. A
 /// binary consume marker by itself is not proof: the answer must be visible in
 /// committed `agent:exchange` history, normally via the queue-prompt echo.
-pub fn check_free_text_queue_head_provenance(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_free_text_queue_head_provenance(
+    file: &Path,
+    rc: &CycleContext,
+) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
@@ -335,8 +338,8 @@ mod tests {
         .unwrap();
     }
 
-    fn run_context(doc: &Path, content: &str) -> RunContext {
-        let rc = agent_doc_run_context_io::run_context(doc.to_path_buf());
+    fn cycle_context(doc: &Path, content: &str) -> CycleContext {
+        let rc = agent_doc_run_context_io::cycle_context(doc.to_path_buf());
         rc.set_doc_content(content.to_string());
         rc
     }
@@ -376,7 +379,7 @@ mod tests {
         mark_cycle_committed(&doc, preflight, committed);
         agent_doc_cycle_state_io::record_pending_done_ids(&doc, &["done".to_string()]).unwrap();
 
-        let rc = run_context(&doc, committed);
+        let rc = cycle_context(&doc, committed);
         assert!(
             matches!(
                 check_queue_head_removal_guard(&doc, &rc).unwrap(),
@@ -417,7 +420,7 @@ mod tests {
         let doc = make_doc(tmp.path(), preflight);
         mark_cycle_committed(&doc, preflight, committed);
 
-        let rc = run_context(&doc, committed);
+        let rc = cycle_context(&doc, committed);
         assert!(
             matches!(
                 check_free_text_queue_head_provenance(&doc, &rc).unwrap(),
@@ -455,7 +458,7 @@ mod tests {
         let doc = make_doc(tmp.path(), committed);
         mark_cycle_committed(&doc, committed, committed);
 
-        let rc = run_context(&doc, committed);
+        let rc = cycle_context(&doc, committed);
         match check_free_text_queue_head_provenance(&doc, &rc).unwrap() {
             GuardResult::Error(message) => {
                 assert!(message.contains("completed free-text"), "got: {message}");
@@ -496,7 +499,7 @@ mod tests {
         let doc = make_doc(tmp.path(), committed);
         mark_cycle_committed(&doc, committed, committed);
 
-        let rc = run_context(&doc, committed);
+        let rc = cycle_context(&doc, committed);
         assert!(
             matches!(
                 check_free_text_queue_head_provenance(&doc, &rc).unwrap(),

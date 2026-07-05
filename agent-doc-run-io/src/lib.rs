@@ -193,7 +193,7 @@ pub fn run_with_context(
     no_git: bool,
     force_disk: bool,
     config: &agent_doc_config::Config,
-    run_context: Option<&agent_doc_run_context_io::RunContext>,
+    cycle_context: Option<&agent_doc_run_context_io::CycleContext>,
 ) -> Result<()> {
     let _stderr_redirect = if !dry_run && file.exists() {
         RunStderrRedirect::maybe_start(file)
@@ -222,7 +222,7 @@ pub fn run_with_context(
             no_git,
             force_disk,
             config,
-            run_context,
+            cycle_context,
             force_fresh_agent_session,
         )?;
         create_branch = false;
@@ -262,7 +262,7 @@ pub fn run_once(
     no_git: bool,
     force_disk: bool,
     config: &agent_doc_config::Config,
-    run_context: Option<&agent_doc_run_context_io::RunContext>,
+    cycle_context: Option<&agent_doc_run_context_io::CycleContext>,
     force_fresh_agent_session: bool,
 ) -> Result<RunCycleOutcome> {
     if !file.exists() {
@@ -320,7 +320,7 @@ pub fn run_once(
         agent_doc_document_realtime_io::atomic_write_through_authority(file, &content_original)?;
     }
     if !dry_run {
-        let early_rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+        let early_rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
         let (early_fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
             &content_original,
             file,
@@ -352,11 +352,11 @@ pub fn run_once(
             &the_diff,
         )?;
     let owned_rc;
-    let rc: &agent_doc_run_context_io::RunContext = if let Some(provided) = run_context {
+    let rc: &agent_doc_run_context_io::CycleContext = if let Some(provided) = cycle_context {
         provided.set_file_path(file.to_path_buf());
         provided
     } else {
-        owned_rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+        owned_rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
         &owned_rc
     };
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
@@ -717,7 +717,7 @@ pub fn apply_template_response(
     response: &str,
     use_crdt: bool,
 ) -> Result<()> {
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let current_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "direct_run_template_current",
@@ -1478,7 +1478,7 @@ pub fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> 
         file,
         "active_queue_prompt_state",
     )?;
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let (fm, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
         file,
@@ -1751,7 +1751,7 @@ fn build_prompt_volatile_suffix(
         agent_doc_prompt_context::format_active_format_requirements(content)
             .map(|section| format!("\n\n{}\n", section))
             .unwrap_or_default();
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let ssh_context = rc.ssh_context();
     let document_section = agent_doc_prompt_context_io::build_document_section_with_ssh_context(
         file,

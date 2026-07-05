@@ -48,7 +48,7 @@ use std::process::Command;
 
 use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_backlog::backlog;
-use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
+use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {
@@ -152,7 +152,7 @@ pub fn run(
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
 
     let has_pending_ops = !pending_add.is_empty() || !pending_add_gated.is_empty();
     let pending_only = has_pending_ops && message.is_none();
@@ -292,7 +292,7 @@ fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Resul
 }
 
 /// Save snapshot relative to project root for thread safety.
-fn save_snapshot(file: &Path, doc: &str, rc: &RunContext) -> Result<()> {
+fn save_snapshot(file: &Path, doc: &str, rc: &CycleContext) -> Result<()> {
     if let Some(snap_abs) = rc.snapshot_path_for() {
         if let Some(snap_parent) = snap_abs.parent() {
             std::fs::create_dir_all(snap_parent)

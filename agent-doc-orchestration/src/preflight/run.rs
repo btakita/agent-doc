@@ -95,7 +95,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let content = resolve_current_preflight_document(file, "initial")?;
     let pre_mutation_unresolved_exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let (initial_frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
         file,

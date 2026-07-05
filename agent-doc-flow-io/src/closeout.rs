@@ -96,7 +96,7 @@ pub fn complete_required_closeout_with_options(
     options: CompleteRequiredCloseoutOptions,
 ) -> Result<bool> {
     let mut timer = CloseoutTimer::start(file);
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
 
     // `#crdtauth4` — authority-gated state-vector commit barrier (plan phase 4).
     // Under `CrdtAuthority::MultiReplica` (a live editor is attached) flush every

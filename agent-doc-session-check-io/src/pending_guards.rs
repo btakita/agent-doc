@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use agent_doc_run_context_io::RunContext;
+use agent_doc_run_context_io::CycleContext;
 use agent_doc_workflow::session_check::GuardResult;
 use anyhow::Result;
 
@@ -10,7 +10,7 @@ use crate::{
     unresolved_backlog_capture_targets, unresolved_promised_backlog_item_ids,
 };
 
-pub fn check_pending_capture_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_pending_capture_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     let mode = resolve_pending_capture_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
@@ -125,7 +125,7 @@ pub fn check_pending_capture_guard(file: &Path, rc: &RunContext) -> Result<Guard
     )
 }
 
-pub fn check_pending_done_guard(file: &Path, rc: &RunContext) -> Result<GuardResult> {
+pub fn check_pending_done_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);

@@ -72,11 +72,12 @@ Work items:
    (operator wins same-node; disjoint nodes both land). Replace
    `response_converged_in_visible_target`'s heading heuristic (Phase 1) with this
    as the authority; keep the heading check as a cheap fast-path.
-   The realtime document graph should be a `RealtimeDocumentContext`: a typed
-   lazily `ThreadSafeContext` schema whose current-document, replica, receipt,
-   and convergence slots/cells cannot be mixed with the short-lived cycle graph.
-   Keep `CycleContext` for one-cycle IO/cache projections; use
-   `RealtimeDocumentContext` for cross-thread editor/watcher/actor authority.
+   The realtime document graph should be a direct typed lazily
+   `ThreadSafeContext<RealtimeDocumentSchema>` whose current-document, replica,
+   receipt, and convergence slots/cells cannot be mixed with the short-lived
+   cycle graph. Keep `CycleContext` for one-cycle IO/cache projections; use the
+   typed realtime schema directly for cross-thread editor/watcher/actor
+   authority instead of introducing a wrapper context type.
 2. **One reconcile step, one stage.** Collapse the write-stage proof and the
    commit-stage `try_auto_recover_live_prompt_drift` into a single
    `reconcile_turn_against_live_buffer(file, base, candidate) -> Reconciled`

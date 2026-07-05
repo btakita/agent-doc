@@ -44,11 +44,11 @@ use agent_doc_element::element;
 use crate::PatchMode;
 use agent_doc_frontmatter::project_config::ComponentConfig;
 use agent_doc_project_config_io as project_config_io;
-use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
+use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 
 fn load_configs_with_context(
     file: &Path,
-    rc: Option<&RunContext>,
+    rc: Option<&CycleContext>,
 ) -> Result<HashMap<String, ComponentConfig>> {
     if let Some(rc) = rc {
         return Ok(rc
@@ -89,7 +89,7 @@ pub fn run(
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
 
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;

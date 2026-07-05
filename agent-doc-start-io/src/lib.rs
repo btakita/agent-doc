@@ -111,7 +111,7 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
     }
 
     let updated_content = replay_missing_operator_queue_items(file, updated_content);
-    let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
+    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &updated_content,
         file,

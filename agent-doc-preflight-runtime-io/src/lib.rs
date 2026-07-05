@@ -140,7 +140,7 @@ pub fn resolve_current_preflight_document(file: &Path, source: &str) -> Result<S
 
 pub fn enforce_no_uncommitted_closeout_drift(
     file: &Path,
-    rc: &agent_doc_run_context_io::RunContext,
+    rc: &agent_doc_run_context_io::CycleContext,
     session_check_effects: &impl agent_doc_session_check_io::SessionCheckEffects,
 ) -> Result<()> {
     if recover_route_queue_snapshot_commit_boundary(file, rc)? {
@@ -334,7 +334,7 @@ pub fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path)
 
 pub fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
     file: &Path,
-    rc: &agent_doc_run_context_io::RunContext,
+    rc: &agent_doc_run_context_io::CycleContext,
 ) -> Result<bool> {
     let current = resolve_current_preflight_document(file, "duplicate_prompt_comments")?;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
@@ -373,7 +373,7 @@ pub fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
 
 pub fn recover_route_queue_snapshot_commit_boundary(
     file: &Path,
-    rc: &agent_doc_run_context_io::RunContext,
+    rc: &agent_doc_run_context_io::CycleContext,
 ) -> Result<bool> {
     if !detect_route_queue_snapshot_commit_boundary_recoverable(file, rc)? {
         return Ok(false);
@@ -422,7 +422,7 @@ pub fn recover_route_queue_snapshot_commit_boundary(
 
 pub fn detect_route_queue_snapshot_commit_boundary_recoverable(
     file: &Path,
-    rc: &agent_doc_run_context_io::RunContext,
+    rc: &agent_doc_run_context_io::CycleContext,
 ) -> Result<bool> {
     let Some(state) = agent_doc_cycle_state_io::load(file)? else {
         return Ok(false);
@@ -501,7 +501,7 @@ pub fn detect_route_queue_snapshot_commit_boundary_recoverable(
 /// HEAD). Returns `Ok(false)` when recovery is not safely possible.
 pub fn recover_ipc_truncated_worktree_from_editor_buffer(
     file: &Path,
-    rc: &agent_doc_run_context_io::RunContext,
+    rc: &agent_doc_run_context_io::CycleContext,
 ) -> Result<bool> {
     if !matches!(
         rc.snapshot_commit_status(),

@@ -501,7 +501,7 @@ mod tests {
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
             agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
         ));
-        let rc = agent_doc_run_context_io::run_context(doc.clone());
+        let rc = agent_doc_run_context_io::cycle_context(doc.clone());
         assert!(
             agent_doc_preflight_runtime_io::detect_route_queue_snapshot_commit_boundary_recoverable(
                 &doc, &rc
@@ -589,7 +589,7 @@ mod tests {
         )
         .unwrap();
 
-        let rc = agent_doc_run_context_io::run_context(doc.clone());
+        let rc = agent_doc_run_context_io::cycle_context(doc.clone());
         assert!(
             !agent_doc_preflight_runtime_io::detect_route_queue_snapshot_commit_boundary_recoverable(
                 &doc, &rc
@@ -1100,7 +1100,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let rc = agent_doc_run_context_io::run_context(doc.clone());
+        let rc = agent_doc_run_context_io::cycle_context(doc.clone());
         let changed = agent_doc_preflight_runtime_io::remove_post_exchange_duplicate_prompt_comments_for_preflight(
             &doc, &rc,
         )
